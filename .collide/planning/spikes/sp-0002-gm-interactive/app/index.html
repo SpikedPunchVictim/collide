@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>S2 Spike</title>
+<link rel="stylesheet" href="xterm.css">
+<style>
+html,body{margin:0;height:100%;background:#1e1e2e;color:#ccc;font:12px Menlo,monospace}
+body{display:flex;flex-direction:column}
+#bar{height:20px;line-height:20px;padding:0 8px;background:#11111b;white-space:nowrap;overflow:hidden}
+#term{flex:1;min-height:0;padding:4px 0 0 4px}
+</style></head>
+<body><div id="bar">starting</div><div id="term"></div>
+<script src="xterm.js"></script><script src="addon-fit.js"></script><script src="addon-webgl.js"></script>
+<script src="app.js"></script></body></html>

@@ -1,0 +1,15 @@
+apiVersion: collide/v0
+name: hello
+version: 0.1.0
+requires:
+  sdk: ">=0.1 <0.2"
+  tools:
+    - { name: node, version: ">=22.18" }
+config:
+  greeting: { type: string, default: "hello" }
+  lanePool: { type: integer, minimum: 1, default: 2 }
+hooks:
+  hello: { script: hooks/hello.ts }
+  fail: { script: hooks/fail.ts }
+  throws: { script: hooks/throws.ts }
+  exits-early: { script: hooks/exits-early.ts }

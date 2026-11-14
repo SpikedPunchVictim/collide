@@ -1,0 +1,24 @@
+# Dependencies and build output
+node_modules/
+.pnpm-store/
+target/
+dist/
+
+# Spike scratch: nested fixture repos, caches and raw run output.
+# Each spike's own .gitignore lists these too.
+.collide/planning/spikes/*/work/
+.collide/planning/spikes/*/out/
+
+# Local settings and secrets
+.env
+.env.*
+.claude/settings.local.json
+
+# OS and editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Private notes: unredacted originals, the name key and the denylist (never public)
+private/

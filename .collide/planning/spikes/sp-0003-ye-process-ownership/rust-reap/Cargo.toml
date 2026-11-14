@@ -1,0 +1,9 @@
+[package]
+name = "rust-reap"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "=0.2.189"
+tokio = { version = "=1.53.1", default-features = false, features = ["rt", "process"] }

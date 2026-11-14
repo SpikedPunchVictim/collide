@@ -1,0 +1,15 @@
+{
+  "name": "s5-schema-expressions",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway spike S5 dependencies. Installed locally with a spike-local store.",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "ajv": "^8.20.0",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^5.5.0",
+    "json-schema-to-typescript": "^16.0.0",
+    "typescript": "^7.0.2",
+    "yaml": "^2.9.1"
+  }
+}

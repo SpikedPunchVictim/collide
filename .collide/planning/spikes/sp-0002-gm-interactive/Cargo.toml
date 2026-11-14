@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["crates/s2lib", "src-tauri"]
+
+[profile.dev]
+debug = 0

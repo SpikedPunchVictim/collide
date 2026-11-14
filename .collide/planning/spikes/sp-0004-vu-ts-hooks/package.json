@@ -1,0 +1,9 @@
+{
+  "name": "s4-ts-hooks-spike",
+  "private": true,
+  "description": "Collide spike S4: TS hooks from a git snapshot with a Collide-supplied SDK. Throwaway.",
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}

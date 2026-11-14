@@ -1,0 +1,17 @@
+#!/bin/sh
+# Stand-in app launched by LaunchServices (`open`). It starts children the way
+# the app would, records them, then exits as if the user quit it.
+# The output directory is read from S3Quit.target next to the bundle.
+OUT=$(cat "$(dirname "$0")/../../../S3Quit.target")
+export COLLIDE_RUN=$(basename "$OUT")
+echo "$$ $(ps -o ppid= -p $$) $(ps -o pgid= -p $$)" > "$OUT/app.pid"
+/usr/bin/python3 -c 'import time; time.sleep(120)' &
+echo $! > "$OUT/plain_child.pid"
+/usr/bin/python3 -c 'import os,sys,time
+os.setsid(); open(sys.argv[1],"w").write(str(os.getpid())); time.sleep(120)' "$OUT/setsid_child.pid" &
+/usr/bin/python3 -c 'import os,sys,time
+if os.fork(): os._exit(0)
+os.setsid(); open(sys.argv[1],"w").write(str(os.getpid())); time.sleep(120)' "$OUT/double_fork.pid"
+sleep 1
+echo exiting > "$OUT/app.exited"
+exit 0

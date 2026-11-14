@@ -1,0 +1,22 @@
+# Not a workspace member: it depends on the vendored, patched copy of cel (made by scripts/q4-vendor.sh).
+[package]
+name = "s5-cel-patched"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = ["patched"]
+patched = []
+
+[dependencies]
+cel = { path = "../work/vendor/cel-patched" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+[[bin]]
+name = "cel-bench-patched"
+path = "src/main.rs"

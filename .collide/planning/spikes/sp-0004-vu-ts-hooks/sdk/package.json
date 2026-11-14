@@ -1,0 +1,12 @@
+{
+  "name": "@collide/pack-sdk",
+  "version": "0.1.0",
+  "description": "Stand-in Collide pack SDK for spike S4. Compiled JS plus .d.ts, zero runtime dependencies.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  }
+}

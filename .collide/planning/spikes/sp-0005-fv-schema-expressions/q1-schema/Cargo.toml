@@ -1,0 +1,29 @@
+[package]
+name = "s5-schema"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+schemars = ["dep:schemars"]
+ts = ["dep:ts-rs"]
+ts-fix = ["ts"]
+specta = ["dep:specta", "dep:specta-typescript", "dep:specta-serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = { version = "1", optional = true }
+ts-rs = { version = "12", features = ["serde-compat", "serde-json-impl"], optional = true }
+specta = { version = "=2.0.0-rc.28", features = ["derive", "serde_json"], optional = true }
+specta-typescript = { version = "0.0.15", optional = true }
+specta-serde = { version = "0.0.15", optional = true }
+
+[[bin]]
+name = "emit"
+path = "src/bin/emit.rs"
+
+[[bin]]
+name = "verdict"
+path = "src/bin/verdict.rs"

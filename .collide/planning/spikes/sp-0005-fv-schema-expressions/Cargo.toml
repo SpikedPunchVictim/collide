@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["q1-schema", "q2-yaml", "q4-cel"]
