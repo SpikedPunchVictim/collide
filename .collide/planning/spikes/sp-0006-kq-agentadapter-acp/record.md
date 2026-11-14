@@ -2,7 +2,7 @@
 id: sp-0006-kq
 alias: S7
 kind: spike
-status: results
+status: concluded
 title: "S7: `AgentAdapter` against ACP (paper check)"
 owners: []
 links: []

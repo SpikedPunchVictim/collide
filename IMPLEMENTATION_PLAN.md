@@ -7,10 +7,47 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 12, frozen until R5.** S1–S9 and S11 are applied; S10 runs when the group-runs stage starts. An
-adversarial review, R5, comes next, and it now reviews the in-app agent too (0.2, 0.3, 0.7, 0.9, 0.11). No product
-code is written before it. R5's findings and the owner's decisions on them may change this plan; nothing else does
-until then.
+**Status: revision 13.** R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
+`.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
+starts. Stage 2 may start once the owner accepts revision 13. Until then no product code is written.
+
+Revision 13 (2026-11-14) applies R5, the adversarial review of revisions 10–12 by Fable and Opus (both verdicts:
+ready after fixes), and the owner's decisions on it:
+- Contracts Stage 2 freezes, now stated before it starts (0.2, 0.3, 0.4, 0.5, 0.7, 0.10, 0.11, Stage 2):
+  - session replay is one ordered shim journal, with a storable timestamp and the journal written before the child
+    sees the bytes (0.2, 0.3);
+  - the `wait` hook can answer `pending` with `retryAfter`, and a `wait` phase has `interval:` and `timeout:` (0.5,
+    0.7);
+  - an actor is read from peer credentials, only the app does person-only operations, the socket directory is `0700`
+    with a uid check, and the same-user guardrail is stated as what it is (0.2, 0.10, 0.11);
+  - a PR integrate answers `merged` or `pending`, with an `integrating` state, and side-effect steps write an intent
+    and an outcome event, so a restart checks the world and never retries blind (0.4, 0.5);
+  - the endpoint's shell answers `initialize`, `ping` and `tools/list` from a build-time manifest, forwards only
+    `tools/call` as `ui_tools.request`, and cancels asks when the window closes or reloads (0.2);
+  - provider writes hold a per-root lock and are atomic, the slice reads only `epics/`, and built-in packs ship
+    compiled in the bundle (0.6, 0.10, Stage 2);
+  - Stage 2's items are brought to revision 12, and the `spike` kind and its statuses are defined (0.10).
+- Fixes placed in the stage that builds each one (B1–B23 in the Review log): webview CSP and sanitized markdown, a
+  paged `query`, the ask line's `--add-dir`, `--permission-prompts none` and a `--restricted` measurement, an opencode
+  probe, a realpath read rule, a Claude version range with a settings canary, a full-disk path, a clock table, an OTLP
+  receiver in the daemon, an interactive-launch MCP rule, an opencode listener check, an ask cancelled with its
+  connection, `git:` pack fetch rules, hook-own report lines as the only primary source, ACP `configOptions` first,
+  named protected files, caps on CEL-bound fields only, repo budget and timeout defaults, id collision tests and
+  `collide task reid`, walkthrough records, the contradictions fixed, and a daemon start that survives SSH.
+- Stages are split into lettered sub-stages, with no renumbering: Stage 3 (3a–3d, with the thin loop as 3c), Stage 4
+  (4a–4c), Stage 6 (6a–6b, then Projects v2 as 6c) and Stage 9 (9a–9d). Each has its own goal, criteria and Status,
+  and Status names the plan revision its items came from. Only the next stage is split into items.
+- Owner decisions on R5's challenges (2026-11-14):
+  - a thin loop (prompt → `collide/quick` run → review → accept, in the app, against scratch tasks) follows the Claude
+    adapter as Stage 3c, before the ACP engine (3d), the plan adapter, GitHub and the board (Milestone A, Stage 3c);
+  - GitHub Projects v2 moves from Stage 5 to Stage 6c, after the board; Stage 5 keeps Issues, and Stage 2 still
+    freezes the provider contract in full;
+  - the endpoint stays in the app shell. The stdio bridge and the daemon-hosted endpoint were considered and not
+    chosen (0.2);
+  - rejected: a three-letter id suffix, the markdown provider in Rust, and named per-client endpoint tokens;
+  - deferred: a Collide-managed copy of Claude (Deferred).
+- The product will be built by Sonnet agents (owner, 2026-11-14). Each Stage 2+ item is sized to be finished by one
+  such agent in one session from the item file alone (0.15).
 
 Revision 12 (2026-11-14) adds the in-app agent, from S6's in-app agent section
 (`.collide/planning/spikes/sp-0009-bb-interface-prototype/record.md`) and the owner's design and decisions:
@@ -94,7 +131,7 @@ Revision 10 (2026-11-13) applies spikes S1–S4 and S9 (`.collide/planning/spike
 - S9's addendum measured hook and permission outcomes: refused tool calls classified from `tool_result_meta`,
   hook failures read from `--include-hook-events`, and two more detectors (0.3, 0.13).
 - Planning is a built-in pack, `collide/plan` (owner, 2026-11-13; `docs/research/planning.md`). Core gains item
-  kinds, op effects, typed links, an assignee, a checklist field, five task points and derived points. A built-in
+  kinds, op effects, typed links, `owners`, a checklist field, five task points and derived points. A built-in
   markdown provider keeps shared planning at a path set per repo. Spikes can run several agents, a session is
   private until Share, and spike S10 checks the seams (0.1, 0.4, 0.5, 0.7, 0.8, 0.10, 0.11, 0.13).
 - S11 checked the point catalogue and the `change` payload against five backends (owner, 2026-11-13;
@@ -209,6 +246,10 @@ Revision 6 applied the R3 fixes (Fable + Opus) and moved the task board early. S
 - **Same-user reality.** Agents with Bash run as the user and can do anything the user can. Permission prompts and
   Collide's checks are guardrails, not a security boundary, especially once gates run the branch's own code
   (orchard's `iter` runs the branch's dev CLI). A real boundary needs an OS sandbox or container; deferred, stated.
+  - This covers Collide's own checks too (R5). The socket's peer credentials, the person-only operations (0.10) and the
+    CLI token file (0.2) stop mistakes: an agent calling `collide` by accident, or a script that does not know the
+    rules. An agent with Bash that means to can read the CLI token file, the user's files and the keychain entries
+    the user's own session can read, so none of these claims more than a guardrail.
 
 ### 0.2 Process model
 
@@ -231,8 +272,14 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     - holds the child's stdin pipe, and for an interactive session the PTY master, across a daemon restart
       (measured S2: a `claude -p` turn and a PTY take-over both went on across a daemon SIGKILL and restart, with no
       gap in input or output);
-    - logs the bytes written to that stdin, as it logs stdout, because an ACP session is rebuilt by replaying both
-      (S7; 0.3). The log of host-to-agent bytes is new, and no measurement covers it;
+    - **journals the child's traffic in one ordered file** (R5), because an ACP session is rebuilt by replaying both
+      directions (S7; 0.3). Each record is `{seq, wall_ns, dir, bytes}`: `seq` is a counter, `wall_ns` is the wall
+      clock when the shim saw the bytes, and `dir` is `in` (written to the child's stdin) or `out` (read from its
+      stdout). One file with one counter gives replay a single order, which two logs cannot give. The journal is
+      written before the child sees the bytes, so an `in` record never goes missing, and a record cut short by a
+      crash is dropped at replay. The daemon-to-shim messages are length-framed, so a half-written message is never
+      mistaken for a whole one. Plain stdout and stderr files stay as they are, for tailing. The journal of
+      host-to-agent bytes is new, and no measurement covers it;
     - for a PTY, keeps the last 1 MiB of output and replays it on attach, atomically with subscribing, so a view
       opened after an app restart shows the session so far (measured S2);
     - reaps the child with `libc::wait4`;
@@ -267,6 +314,9 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     - launchd starts the job in `/`, with a bare environment. Every path in the plist is absolute and canonical,
       and the plist sets `USER`, `HOME` and `PATH`: `claude` fails with `api_error` without `USER` (measured S2).
       The daemon then captures the login-shell environment (below).
+    - **Over SSH, or with no GUI session, `launchctl bootstrap gui/<uid>` can fail** (inferred; the job needs a GUI
+      session). The daemon then starts with setsid, outside the coalition, and the start prints a warning that it may
+      end with its launcher. The run is not refused.
   - A shim whose child exits while the daemon is down starts the daemon, so a phase boundary is not missed while the
     app is closed.
   - The daemon records its login session and restarts in a new one. Ending at logout is recorded as host shutdown,
@@ -283,15 +333,56 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     capped at 1 MiB (measured S4; the session kill and the cap from herdr-core). On failure it falls back to the
     minimal environment and logs the shell and the reason.
   - `LANG` is set when missing.
+  - **The capture is repeated when the app starts** (R5), and the daemon uses the newest one for each new phase. A
+    capture made once at daemon start would hold a `PATH` or `ANTHROPIC_*` value for as long as the daemon lives,
+    and the daemon outlives the app. A phase already running keeps the environment it started with.
   - Everything Collide starts gets this environment minus the adapter's stripped variables (0.3), terminal session
     ids (`TERM_SESSION_ID`, `ITERM_SESSION_ID`) and `XPC_SERVICE_NAME`/`XPC_FLAGS`.
 - **The socket** is at a short fixed path. AF_UNIX paths are limited to 103 bytes on macOS (measured S3); a longer
   path fails fast with a message naming the path and the limit.
+  - **Its directory is mode `0700`, and the daemon checks the directory's owner and mode at start** and refuses to
+    bind in one that is not the user's or is open to others (R5). A connecting peer's uid must equal the daemon's
+    (`getpeereid`), so a second local user cannot even reach the token check.
+  - **The CLI's token** is in a file of mode `0600` in that directory, made at the daemon's first start. The CLI
+    reads it, as the shell reads its own. It is never put in an environment variable. Under the same-user rule
+    (0.1) an agent with Bash can read it, which is why who is asking comes from the peer's process, not the token
+    (0.10, below).
+  - **A shim's socket follows the same rules:** a directory of mode `0700` under the run directory, the same uid
+    check, and no token, because only the daemon talks to it.
+- **Who is asking** (R5). A connection's peer pid is read with `LOCAL_PEERPID`. The daemon walks that process's
+  parents and looks for the markers below. A process with `COLLIDE_RUN` in its tree is a **run's agent**; one whose
+  tree holds the app's process is the **app**; anything else is the **CLI from a terminal**. The result is the
+  `actor` the daemon records on every event. Only the app may do the person-only operations (0.10); the CLI asks for
+  them as a Queue confirmation instead. Processes whose environment macOS hides are found through their parents, as
+  in the sweep (below). This is a guardrail (0.1).
+- **Clocks** (R5). macOS has three clocks, and a wrong choice breaks a timeout or a countdown the first time a laptop
+  sleeps. Collide never uses one where another is meant:
+
+  | clock | stops in sleep | use |
+  |---|---|---|
+  | uptime (`mach_absolute_time`, `CLOCK_UPTIME_RAW`) | yes | work timeouts: a phase, an ask, a `wait` timeout (0.7) |
+  | continuous (`CLOCK_MONOTONIC_RAW`) | no | the cache countdown (0.3, 0.13) and spans shown as elapsed |
+  | wall (`SystemTime`) | no, and can jump | the usage-limit reset (0.3), event timestamps, the journal's `wall_ns`, display |
+
+  - A phase that slept for an hour has not worked for an hour, so work timeouts use the uptime clock. A cache that
+    expires in five minutes, and a limit that resets at a time of day, do not wait for the laptop to wake, so they
+    use the others.
+  - The owner's sleep test (0.13) moves to Stage 3b, where it checks these choices.
 - **Durability** (herdr's bugs, read):
-  - logging never panics, and a full disk is tested;
+  - logging never panics, and a full disk is tested with a writer that fails with `ENOSPC` on demand, not `/dev/full`
+    (R5), so the failing write is a chosen one;
   - state is saved without holding a lock that other work waits on;
   - a store or `exit.json` that cannot be read is moved aside and reported, never overwritten;
-  - on a full disk the shim keeps its exit record in memory and serves it until the daemon acknowledges it.
+  - on a full disk the shim keeps its exit record in memory and serves it until the daemon acknowledges it;
+  - **free space is checked before a workspace is made and before each phase** (R5). Under a floor the run goes to
+    `paused: disk` with a Queue item, and nothing is started. A phase that ends with no `result` on a full volume
+    fails with cause `disk`, not `lost`;
+  - a child's stream lines and each phase's log have caps, so one runaway tool cannot fill the disk: a line over the
+    cap is cut and marked, and a log over its cap stops growing with a final marker.
+- **The OTLP receiver** (R5; 0.13) is part of the daemon. It binds `127.0.0.1` on a port the daemon picks, checks
+  `Host`, wants a per-run token as a bearer header, and caps a request body. The token is made per run and handed to
+  that run's child in its telemetry settings, so it is in the child's environment but is good for the receiver only.
+  Telemetry of an interactive session uses the same receiver.
 - **The workflow engine needs a live owner between phases.** Something has to notice that phase N ended and start
   phase N+1. With the app closed, the next phase started 0.25–0.37 s after the previous one ended, while the daemon
   lived (measured S3). If the daemon dies, children keep running and logs keep being written, but no phase advances
@@ -303,7 +394,8 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   descendants three ways:
   - a ppid walk;
   - a marker scan of the user's processes, enumerated in-process with libproc. Processes older than the run's start
-    clock are skipped, so a reused pid is never hit;
+    clock are skipped, and a process is identified by pid plus `p_uniqueid` (R5), which macOS never reuses, so a
+    reused pid is never hit;
   - the descendants of everything the first two found. macOS hides the environment of its own binaries, but not
     their parents' (read: herdr-core `sweep.rs`).
 
@@ -316,19 +408,41 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   - When the CLI starts a daemon from inside a run (an agent's Bash), it strips `COLLIDE_RUN`, `COLLIDE_RUN_START`
     and `COLLIDE_SPAN` first, so that run's stop cannot kill the daemon.
 - The socket requires a per-client token. The token is never put in an agent's or hook's environment. Run agents
-  need no access to Collide in v0 (0.3). The one other way in is the UI-tools endpoint below, which gives an agent
-  five view-only tools and nothing else.
+  are given no access to Collide in v0 (0.3): nothing hands them a token or a way in. Under the same-user rule (0.1)
+  an agent with Bash can still read the CLI token file, so this is a guardrail, and a call from a run's tree is
+  recognised by its peer process and gets the `run agent` actor, which cannot do the person-only operations (0.10,
+  above). The one other way in is the UI-tools endpoint below, which gives an agent five view-only tools and nothing
+  else.
+- **A step with a side effect writes an intent before it and an outcome after it** (R5). The side-effect steps are an
+  integrate (a merge or a PR), a source op, an `after_integrate` hook and a remote write. The intent names the step
+  and what it will do; the outcome names the result. After a restart the engine finds an intent with no outcome and
+  checks the world first, with the step's own check (is the branch merged, does the PR exist, is the label set), and
+  never repeats the step blind. When the check cannot tell, the run waits in the Queue as "outcome unknown", for a
+  person to say. A merge that finds its change already at the target is a success, not a conflict. Hooks run under the
+  shim like any child, so a hook's side effect is covered by the same rule (Stage 8 tests it with a SIGKILL after
+  the intent).
 - **The UI-tools endpoint** (owner, 2026-11-14; S6's in-app agent section). It lets an agent change what the window
-  shows (0.11). Where it lives is inferred, S6 did not test it, and R5 checks it.
+  shows (0.11). The transport was measured in S9 and R5 checked where it lives. It stays in the app shell (owner,
+  2026-11-14), with the fixes below.
   - **It lives in the app process** (the Tauri shell), which owns the window. It is stateless streamable HTTP with
     JSON responses, on 127.0.0.1 only, on a port picked once and kept in the user's settings. A port already in use
     fails with a message that names it.
-  - **The shell does transport only.** It refuses a foreign `Host` or `Origin`, a content type that is not JSON, a
-    body over 1 MB, and a missing or wrong token. It forwards each JSON-RPC message to the window as an event on the
-    one event channel, and returns the window's reply. The window runs the MCP layer and the tools (0.11) in
-    TypeScript against its own reducer state, and answers through `rpc` (`ui_tools.reply`). The shell handles the
-    `ui_tools.*` methods itself and does not forward them, so one `rpc` command and one event channel still carry
-    everything (above).
+  - **The shell answers the protocol, and the window answers the tools** (R5). The shell refuses a foreign `Host` or
+    `Origin`, a content type that is not JSON, a body over 1 MB, and a missing or wrong token. Then, by method:
+    - `initialize`, `ping` and `tools/list` are answered by the shell alone, from a **manifest generated at build
+      time** from the TypeScript tool definitions (0.11), so a client can connect and list tools with the window
+      closed or busy, and the manifest cannot drift from the tools;
+    - a notification (no `id`) gets `202 Accepted` and no body;
+    - `GET` and `DELETE` get `405`, because the endpoint has no stream and no session to end;
+    - only `tools/call` goes on to the window, as the event `ui_tools.request {requestId, caller, deadline,
+      message}`. `caller` is the ask id or `external`, and `deadline` is when the shell will give up (10 s). The window
+      runs the tools against its own reducer state and answers through `rpc` (`ui_tools.reply {requestId, …}`). A
+      reply to a request the shell has dropped is ignored;
+    - the shell counts the **per-ask cap of 20 screen-changing calls** (0.9), so a window reload cannot reset it;
+    - the shell handles the `ui_tools.*` methods itself and does not forward them, so one `rpc` command and one
+      event channel still carry everything (above).
+  - **Asks are cancelled when the window closes or reloads** (R5): the shell sends `ask.cancel` for every ask it
+    knows, because the page that was going to answer their calls is gone. A new window starts with no asks.
   - **Two kinds of token**, never put in an environment variable and compared in constant time:
     - the **endpoint token** is for external clients (0.7). It is 32 random bytes in the OS keychain, made at first
       use, shown and rotated in Settings. Rotating it ends every client that used the old one. It is sent as an
@@ -342,13 +456,18 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   - **The ask agent child is launched and owned the normal way:** the UI calls `ask.start`, the daemon builds the
     launch spec from the adapter, and a shim starts the child (0.3). Stop, the sweep and a daemon restart treat it as
     they treat a run's child, and it carries the same markers, with the ask's id in `COLLIDE_RUN`.
-  - **A closed or silent window is a plain error to the agent**, as in S6: `Collide has no window open; open it and
-    ask again`, and `the Collide window did not answer within 10 s`. With the window closed (0.11) the app stays in
-    the menu bar, the endpoint stays up, and every call fails that way.
+    **The daemon cancels an ask when the connection that started it drops** (R5), so a crashed shell or a closed
+    window does not leave a model running with nobody to read it.
+  - **A closed or silent window is a plain error to the agent.** With the window closed (0.11) the app stays in the
+    menu bar and the endpoint stays up. `initialize`, `ping` and `tools/list` still answer, and a `tools/call` fails
+    with `Collide has no window open; open Collide and ask again`, so the person is told what to do. A window that
+    does not answer in time gives `the Collide window did not answer within 10 s`. Stage 6 tests the case of a
+    window closed when the client starts.
   - **Alternatives, with what each gives up.**
-    - The endpoint in the daemon, which reaches the window over the event channel: the daemon is the one owner, but
-      the tools need the window's state, so every call crosses one more hop, and the endpoint still has no use with
-      the window closed.
+    - **Considered and not chosen (owner, 2026-11-14): a stdio bridge, `collide mcp`,** that a client launches and
+      that talks to the endpoint, and **the endpoint in the daemon**, which reaches the window over the event
+      channel. The transport was measured in S9 and the shell is the smallest change from revision 12. The daemon
+      would add a hop for every call and still has no use with the window closed.
     - The MCP layer in the shell, in Rust: no TypeScript SDK in the window, but the tool schemas are written twice
       and the validation still needs the window's ids.
     - S6's Vite plugin and websocket: dev only.
@@ -356,7 +475,8 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
       first. A window that is hidden or throttled may answer slowly, and that is unmeasured.
 - Crates: `core` (domain, state machines, workflow engine, pack model, implementation resolution; traits `AgentAdapter`,
   `AgentSession`, `HookRunner`, `TaskProvider` only; no Tauri, SQLite or process types) and `host` (implementations,
-  store, `collide-daemon` and `collide` binaries; the shim is `collide shim`). `app/src-tauri` stays thin.
+  store, `collide-daemon` and `collide` binaries; the shim is `collide shim`). `app/src-tauri` stays thin: it calls
+  `host` (for example the `ui_tools` request handler) and adds only Tauri's commands, window and listener.
   `packages/pack-sdk` is the TypeScript SDK.
 
 ### 0.3 Agents and model sources
@@ -378,11 +498,13 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     launch spec (argv, env, working directory, the variables to strip), builds a session, lists the tool's config
     paths in a repo and names an interactive command for take-over.
   - `AgentSession` is one per child, a sans-IO state machine with `start`, `feed` (one line of the child's stdout and
-    the time it arrived), `send_turn`, `answer`, `cancel` and `finish` (the exit info, returning the phase outcome).
-    Each call returns events and the bytes to write. The same input gives the same output, so a daemon restart
-    rebuilds a session by feeding it the child's logged stdout and stdin (0.2). A Claude session is nearly empty: the
-    launch line carries the first turn and `feed` is the S1 parser. An ACP session holds its handshake, request ids
-    and pending permission requests.
+    the **storable wall-clock time it arrived**, `wall_ns`: the session never reads a clock itself), `send_turn`,
+    `answer`, `cancel` and `finish` (the exit info, returning the phase outcome). Each call returns events and the
+    bytes to write. The same input gives the same output, so a daemon restart rebuilds a session with `replay`: it
+    feeds the shim's journal back in `seq` order, `in` records as the bytes the session wrote and `out` records
+    through `feed` with their stored `wall_ns` (0.2). A replay writes nothing to the child. A Claude session is nearly
+    empty: the launch line carries the first turn and `feed` is the S1 parser. An ACP session holds its handshake,
+    request ids and pending permission requests.
   - **Normalized events:** message, tool call, permission request, `SessionBound`, `Usage`, `TurnEnd`,
     `FinalReport` and `Other`.
   - **A session starts as `Assign(uuid)`, `AgentAssigned` or `Resume(id)`.** Claude supports the first and last; ACP
@@ -467,6 +589,20 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     (`CronCreate`, `ScheduleWakeup`, `RemoteTrigger`, `PushNotification`, `EnterWorktree`, `ExitWorktree`,
     `Workflow`, `SendMessage`; measured S1). They start work the owner cannot see, or move the session out of its
     workspace, so they are disallowed unless a role asks for one (owner, 2026-11-13).
+  - **A tested version range** (R5). The adapter names the range of `claude` versions its contract test passed on,
+    starting at 2.1.323 (S1) and 2.1.325 (S9's addendum). The daemon reads `claude --version` at start and before a
+    phase, cached by the binary's path and modification time. Outside the range, the daemon runs a one-turn smoke
+    check (a prompt that must come back as a `result` with the pinned stream shape), then warns in the Queue when it
+    passes and refuses the phase, with the version and the range, when it fails. The version goes in the fingerprint
+    (0.13). An event the adapter does not know is an `Other`, counted per run, and a rising count is a finding
+    (0.13). Where a documented flag does what a variable read from the binary does, the adapter prefers the flag once
+    a test shows they agree: `--autocompact` is in 2.1.325's `--help`, and the contract test compares it with
+    `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (below).
+  - **Settings that fail validation are ignored silently under `-p`** (R5; read from 2.1.325's own text). The
+    contract test validates the generated `settings.json` against the published settings schema. At run time a
+    **canary** covers the rest: the snapshot settings carry a no-op hook, and if no `hook_started` event for it
+    arrives in the first turn, the phase fails with `Claude ignored Collide's settings`, and the Queue says so. A
+    phase with ignored settings would load the user's settings and hooks while the page promised it did not.
 - **The stream protocol** (measured S1):
   - user turns, permission answers (`control_response`, allow or deny) and interrupts (`control_request`
     `interrupt`) go on stdin;
@@ -573,7 +709,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     - A Queue item that has waited past the cache's hour shows what resuming and starting fresh would cost, and so
       does the cold-return finding (0.13).
   - **Context options.** A role may set:
-    - `compact_at`, which sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. Compaction fires at that window minus 33K tokens.
+    - `compact_at`, which sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (or `--autocompact` once the contract test shows it
+      agrees, above). Compaction fires at that window minus 33K tokens.
       The smallest window is 100K and the largest the model's; an unusable value is ignored with no warning, and the
       variable overrides the user's own `settings.json` window (all measured S9). So Collide refuses a value under
       100,000;
@@ -622,6 +759,9 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
   - The Queue shows the reset time. The phase resumes by session id when the limit resets, or when the user resumes
     it.
   - Paused time is a wait, not active time (0.13).
+  - **The reset time is a wall-clock time** (R5). The countdown shown to the person is computed from the wall clock,
+    and the pause's own duration is measured on the continuous clock (the table in 0.2), so a laptop that sleeps
+    through the reset resumes the phase when it wakes, and does not wait out the rest of a countdown.
 - **Agent work inside a `script` phase** (owner, 2026-11-13). A tool that runs its own agents is a `script` phase
   (Ferry runs `claude -p` in containers), so Collide never sees its stream. Such a phase declares
   `agentWork: true`:
@@ -664,6 +804,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       --setting-sources ""                      # `config: user` passes `user` instead
       --settings <ask dir>/settings.json        # { "autoMemoryEnabled": false }
       --mcp-config <ask dir>/mcp.json --strict-mcp-config      # the endpoint and the ask token (0.2)
+      --add-dir <extra readable folder>         # one per folder after the first (R5)
+      --permission-prompts none                 # a request the line does not allow is denied, never asked
       --tools Read,Grep,Glob
       --allowedTools Read,Grep,Glob,mcp__collide__query,mcp__collide__set_view,mcp__collide__show_groups,
                      mcp__collide__highlight,mcp__collide__open
@@ -672,7 +814,14 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       [--max-budget-usd <budget>]               # only when the entry sets one
     ```
 
-    - The request goes on stdin, so it is not in argv. The working directory is the entry's first readable folder.
+    - The request goes on stdin, so it is not in argv. The working directory is the entry's first readable folder, and
+      each further readable folder is passed with `--add-dir`, which is how a second folder becomes readable at all
+      (R5; `--add-dir` is in 2.1.325's `--help`; its effect under `-p` is unmeasured and Stage 6 tests it).
+    - `--permission-prompts none` makes a read the line does not allow a plain denial. Without it the child could
+      wait on a prompt nobody answers until the timeout (read from 2.1.325's `--help`; unmeasured under this line).
+    - **`--restricted`** (R5) is a 2.1.325 flag that may confine reads to the working directory and added
+      directories. Stage 6 measures it under `-p`, and the adapter adopts it if it does confine reads. `--bare` is
+      not adopted (owner, 2026-11-14): it changes how the login is read.
     - `--tools` removes Bash, Edit and Write from the child. `--allowedTools` alone would only skip prompts (the S6
       record's reasoning; not tested on its own). With `--tools` cut to three, the scheduling and worktree tools of
       the run line's `--disallowed-tools` are absent already, so the ask line does not list them.
@@ -681,12 +830,17 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     - The child's environment is the base environment (0.2) minus the adapter's stripped variables. S6 removed every
       `CLAUDE*` and `OTEL_*` variable, and the adapter strips the `CLAUDE*` ones (above).
     - Whether a Read outside the working directory is refused without a prompt under `-p` is unmeasured. Stage 6 tests
-      it and records the result.
+      it and records the result. Until it does, the Agents page and the ask box say the agent "starts in this folder",
+      and never that it "can read only" it. The contract test (opt-in) plants a file outside every readable folder
+      with a known marker and checks that the marker never reaches the agent's answer, and that the Stage 6 criterion
+      on the ask line equals the adapter's pinned line.
   - **ACP profile.** An ACP ask agent gets the engine of Stage 3 and an ask profile in `host`, with no `fs`,
     `terminal` or `elicitation` client capability, as above. The profile answers permission requests by kind:
-    - `read` and `search` are allowed (`allow_once`) when every path the request reports is inside the entry's
-      readable folders. A request that reports no path is refused, so the rule fails closed. Whether opencode asks at
-      all for a read it is configured to allow is unmeasured;
+    - `read` and `search` are allowed (`allow_once`) when every path the request reports, after `realpath`, is inside
+      the entry's readable folders, also after `realpath` (R5). The comparison is made on resolved paths, because a
+      symlink in a readable folder, or `..`, would otherwise reach out of it. A request that reports no path is
+      refused, so the rule fails closed. Whether opencode asks at all for a read it is configured to allow is
+      unmeasured;
     - everything else, `edit`, `execute`, `fetch`, `delete` and the rest, is refused with a message;
     - when no `allow_once` exists the answer is `Cancel`, as in every adapter, and no "always" option is ever picked.
 
@@ -694,14 +848,28 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     directory and what it is told, and that opencode's own configuration decides what it can read or write. So the
     folder and tool kinds are checked by Collide on each permission request, and the Agents page says that an ACP
     agent's own settings are its promise, not Collide's guarantee (0.7).
+
+    **opencode's default is unrestricted** (R5; S6 measured that its own configuration decides what it can read or
+    write, and that it asks for nothing it is configured to allow). So the Test-this-agent action (0.7) runs a probe:
+    the agent is asked to write a file and to run `true` in a temporary directory. If either happens, the probe is
+    **red**, and the agent is refused as an ask agent until the person acknowledges that its own settings are not
+    confined. The untrusted bodies of tasks and issues are withheld from `query` for such an agent (0.11), because it
+    could act on instructions in them. Stage 6 also measures whether a permission configuration that Collide supplies
+    changes the result, and records it.
+  - **An ACP agent's listener.** `opencode acp` has `--port`, `--hostname`, `--mdns` and `--cors` (read from
+    `opencode acp --help`, 1.1.56). Stage 6 checks with `lsof`, by the child's pid, whether a started agent listens on
+    a port. The profile refuses `--mdns`, a `--hostname` that is not loopback and any `--cors`, and the Agents page
+    names a port the agent opened.
   - **Budget and timeout.** A per-ask budget is optional and off by default (owner, 2026-11-14). Only Claude Code
     enforces one (`--max-budget-usd`, a soft cap that can overshoot by a call, above). An ACP agent reports no cost
     (measured S6), so a budget on one is a load error that says only a timeout applies. Every agent has a timeout,
     which is Collide's: it stops the child as a phase is stopped (above) and the ask box says `timed out after N s`.
     The Agents page states this plainly: ACP and External agents get a timeout only.
   - **Models.** A Claude entry's model is a name such as `haiku`. An ACP entry's model is an opaque id such as
-    `ollama/qwen2.5:7b`, set with `session/set_model` after `session/new` and checked against the agent's advertised
-    list, as above.
+    `ollama/qwen2.5:7b`. The adapter reads `configOptions` from the `session/new` response and, when one is a model
+    selector, sets it with `session/set_config_option` (R5; the current ACP way). Only when the agent has no model
+    option does it fall back to `session/set_model`, the call S7 measured. The id is checked against the list the
+    agent advertises, as above.
 - Later adapters for runs: an ACP adapter, opencode first, then Codex. S7 mapped `AgentAdapter` onto ACP before the
   skeleton outlined the traits, so they are not shaped by Claude alone. The ask agent's ACP profile (above) is the
   first use of the engine with a real agent, and it ships in Stage 6, before any run uses ACP.
@@ -768,6 +936,10 @@ How packs share points:
   - Several workflows can be applied. `board.yaml` names the default, a profile may name another (0.7), and a run
     may choose any.
   - Each pack's `record` hook commits only files under the paths that pack declares.
+  - **Built-in packs ship compiled in the app bundle** (R5), with their own copy of the SDK, so they need no
+    materialization into the data directory, no git tree id and no trust prompt, and they cannot be edited in place.
+    Their hooks run with `node` from the captured environment (0.2). When `node` is missing, the message says that
+    the built-in pack needs it and where it looked, not a bare "command not found".
 - **Named points.** One catalogue, defined in full by the skeleton (Stage 2), so a pack can attach anywhere:
 
   | object | points |
@@ -850,11 +1022,19 @@ How packs share points:
   | 5. end ops | `on_end` ops, then `record` |
   | 6. cleanup | `cleanup`, only after `interrupted` or `timed_out` |
   | 7. end | `run.after_end`, on every outcome |
-  | later: accept | `sync` check; the `before_*` points of the source's operations and of the run's task diff; `run.before_integrate`, `integrate`, `run.after_integrate`; the source's operations (writes, then `after_*` points); `record` |
+  | later: accept | `sync` check; the `before_*` points of the source's operations and of the run's task diff; `run.before_integrate`, `integrate` (answers `merged` or `pending`, 0.5); once `merged`: `run.after_integrate`, the source's operations (writes, then `after_*` points); `record` |
   | later: removal | `workspace.before_remove`, then `remove` (task workspaces) or `discard` (sandbox and experiment) |
 
   Accepting is a user action on a finished run, so the integrate points fire after `run.after_end`. The `before_*`
   points of accept run first, so a refused `done` gate leaves the code unmerged (S11).
+  - **`integrating` and `pending`** (R5). A pull request is not merged when `integrate` returns, so a result of
+    `pending {url, head}` puts the run in the state `integrating`, not `done`. The source's operations and
+    `run.after_integrate` wait for `merged`. A workflow polls with a `wait` phase (0.7), and a pending `integrate`
+    that is polled again replaces its entry in run state (0.5). A group is ready only when every member's merge
+    commit is an ancestor of the line's ref (0.7, Stage 11), so a group never counts a PR that was merged and then
+    reverted, or closed without merging.
+  - The integrate step writes an intent before the merge or the PR and an outcome after (0.2), so a restart in the
+    middle checks whether the branch is already merged or the PR exists, and does not make a second one.
 - **Gates** attach either to a workflow's phases or to a named point (`task.before_status: review`), so a codemap or
   lint pack's gate applies whatever workflow is running.
 - **Syncing with the base.** Long runs fall behind their base.
@@ -920,9 +1100,10 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   - Point bindings take `timeout:`. The default is 30 s for task points and 120 s for move points, which may scan
     files. A timeout is `error`.
 - **Result**: the file named by `$COLLIDE_RESULT`:
-  `{ "status": "ok" | "fail" | "unverified" | "refused" | "error", "message", "outputs": {} }`. The status in this file
-  is the verdict. A non-zero exit or a missing or invalid file is `error`. A child tool's exit code is never forwarded
-  as a verdict (R1: `iter`, `plan` and `preflight` use exit 2 for usage errors).
+  `{ "status": "ok" | "fail" | "unverified" | "pending" | "refused" | "error", "message", "outputs": {},
+  "retryAfter"?: seconds }`. The status in this file is the verdict. A non-zero exit or a missing or invalid file is
+  `error`. A child tool's exit code is never forwarded as a verdict (R1: `iter`, `plan` and `preflight` use exit 2 for
+  usage errors).
   - **`unverified`** (owner, 2026-11-13; Ferry's three-state gate result): a gate, `script` or `wait` hook could
     not check here, for example Docker or Orchard's lanes are down, or a CI check was cancelled. It is neither a
     pass nor a fail, so no fixer is sent at code nobody proved broken.
@@ -930,6 +1111,15 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       the hook, proceeds as if it passed, or stops the run.
     - From any other hook (workspace, `record`, `integrate`) it is `error`.
     - Experiments count it as its own outcome, never a pass (0.14).
+  - **`pending`** (R5) is the answer of a `wait` hook, or of `integrate` for a pull request, when the thing it checks
+    has not happened yet and may later. It is not a verdict and ends no span as a failure.
+    - `retryAfter` is a hint in seconds for when to ask again. The engine takes the larger of it and the phase's
+      `interval:` (0.7), never less than 1 s, and a `pending` with no hint uses the interval.
+    - Each poll is a new invocation of the hook, and a `pending` entry **replaces** the previous entry for the same
+      `pack/hook`, phase and round in run state, so a CI wait polled every 30 s for an hour keeps one entry and not
+      120 (0.5, State). The last non-pending result is kept as before.
+    - A `wait` phase that reaches its `timeout:` while still `pending` ends as `error`, with the last message.
+    - From any hook other than `wait` and a PR `integrate`, `pending` is `error`.
 - **State.** A hook's `outputs` are kept and passed on, so a step can hand data to later steps.
   - Outputs of workspace hooks become **workspace state**. It lasts as long as the workspace, across runs. So
     `cleanup`, `remove`, `resume` and `doctor` receive what `create` learned instead of rediscovering it.
@@ -984,6 +1174,11 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   - **Agent phases do not.** An agent, or task text injected into it, could otherwise write `tests.passed` or a
     span that becomes an experiment's primary metric. Work done inside an agent phase is measured by sampling and by
     the pack's import (0.13).
+  - **Only a hook's own report lines may be primary** (R5). A line counts toward an experiment's primary metric only
+    when it comes from a hook, gate or phase whose `COLLIDE_REPORT` descriptor that process opened itself. A child
+    that inherited the descriptor, for example a tool the hook started that started an agent, writes lines that are
+    shown and never primary. Collide checks this by giving each hook its own file and marking lines written by a
+    process other than the hook's own pid as `inherited`.
   - Anything in the process tree, in any language, appends lines, and Collide tails the file as it tails logs:
 
     ```
@@ -1069,6 +1264,10 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     wrong). So the SDK never comes from the repo.
   - `requires.sdk` names the range the pack accepts.
   - v0 packs have no other npm dependencies; a pack that needs one vendors it.
+  - **Built-in packs are not materialized** (R5). `collide`, `collide/plan` and any later built-in pack are compiled
+    into the app bundle with their own copy of the SDK, read-only, with no cache entry, no trust prompt and no tree
+    id to pin (the app's version is the pin, and the fingerprint records it). They run with `node` from the captured
+    environment (0.2), and a missing `node` fails with a message that names the built-in pack and what it needs.
 - **The context object.** `defineHook(async (input, ctx) => …)` gives:
   - `ctx.state`, to read state;
   - `ctx.config`, the pack's settings, and `ctx.dataDir`, its data directory (0.7);
@@ -1136,7 +1335,7 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       lanePool:   { type: integer, minimum: 1, default: 2 }
       notifyHook: { type: string, secret: true }
     ```
-  - Values come from three layers, lowest first:
+  - Values come from four layers, lowest first (R5 corrected the count):
     1. the schema's defaults;
     2. the user's file, `~/.config/collide/config.yaml`, per board and per pack;
     3. the repo's shared file, `.collide/config.yaml` (committed). **The repo's value wins**, so a team setting
@@ -1179,12 +1378,19 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     ask: { agent: claude-haiku }
     ```
 
-    - **Layers and sources.** The repo's file may set only `budget_usd` and `timeout_s` for an entry, because a team
-      has a say in cost and not in what runs on a developer's machine. `timeout_s` is `overridable`, since a slow
-      local model is a fact about one machine. Every other field is refused in the repo file, naming the key, because
-      a command in a committed file would be code that Collide runs on the strength of a trust prompt. The Agents page
-      and `collide config get agents.<id>.<field>` show each value with its layer: built-in, the user's file or the
-      repo's file.
+    - **Layers and sources.** The repo's file may set only two defaults for every ask, `ask.budget_usd` and
+      `ask.timeout_s` (R5), because a team has a say in cost and not in what runs on a developer's machine. They are
+      not per agent id: ids are the user's own names, and a committed `agents.<id>` would name an agent the repo
+      cannot know. An entry's own `budget_usd` and `timeout_s` in the user's file win over the repo's default.
+      `ask.timeout_s` is `overridable`, since a slow local model is a fact about one machine. A repo budget that
+      reaches an agent that cannot enforce one (ACP, External) is ignored, with a notice on the Agents page naming the
+      agent, and is not a load error, because the repo's file cannot know which agent a developer picked. Every other
+      `agents` field is refused in the repo file, naming the key, because a command in a committed file would be code
+      that Collide runs on the strength of a trust prompt. The Agents page and `collide config get
+      agents.<id>.<field>` show each value with its layer: built-in, the user's file or the repo's file.
+    - **An ACP entry's `args` are checked** (R5). The profile refuses `--mdns`, a `--hostname` that is not a loopback
+      address, and `--cors` in `args`, with a message that names the flag (0.3). The page names a port the started
+      agent opened, if Stage 6's check finds one.
     - **Secrets are names.** An entry's `secrets` map an environment variable to an item in the OS keychain. The value
       is read at launch and goes only into the child's environment, never into argv, a log, the ask's record or a
       file. A missing item is a launch error that names it. An `env` line whose name ends in `KEY`, `TOKEN`, `SECRET`
@@ -1201,6 +1407,12 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       ask's token, the time to the first tool call, the finish time, the cost (Claude) or "not reported" (ACP), the
       readable folders and tool kinds in effect, and a plain failure text, such as `claude was not found on PATH`
       or `the agent did not call a tool within 180 s`. An untested entry shows "not tested".
+      - **The probe for confinement** (R5). Test also asks the agent to write a file and to run `true`, both in a
+        temporary directory made for the test, and checks whether either happened. If so, the result is **red**:
+        "this agent is not confined; its own settings let it write and run commands". A red agent is refused as an
+        ask agent until the person acknowledges it, the acknowledgement is recorded with the entry, and the ask box
+        shows a standing warning while it is in use. `query` withholds untrusted bodies from a red agent (0.11).
+        opencode's default is red (0.3).
     - **Endpoint card.** The card shows the endpoint URL, whether a window is connected, the time and name of the
       last call, and the endpoint token, masked, with Reveal, Copy and **Rotate** (0.2). Each agent row shows when it
       was last used and its spend this week, from the ask records. An external client's name comes from its
@@ -1210,7 +1422,15 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       `mcpServers` block, and an opencode `mcp` block. A client that cannot send headers gets the URL with the token
       as its last path segment. Collide writes to no agent's configuration. S6 measured the forms without a token
       (opencode's `mcp list` reported the endpoint connected); the header forms are inferred, and Stage 6's opt-in
-      client test measures them.
+      client test measures them. A snippet that a user pastes into a client's own config puts the token in a file
+      Collide does not control, and the card says so beside the Rotate button.
+    - **Interactive launches get the same MCP rule as runs** (R5). A New session, a take-over and a Plan… session
+      (0.11) pass the snapshot's `--mcp-config` with `--strict-mcp-config`, so a worktree's `.mcp.json` servers that
+      nobody approved do not load (measured S1 for plain `claude` in a worktree). The endpoint token is never in
+      that file; the interactive session is given no UI-tools endpoint. The endpoint's other risk is a client the
+      user pasted a snippet into, so the endpoint has a per-client call limit for `external` callers, counted in the
+      shell (0.2), with its number set in Stage 6. There is one endpoint token for now, rotatable in Settings. Named
+      per-client tokens are not built (owner, 2026-11-14).
 - **Pack data.** Each pack gets a data directory per board under Collide's data directory, passed as
   `COLLIDE_PACK_DATA` and `ctx.dataDir`. That is where "a pack keeps its own files" (0.5). Each experiment arm gets
   its own copy, taken at the start, so a pack that keeps its state there is isolated without declaring anything
@@ -1234,6 +1454,11 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   - `git:` fetches into a bare mirror under `~/.cache/collide/git/` with the user's own git credentials, and reads
     the tree from git objects with the same reader as `repo:`. GitHub, GitLab and self-hosted servers all work. A
     tag is a version.
+  - **Fetch rules** (R5). A fetch is a command that talks to a host the pack's author chose, so:
+    - the first fetch from a host Collide has not fetched from before asks the user, naming the host;
+    - git runs with `GIT_TERMINAL_PROMPT=0`, an allowlist of protocols (`https`, `ssh` and `file`), `--` before the
+      URL, and a timeout;
+    - a URL that starts with `-` is refused at load, because git would read it as a flag.
   - A `dev:` folder's tree id is computed as git computes it, so the same files give the same id as their commit.
     `board.yaml` refuses `dev:`.
   - The Orchard pack is `repo:` in the Orchard repo (`.collide/packs/orchard/`). The Collide repo keeps a fixture
@@ -1326,8 +1551,11 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       profile and a prompt (owner, 2026-11-13, for planning). Two identical instances are refused at launch;
     - `script`: a hook in the workspace (push a branch, open a PR, sync with the base). `agentWork: true` marks one
       that runs agents itself (0.3);
-    - `wait`: a hook polled at an interval until it returns `ok` or `fail`, or a timeout passes (CI checks). No
-      agent runs while it waits, and the time counts as waiting;
+    - `wait`: a hook polled every `interval:` until it returns `ok` or `fail`, or `timeout:` passes (CI checks). The
+      hook may answer `pending`, with an optional `retryAfter` (0.5), which keeps it polling and replaces its entry
+      in run state. `interval:` defaults to 30 s and `timeout:` is required, both shown in the run preview. A timeout
+      while still pending is `error`, and the timeout is measured on the uptime clock (0.2). No agent runs while it
+      waits, and the time counts as waiting;
     - `human`: a Queue item where a person picks one of the phase's declared tokens.
   - **`on_cold:`** on an `agent` phase: `resume` (default) or `fresh` (0.3). A role's context options (`compact_at`,
     `config`, `bash_output_max`, `mcp_output_max`) sit beside its `model` and `budget`.
@@ -1519,8 +1747,9 @@ Collide plays the lead, so it does all four, through the pack.
   - key `source:shortId`, plus template fields, aliases and, for ref-scoped sources, the path in each checkout;
   - title, body, status + category, deps, labels, collections, source fields;
   - provenance: author and trust level;
-  - `kind`, typed `links` (`type`, `to`, `blocking`), `assignee`, and checklist fields (owner, 2026-11-13, for
-    planning);
+  - `kind`, typed `links` (`type`, `to`, `blocking`), `owners` (the people or agents who claimed the item; 0.10 says
+    how a claim works; R5 aligned this with 0.10, which already said `owners`), and checklist fields (owner,
+    2026-11-13, for planning);
   - `version`, required.
 
   See 0.10.
@@ -1568,7 +1797,11 @@ Collide plays the lead, so it does all four, through the pack.
 - Tasks from authors outside the repo's trust list (GitHub `author_association`) need a confirmation before a run,
   and never run in `bypassPermissions`. GitHub draft items have no author association and count as untrusted.
 - Collide never acts automatically on events from untrusted sources.
-- A diff that touches `.collide/`, `.claude/`, a pack path or a pack's `protectedPaths` is flagged in review.
+- A diff that touches one of the protected files is flagged in review. The protected files are named (R5): the
+  committed Collide files (`board.yaml`, `packs.lock`, `config.yaml`, `views/` and `profiles/`), `.claude/`, a pack
+  path and a pack's `protectedPaths`. The `.collide/` directory as a whole is not protected, because the planning
+  folders under it (`planning/`) are the files Collide's own agents write (0.10), and a flag on every diff would
+  flag nothing.
   A pack may fail the phase at its end instead, checked like `readOnly`:
   `protectedPaths: { paths: [...], at: phase-end }` (owner, 2026-11-13; Ferry reverts such a write the moment it
   happens).
@@ -1611,9 +1844,10 @@ Collide plays the lead, so it does all four, through the pack.
   - **a 1 KB source cap.** It is a safety property, not a style one: a 4 KB chain of `+` overflows a 2 MB stack and
     aborts the process, and a deeply nested expression panics inside the parser's error formatter. Compile also runs
     under `catch_unwind`;
-  - **list-length caps when a task is loaded:** `labels`, `collections` and `depends_on` at 1,000 entries, and
-    string fields at about 4 KiB. Hiding the corpus is not enough: one task with a 5,000-entry `labels` list took
-    4.2 s under an innocent `all`/`exists` pair;
+  - **list-length caps when a task is loaded, on the fields bound into CEL only** (R5): `labels`, `collections` and
+    `depends_on` at 1,000 entries, and the bound string fields at about 4 KiB. The task's body is not bound into CEL,
+    so a long body is never cut by this cap. Hiding the corpus is not enough: one task with a 5,000-entry `labels`
+    list took 4.2 s under an innocent `all`/`exists` pair;
   - **no corpus variable in views**, and a static cost estimate when a view is saved or loaded (0.10).
 
   A thread with a deadline is not a limit: the caller moves on and the thread keeps running (measured S5: about one
@@ -1632,7 +1866,8 @@ Collide plays the lead, so it does all four, through the pack.
   - **Limits.** A lens has 1 to 12 groups. Each group has a name, at least one id and a non-empty reason. A call
     names at most 500 ids, the size of the largest `query`, and its body is at most 1 MB (0.2). A title is cut at 80
     characters, a group name at 60, a reason at 600 and a note at 400. An ask makes at most 20 screen-changing calls,
-    so a loop cannot flood the Undo stack (inferred: S6's asks made one or two).
+    so a loop cannot flood the Undo stack (inferred: S6's asks made one or two). The shell counts them (0.2), so a
+    window reload does not reset the count.
   - **The agent's words are text, and Collide's words say what changed.** A title, a group name, a reason or a note is
     shown as plain text, with no markdown or HTML and with control characters removed, and is marked as the agent's.
     The statement of what changed (the expression, the number of groups and ids) is built from the validated action,
@@ -1645,6 +1880,17 @@ Collide plays the lead, so it does all four, through the pack.
     limited only by the permission mapping (0.3).
   - **The endpoint refuses before it parses** a foreign Host or Origin, a non-JSON content type, an oversized body and
     a wrong token (0.2). It counts wrong tokens and never records their value.
+- **The webview shows untrusted text, so it is locked down** (R5). Task bodies, issue text, an agent's words and
+  planning files are written by people outside the repo, and the webview holds the app's whole `rpc` surface:
+  - a strict Content-Security-Policy: scripts, styles and images only from the bundle, `connect-src` only the app's
+    own channel, no `unsafe-inline` and no `unsafe-eval`;
+  - markdown is rendered through a sanitizer with raw HTML turned off. `javascript:`, `file:` and `data:` links are
+    removed, and an external link opens in the operating system's browser after a confirmation that shows the
+    address, never inside the webview;
+  - Tauri's capability set for the window is the `rpc` command and the one event channel, and nothing else: no
+    filesystem, shell or HTTP plugin;
+  - Stage 6 tests it with a hostile issue (script tags, event-handler attributes, `javascript:` links, a markdown
+    image that points at a remote host) and checks that nothing runs and nothing loads.
 - Hook outputs and report lines can come from processes running branch code, because a gate runs the branch's
   tools. They are data: never templated into prompts, and passed to env only as safe tokens (0.5).
 - Metrics hold no prompt, task or tool content. By default they keep only executable names and flag names (0.13).
@@ -1777,6 +2023,14 @@ Why the plan adapter parses files itself:
     of the user's under `arch/` stays uncommitted.
   - Workflow ops (`on_start`, `on_end`) record automatically.
   - Edits made in the UI record when the user presses Record.
+- **Provider writes are safe against each other** (R5). The markdown provider takes an `flock` on a lock file in each
+  root for every write, and writes each file by temp file, `fsync` and rename, so a reader never sees half a file and
+  two writers never interleave. A test runs concurrent `setStatus` calls on one file and checks that every call's
+  result is true to what is on disk.
+- **The planning slice checks out the main checkout's shared root by default** (R5; `--checkout` names another). A
+  write there leaves an uncommitted file. `--commit` commits that one file and nothing else, as a stopgap until the
+  `record` hook exists (Stage 8). A claim (`owners`) is refused when the file already shows an owner, unless the
+  claimant is that owner.
 - **Launch reads each task at the run's line ref, not the working tree.** A task with unrecorded edits must be
   recorded before launch. The run preview shows its status at that ref, and refuses a task that is not launchable
   there, with the reason.
@@ -1852,7 +2106,19 @@ layout: { default: board, groupBy: category }
     - Only a person accepts, defers, rejects or resolves. `collide/plan` refuses those ops from a run
       (`actor.kind: agent`), and refuses `accepted` while a question the proposal includes is open. An agent phase
       that writes a planning file's `status` or `by:` line itself fails at phase end, as an edit to checklist state
-      does.
+      does. **The actor is read from the connection** (R5), never from an argument: the daemon takes it from the
+      peer's process tree (0.2). Only the app is a person; a call from the CLI in a terminal that asks for one of
+      these ops becomes a Queue confirmation that the person answers in the app. Under the same-user rule (0.1) this
+      stops a mistake, not an agent that means to get around it. The phase-end check hashes the planning files that
+      hold a `status:` or `by:` line before and after the phase and compares the lines that changed, so an edit that
+      bypasses the CLI is caught as well.
+    - **A `spike`** (R5) is a folder with a `record.md` at the top level of the shared root. Its statuses, as
+      the records in `.collide/planning/spikes/` use them: `planned` (`ready`); `running` (`active`) while its scripts
+      run; `results` (`review`), when the results are in and the conclusions are not yet written down; `concluded`
+      (`done`), when the record's conclusions are written; and `dropped` (`dropped`). The records in this repo use
+      `results` and `concluded`; the others are for the spike workflow of Stage 9. A spike links to the
+      epics it informs. The slice reads a spike as an item of kind `spike` only from Stage 4c; until then it reads
+      only `epics/` (below).
     - There are no decision or deferred files. The planning view's "Decisions made" lists the Decision sections of
       accepted proposals and resolved questions. A team system keeps its own decision kind through the role mapping;
   - **ids** (owner, 2026-11-13): a kind prefix, a number and a two-letter suffix, as in `ts-0012-ua`. Epics use
@@ -1862,19 +2128,29 @@ layout: { default: board, groupBy: category }
       remotes). It keeps creation order and is the short handle. It may repeat after two branches merge;
     - the suffix makes the id unique, so a merge never renumbers a file or rewrites a link. `collide task 12`
       resolves when one item has that number; otherwise it lists the matches and asks for `12-ua`;
+    - **a collision of whole ids is possible** (R5): 20 letters make 400 suffixes per number. The suffix is drawn
+      from a seeded generator, a test pins that, and a second test forces a collision and checks that the draw is
+      repeated until the id is free among every ref Collide can see. If two branches still create the same id, the
+      second file is a `task.invalid`, and **`collide task reid <id>`** gives it a new suffix, rewrites the links that
+      name it, and commits nothing. The owner's two-letter rule of 2026-11-13 stands (a three-letter suffix was
+      considered and not taken, owner, 2026-11-14);
     - the suffix is letters only, without `i`, `l` or `o`, so it never reads as part of the number. Ids match
       `^[a-z]{2}-[0-9]{3,}-[a-z]{2}$` and are always strings in YAML (S5: a hyphen inside the scalar rules out every
       number, boolean and null form in the five parsers tried, and two letters avoid the `e-` prefix that `yaml`'s
       1.1 mode reads as NaN). A field that holds a hash, such as `preregistered`, is written quoted, because an
       unquoted short sha can parse as a number (`3e10`, `1234567`). Two files with one id are a `task.invalid`;
     - frontmatter is parsed with the `yaml` package in its default (core) mode, never `gray-matter` and never the 1.1
-      mode (S5). The file is capped before parsing (S5 suggests 64 KiB), duplicate keys and the alias limit stay on, and a
+      mode (S5). **The frontmatter block is capped before parsing** (S5 suggests 64 KiB), not the file (R5): a long
+      body is the point of an item, and the body is never parsed as YAML. A body has its own cap, set when Stage 2
+      builds the provider, and an item over it is a `task.invalid`. Duplicate keys and the alias limit stay on, and a
       schema checks every field's JavaScript type, with no coercion and no `Date`. A parse takes about 42 us a file
       (measured S5: 1,599 task files, 67 ms), so the provider needs no parse cache;
   - two roots: a private one in the pack's data directory, and a shared one at the configured path,
     `.collide/planning/` by default, committed as views are;
   - the path is set in `.collide/config.yaml` and is part of the trust hash, so a change asks for trust again. A
-    path outside the repo, under `.git/` or over Collide's own files is refused;
+    path outside the repo, under `.git/` or over Collide's own protected files (`board.yaml`, `packs.lock`,
+    `config.yaml`, `views/` and `profiles/`; 0.9) is refused, and the message names the file it would have covered
+    (R5);
   - after a change, new items go to the new path. Old items stay readable through `layout.previous`, with an "old
     path" chip, and Collide offers Move: a `git mv` committed with the config change. An entry leaves `previous`
     only when nothing remains there;
@@ -1890,9 +2166,13 @@ layout: { default: board, groupBy: category }
   Deferred stay in this plan.
 - **Collide's own build tasks** (owner, 2026-11-13; part L) are items in the shared root, `.collide/planning/`, in
   the layout above. Each stage is an epic (`ep-001` is Stage 1), and its tasks sit in the epic's `tasks/` folder.
-  This plan keeps the design; each stage's **Status** line names its epic, and the items hold the status. Only the
-  next milestone is split into items; later stages stay outlines until they start (0.15).
-  - Kinds so far: `epic` and `task`.
+  This plan keeps the design; each stage's **Status** line names its epic and **the plan revision its items came
+  from** (R5), and the items hold the status. **Only the next stage is split into items** (R5; it was the next
+  milestone): a later stage stays an outline until the one before it nears its end, so a revision of this plan does
+  not leave a hundred items written against an old design. A stage with sub-stages (3a, 3b, …) keeps one epic, and
+  its items say which sub-stage they belong to. If this plan changes after a stage's items were written, the Status
+  line says which items were checked against the new revision.
+  - Kinds so far: `epic`, `task` and `spike` (above).
   - A task's statuses are the five categories themselves (`ready`, `active`, `review`, `done`, `dropped`), as for
     scratch tasks.
   - Links: `blocked-by`, which blocks. The folder gives the epic. A task is **ready to start** when its status is
@@ -1901,7 +2181,10 @@ layout: { default: board, groupBy: category }
   - Frontmatter: `id`, an optional `alias`, `kind`, `status`, `title`, `owners` (the claim) and `links`. Body
     sections: Goal, Success criteria, Tests, Notes.
   - Until the planning slice lands, items are written by hand, and an agent picks a ready one by reading their
-    frontmatter. The slice must read every hand-written item with no `task.invalid`.
+    frontmatter. The slice must read every hand-written item **under `epics/`** with no `task.invalid`. It does not
+    read `spikes/` at first: a spike record is a different shape from a task (its statuses, above), and the slice
+    criterion would fail on it. Stage 4c adds the `spike` kind to the provider, and from then the slice reads the
+    records too.
 
 ### 0.11 Interface direction
 
@@ -2005,7 +2288,9 @@ Details:
 
 - **Task drawer:** body, dependencies (both directions), collections, per-checkout state with divergence and
   collisions, other lines' states, the task's runs, and the source's operations as forms. Create opens the same
-  form.
+  form. The body is **sanitized markdown** (R5): raw HTML off, `javascript:`, `file:` and `data:` links removed,
+  images from remote hosts not loaded, and an external link opens in the browser after a confirmation (0.9). Any
+  other place that shows a task's or an agent's text follows the same rule.
 - **Filter bar → view.** Typing a filter in the Field is an ad-hoc view, and saving it writes a view file. CEL is
   never the only way in: chips for collection, status, label and source write the CEL for you.
 - **Drill-down from a phase segment.** An **activity digest** comes first: files touched, commands with exit
@@ -2083,7 +2368,10 @@ Details:
     from a task, it links `informs` to that task;
   - the conversation is the run's terminal; there is no chat surface. The workflow's prompt names the proposal and
     the CLI ops the agent writes with: `create` into the private root, then `link` from the proposal
-    (`includes`), for tasks, spikes and questions;
+    (`includes`), for tasks, spikes and questions. `collide` is on the session's `PATH` (R5): Collide puts a
+    directory with the `collide` binary first on `PATH` for this session, because the agent's Bash would otherwise
+    not find it. The agent's calls reach the daemon as a run agent (0.2), so the person-only ops (0.10) fail for it
+    and become Queue confirmations;
   - a choice the owner makes in the terminal goes into the proposal's Decision section as text. It is a decision
     only once a person accepts the proposal;
   - a choice to make away from the terminal, or one of several at once, becomes a question item. It appears in
@@ -2184,7 +2472,14 @@ code files. It presents what it is told, and the agent does the analysis (0.3 fo
 
   | tool | input | effect |
   |---|---|---|
-  | `query` | `subject` (`tasks` or `runs`), `filter?`, `limit?` (1 to 500, default 200) | none. Returns the rows the window holds. A task: id, title, body, epic, status, labels, source, `depends_on`, `trusted`. A run: id, task, status, workflow, started, `total_seconds`, `wait_seconds`, `spend_usd`, and each phase's seconds |
+  | `query` | `subject` (`tasks` or `runs`), `filter?`, `fields?`, `limit?` (1 to 500, default 100), `cursor?` | none. Returns one page of the rows the window holds, and a `next_cursor` when there are more. A task: id, title, epic, status, labels, source, `depends_on`, `trusted`, and no body unless `fields` names `body`. A run: id, task, status, workflow, started, `total_seconds`, `wait_seconds`, `spend_usd`, and each phase's seconds |
+
+  - **A page fits under the output cap** (R5). The MCP output cap (25,000 tokens by default, 0.3) replaces an oversized
+    result with an error, and a corpus of about 1,500 tasks would hit it with bodies in. So `query` leaves the body
+    out unless `fields` asks for it, and a body is returned only when the filter names ids (at most 20), cut at 2 KB
+    with its full size shown. The page ends before its estimated size reaches 20,000 tokens, not at `limit`, and the
+    cursor continues. A test pages a fixture of about 1,500 tasks and checks that every page is under the cap and
+    that the pages together hold every row once. For a red ACP agent (0.7) a task's body is withheld altogether.
   | `set_view` | `surface` (`field`, `tracks`), `title`, `reason?`, `filter?` (`{}` clears), `sort?` `{by, dir}`, `group_by?` (Field), `window?` `{from, to}` (Tracks) | sets those parts of that surface's view and leaves the rest. A chip shows the expression |
   | `show_groups` | `surface`, `title`, `groups` (1 to 12 of `{name, ids, reason}`), `rest?` (`dim` or `hide`) | draws a lens: the groups with their reasons, and the rest dimmed or hidden. An id in one group only. A chip |
   | `highlight` | `surface`, `ids`, `note?`, `title?` | marks the ids and filters nothing. A chip |
@@ -2224,8 +2519,10 @@ code files. It presents what it is told, and the agent does the analysis (0.3 fo
   - A failure is plain text, never an empty box. The texts are: `the agent finished without changing the screen (N
     tool calls, none changed anything)`, `timed out after N s`, `stopped at the $X budget`, `cancelled`, `agent
     error: <the first line of its error>`, `<command> was not found on PATH`, `this agent cannot use HTTP MCP
-    servers`, `Collide has no window open; open it and ask again` and `the Collide window did not answer within
-    10 s`. A change made before a failure keeps its chip and its Undo.
+    servers`, `Collide has no window open; open Collide and ask again`, `the Collide window did not answer within
+    10 s`, `cancelled: the window was closed or reloaded` and `this agent is not confined; acknowledge it in
+    Agents first` (0.7). The first two window texts are the endpoint's own (0.2). A change made before a failure
+    keeps its chip and its Undo.
   - **"No files were read"** (S6 proposal 3). S6's run 5 grouped 107 tasks by title wording and never read the code,
     and said so in prose. So Collide, not the prompt, checks it. Collide's `AgentSession` already sees the ask's
     stream: Claude's Read, Grep or Glob calls, and an ACP agent's tool calls of kind `read` or `search` (inferred for
@@ -2329,15 +2626,17 @@ Every run is a trace. The core needed for run state is always recorded; the reso
   - Resource samples are tied to spans.
   - Everything is stored in SQLite next to the event log, per machine. Nothing leaves the machine in v0.
   - **Sleep is not work.** A laptop that sleeps mid-run would otherwise add hours of "active" time. The owner
-    records sleep intervals and counts them as waiting. On macOS the uptime clock stops during sleep while the
+    records sleep intervals and counts them as waiting. The clock table in 0.2 says which clock each timeout and
+    countdown uses (R5). On macOS the uptime clock stops during sleep while the
     continuous clock does not, so the gap between them is the sleep: `slept = Δcontinuous − Δuptime`, computed on
     each sampler tick. A gap over 2 s (two ticks at 1 s) is recorded as a sleep interval and subtracted from active
     time.
     - Measured S8: awake, the formula gave 0.05–0.19 ms. Since boot the two clocks differ by the machine's total
       sleep, and the OS's own record of its last sleep lies inside that total. A dark wake runs the CPU, so it is not
       counted (inferred).
-    - **No sleep mid-run has been tried.** The owner's step (`sleep-check.sh`) is deferred until before Stage 13
-      (Deferred).
+    - **No sleep mid-run has been tried.** The owner's step (`sleep-check.sh`) moves to Stage 3b (R5; it
+      was deferred until before Stage 13), because the timeouts and countdowns that depend on the clocks are built
+      there. It checks the table in 0.2 on a real run that sleeps.
   - **Missing is not zero** (owner, 2026-11-13, after Ferry's runner). A value its source did not give is stored as
     null and shown as "not reported". A value nobody asked for, because an opt-in was off, is shown as "not
     recorded". Neither is ever 0, which would read as "instant" or "free".
@@ -2387,13 +2686,16 @@ Every run is a trace. The core needed for run state is always recorded; the reso
       view shows stream timing and is corrected when the spans arrive.
   - Collide sets the export intervals short (`OTEL_LOGS_EXPORT_INTERVAL`, `OTEL_METRIC_EXPORT_INTERVAL`; defaults
     5 s and 60 s). At 1 s, log records arrived p50 978 ms after the event (measured S2).
+  - **The receiver is the daemon's** (R5; 0.2): it binds `127.0.0.1`, checks `Host`, caps a request body and takes
+    records only with the run's token.
   - Records are attributed by `session.id` and by `OTEL_RESOURCE_ATTRIBUTES` (`collide.run`, `collide.phase`). Each
     run's processes carry a token in `OTEL_EXPORTER_OTLP_HEADERS`, and the receiver refuses records without one.
   - Every record carries the account's identity (`user.email`, account and organization ids; measured S2). The
     receiver drops those attributes on arrival, before anything is stored.
   - `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS` and `OTEL_LOG_TOOL_CONTENT` are forced off (all measured in the
     binary).
-  - Inherited `OTEL_*` variables are stripped.
+  - Inherited `OTEL_*` variables are stripped, **after** the adapter has looked at them (R5): it records whether the
+    user's environment or settings set an OTLP endpoint before the strip removes the evidence.
   - A user's existing endpoint is never overridden. When one is set, the session falls back to the transcript.
 - **Token and context metrics** (owner, 2026-11-13; `docs/research/tokens-and-context.md`). They need no pack:
   - per response: input, cache read and cache write (1-hour and 5-minute) tokens, and the context size; output
@@ -2445,7 +2747,10 @@ Every run is a trace. The core needed for run state is always recorded; the reso
     - the line's ref and commit;
     - each pack's name, source and tree id, with a `dev:` pack marked, and the `board.yaml` hash;
     - the profile, and a hash of its resolved values;
-    - the Collide, claude and node versions;
+    - the Collide, claude and node versions (the claude version is the one the daemon read for this phase, 0.3);
+    - `apiKeySource` from `system/init` (R5): whether the login came from a claude.ai session, an API key or a helper,
+      because the cache tier and the cost differ (0.3). The run preview shows it before the run starts, from the
+      captured environment, and the fingerprint records what `system/init` then said;
     - the model each alias resolved to;
     - the context options in effect, and the names of the user hooks and plugins the phase loaded (0.3);
     - the tools the phase had: its agent definition's `tools:` list and the disallowed tools. A tool that is only
@@ -2552,8 +2857,10 @@ An experiment runs one task under two **arms**, one after the other on this mach
 - **Comparison:**
   - The user picks the **primary metric** when creating the experiment. The default is active time on the critical
     path.
-  - The primary metric comes only from what Collide measured or from spans that hooks reported. A reported `metric`
-    line is never primary, because the code under test may have written it.
+  - The primary metric comes only from what Collide measured or from spans that hooks reported. A reported line
+    counts only when it is the hook's own (0.5): a line a child wrote through an inherited descriptor is never
+    primary, because the code under test may have written it. A `metric` line from the code under test is never
+    primary either.
   - **Verdict rule** (`crossover` only): the exact crossover test.
     - Each pair gives its period difference (first run minus second). The test compares the A B pairs' differences
       with the B A pairs' over every way of splitting the pairs into two equal groups. That also removes a steady
@@ -2603,7 +2910,10 @@ Skeleton first, then test-first passes (owner, 2026-11-13).
   - **Every cross-process contract, in full:** the hook protocol (stdin, result file, report lines), the provider
     and observer protocols, the JSON-RPC between UI or CLI and the owner, the event log, and the schemas for
     `pack.yaml`, `board.yaml`, `config.yaml` and views. That includes the point and event catalogues (0.4) and keys
-    used only in Milestones C and D, so a manifest written today keeps validating.
+    used only in Milestones C and D, so a manifest written today keeps validating. It also includes the keys that
+    only GitHub Projects v2 needs, though Projects is built after the board (Stage 6c; owner, 2026-11-14): the
+    provider contract, the status mapping and the fields are frozen in full now, and Stage 6c adds code, not
+    contract.
   - **Code outlines for Milestones A and B** (Stages 3–10):
     - Rust crates and modules, traits, types, state enums and function signatures;
     - the SDK's functions and types;
@@ -2630,7 +2940,15 @@ Skeleton first, then test-first passes (owner, 2026-11-13).
   3. implements until they pass;
   4. refactors with them passing.
 
-  A stage is complete when CI counts zero stubs carrying its tags.
+  A stage is complete when CI counts zero stubs carrying its tags. A stage split into lettered sub-stages (3a, 3b, …)
+  completes one sub-stage at a time, each with its own tags and its own success criteria.
+- **Builders are Sonnet agents** (owner, 2026-11-14).
+  - Each Stage 2+ item is sized and written so that one Sonnet agent can finish it in one session from the item file
+    alone. The item names the plan sections and contracts it implements (by section, never by line), the crate or
+    package area it touches, the tests to write first, and when it is done.
+  - Design reviews stay with Fable and Opus. The main session spot-checks each result.
+  - This strengthens the split of large stages (S1, R5): a stage too big for a handful of such items is split into
+    lettered sub-stages, and only the next stage is split into items (0.10).
 - **Every commit passes all tests** (the owner's standing rule). So a test lands in the same commit as the code that
   makes it pass, and its failure is observed locally first.
   - A failure caused by a stub only proves the code is missing.
@@ -2649,7 +2967,11 @@ Skeleton first, then test-first passes (owner, 2026-11-13).
 
 ## Milestone A: Foundations
 
-Ends usable from the CLI and a read-only desktop board:
+Ends usable from the CLI and a read-only desktop board, with a thin loop in the app along the way (owner,
+2026-11-14):
+- type a prompt in the app, run it through `collide/quick` in a worktree, review the diff and accept it, against
+  scratch tasks (Stage 3c), as soon as the process owner and the Claude adapter work. This is the first dogfooding:
+  Collide's own work can go through it before the plan adapter, GitHub or the board exist;
 - browse the corpus through views, in the app;
 - write tasks from the CLI;
 - run one agent phase on one task.
@@ -2808,7 +3130,7 @@ reproduction script and a record, together in one spike folder under `.collide/p
   - Claude Code telemetry received locally: does it give tool timings more precise than tailing stream-json?
   - Report files: tailing lag under a chatty writer, and the size and rate caps.
   - Result: 1 s sampling at 0.11% of a core; three real Orchard runs measured, one with its lane containers.
-    Deferred (see Deferred): the mid-run sleep test and a run measured from its start.
+    The mid-run sleep test moved to Stage 3b (R5). Deferred (see Deferred): a run measured from its start.
 
 **Success Criteria**:
 - Ten decision records (S1–S9 and S11), with measured numbers.
@@ -2816,9 +3138,9 @@ reproduction script and a record, together in one spike folder under `.collide/p
   Claude launch line is fixed, including where settings come from. The snapshot + SDK path works.
 - S1, S3 and S4 ran first. Their records were read against this plan before the other spikes started (owner,
   2026-11-13). Done: revision 10 applies them, S2 and S9 (part E), and S11 (part J). Revision 11 applies S5–S8.
-- An adversarial review, **R5** (Fable and Opus, read-only, as in R1–R4), now attacks the finalized plan, and the
-  owner's decisions on its findings are applied. No product code is written before that; spike code is throwaway
-  and exempt (owner, 2026-11-13).
+- An adversarial review, **R5** (Fable and Opus, read-only, as in R1–R4), attacked the finalized plan, and the
+  owner's decisions on its findings are applied in revision 13. No product code is written before the owner accepts
+  revision 13; spike code is throwaway and exempt (owner, 2026-11-13).
 - S6: its pilots complete each scenario with the end state detected (measured: 50 of 50 tests), and the record
   lists what changed in the prototype and why. Its in-app agent answered both of the owner's requests live (0.11).
   The sessions with a first-time participant were skipped (owner, 2026-11-14), so the owner's judgement on the
@@ -2829,7 +3151,8 @@ reproduction script and a record, together in one spike folder under `.collide/p
 
 **Tests**: Each reproduction script runs from a clean checkout and prints its measurement.
 **Status**: Complete except S10, which runs when the group-runs stage starts (S1–S9 and S11 done; revision 11 applies
-S5–S8). Items: epic `ep-001-ef` in `.collide/planning/epics/`; records in `.collide/planning/spikes/` (part L).
+S5–S8; revision 13 applies R5). Items: epic `ep-001-ef` in `.collide/planning/epics/`; records in
+`.collide/planning/spikes/` (part L).
 
 ## Stage 2: Skeleton
 
@@ -2841,8 +3164,10 @@ part L).
   - the `core` and `host` crates, `app/src-tauri` and `app/` (React);
   - `packages/pack-sdk`;
   - two fixture packs: a review loop (`fixtures/packs/loop`) and an issue → PR → CI shape (`fixtures/packs/pr-ci`);
-  - a fixture copy of the reference pack's manifest and hooks. The pack itself lives in the Orchard repo (0.7);
-  - `packs/collide`, the built-in pack (0.4).
+  - a fixture copy of the reference pack's manifest and hooks (`fixtures/packs/orchard`). The pack itself lives in
+    the Orchard repo (0.7);
+  - the two built-in packs (0.4): `packs/collide` (workflows such as `collide/quick`) and `packs/plan` (`collide/plan`,
+    the markdown provider the planning slice runs on).
 - Contracts in full, with JSON Schema and TypeScript types generated from them. The pipeline is `schemars` →
   JSON Schema → `json-schema-to-typescript`, a Node build step (0.6; S5):
   - the rules of 0.6 hold from the first schema: `additionalProperties: false` on every struct and tagged variant,
@@ -2855,16 +3180,27 @@ part L).
     `board.yaml`, `config.yaml`, views, profiles, `packs.lock` with its `source` field, the user's `packs.yaml`, and
     the `.collide` pointer file;
   - the hook, provider and observer protocols, and the report line format;
-  - the shim protocol, versioned on its own, and `exit.json`, with the log of the bytes written to the child's stdin
-    beside its stdout log (0.2);
+  - the shim protocol, versioned on its own, and `exit.json`, with the shim's **journal** (R5; 0.2): one ordered file
+    of `{seq, wall_ns, dir, bytes}` records, written before the child sees the bytes, and the length-framed
+    daemon-to-shim messages. `AgentSession::feed` takes the storable `wall_ns` and `replay` takes the journal (0.3);
+  - the hook result with `pending` and `retryAfter`, and `interval:` and `timeout:` on a `wait` phase (0.5, 0.7); the
+    `integrate` answer `merged {commit}` or `pending {url, head}`, and the `integrating` run state (0.4);
+  - the intent and outcome events around a side-effect step, and the `actor` the daemon derives from the connection's
+    peer credentials, with the socket directory, uid check and CLI token file of 0.2 (R5);
   - the JSON-RPC between UI or CLI and the owner, including the Queue item's context record: six sections, each
-    filled or "Not available" (0.11; S6);
+    filled or "Not available" (0.11; S6). Its method list is written in this stage, since no earlier section lists
+    it;
   - the ask methods `ask.start`, `ask.cancel` and `ask.test`, and their `ask.*` events, which carry the normalized
     stream events and the ask's outcome (0.3, 0.11);
-  - the shell's own `ui_tools.*` methods (`reply`, `token`, `rotate`) and its `ui_tools.request` event, which the
-    shell handles and never forwards (0.2). The five tools' definitions are TypeScript in the window, not Rust
-    contracts, because the window answers every call, and Stage 6 and the later stages that add surfaces write them;
-  - the `agents` and `ask` settings keys (0.7), and `layout.sort` in a view (0.11);
+  - the shell's own `ui_tools.*` methods (`reply`, `token`, `rotate`) and its `ui_tools.request {requestId, caller,
+    deadline, message}` event. The shell handles the methods and never forwards them. It answers `initialize`,
+    `ping` and `tools/list` from a build-time manifest, returns 202 for notifications and 405 for GET and DELETE,
+    forwards only `tools/call`, counts the per-ask cap and cancels asks when the window closes or reloads (0.2; R5).
+    The manifest's file format is a contract here. The five tools' definitions are TypeScript in the window, not
+    Rust contracts, because the window answers every call, and Stage 6 and the later stages that add surfaces write
+    them and the generator that makes the manifest from them;
+  - the `agents` and `ask` settings keys (0.7), including the repo's `ask.budget_usd` and `ask.timeout_s` defaults,
+    and `layout.sort` in a view (0.11);
   - the point and event catalogues (0.4);
   - state, events and spans, with a parent id and a kind on every span, and a wait span that names its Queue item
     (0.13; S6);
@@ -2875,18 +3211,24 @@ part L).
   permission answers `Allow`, `Deny` and `Cancel`, `Usage.quality`, the capability table, `TurnEnd`, `model.id`.
   The ACP engine and profile belong to `host` and are not outlined here.
 - `host` outlines: the Claude adapter, `collide-daemon` with its launchd start, `collide shim`, the store, the hook
-  executor, the provider supervisor, the sampler and the CLI commands.
+  executor, the provider supervisor, the sampler and the CLI commands, with the clocks of 0.2's clock table and the
+  OTLP receiver declared in 0.2. The `ui_tools` request handler is real here, as a pure function with no listener
+  (the listener is Stage 6b).
+- `cel` 0.15, patched and vendored with S5's step counter, and the test that a runaway expression stops (0.9; S5).
+  Views and `when:` start using it in Stage 4b.
 - `@collide/pack-sdk`: `defineHook`, `defineProvider`, `defineObserver`, the `ctx` object and the generated types,
   with stubbed bodies.
 - The shell's `rpc` command and event channel. The React component tree for Field, Tracks, Queue, run detail (Output,
   Time breakdown, Review), Compare and Experiments, following S6's surfaces, with typed props and placeholder
   rendering, and one reducer for UI state (every user action, and every in-app agent tool call, a reducer action).
-- Test doubles as outlines: a fake adapter that emits normalized events, a second `AgentSession` that is a scripted
-  fake ACP child (below), a fake provider, a fake hook runner.
+- Test doubles as outlines: a fake adapter that emits normalized events, a second `AgentSession` double that is fed
+  scripted ACP messages in `core` (sans-IO; the ACP engine and its fake child process are Stage 3d), a fake provider,
+  a fake hook runner.
 - CI: build, lint, typecheck, the stub count per tag, the dependency-direction check and the no-names check.
-- **Planning contracts** (owner, 2026-11-13), defined first (part L): the provider schema's `kinds`, op effects,
-  `links`, `assignee` and checklist field type; fan-out `instances:`; the run budget; the five new task points with
-  `change` and `latestRun`; `points:`, `views:` and `checklists:` in `pack.yaml`.
+- **Planning contracts** (owner, 2026-11-13), defined first (part L): the provider schema's `kinds` (including
+  `spike` and its statuses, 0.10), op effects, `links`, `owners` and checklist field type; fan-out `instances:`; the
+  run budget; the five new task points with `change` and `latestRun`; `points:`, `views:` and `checklists:` in
+  `pack.yaml`.
   - From S11 (owner, 2026-11-13): `change.diff`, `batch` and `effects`; `change.via` and `actor.kind: agent` with
     `run` and `phase`, reserved now so run-made writes need no later schema change; `apply` `items[]`; `preview`;
     the `watch` notification shapes and `task.invalid`; the run-diff points at accept.
@@ -2894,15 +3236,24 @@ part L).
     second-pack stage builds attribution for global sources.
 - **Planning slice** (owner, 2026-11-13; part L), built for real as soon as the planning contracts, the provider
   protocol and the pack SDK's outline exist, ahead of the rest of this stage:
-  - `collide/plan` loads as a built-in pack, from the build;
+  - `collide/plan` loads as a built-in pack, compiled into the app bundle with its own copy of the SDK, so it needs
+    no materialization or trust prompt (R5; 0.6). Its provider is TypeScript on `node` from the captured
+    environment, because this stage must prove the TypeScript provider path, the extension model's main risk (the
+    provider in Rust was considered and not chosen, owner, 2026-11-14);
   - the markdown provider's shared root at its default path, `.collide/planning/`, read in 0.10's layout (only
-    the paths it names): kinds `task` and `epic`, epic membership from the folder, `blocked-by` links, and the ops
-    `create`, `setStatus`, `link`, `claim` and `unclaim`. `create` writes into the epic's `tasks/` folder and takes
-    the next number for the kind across every ref Collide can see (0.10);
+    the paths it names, and under `epics/` only; spike records come in Stage 4c): kinds `task` and `epic`, epic
+    membership from the folder, `blocked-by` links, and the ops `create`, `setStatus`, `link`, `claim` and
+    `unclaim`. `create` writes into the epic's `tasks/` folder and takes the next number for the kind across every
+    ref Collide can see (0.10);
+  - writes hold a per-root `flock` and are temp, `fsync` and rename (0.10; R5). They go to the main checkout's shared
+    root by default (`--checkout` names another), `--commit` makes a one-file commit until `record` exists, and
+    `claim` refuses when an owner is shown (0.10);
   - provider protocol v0's `initialize`, `list`, `get` and `apply`, and a working `defineProvider` in
     `@collide/pack-sdk`;
   - the CLI's `collide tasks [--ready] [--kind <kind>] [--json]`, `collide task <id> [--json]` and
-    `collide task <id> <op> …`. `<id>` may be the short form (`12` or `12-ua`) when it matches one item. Until
+    `collide task <id> <op> …`. `<id>` may be the short form (`12` or `12-ua`) when it matches one item. New ids
+    draw their suffix from a seeded source in tests and redraw on a collision, and `collide task reid <id>` gives an
+    item a new id and rewrites the links that name it (0.10; R5). Until
     the headless-core stage's daemon exists, the CLI starts the provider itself; the corpus stage moves it behind
     the provider supervisor;
   - left to the corpus stage: the private root, the layout setting, views and CEL, `watch`, trust and the
@@ -2912,14 +3263,15 @@ part L).
 - `cargo build`, `cargo clippy`, `tsc --noEmit` and the app build pass.
 - Every stub carries a tag, every tag belongs to a stage, and CI prints the count per tag. CI also lists each
   catalogue point with the stage that makes it fire.
-- The built-in pack's, the reference pack's and both fixture packs' manifests validate against the generated
+- Both built-in packs', the reference pack's and both fixture packs' manifests validate against the generated
   schema. A manifest with an unknown key fails.
 - Serde round-trips pass for every protocol type, and the generated TypeScript types match the schema.
 - The pipeline rejects what S5's cases rejected: a manifest with an unknown key at any depth, and a tagged variant
   with a key its definition lacks, including `Wait {}`. A test pins the YAML loader's options: `no` stays a string, a
   duplicate key, an anchor and an unquoted `{{ }}` are errors, and the last carries the hint "quote the template".
-- A fake `AgentSession` replayed over a logged stdout and stdin reaches the same state as the live one, including a
-  pending permission request.
+- A fake `AgentSession` replayed over the shim's journal reaches the same state as the live one, including a pending
+  permission request and the events' timestamps (from the stored `wall_ns`). A journal whose last record is cut short
+  replays up to the last whole record. A framed daemon-to-shim message cut in half is never taken as whole.
 - A test fails if `core` gains a Tauri, SQLite or process dependency.
 - A seeded `orchard` string in `core`, and a seeded `CLAUDECODE` or `ANTHROPIC_` string outside the Claude adapter,
   each fail CI.
@@ -2927,55 +3279,122 @@ part L).
   kind other than `read` or `search`, fails validation.
 - A provider with one kind and no links validates unchanged. `collide schema` lists every new key and point. A
   derived point that names an unknown core point, or a gate bound to an `after_*` point, is refused at load.
+- The new contract rules (R5) each have a test over the schema or a fixture: a `wait` hook answering `pending` three
+  times leaves one run-state entry; an `integrate` of `pending` leaves the run `integrating` and holds the source's
+  ops back; a `ui_tools.request` round trip with the shell's manifest answers (`initialize`, `ping`, `tools/list`),
+  202, 405 and the cap; an actor read from a fake peer is `app`, `cli` or `run agent` by its process tree, and a
+  person-only op from a `run agent` is refused; a path that is not a safe `0700` socket directory is refused.
 - Planning slice (part L):
-  - `collide tasks --json` lists every hand-written item in Collide's `.collide/planning/`, with no `task.invalid`;
+  - `collide tasks --json` lists every hand-written item **under `epics/`** in Collide's `.collide/planning/`, with
+    no `task.invalid`. It does not read `spikes/` in this stage. The slice criterion is narrowed, not the spike
+    records made read-only items, because a spike record's statuses and shape are not a task's (0.10; R5);
   - `collide tasks --ready` equals the ready list checked by hand;
   - `collide task <id> setStatus active` changes only that item's `status` line (`git diff`);
   - a task file moved into another epic's folder is listed under that epic, and its links are unchanged;
   - with two tasks numbered 12, `collide task 12` lists both and asks for the suffix;
+  - concurrent `setStatus` calls on one file all report what is on disk (the `flock` test), and a kill between the
+    temp write and the rename leaves the old file whole;
+  - a claim on an item that shows an owner is refused;
   - from here on, Collide's own build tasks are read and updated through the CLI.
 
-**Tests**: Schema generation; manifest validation (all four packs, plus invalid fixtures); serde round-trips;
+**Tests**: Schema generation; manifest validation (all five packs, plus invalid fixtures); serde round-trips;
 dependency-direction test; the no-names check with its positive controls.
 The YAML hazards (`no`, `0.10`, `1e10`, a duplicate key, an alias bomb, 100,000-deep nesting). The step counter's
 patch, vendored, stops a runaway expression. Session replay.
 Planning: derived-point validation; the new keys' schemas; the `change` and `watch` shapes. The slice: provider
 contract tests over fixture items; the ready rule (blocked, unblocked by `done` and by `dropped`, a cycle); ids
 (the next number across refs, including a fetched remote branch; a repeated number after a merge; short-form
-lookup; two files with one id is a `task.invalid`); epic membership from the folder; an item with an unknown kind or
-a broken link is counted, not dropped.
-**Status**: Not Started. Items: epic `ep-002-va` in `.collide/planning/epics/` (part L).
+lookup; two files with one id is a `task.invalid`; the seeded suffix draw; a forced collision redrawn; `collide task
+reid` rewriting the links that name the item); epic membership from the folder; an item with an unknown kind or a
+broken link is counted, not dropped; a frontmatter block over its cap is invalid while a long body is not.
+Contracts: the journal and its replay; the `pending` poll; the `integrating` state; the intent and outcome events;
+the manifest; the actor from peer credentials.
+**Status**: Not Started. Items from revision 13: epic `ep-002-va` in `.collide/planning/epics/` (part L), `ts-0007`
+to `ts-0044`, each sized for one Sonnet agent (0.15). The planning slice's items are built first.
 
-## Stage 3: Headless core (CLI, no UI)
+## Stage 3: Headless core (CLI, no UI), and the thin loop
 
-**Goal**: `collide run` starts one Claude phase on a task given as a file, in a new git worktree, and records it.
+**Goal**: `collide run` starts one Claude phase on a task given as a file, in a new git worktree, and records it. Then
+the thin loop (3c) puts that run behind a prompt box in the app. Four sub-stages, each with its own goal, criteria and
+Status (owner, 2026-11-14; R5 S1). Each keeps the epic `ep-003-da`, with its items grouped by letter.
 
-- `core` state machines (Run, Phase, Workspace), with the terminal states and pauses of 0.7 and 0.8, and `lost`. The
-  `host` Claude adapter per S1.
+### Stage 3a: Process owner, with python children
+
+**Goal**: The daemon and the shim own a child process, record every byte, and survive hostile children, a dead daemon
+and a full disk, with no agent involved. The children are python3 fixtures.
+
+- `core` state machines (Run, Phase, Workspace), with the terminal states and pauses of 0.7 and 0.8, and `lost`.
 - **The daemon and the shim** (0.2), speaking the skeleton's JSON-RPC:
   - the shim is synchronous: `std::process::Command` with `pre_exec(setsid)`, then `libc::wait4` on the pid. An
     agent's exit is never taken from std's or tokio's `wait`, and a tokio `Child` is never dropped (measured S3);
-  - the shim logs the bytes written to the child's stdin as well as its stdout, so a session can be replayed (S7);
+  - the shim writes the **journal** of 0.2: one ordered file of `{seq, wall_ns, dir, bytes}`, each record written
+    before the child sees the bytes. Daemon-to-shim messages are length-framed (R5; S7);
   - the daemon reaps shims with tokio, because it reads totals from `exit.json`;
-  - on-demand start under the lock file, as a one-shot launchd job on macOS; the base environment captured once;
+  - on-demand start under the lock file, as a one-shot launchd job on macOS, with the `setsid` fallback and its warning
+    over SSH; the base environment captured once and again at app start (0.2);
   - the durability rules of 0.2.
-- The two traits of 0.3 (`AgentAdapter`, `AgentSession`) with S7's changes P1–P9, and the capability table with `Yes`,
-  `No` and `Unknown`. The Claude adapter is the first `AgentSession`. `models.yaml` loading and alias resolution,
-  including `model.name`, with `model.id` kept opaque.
-- **The ACP engine** (`host`), tested with a scripted fake ACP child: the handshake, a prompt turn, a permission
-  request, `session/cancel`, an empty turn (`empty_turn`) and a child that exits first (`lost`). A real ACP agent
-  is Deferred for runs (below); the ask box uses one from Stage 6. The second `AgentSession` keeps the trait honest
-  meanwhile (S7).
+- **Socket security** (0.2; R5): the `0700` directory with the uid check, the CLI token file at `0600`, the shim socket
+  the same, and the actor the daemon derives from the connection's peer credentials and process tree.
+- **Clocks and disk** (0.2; R5): the clock table (uptime for work timeouts, continuous time for the cache countdown,
+  wall time for display and limit reset); the free-space check before a workspace or a phase (`paused: disk`, cause
+  `disk`); the caps on a child's stream line and on a phase's log.
 - File-backed child logs; SQLite store + event log; per-client socket token; version handshake.
 - Built-in workspace: `git worktree add`, returning `{ path, gitDir }`; refuses to remove a dirty or unmerged
   worktree.
+- Stop per 0.5: the ppid walk, the marker scan through libproc (`p_uniqueid`), their descendants, the order, the
+  hooks' `detached` records and the survivor report.
+- The shim's exit totals, and disk space per workspace at phase end (0.13).
+
+**Success Criteria**:
+- Stopping leaves zero processes, including a setsid'd grandchild, a double-forked orphan and a child that ignores
+  SIGHUP and SIGTERM (`ps`). The test children are python3, not platform binaries. A double-forked `/bin/sleep`
+  orphan that its hook recorded is stopped by the cleanup hook; an unrecorded one appears in the survivor report
+  (0.5).
+- A phase that ends while the daemon is down keeps its exit code and totals, and the next phase starts with the app
+  closed.
+- A shim killed with SIGKILL makes its phase `lost`, even though the agent reported success. A SIGSTOPped shim is
+  reported as unresponsive and does not stall other runs.
+- When a shim is killed, a child that ignores EOF and hangup is stopped as its phase turns `lost` (S2).
+- The daemon started by the one-shot launchd job has `USER`, `HOME` and `PATH`, and a python3 child runs under it. The
+  real-`claude` check is in 3b.
+- A daemon started from a terminal survives closing that terminal.
+- Writing the child's stream and logs through a writer that fails with `ENOSPC` on demand crashes neither the daemon
+  nor a shim, and an unreadable store is moved aside and reported. With free space under the floor, a phase does not
+  start and the run shows `paused: disk` (R5).
+- A session replayed from the shim's journal reaches the same state as the live one. A journal cut short replays up to
+  the last whole record (R5).
+- A socket directory that is not `0700`, or a connection from another uid, is refused. A connection from a python3
+  child of a run is identified as `run agent`, and a person-only operation from it is refused (R5).
+- A sleep gap injected through fake clocks counts as waiting, not active time, and a work timeout counts uptime only
+  (0.2).
+
+**Tests**: State-machine unit tests; store migrations; hostile-process tests adapted from herdr-core (SIGKILL and
+SIGSTOP of the shim, children that ignore HUP and TERM, python3 fixtures, a recorded `/bin/sleep` orphan); the
+`ENOSPC` writer; store quarantine; the journal's order and its cut-short replay; the framed message cut in half; the
+socket checks; sleep accounting with fake clocks.
+**Status**: Not Started. Items from revision 13, not yet split into items: they are split when Stage 2 nears done
+(0.10). Epic `ep-003-da`, items lettered `3a` (part L).
+
+### Stage 3b: Claude adapter and the first run
+
+**Goal**: `collide run` starts one real Claude phase on a task file in a fresh worktree, and records it.
+
+- The `host` Claude adapter per S1. The two traits of 0.3 (`AgentAdapter`, `AgentSession`) with S7's changes P1–P9, and
+  the capability table with `Yes`, `No` and `Unknown`. The Claude adapter is the first `AgentSession`.
+  `AgentSession::feed` takes the journal's `wall_ns` (0.3). `models.yaml` loading and alias resolution, including
+  `model.name`, with `model.id` kept opaque.
 - Permission requests answered from the CLI (`--permission-prompts host`).
-- Stop per 0.5: the ppid walk, the marker scan through libproc, their descendants, the order, the hooks' `detached`
-  records and the survivor report.
 - **The adapter's declarations (0.3):**
   - its environment is stripped from everything Collide starts (Claude: `CLAUDECODE` and every `CLAUDE_*`);
   - a usage or rate limit becomes a `limited` event. The phase pauses (`paused: usage limit`) and resumes by
     session id at the reset time, or when the user resumes it.
+- **Claude's version and settings (0.3; R5):**
+  - the adapter's tested version range, read when the daemon starts and before each phase (cached by path and
+    modification time). A version outside it gets a one-turn smoke check, then a warning or a refusal through the
+    Queue. The version is in the fingerprint, and an event the adapter does not know is counted as Other;
+  - the generated settings are validated against Claude's published schema in the contract test, because a file that
+    fails validation is silently ignored under `-p`. A runtime canary (a `hook_started` event, else the phase fails
+    with "Claude ignored Collide's settings") catches the rest.
 - Always-recorded metrics (0.13):
   - spans for runs, phases, turns and waits, with active time apart from waiting time. Usage-limit pauses and
     machine sleep count as waiting;
@@ -2992,24 +3411,13 @@ a broken link is counted, not dropped.
 - **Contract test:** recorded from the real, pinned `claude` and re-run on upgrade, so format drift fails a test
   (the fake alone cannot detect it).
 - **Dogfood** (part L): `collide run` takes an item from `.collide/planning/` as its task file.
+- `collide run` on a file task: a new worktree, one Claude phase, the record.
 
 **Success Criteria**:
 - A real run on the Orchard repo in a fresh worktree.
 - One of Collide's own build tasks runs through `collide run` in a fresh worktree of Collide (part L).
 - The owner restarts mid-run, and the run continues or resumes.
-- Stopping leaves zero processes, including a setsid'd grandchild, a double-forked orphan and a child that ignores
-  SIGHUP and SIGTERM (`ps`). The test children are python3, not platform binaries. A double-forked `/bin/sleep`
-  orphan that its hook recorded is stopped by the cleanup hook; an unrecorded one appears in the survivor report
-  (0.5).
-- A phase that ends while the daemon is down keeps its exit code and totals, and the next phase starts with the app
-  closed.
-- A shim killed with SIGKILL makes its phase `lost`, even though the agent reported success. A SIGSTOPped shim is
-  reported as unresponsive and does not stall other runs.
-- When a shim is killed, a child that ignores EOF and hangup is stopped as its phase turns `lost` (S2).
-- The daemon started by the one-shot launchd job has `USER`, `HOME` and `PATH`, and a real `claude -p` phase runs
-  under it.
-- A daemon started from a terminal survives closing that terminal.
-- Logging on a full disk crashes neither the daemon nor a shim, and an unreadable store is moved aside and reported.
+- A real `claude -p` phase runs under the daemon that the one-shot launchd job started.
 - A permission request is answered from the CLI.
 - A role whose alias is unmapped is refused with a message that names the alias.
 - A run's trace shows its phase and permission-wait spans, with the wait counted as waiting. Its tokens and cost
@@ -3031,30 +3439,102 @@ a broken link is counted, not dropped.
   them (`ps -E`).
 - A recorded limit message pauses the phase with its reset time, and the phase resumes by session id. The pause
   counts as waiting.
-- A sleep gap injected through fake clocks counts as waiting, not active time.
+- A permission request with unknown input shows "input not available until approved", and no answer offers an
+  "always" option.
+- Over the same recorded session, the Claude `AgentSession` replayed from the journal reaches the same state as the
+  live one.
+- A `claude` outside the tested range gets the smoke check and a Queue warning. A generated settings file that fails
+  Claude's schema fails the contract test, and a phase whose canary never appears fails with the message that names it
+  (R5).
+- The owner's sleep test (`sleep-check.sh`, 0.13) runs on a real run that sleeps: the table in 0.2 holds, and the sleep
+  counts as waiting (R5; moved here from Stage 1's deferred step). It is recorded as owner judgement in the stage's
+  task item.
+
+**Tests**: Alias resolution; env stripping; limit pause and resume; usage counting over repeated content blocks and a
+compaction; per-turn differences of running totals; missing values stored as null; error results' spend; other model
+calls; settling on exit and end of output in either order; the hook-blocked prompt; refusal classification and hook
+outcomes; context-option validation; span-tree tests against fake-Claude streams; fake-Claude end-to-end; the version
+range and the canary; `TurnEnd` reasons; `Usage.quality`; real-claude contract test (opt-in in CI).
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-003-da`, items lettered `3b`
+(part L).
+
+### Stage 3c: The thin loop, in the app
+
+**Goal**: In the app, type a prompt, run it through `collide/quick` in a worktree, review the diff and accept it,
+against scratch tasks. This is the first dogfooding: Collide's own work can go through it before the plan adapter,
+GitHub or the board exist (owner, 2026-11-14; R5 challenge 1).
+
+What it pulls forward, and from where. Nothing is cut from the later stages; each of these is built here in its
+smallest form and finished there:
+- **From Stage 4b:** scratch tasks in Collide's store, with `create` and `setStatus` and nothing else (no corpus, no
+  views). The prompt box creates one per prompt.
+- **From Stage 6:** the shell's `rpc` command and event channel with the per-client token, a window with one page, and
+  a one-item Queue (a permission request and a "ready to review" item). The board, views and endpoint wait for 6.
+- **From Stage 7:** the built-in worktree's lifecycle only (create, and remove after accept or discard). Hooks and
+  workspace implementations wait for 7.
+- **From Stage 8:** a hard-coded run sequence for `collide/quick` (one agent phase, then review), in place of the
+  transition table and its engine.
+- **From Stage 9a:** launching from a prompt, the diff review for one run, and accept with the `merge-local`
+  implementation (a local merge of the run's branch, with the worktree removed). Re-prompt in the same session, and
+  discard, are included. The context view, take-over, tracks and metrics views wait.
+- The built-in `collide` pack's `collide/quick` is compiled into the bundle (0.4, 0.6), so there is nothing to
+  trust.
+
+What it costs (owner, 2026-11-14): the launch path and the accept path are written twice. When task sources land,
+Stage 9a launches from a task in the Queue through the engine of Stage 8, and accept runs the pack's `integrate`
+implementation and its after-steps. The code in 3c that hard-codes the sequence is replaced then, not extended, and
+the 3c tests are rewritten against the engine. The cost is accepted for an earlier first loop.
+
+**Success Criteria**:
+- In a browser, over the generic `rpc` command and a fake Claude, a prompt creates a scratch task and starts a
+  `collide/quick` run in a fresh worktree. The one-item Queue shows "ready to review" with the run's diff. Accept
+  merges the branch into the checkout and removes the worktree. Re-prompt continues the same session. Discard removes
+  the worktree and leaves the checkout unchanged.
+- A permission request from the run shows in the Queue, and answering it lets the run continue.
+- Closing the window and reopening it shows the same run and the same review item (the daemon owns the run).
+- The owner runs one real prompt on a worktree of Collide through the app, reviews the diff and accepts it. Recorded
+  as owner judgement in the stage's task item, with what was awkward.
+- After this stage, the owner's Collide work that fits a prompt goes through the thin loop (dogfooding).
+
+**Tests**: The loop over `rpc` in a browser against the fake Claude; permission answer; accept, re-prompt and discard
+against a fixture repo; window close and reopen; scratch-task create and status.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-003-da`, items lettered `3c`
+(part L). It runs after 3b. The ACP engine (3d) follows it; the thin loop needs only Claude.
+
+### Stage 3d: ACP engine
+
+**Goal**: A second `AgentSession`, over a scripted fake ACP child, keeps the trait honest.
+
+- **The ACP engine** (`host`), tested with a scripted fake ACP child: the handshake, a prompt turn, a permission
+  request, `session/cancel`, an empty turn (`empty_turn`) and a child that exits first (`lost`). A real ACP agent
+  is Deferred for runs (below); the ask box uses one from Stage 6b. The second `AgentSession` keeps the trait honest
+  meanwhile (S7).
+- The model is chosen through the child's `configOptions` and `session/set_config_option`, with `session/set_model` as
+  the fallback when the child offers no `configOptions` (0.3; R5).
+
+**Success Criteria**:
 - Over the fake ACP child, a turn that ends with no output is `empty_turn`, never a clean finish. A cancel sends
   `session/cancel` and the phase settles from the prompt response; a child that exits before it is `lost`. A usage
   record whose quality is `Partial` or `Unreported` is shown as such and never as zero.
-- A permission request with unknown input shows "input not available until approved", and no answer offers an
-  "always" option.
-- A session replayed from its logged stdout and stdin reaches the same state as the live one.
+- A child that offers `configOptions` has its model set through `session/set_config_option`. One that offers only
+  `session/set_model` gets that call (R5).
 
-**Tests**: State-machine unit tests; store migrations; hostile-process tests adapted from herdr-core (SIGKILL and
-SIGSTOP of the shim, children that ignore HUP and TERM, python3 fixtures, a recorded `/bin/sleep` orphan); a
-`/dev/full` logging test; store quarantine;
-alias resolution; env stripping; limit pause and resume; usage counting over repeated content blocks and a
-compaction; per-turn differences of running totals; missing values stored as null; error results'
-spend; other model calls; settling on exit and end of output in either order; the hook-blocked prompt;
-refusal classification and hook outcomes;
-context-option validation; sleep accounting with fake clocks; span-tree tests
-against fake-Claude streams; fake-Claude end-to-end; the fake ACP child, with the same scenarios as the fake
-Claude where they apply; `Usage.quality`; `TurnEnd` reasons; real-claude contract test (opt-in in CI).
-**Status**: Not Started. Items: epic `ep-003-da` in `.collide/planning/epics/` (part L).
+**Tests**: The fake ACP child, with the same scenarios as the fake Claude where they apply; the `configOptions` and
+`set_model` paths; `Usage.quality`; `TurnEnd` reasons.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-003-da`, items lettered `3d`
+(part L).
 
 ## Stage 4: Pack loading, settings, plan adapter, corpus and views
 
 **Goal**: Tasks come from a ref-scoped source that can be read and written, are combined into a corpus, and are
-filtered by views. Everything loads from a trusted snapshot, with the pack's settings.
+filtered by views. Everything loads from a trusted snapshot, with the pack's settings. Three sub-stages, each with its
+own goal, criteria and Status (owner, 2026-11-14; R5 S1). Each keeps the epic `ep-004-qd`, with its items grouped by
+letter.
+
+### Stage 4a: Packs, trust and settings
+
+**Goal**: Packs and settings load from a trusted snapshot, with every refusal that guards the load. No provider runs
+yet.
 
 - **Minimal pack loading.**
   - The Collide directory: `.collide/`, or the directory a `.collide` pointer file names (0.7).
@@ -3073,15 +3553,16 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
 - **Pack sources and scope (0.7):**
   - sources `repo:`, `git:` (any git URL, a repo on disk included) and `dev:`, each resolved to a git tree id and
     materialized by one code path. `git:` fetches into a bare mirror under `~/.cache/collide/git/` with the user's
-    git credentials;
+    git credentials, under the fetch rules of 0.7 (R5): a new host asks first, git runs with `GIT_TERMINAL_PROMPT=0`, a
+    protocol allowlist, `--` before the URL and a timeout, and a URL that starts with `-` is refused;
   - user packs in `~/.config/collide/packs.yaml` and their lock, switched on per board;
   - trust per source (0.9);
   - working copies (0.7): `collide pack link <name>` with no folder, and new `.collide/packs/` folders in the
     user's checkout offered as working copies;
   - `collide pack add|link|enable|disable|list`.
 - **Settings (0.7):**
-  - three layers: the schema's defaults, then `~/.config/collide/config.yaml`, then the snapshot's
-    `.collide/config.yaml`, which wins except for keys marked `overridable`;
+  - four layers, lowest first: the schema's defaults, then `~/.config/collide/config.yaml`, then the snapshot's
+    `.collide/config.yaml`, which wins except for keys marked `overridable`, then the run's profile (next bullet);
   - profile files from the snapshot's `.collide/profiles/`, `~/.config/collide/profiles/` and packs' `profiles:`,
     applied as the top layer by `collide config get <key> --profile <name>`. A user profile that sets a key not
     marked `overridable` is refused, naming the key;
@@ -3097,6 +3578,61 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
     name, resolved at launch only. `collide config get agents.<id>.<field>` shows the layer;
   - `collide config get <key>` shows the value and the layer it came from.
 - **Pack data:** one directory per pack per board, passed as `COLLIDE_PACK_DATA` (0.7).
+
+This sub-stage checks agent entries at load only. Launching an agent, and the secrets test at launch, are in 6b.
+
+**Success Criteria**: On fixture repos:
+- An edited `pack.yaml`, hook, `board.yaml` or `config.yaml` on a branch is not used. A changed hash asks again.
+- A key set in both the user's file and `.collide/config.yaml` resolves to the repo's value, and `collide config get`
+  names the repo as its layer.
+- A secret in either file fails the load and names the key. A source account in the repo file is refused.
+- In a fixture repo whose `.collide` file says `dir: tools/collide`, the board, views and settings load from
+  `tools/collide/`.
+- A pack that commits `node_modules/@collide/pack-sdk`, or a symlink, is refused at load, and the message names the
+  path.
+- A pack from a `git:` source on a local bare repo loads by its pinned tree id. Moving the remote's ref changes
+  nothing until `collide pack update`. A lock whose commit the remote no longer has fails, naming the pack and the
+  commit.
+- A user pack named like a repo pack is refused, naming both. `collide pack link` overrides a repo pack for that user
+  only, and `collide pack list` marks it dev. A `dev:` folder inside a workspace is refused.
+- A repo pack change committed at the line's ref, with no lock edit, loads after a trust prompt that shows the diff.
+- `collide pack link <name>` with no folder runs the uncommitted pack folder from the user's checkout, badged dev. A
+  new `.collide/packs/` folder there is listed as a working copy.
+- An `overridable` key resolves to the user's value. A user profile that sets any other key is refused.
+- A `git:` URL that starts with `-` is refused at load. The first fetch from a new host asks, naming the host, and a
+  fetch that takes longer than the timeout fails with the pack's name (R5).
+- Agent entries (owner, 2026-11-14):
+  - with no config at all, the built-in entry resolves to Claude Code, `haiku`, `config: none`, a 180 s timeout and no
+    budget, and `ask.agent` names it;
+  - a repo file that sets `command`, `args`, `env`, `secrets`, `read`, `tools`, `model`, `config` or `ask.agent` fails
+    the load and names the key. The same file's `budget_usd` and `timeout_s` load, and the repo's `budget_usd` wins
+    over the user's while the user's `timeout_s` wins over the repo's;
+  - `collide config get agents.claude-haiku.timeout_s` names the layer, and so does every other field;
+  - `tools: [write]` fails. A `budget_usd` on an ACP entry fails with "only a timeout applies". An `env` line
+    `OPENAI_API_KEY: sk-test` fails with the hint to use `secrets`;
+  - a `secrets` entry names a keychain item and holds no value in any file. A missing item is an error that names the
+    item. The launch test (the value reaches the agent and appears in no file, argv or log) is in 6b;
+  - the owner runs `collide config get` on an entry they wrote and reads the layers back, recorded as owner
+    judgement in the stage's task item.
+
+**Tests**:
+- Snapshot-not-workspace test; materialization refusals and the re-hash; id and template-field validation,
+  including a value that fails the safe-token rule.
+- Settings: layering, per-user-only keys, the secret rule against a fake keychain, the pointer file (a `dir:`
+  outside the repo is refused), `overridable` keys, profile layering.
+- Agent entries: layering and the per-field source; each refusal above; the secret-name test with names that should
+  and should not match; the timeout range.
+- Pack sources: resolution for each kind; a `dev:` folder's tree id equals `git write-tree` over the same files;
+  the name clash; trust per source; the fetch rules, against a fixture remote that prompts, a hanging remote and a
+  URL that starts with `-`.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-004-qd`, items lettered `4a`
+(part L).
+
+### Stage 4b: Providers, plan adapter, corpus and views
+
+**Goal**: Tasks from the plan adapter and the scratch source are read and written through the provider protocol,
+combined into a corpus, and filtered by views.
+
 - **Provider protocol v0** per 0.10, with the pack's settings passed to `initialize`. A provider supervisor restarts
   providers with backoff, isolated from the process owner.
 - `@collide/pack-sdk` v0, compiled: `defineProvider`, `defineHook`, `ctx.config`, `ctx.dataDir`.
@@ -3130,10 +3666,6 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
 - **CLI:** `collide init`, `collide tasks [--view <name>] [--checkout <path>]`, `collide task <id> [--json]` (one
   item: fields, status, links one hop out, version and latest run; part K), `collide task <id> <op> …`,
   `collide config get|set`, `collide pack …`.
-- **Planning** (owner, 2026-11-13): the rest of the markdown provider, after the skeleton's slice: the private
-  root and the layout setting; kinds, op effects and links in the corpus; `collide/plan`'s record parser (claim
-  blocks) and `roles` mapping; pack views, with the slice's `--ready` as a built-in view. The slice's CLI moves
-  behind the provider supervisor. The Orchard pack's plan provider reads ADRs, spikes and questions.
 
 **Success Criteria**: On the Orchard repo:
 - A task shows `doing` in one worktree and `ready` at the board root, with the divergence reported.
@@ -3145,48 +3677,8 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
   category `active` writes `doing`.
 - A write into a checkout with a running phase is queued, not applied.
 - A write to the board root during a rebase waits, and the CLI says why. It applies once the rebase ends.
-- An edited provider script, view, `board.yaml` or `config.yaml` on a branch is not used. A changed hash asks again.
-- A key set in both the user's file and `.collide/config.yaml` resolves to the repo's value, and `collide config get`
-  names the repo as its layer.
-- A secret in either file fails the load and names the key. A source account in the repo file is refused.
-- In a fixture repo whose `.collide` file says `dir: tools/collide`, the board, views and settings load from
-  `tools/collide/`.
-- A pack that commits `node_modules/@collide/pack-sdk`, or a symlink, is refused at load, and the message names the
-  path.
-- A pack from a `git:` source on a local bare repo loads by its pinned tree id. Moving the remote's ref changes
-  nothing until `collide pack update`. A lock whose commit the remote no longer has fails, naming the pack and the
-  commit.
-- A user pack named like a repo pack is refused, naming both. `collide pack link` overrides a repo pack for that user
-  only, and `collide pack list` marks it dev. A `dev:` folder inside a workspace is refused.
-- A repo pack change committed at the line's ref, with no lock edit, loads after a trust prompt that shows the diff.
-- `collide pack link <name>` with no folder runs the uncommitted pack folder from the user's checkout, badged dev. A
-  new `.collide/packs/` folder there is listed as a working copy.
-- An `overridable` key resolves to the user's value. A user profile that sets any other key is refused.
-- Agent entries (owner, 2026-11-14):
-  - with no config at all, the built-in entry resolves to Claude Code, `haiku`, `config: none`, a 180 s timeout and no
-    budget, and `ask.agent` names it;
-  - a repo file that sets `command`, `args`, `env`, `secrets`, `read`, `tools`, `model`, `config` or `ask.agent` fails
-    the load and names the key. The same file's `budget_usd` and `timeout_s` load, and the repo's `budget_usd` wins
-    over the user's while the user's `timeout_s` wins over the repo's;
-  - `collide config get agents.claude-haiku.timeout_s` names the layer, and so does every other field;
-  - `tools: [write]` fails. A `budget_usd` on an ACP entry fails with "only a timeout applies". An `env` line
-    `OPENAI_API_KEY: sk-test` fails with the hint to use `secrets`;
-  - a `secrets` entry resolves from a fake keychain at launch and appears in no file, argv or log (checked by searching
-    them for a seeded value). A missing item is an error that names the item;
-  - the owner runs `collide config get` on an entry they wrote and reads the layers back, recorded as owner
-    judgement in the stage's task item.
+- An edited provider script or view on a branch is not used. A changed hash asks again.
 - A scratch task created with `collide task new` is listed for that board only.
-- Planning:
-  - Collide's spike records in `.collide/planning/spikes/` list in `collide tasks --view spikes --json` with their
-    statuses (`concluded`, or `results` while the owner has not decided), and no item from inside a spike folder
-    other than its record;
-  - over the Orchard repo, the Decisions needed view lists the same question ids as the human queue in
-    `plan status --format json`;
-  - an ADR's `evidence` link shows from the spike's side as "evidence for";
-  - a malformed claim block is a counted parse error on the view;
-  - two branches that each create ten items in the shared root merge with no id collision;
-  - a private-root item never appears in `git status`;
-  - a layout path outside the repo or under `.git/` is refused with the reason.
 
 **Tests**:
 - Protocol contract tests with a fake provider.
@@ -3204,74 +3696,133 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
   - a view that panics in compile is an error on that view, and the others still load (`catch_unwind`);
   - the static estimate on a view that cannot finish within the budget;
   - a view that names a corpus variable is refused.
-- Snapshot-not-workspace test; materialization refusals and the re-hash; id and template-field validation,
-  including a value that fails the safe-token rule.
-- Settings: layering, per-user-only keys, the secret rule against a fake keychain, the pointer file (a `dir:`
-  outside the repo is refused), `overridable` keys, profile layering.
-- Agent entries: layering and the per-field source; each refusal above; the secret-name test with names that should
-  and should not match; the timeout range; the seeded-value search over files, argv and logs.
-- Pack sources: resolution for each kind; a `dev:` folder's tree id equals `git write-tree` over the same files;
-  the name clash; trust per source.
 - Root busy, against a fixture repo stopped mid-rebase.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-004-qd`, items lettered `4b`
+(part L).
+
+### Stage 4c: Planning
+
+**Goal**: The rest of the markdown provider and the planning pack, so the spike records and Orchard's plan items are
+items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `spikes/` from here (0.10; R5).
+
+- **Planning** (owner, 2026-11-13): the rest of the markdown provider, after the skeleton's slice: the private
+  root and the layout setting; kinds, op effects and links in the corpus; `collide/plan`'s record parser (claim
+  blocks) and `roles` mapping; pack views, with the slice's `--ready` as a built-in view. The slice's CLI moves
+  behind the provider supervisor. The Orchard pack's plan provider reads ADRs, spikes and questions.
+
+**Success Criteria**:
+- Planning:
+  - Collide's spike records in `.collide/planning/spikes/` list in `collide tasks --view spikes --json` with their
+    statuses (all `concluded` today; a later record shows `results` until the owner decides), and no item from inside
+    a spike folder other than its record;
+  - over the Orchard repo, the Decisions needed view lists the same question ids as the human queue in
+    `plan status --format json`;
+  - an ADR's `evidence` link shows from the spike's side as "evidence for";
+  - a malformed claim block is a counted parse error on the view;
+  - two branches that each create ten items in the shared root merge with no id collision;
+  - a private-root item never appears in `git status`;
+  - `collide task reid` on a colliding item rewrites the links that name it, and a repeated suffix draw is redrawn
+    (0.10; R5);
+  - a layout path outside the repo or under `.git/` is refused with the reason.
+
+**Tests**:
 - Planning: parser fixtures, with strict plan CLI frontmatter left untouched, and S5's hazards (an unquoted
   `no`, a hash like `1e10`, a duplicate key, an alias bomb, a file over the cap); provider contract tests against
   markdown and plan fixtures; id generation; view counts; layout checks.
-**Status**: Not Started. Items: epic `ep-004-qd` in `.collide/planning/epics/` (part L).
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-004-qd`, items lettered `4c`
+(part L).
 
 ## Stage 5: GitHub adapter
 
-**Goal**: A global source with live updates and writes, built against the same protocol before the UI depends on it.
+**Goal**: A global source with live updates and writes over Issues (REST), built against the same protocol before the
+UI depends on it. Projects v2 comes after the board, in Stage 6c (owner, 2026-11-14; R5 challenge 5). Stage 2 still
+freezes the provider contract in full, including the Projects keys.
 
-- `github` adapter (TypeScript, built-in pack). `board.yaml` names the repos and projects. The `gh` account is per
-  user, in the user's settings (0.7), and is read with `gh auth token --user <name>`.
+- `github` adapter (TypeScript, built-in pack). `board.yaml` names the repos. The `gh` account is per user, in the
+  user's settings (0.7), and is read with `gh auth token --user <name>`.
   - Issues over REST: `since` + `sort=updated`, ETags. Pull requests are shown read-only and are not launchable.
-  - Projects v2 items and fields over GraphQL.
-  - Draft items are keyed `github:<owner>/projects/<n>/draft/<id>` and are untrusted (0.9).
   - Issues from repos without a board are shown but not launchable, and the reason is given.
-  - `initialize` checks token scopes. Projects v2 needs `project`, and the error names
-    `gh auth refresh -s project`.
+  - `initialize` checks the token's scopes for what Issues needs and names the fix.
   - A periodic full reconcile emits `task.removed` for deleted or transferred issues, which `since` never returns.
-- **Operations:** `setStatus` (close/reopen with a reason, or the Projects Status field; categories map through
-  `board.yaml`'s status mapping) and `comment`. Versions are per item (0.10). A stale version is detected before the
-  write and returns `conflict`.
+- **Operations:** `setStatus` (close or reopen with a reason; categories map through `board.yaml`'s status mapping)
+  and `comment`. Versions are per item (0.10). A stale version is detected before the write and returns `conflict`.
 - **Provenance:** `author_association` per task, for 0.9's trust rules.
-- Measure what one Projects v2 poll costs on a real project, and pick the interval from it.
 - Any protocol change this adapter forces goes back into 0.10 and the plan adapter.
 
 **Success Criteria**:
 - An issue edit appears within 60 s (measured).
-- A Projects Status change made in Collide shows on github.com.
-- `setStatus` with category `done` closes an issue, or sets the mapped Projects status.
-- A write with a stale version (issue or Projects item) is detected before the write and returns `conflict`.
+- `setStatus` with category `done` closes an issue.
+- A write with a stale version is detected before the write and returns `conflict`.
 - A deleted issue leaves the corpus within one reconcile interval.
 - A view over both plan and GitHub tasks lists both.
 
 **Tests**: Recorded GitHub fixtures (no network in CI); scope check; per-item version conflict tests; reconcile
-removal; draft and PR items; category mapping; mixed-source view test.
-**Status**: Not Started. Items: epic `ep-005-hs` in `.collide/planning/epics/` (part L).
+removal; PR items; category mapping; mixed-source view test.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-005-hs` in
+`.collide/planning/epics/` (part L).
+
 
 ## Stage 6: Task board (read-only desktop)
 
 **Goal**: The desktop app opens a board and shows the corpus through views, live, before any workflow runs from it
-(owner, 2026-11-12).
+(owner, 2026-11-12). Three sub-stages, each with its own goal, criteria and Status (owner, 2026-11-14; R5 S1). Each
+keeps the epic `ep-006-wq`, with its items grouped by letter.
+
+### Stage 6a: The board
+
+**Goal**: The Field, filter bar, drawer, settings and no-setup open, over the corpus, live. Stage 3c built a minimal
+shell and window; this finishes them.
 
 - The Tauri shell: one `rpc` command and one event channel, forwarding to the owner's socket and adding the token
-  (0.2). The UI's client speaks the owner's JSON-RPC (handshake, reconnect), so it also runs in a browser against a
-  fake owner.
+  (0.2). Stage 3c built the minimal form. The webview's CSP and Tauri capabilities are set here (0.9; R5): the
+  capabilities are `rpc` and one event channel, and nothing else. The UI's client speaks the owner's JSON-RPC
+  (handshake, reconnect), so it also runs in a browser against a fake owner.
 - **Field:** views; board and run-order layouts; live updates from `watch`; divergence and collision chips.
 - **Filter bar:** chips that write CEL; saving a view writes a view file.
 - **Task drawer, read-only:** body, dependencies both ways, collections, per-checkout state.
 - **Board switcher.**
 - **Settings:** each key's effective value and the layer it came from (0.7). Secrets are set into the keychain from
-  here. The Agents page is part of it (below).
+  here. The Agents page is part of it (6b).
 - **No-setup open** (0.11): any git repo opens with the built-in packs, a GitHub source when `origin` is on GitHub
   and `gh` is logged in, and the default aliases. Board settings stay per user until Share with team writes
   `.collide/`. First-run checks: `claude` installed and logged in, a git repo (else offer `git init`), `gh` optional.
   The trust prompt appears only for repo packs.
-- **Empty board:** a prompt box that creates a scratch task (launching it arrives in Stage 9), New session (Stage 9),
-  the detected sources, and Add a pack.
+- **Empty board:** a prompt box that creates a scratch task (built in 3c; launching from the board arrives in 9a), New
+  session (9b), the detected sources, and Add a pack.
 - **Planning** (owner, 2026-11-13): a read-only planning view; links both ways in the drawer; checklists shown
   read-only; the branch-only chip.
+- **Markdown in the webview** (0.9; R5): task, issue and agent text is rendered with raw HTML off, no `javascript:` or
+  `file:` links, and external links opened by the OS after a confirmation.
+
+**Success Criteria**:
+- S6 scenario 2, and scenario 1 up to the board, pass as UI tests ported from S6's pilots against the real app, each
+  completing and detecting its end state. The owner's walkthrough of both is recorded as owner judgement in the
+  stage's task item, which lists what to record: the owner's time per scenario beside S6's advisory limit, the
+  errors, and what was awkward (R5). S6's thresholds are advisory (Stage 1).
+- A fresh git repo with no `.collide/`, on a machine profile with no Collide config, opens to a board with no setup
+  step. Share with team writes `.collide/`, and a second clone opens with it after the trust prompt.
+- A folder that is not a git repo offers `git init`. A missing or logged-out `claude` is named, with the fix.
+- The MVP view in the app lists the same tasks as `collide tasks --view edge-mvp`.
+- A `plan set` in a worktree shows as a divergence chip within the watch debounce plus the 10 s recheck.
+- A key set in both settings files shows the repo's value, labelled as coming from the repo.
+- The UI's tests run in a browser against a fake owner, with no Tauri.
+- A proposal shared on a branch and checked out as a worktree shows its items with the branch-only chip. The
+  planning view's counts match the CLI's.
+- A recorded GitHub issue whose body holds raw HTML, a `javascript:` link, a `file:` link and an image that fetches a
+  remote URL is shown in the drawer as text: nothing runs, nothing is fetched, and the CSP blocks the image. An
+  external link asks before it opens (R5).
+
+**Tests**: Reducers over provider notifications; view save round-trip; the no-setup open and first-run checks; the
+settings view; the hostile-issue fixture in a browser, against the CSP; one Playwright smoke run of scenarios 1 and 2.
+Planning: planning-view counts against the CLI; the branch-only chip.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-006-wq`, items lettered `6a`
+(part L).
+
+### Stage 6b: The in-app agent
+
+**Goal**: The ask box, the endpoint and the Agents page work with Claude Code and one ACP agent, with every guard of
+0.2, 0.3, 0.7 and 0.9 tested. It changes nothing in a repo and starts no run.
+
 - **The in-app agent on the Field** (owner, 2026-11-14; 0.2, 0.3, 0.7, 0.9, 0.11; S6's in-app agent section). It
   changes nothing in a repo and starts no run, so it belongs to a read-only board:
   - **The endpoint** in the shell, with its guards, the endpoint token in the keychain, ask tokens and the
@@ -3291,36 +3842,40 @@ removal; draft and PR items; category mapping; mixed-source view test.
   - **The token cost of the strict line is measured here.** The two example asks run under `config: none` and under
     `config: user`, and the input tokens of each go in the record. S6 measured 28K to 107K under a line that was not
     strict (0.11).
+  - **Measured here, for the ask line (0.3; R5):**
+    - whether `--add-dir` makes a second folder readable under `-p`;
+    - whether `--restricted` confines reads under `-p`, and the adapter adopts it if it does. `--bare` is not adopted;
+    - whether a read outside the folders is refused without a prompt under `--permission-prompts none`;
+    - `lsof` by the child's pid, for an ACP agent's listener, and whether a permission configuration that Collide
+      supplies to opencode changes its default of unrestricted.
+    Until each is measured, the page says the agent "starts in this folder".
+  - **The launch tests that moved here from 4a:** the secrets test. A `secrets` entry resolves from a fake keychain at
+    launch, and the value is searched for, as a seeded string, in every file, argv and log, and is found in none.
+  - **A closed window** (0.2): the shell fails `tools/call` with the "open Collide" message, including when the client
+    started while the window was already closed.
 
 **Success Criteria**:
-- S6 scenario 2, and scenario 1 up to the board, pass as UI tests ported from S6's pilots against the real app, each
-  completing and detecting its end state. The owner's walkthrough of both is recorded as owner judgement in the
-  stage's task item. S6's thresholds are advisory (Stage 1).
-- A fresh git repo with no `.collide/`, on a machine profile with no Collide config, opens to a board with no setup
-  step. Share with team writes `.collide/`, and a second clone opens with it after the trust prompt.
-- A folder that is not a git repo offers `git init`. A missing or logged-out `claude` is named, with the fix.
-- The MVP view in the app lists the same tasks as `collide tasks --view edge-mvp`.
-- A `plan set` in a worktree shows as a divergence chip within the watch debounce plus the 10 s recheck.
-- A key set in both settings files shows the repo's value, labelled as coming from the repo.
-- The UI's tests run in a browser against a fake owner, with no Tauri.
-- A proposal shared on a branch and checked out as a worktree shows its items with the branch-only chip. The
-  planning view's counts match the CLI's.
-- **The in-app agent** (owner, 2026-11-14). The first five need no model and no browser:
+- **The in-app agent** (owner, 2026-11-14). The first six need no model and no browser:
   - S6's 47 agent tests are ported and pass against the real reducer and tool code: each tool's valid call, each
     refusal (an unknown id applies nothing, an id in two groups, a group with no reason, 13 groups, a bad sort key, an
     unknown surface or subject, a call for a surface not built yet), Undo restoring exactly the replaced state, a lens
     that does not change when a task does, a lens saved only as a snapshot, a view saved as a View through the chips'
-    CEL, and the 21st screen-changing call of one ask refused;
+    CEL, and the 21st call of one ask refused. The cap is counted in the shell (0.2);
   - the endpoint, tested with a fake window: a wrong token, a foreign `Host`, a foreign `Origin`, a content type that
-    is not JSON and a body over 1 MB are each refused and nothing reaches the window; a closed window and a window
-    that stays silent for 10 s each give the plain text of 0.2; after **Rotate** the old token is refused at once; an
-    ask token stops working when its ask ends; the endpoint token appears in no log, no argv and no `ask` record;
-  - the launch specs, with no process: the Claude `ask` argv equals the line in 0.3 exactly, holds no token and no
-    request text, and has no `--disable-slash-commands`; `config: user` changes only `--setting-sources`;
-    `--max-budget-usd` appears only when the entry sets a budget; `mcp.json` is mode 0600 and gone after the ask. The
-    fake ACP child shows a read inside the readable folders allowed, a read outside them, a read with no path, an
-    edit and a command each refused, `Cancel` when no `allow_once` exists, an agent with no HTTP MCP support refused
-    with the plain text, a timeout that stops the child and says so, and Cancel that ends the ask;
+    is not JSON and a body over 1 MB are each refused and nothing reaches the window; a closed window, a window closed
+    when the client starts, and a window that stays silent for 10 s each give the plain text of 0.2; `initialize`,
+    `ping` and `tools/list` are answered from the manifest with no window, a notification gets 202, and a GET or
+    DELETE gets 405; an ask is cancelled when the window closes or reloads; after **Rotate** the old token is refused
+    at once; an ask token stops working when its ask ends; the endpoint token appears in no log, no argv and no `ask`
+    record;
+  - the launch specs, with no process: the Claude `ask` argv equals the adapter's pinned line in 0.3 exactly, holds no
+    token and no request text, passes `--add-dir` once per extra folder and `--permission-prompts none`, and has no
+    `--disable-slash-commands`; `config: user` changes only `--setting-sources`; `--max-budget-usd` appears only when
+    the entry sets a budget; `mcp.json` is mode 0600 and gone after the ask. The fake ACP child shows a read inside
+    the readable folders allowed, a read outside them, a read with no path, an edit and a command each refused, a
+    symlink inside a readable folder that points out of it refused after `realpath`, `Cancel` when no `allow_once`
+    exists, an agent with no HTTP MCP support refused with the plain text, a timeout that stops the child and says so,
+    and Cancel that ends the ask;
   - the flag: over fake streams, a `show_groups` ask with no read shows "No files were read in this ask"; with a
     Read, a Grep or a Glob (Claude) or a `read` or `search` tool call (the fake ACP child), it does not; for an
     external client it says the reads are not visible;
@@ -3345,15 +3900,50 @@ removal; draft and PR items; category mapping; mixed-source view test.
     read each field's source, put a key in the keychain and see that it is in no file, set a budget on the Claude
     entry and see the words for the ACP one, then rotate the token and connect an external client with a fresh
     snippet; close the window during an ask and read the error.
+  - **`query` at scale** (R5): over a fixture of about 1,500 tasks, `query` returns no body by default, honours
+    `fields`, pages by cursor with each page under 20K tokens, and returns a body by id, truncated. No page nears
+    Claude's 25K output cap.
+  - **The probe and the listener** (R5): over a fake agent that writes a file and runs `true`, Test this agent is red,
+    the agent is refused as an ask agent until acknowledged, and `query` withholds untrusted bodies for it. An ACP
+    profile that is given `--mdns`, a non-loopback `--hostname` or `--cors` is refused.
+  - **Measurements recorded** in the stage's task item: `--add-dir`, `--restricted`, the outside read, opencode's
+    listener and its permission configuration. If `--restricted` confines reads, the pinned line adopts it and its
+    criterion above changes with it.
+  - **The secrets launch test:** a seeded secret reaches the agent's environment and appears in no file, argv or log.
+  - The owner's walkthrough also lists what to record: time, errors and what was awkward (R5).
 
-**Tests**: Reducers over provider notifications; view save round-trip; the no-setup open and first-run checks; the
-settings view; one
-Playwright smoke run of scenarios 1 and 2.
-Planning: planning-view counts against the CLI; the branch-only chip.
-In-app agent: the ported reducer and tool tests; the endpoint against a fake window, in Rust, with the guards and
-both tokens; the launch specs and the ACP profile over the fake ACP child; the flag over fake streams; the Agents page
-and its test action over a fake agent; the real-agent contract test (opt-in).
-**Status**: Not Started. Items: epic `ep-006-wq` in `.collide/planning/epics/` (part L).
+**Tests**: In-app agent: the ported reducer and tool tests; the endpoint against a fake window, in Rust, with the
+guards and both tokens; the manifest answers, the 202 and 405 cases and the cap; the launch specs and the ACP profile
+over the fake ACP child, including the realpath case; the flag over fake streams; the Agents page and its test action
+over a fake agent, with the probe; the secrets launch test; the real-agent contract test (opt-in), with a file
+planted outside every readable folder.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-006-wq`, items lettered `6b`
+(part L).
+
+### Stage 6c: GitHub Projects v2
+
+**Goal**: Projects v2 items and fields join the GitHub source, after the board exists to show them (owner,
+2026-11-14; R5 challenge 5). Stage 5 built Issues over REST, and Stage 2 froze the Projects keys in the contract.
+
+- Projects v2 items and fields over GraphQL. `board.yaml` names the projects.
+- Draft items are keyed `github:<owner>/projects/<n>/draft/<id>` and are untrusted (0.9).
+- `initialize` checks that the token has the `project` scope, and the error names `gh auth refresh -s project`.
+- `setStatus` through the Projects Status field, with categories mapped through `board.yaml`'s status mapping. A stale
+  version on a Projects item is detected before the write and returns `conflict` (0.10).
+- Measure what one Projects v2 poll costs on a real project, and pick the interval from it.
+- Any protocol change this forces goes back into 0.10 and the plan adapter.
+
+**Success Criteria**:
+- A Projects Status change made in Collide shows on github.com.
+- `setStatus` with category `done` on a Projects item sets the mapped Projects status.
+- A write with a stale version on a Projects item is detected before the write and returns `conflict`.
+- A token without the `project` scope fails with the message that names the command.
+- A draft item shows as untrusted. The cost of one poll and the chosen interval are in the stage's task item.
+
+**Tests**: Recorded GraphQL fixtures (no network in CI); the scope check; version conflict on an item; draft items;
+category mapping.
+**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-006-wq`, items lettered `6c`
+(it extends the adapter of epic `ep-005-hs`; part L).
 
 ## Milestone B: Workflows and packs (Orchard drives it)
 
@@ -3369,8 +3959,9 @@ Queue.
   `protectedPaths`. `metrics` and `experiment` are validated from Stage 2 and used from Stage 13.
 - Namespaced contribute. Named workspace implementations, resolved per workflow, with the built-in one as the
   fallback (0.4). Chain order and failure rules.
-- Hook executor per 0.5, with the pack's settings as `config` on stdin and `COLLIDE_PACK_DATA`. The line lock, with
-  the root-busy wait. Only the default line exists yet.
+- Hook executor per 0.5, with the pack's settings as `config` on stdin and `COLLIDE_PACK_DATA`. Each hook runs under
+  a shim (0.2; R5), so the stop and survivor rules of 0.5 cover it. The line lock, with the root-busy wait. Only the
+  default line exists yet.
 - State per 0.5:
   - run state per invocation (`pack/hook` plus phase, round and fan-out instance);
   - workspace state merged key by key, which `doctor` checks and rewrites;
@@ -3382,7 +3973,9 @@ Queue.
   - a required `t` on every line;
   - generated `<pid>-<counter>` span ids and `COLLIDE_REPORT_PARENT`;
   - `unclosed` spans; the size and rate caps;
-  - `collide report` and the SDK's `ctx.report`.
+  - `collide report` and the SDK's `ctx.report`;
+  - only a hook's own report lines, written through a descriptor its children do not inherit, may carry the primary
+    metric (0.5, 0.14; R5).
 
   Reported spans are stored now. The UI shows them from Stage 9.
 - Workspace kinds and lifecycle states:
@@ -3414,6 +4007,9 @@ Queue.
   rejected and counted.
 - `run.after_end` handlers run after a run that failed while provisioning.
 - A fixture workflow that names no workspace implementation runs in a built-in `git worktree add` workspace.
+- A hook running when the daemon is killed with SIGKILL is stopped, and no hook process survives (`ps`; R5).
+- A `metric` line written by a hook's child through an inherited descriptor is not taken as the primary metric. The
+  hook's own line is (R5).
 
 **Tests**:
 - Executor:
@@ -3436,7 +4032,8 @@ Queue.
     `requires.modelName`.
 - YAML hazards.
 - Injection: a positive-control hook that shells out on task text must trip the test; the real executor must not.
-**Status**: Not Started
+- Hook under a shim: the daemon killed mid-hook; the inherited-descriptor report line.
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 8: Workflow engine (driven by fakes)
 
@@ -3450,6 +4047,14 @@ and sandboxes, with no real agent.
   - `round` counted on re-entry;
   - terminal states `ended(<outcome>)`, `failed` and `stopped`.
 - **Adopting** a run at a named phase and round, in an existing workspace (0.7).
+- **Intent and outcome** (0.5; R5): the engine writes an intent event before each side-effect step (a provider `apply`,
+  a push, an `integrate`) and an outcome event after it. After a restart it checks the world and never retries a step
+  blindly. A step whose outcome cannot be told becomes a Queue item, "outcome unknown". A merge that finds its change
+  already at the target is a success, not a conflict.
+- **`wait` phases** poll with `interval:` and end at `timeout:`. A hook that answers `pending`, with `retryAfter`,
+  replaces its run-state entry and is polled again (0.5, 0.7; R5).
+- **`integrating`** (0.4; R5): an `integrate` that answers `pending {url, head}` leaves the run `integrating`, with the
+  source's ops and after-steps held back. They run when the same `integrate` later answers `merged {commit}`.
 - The built-in `collide` pack's workflows (0.4) run in the engine suite next to the fixture packs.
 - `accepts`: the run preview checks each task and names the field or operation it lacks. A workflow that uses
   `task.*` is refused for several tasks.
@@ -3505,6 +4110,14 @@ gates:
 - `collide/quick` and `collide/review` (max rounds 2) run to their ends, and `collide/review` stops to `ask_human`
   when a round leaves as many open findings as the round before;
 - an agent phase's environment has no `COLLIDE_REPORT`;
+- a `wait` hook that answers `pending` three times leaves one run-state entry, is polled at its interval and ends at
+  its `timeout:` (R5);
+- a fake `integrate` that answers `pending {url, head}` leaves the run `integrating` with the source's ops held back,
+  and the ops run once it answers `merged {commit}` (R5);
+- a fake `integrate` killed with SIGKILL after its intent event and before its outcome (R5): on restart, a fake target
+  that shows the merge is recorded as a success with no second merge; one that shows nothing runs the step again;
+  one that cannot be checked puts "outcome unknown" in the Queue. The same holds for a killed `apply` and a killed
+  push;
 - a gate that returns `unverified` holds the run, no fix phase starts, and a retry after the fake environment is
   restored passes;
 - a fake `script` phase with `agentWork: true` reports `usage`, shown apart from the measured totals, and `limited`,
@@ -3528,15 +4141,23 @@ gates:
 
 **Tests**: Engine table tests; fan-out join; artifact-missing failure; `record` after outputs; per-task decisions
 with `tasks[]` of length 1 and 2; round counting; terminal states and `outcome`; `wait` timeout; adopting;
-`ask_human` cause recorded; `when:` over run state; an `after_*` refusal fails its phase; the config-path flag.
+`ask_human` cause recorded; `when:` over run state; an `after_*` refusal fails its phase; the config-path flag; the
+`pending` poll; `integrating`; intent and outcome with a kill at each step.
 Planning: engine tables for instances; the budget stop; point order; derived-point expansion; gate binding
 with `when:`; the run-diff points against the fake provider.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 9: Desktop UI: runs
 
-**Goal**: Launch, Tracks and Queue (0.11) over the real core and engine, as validated in S6. A repo with no pack
-gets real use here: prompt, run, review, accept.
+**Goal**: Launch, Tracks and Queue (0.11) over the real core and engine, as validated in S6. Stage 3c built the loop
+from a prompt to an accepted run in a thin, hard-coded form. Here it runs through the engine, and the rest of the run
+surfaces are built. Four sub-stages, each with its own goal, criteria and Status (owner, 2026-11-14; R5 S1). They keep
+the Stage 9 epic, with items grouped by letter.
+
+### Stage 9a: Launch, Queue and accept
+
+**Goal**: A task, or a prompt, launches a run through the engine. Its decisions arrive in the Queue, and a finished run
+is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path.
 
 - **Field:** Launch with a run preview (implementations, accepted tasks, the reason for each refused one; the
   profile, its reason and each setting's layer; dev and `agentWork` badges). Profiles picked in the preview or
@@ -3544,10 +4165,7 @@ gets real use here: prompt, run, review, accept.
   differs from the ref (0.7). The
   drawer's operation forms, create, and Record.
 - **Launch from a prompt:** the empty board's prompt box creates a scratch task and launches the board's default
-  workflow on it (`collide/quick` with no pack).
-- **New session** (0.11): interactive Claude in a fresh worktree through the owner's PTY (S2), as a one-phase run on a
-  new scratch task. The worktree is under the repo's worktree root, and Claude's trust prompt is left to the user
-  (0.4, 0.9).
+  workflow on it (`collide/quick` with no pack), through the engine. Stage 3c's hard-coded sequence is removed here.
 - **Cold resume:** a phase with `on_cold: fresh` that resumes after its cache expired starts a new session from the
   handoff note (0.3).
 - **Review and accept a single run** (moved here from the integration stage; owner, 2026-11-13): diff, then accept,
@@ -3557,17 +4175,7 @@ gets real use here: prompt, run, review, accept.
   `run.after_integrate`, the source's operations, then `record`. An integrate that carries an edit to the agent
   tool's config waits for an acknowledgement (0.3). So does the next run that would load a working-copy pack the
   integrate changed (0.7).
-- **Tracks:** live runs as phase tracks with meters, including provisioning. A phase opens to its activity digest,
-  report and diff, with the transcript and terminal behind a toggle. Provisioning progress from `progress` report
-  lines. Dependency and build folders are collapsed with counts; lock files are always shown (0.11).
-- **Agent output and tool-call time breakdown** (0.11; part K): the output pane on selecting a track, a phase or a
-  task with a run, live and paged; the breakdown table and timeline per track or phase, with the tool-type,
-  minimum-duration and time-window filters and their CEL; a bar opens its call in the output pane. The window
-  matches overlapping calls, and totals count only the time inside it (part L).
-- **Take over:** the phase's session opens in a terminal through the owner's PTY (S2), with xterm's DOM renderer.
-  Closing the terminal detaches and reopening replays the shim's buffer. `claude`'s exit or **End take-over** ends
-  the phase and runs its gates. Live cost from telemetry, with a Queue warning at the phase budget, and the session
-  id followed across `/clear` (0.11).
+- **Reattach after the app restarts.** The app finds the daemon's runs and shows them as they were.
 - **Queue:**
   - permission requests, `ask_human` with its cause, `human` phases, each with its `show:` list; `unverified`
     results; failures;
@@ -3580,6 +4188,94 @@ gets real use here: prompt, run, review, accept.
     model call.
 - **Dogfood** (part L): from this stage, Collide's own tasks run through `collide/quick`, and its spikes through
   `collide/plan`'s spike workflow.
+
+**Success Criteria**:
+- These pass as UI tests ported from S6's pilots, in the real app with the fake adapter, and the owner's walkthrough of
+  each is recorded as owner judgement in the stage's task item. The item lists what to record: the owner's time per
+  scenario beside S6's advisory limit, the errors, and what was awkward (R5):
+  - S6 scenario 4;
+  - single-task versions of scenarios 3 and 5: launch one task, then review its finished run.
+- The app quits and relaunches mid-run without loss.
+- **No pack, real Claude:** S6 scenario 1 in full. A fresh repo with no pack and no tasks → a prompt → a finished
+  `collide/quick` run, reviewed and accepted. The base ref has the change, and the scratch task is `done`.
+- Stage 3c's hard-coded launch and accept paths are gone, and the 3c flows pass against the engine.
+- An accept that would conflict goes to the Queue, and no checkout changes (`git status`).
+- **Run-diff points on the real accept path** (owner, 2026-11-13; S11): a plan-fixture task file set to `in_review` in
+  a run's worktree fires `task.before_status: review` at accept. A refusing gate stops `integrate`, the base ref is
+  unchanged (`git log`), and the Queue says why. A `task.before_status: done` gate refuses before anything merges.
+- One of Collide's own build tasks runs from the Field through `collide/quick` to accept, and one of its spikes runs
+  through `collide/plan`'s spike workflow (part L).
+- A Queue item's context view opens with `i` and makes no model request.
+- A usage limit from the fake adapter appears in the Queue with its reset time, and the run resumes after it
+  without a click. The Queue shows the resume's cache-write cost.
+- A fake-adapter phase with `on_cold: fresh`, resumed after the cache TTL, starts a new session whose first prompt is
+  the handoff note.
+- Group launch and group accept are graded in Stage 11.
+
+**Tests**: Reducer tests for the Queue against fake-adapter streams; keyboard triage tests; the Queue context view for
+each kind, built with the fake adapter counting zero model requests, the agent's words escaped and placed after
+Collide's facts, a path outside the worktree flagged, and the history counts; the handoff-note builder; single-run
+accept order, including the run-diff and `done` gates before `integrate`; the merge-tree conflict check; the
+prompt-to-accept path with real Claude (opt-in in CI, like the contract test); one Playwright smoke run of the
+scenarios above.
+**Status**: Not Started. Items from revision 13, not yet split into items (Stage 3c's code is the starting point).
+
+### Stage 9b: Tracks, output, take-over and the menu bar
+
+**Goal**: Live runs are watched and steered: phase tracks, the agent's output, the tool-call time breakdown, take-over,
+New session and the menu bar.
+
+- **Tracks:** live runs as phase tracks with meters, including provisioning. A phase opens to its activity digest,
+  report and diff, with the transcript and terminal behind a toggle. Provisioning progress from `progress` report
+  lines. Dependency and build folders are collapsed with counts; lock files are always shown (0.11).
+- **Agent output and tool-call time breakdown** (0.11; part K): the output pane on selecting a track, a phase or a
+  task with a run, live and paged; the breakdown table and timeline per track or phase, with the tool-type,
+  minimum-duration and time-window filters and their CEL; a bar opens its call in the output pane. The window
+  matches overlapping calls, and totals count only the time inside it (part L).
+- **Take over:** the phase's session opens in a terminal through the owner's PTY (S2), with xterm's DOM renderer.
+  Closing the terminal detaches and reopening replays the shim's buffer. `claude`'s exit or **End take-over** ends
+  the phase and runs its gates. Live cost from telemetry, with a Queue warning at the phase budget, and the session
+  id followed across `/clear` (0.11). The telemetry arrives at the daemon's OTLP receiver (0.2; R5): `127.0.0.1` only,
+  a `Host` check, a per-run token and a body cap. The user's own OTEL endpoint is detected before the `OTEL_*`
+  variables are stripped, and the preview names it (0.13).
+- **New session** (0.11): interactive Claude in a fresh worktree through the owner's PTY (S2), as a one-phase run on a
+  new scratch task. The worktree is under the repo's worktree root, and Claude's trust prompt is left to the user
+  (0.4, 0.9). New session, take-over and Plan… launch with the snapshot's `--mcp-config` and `--strict-mcp-config`, so
+  they hold no endpoint token unless the person adds one (0.7; R5).
+- **Menu bar** (0.11): the icon, badge, countdown, notifications and actions. Closing the window destroys the webview
+  and keeps the app running. The app restarts a daemon that stopped answering, with 0.2's back-off.
+
+**Success Criteria**:
+- **New session:** a terminal opens in a fresh worktree, a prompt typed there is answered, closing the view
+  detaches, and exiting `claude` puts the diff into review. The first session in a repo shows Claude's trust prompt
+  and Collide sends it no keys; the second shows none.
+- **Take over, with real Claude:** a running headless phase is taken over, a prompt typed in the terminal is
+  answered, closing the terminal detaches, and **End take-over** ends the phase and runs its gates. Quitting the app
+  mid-take-over and relaunching returns to the same session with its output replayed, as S2 measured. After a
+  `/clear`, a headless resume uses the new session id.
+- A take-over past its phase budget raises a Queue warning, from telemetry, and keeps running.
+- **Telemetry and interactive launches** (R5): the OTLP receiver refuses a request with a foreign `Host`, a missing or
+  wrong run token, or a body over the cap, and it is bound to `127.0.0.1` (`lsof`). A New session's `claude` argv holds
+  `--strict-mcp-config` and no endpoint token. A user's own `OTEL_EXPORTER_OTLP_ENDPOINT` is seen before the strip and
+  named in the preview.
+- **Menu bar:** with the window closed, the app and its WebKit processes stay under 80 MiB, measured as S2's addendum
+  does. A new Queue item raises a notification that holds no task text while the setting is off (checked with a
+  seeded title). With the window closed, a killed daemon is restarted by the app, and the run's next phase starts.
+- On live and finished runs, selecting a track opens the output pane, live and paged. The breakdown's tool-type,
+  minimum-duration and window filters select the known calls of a fixture, and a bar opens its call in the pane. The
+  owner's walkthrough records time, errors and what was awkward (R5).
+
+**Tests**: Reducer tests for Tracks against fake-adapter streams; the output pane on hostile output (HTML, ANSI,
+links, a 10 MB result); the breakdown's filters (a 2 s minimum and a clock window, counted against a fixture) and
+wall-clock against summed time with parallel calls; a call that starts before the window counted, with only its
+in-window time in the total; the notification text builder; the daemon restart back-off; take-over and New session with
+real Claude (opt-in in CI, like the contract test).
+**Status**: Not Started. Items from revision 13, not yet split into items.
+
+### Stage 9c: Metrics, import, compare and export
+
+**Goal**: The always-recorded data is shown, compared and exported, with no pack needed.
+
 - **Metrics from the always-recorded data, with no pack needed** (owner, 2026-11-13):
   - cost labelled API-equivalent; tokens and the cache hit rate; active time apart from waiting; time per tool and
     per command;
@@ -3592,6 +4288,24 @@ gets real use here: prompt, run, review, accept.
   - comparing two finished runs;
   - annotations;
   - JSONL/CSV export.
+
+**Success Criteria**:
+- S6 scenario 6 passes as a UI test ported from S6's pilots, in the real app with the fake adapter, and the owner's
+  walkthrough is recorded as owner judgement in the stage's task item.
+- The critical path matches hand-built fixtures with known answers, including a fan-out and a human wait.
+- **Metrics with no pack, real Claude:** the finished run of scenario 1 shows tokens, cache hit rate, CPU time, peak
+  memory, disk and its context findings. An imported history shows the same for past sessions, and the store holds
+  no prompt, reply or tool text (checked by searching it for seeded strings).
+
+**Tests**: Critical-path fixtures; export round-trip; detector fixtures; the transcript import with repeated usage
+rows.
+**Status**: Not Started. Items from revision 13, not yet split into items.
+
+### Stage 9d: Planning in the app, and the agent on Tracks
+
+**Goal**: The planning workflows and the in-app agent's Tracks tools work in the app, and the command palette ties the
+surfaces together.
+
 - **The in-app agent on Tracks** (owner, 2026-11-14; 0.11): the Stage 6 tools learn the surfaces this stage builds.
   - `query` over runs returns each run's id, task, status, workflow, start, total and wait seconds, spend, and the
     seconds in each phase. Seconds in a phase are the phase's wall time, the width of its segment, taken from the
@@ -3602,9 +4316,7 @@ gets real use here: prompt, run, review, accept.
     sort value on each row. `highlight` marks runs, and `open` opens a run, a Queue item or an experiment.
   - A Tracks view saves as a personal view in the board's settings, with its filter and sort, and not its window
     (0.11).
-- Command palette. Reattach after the app restarts. Owner logs viewable.
-- **Menu bar** (0.11): the icon, badge, countdown, notifications and actions. Closing the window destroys the webview
-  and keeps the app running. The app restarts a daemon that stopped answering, with 0.2's back-off.
+- Command palette. Owner logs viewable.
 - **Planning** (owner, 2026-11-13):
   - `collide/plan/spike` in a private proposal: pre-register, with a `human` phase that approves it; run; verify;
     decide, with a `human` phase whose `show:` is the record; write back through the source's ops;
@@ -3614,40 +4326,6 @@ gets real use here: prompt, run, review, accept.
     suggestions shown with their evidence.
 
 **Success Criteria**:
-- These pass as UI tests ported from S6's pilots, in the real app with the fake adapter, and the owner's
-  walkthrough of each is recorded as owner judgement in the stage's task item (S6's thresholds are advisory):
-  - S6 scenarios 4 and 6;
-  - single-task versions of scenarios 3 and 5: launch one task, then review its finished run.
-- The critical path matches hand-built fixtures with known answers, including a fan-out and a human wait.
-- The app quits and relaunches mid-run without loss.
-- **No pack, real Claude:** S6 scenario 1 in full. A fresh repo with no pack and no tasks → a prompt → a finished
-  `collide/quick` run, reviewed and accepted. The base ref has the change, and the scratch task is `done`.
-- **New session:** a terminal opens in a fresh worktree, a prompt typed there is answered, closing the view
-  detaches, and exiting `claude` puts the diff into review. The first session in a repo shows Claude's trust prompt
-  and Collide sends it no keys; the second shows none.
-- An accept that would conflict goes to the Queue, and no checkout changes (`git status`).
-- **Run-diff points on the real accept path** (owner, 2026-11-13; S11): a plan-fixture task file set to `in_review` in
-  a run's worktree fires `task.before_status: review` at accept. A refusing gate stops `integrate`, the base ref is
-  unchanged (`git log`), and the Queue says why. A `task.before_status: done` gate refuses before anything merges.
-- **Take over, with real Claude:** a running headless phase is taken over, a prompt typed in the terminal is
-  answered, closing the terminal detaches, and **End take-over** ends the phase and runs its gates. Quitting the app
-  mid-take-over and relaunching returns to the same session with its output replayed, as S2 measured. After a
-  `/clear`, a headless resume uses the new session id.
-- A take-over past its phase budget raises a Queue warning, from telemetry, and keeps running.
-- One of Collide's own build tasks runs from the Field through `collide/quick` to accept, and one of its spikes runs
-  through `collide/plan`'s spike workflow (part L).
-- A Queue item's context view opens with `i` and makes no model request.
-- **Menu bar:** with the window closed, the app and its WebKit processes stay under 80 MiB, measured as S2's addendum
-  does. A new Queue item raises a notification that holds no task text while the setting is off (checked with a
-  seeded title). With the window closed, a killed daemon is restarted by the app, and the run's next phase starts.
-- A usage limit from the fake adapter appears in the Queue with its reset time, and the run resumes after it
-  without a click. The Queue shows the resume's cache-write cost.
-- **Metrics with no pack, real Claude:** the finished run of scenario 1 shows tokens, cache hit rate, CPU time, peak
-  memory, disk and its context findings. An imported history shows the same for past sessions, and the store holds
-  no prompt, reply or tool text (checked by searching it for seeded strings).
-- A fake-adapter phase with `on_cold: fresh`, resumed after the cache TTL, starts a new session whose first prompt is
-  the handoff note.
-- Group launch and group accept are graded in Stage 11.
 - **The in-app agent on Tracks** (owner, 2026-11-14):
   - the Stage 6 reducer and tool tests gain Tracks cases, with no model and no browser: over a fixture of nine
     finished runs with distinct build seconds, `set_view` sorting by `phase:build` descending gives the known order,
@@ -3678,21 +4356,11 @@ gets real use here: prompt, run, review, accept.
   - a gate that times out on a drawer write leaves the write unapplied, with the hook's name in the message;
   - an `after_status` hook that fails after a drawer write leaves the write in place and adds a Queue item.
 
-**Tests**: Reducer tests for Tracks and Queue against fake-adapter streams; the in-app agent's Tracks tools over the
-nine-run fixture and the real-agent contract test (opt-in); keyboard triage tests; critical-path
-fixtures; export round-trip; detector fixtures; the output pane on hostile output (HTML, ANSI, links, a 10 MB
-result); the breakdown's filters (a ≥2 s filter and a clock window, counted against a fixture) and wall-clock against
-summed time with parallel calls; a call that starts before the window counted, with only its in-window time in the
-total; the Queue context view for each kind, built with the fake adapter counting zero model requests, the agent's
-words escaped and placed after Collide's facts, a path outside the worktree flagged, and the history counts; the transcript import with repeated usage rows; the handoff-note
-builder; single-run accept order, including the run-diff and `done` gates before `integrate`; the merge-tree conflict check; the notification text builder; the daemon restart
-back-off; take-over, New session and
-the prompt-to-accept path with real Claude (opt-in in CI, like the contract test); one Playwright smoke run of the
-scenarios above.
+**Tests**: The in-app agent's Tracks tools over the nine-run fixture and the real-agent contract test (opt-in).
 Planning: the spike workflow end to end with the fake adapter; Plan… with the fake adapter scripting the CLI
 calls; the person-only ops refused from a run; the Queue lane reducer; `protectedPaths` on checklist state and
 on a planning file's `status` and `by:` lines; point timeouts and failures outside a run.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 10: Orchard loop end-to-end
 
@@ -3731,7 +4399,7 @@ on a planning file's `status` and `by:` lines; point timeouts and failures outsi
 
 **Tests**: The pack's own `pack test` with fakes passes in CI. The real run's timings and `ask_human` causes are
 recorded in a spike folder under `.collide/planning/spikes/`.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Milestone C: Integration and ecosystem
 
@@ -3742,7 +4410,9 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 - **First, outline Milestone C** (Stages 11 and 12) against the real loop of Stage 10 (0.15).
 - Group runs from a selection or a view:
   - one run per `ready` task, under a concurrency cap;
-  - a dependent starts once its dependencies are done at the base ref (integrated), not merely started;
+  - a dependent starts once its dependencies are done at the base ref (integrated), not merely started. A run is
+    integrated when its `integrate` has answered `merged {commit}` and that commit is an ancestor of the line's ref. A
+    `pending {url, head}` answer, a PR that is open, does not count (0.4; R5);
   - a cycle is an error.
 - Review and accept per run as in Stage 9, for every run of a group.
 - **A group from a lens** (owner, 2026-11-14; 0.11). Grouping tasks to run together is an option, and the in-app agent
@@ -3753,7 +4423,8 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 - The two integrate implementations:
   - `orchard/merge-local`: a local merge into the base ref;
   - `github/pull-request`, from the built-in GitHub pack: push and open a PR linked to the issue, with no closing
-    keyword. The issue closes through the accept op (second-pack stage, S11).
+    keyword. It answers `pending {url, head}` and the run is `integrating` until the PR merges, then `merged {commit}`.
+    The issue closes through the accept op, after the merge (second-pack stage, S11; R5).
 - Write conflicts and merge conflicts go to the Queue. A task from an untrusted author needs confirmation.
 - **Planning** (owner, 2026-11-13), after S10, in `collide/plan`: panel, specialist and adversarial spike
   workflows; the merge script and the merger phase; disagreements as question items, with a `wait` phase; the
@@ -3765,7 +4436,9 @@ recorded in a spike folder under `.collide/planning/spikes/`.
   integrated.
 - Launching the MVP view starts only its `ready` tasks.
 - Accepting an Orchard run merges locally and records.
-- Accepting a GitHub-sourced run opens a PR linked to its issue.
+- Accepting a GitHub-sourced run opens a PR linked to its issue. The run is `integrating` while the PR is open, and a
+  task that depends on it does not start until the PR is merged and its merge commit is an ancestor of the line's ref
+  (R5).
 - One board runs an Orchard task under `orchard/loop` and a GitHub issue under a PR workflow at the same time, and
   each run is accepted through its own integrate implementation.
 - A workspace whose base has moved on shows how far behind it is. An accept that would conflict goes to the Queue,
@@ -3792,14 +4465,16 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 group to preview path; the merge-tree conflict check; both integrate implementations against fixtures;
 untrusted-author gate.
 Planning: the merge cases, one per row of the merge table; verify verdicts; `wait` on linked questions.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 12: Second pack, composition, observers, grouped chains
 
 **Goal**: Prove the extension points with packs that were not the reason they exist.
 
 - Plain GitHub pack:
-  - an issue → PR → CI workflow: a `script` phase pushes and opens the PR, and a `wait` phase polls its checks;
+  - an issue → PR → CI workflow: a `script` phase pushes and opens the PR, and a `wait` phase polls its checks (a
+    check still running is `pending` with `retryAfter`, 0.5; R5). The `github/pull-request` integrate then leaves the
+    run `integrating` until the PR merges (0.4; R5);
   - PRs Collide opens carry no closing keywords (`Closes #n` and the like). The issue closes through the accept op,
     so its `task.before_status: done` gate runs before the merge and GitHub's own close does not race it. A
     Projects automation that moves the item after Collide's own close (`automated`) shows no outside chip (S11);
@@ -3879,7 +4554,7 @@ Planning: the Share preview's contents; the move op for markdown, plan and beads
 claim collision; move-op points; the path Move; the beads fixture's contract tests.
 Global sources: beads attribution from the journal's actor; GitHub attribution from `tool_use` inputs and timeline
 events (matched, ambiguous and unmatched cases); the phase-end re-read; the phase-end gate.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Milestone D: Measurement and experiments
 
@@ -3892,9 +4567,9 @@ the current workflow.
 local model, GPU went, at the granularity S8 established.
 
 - **First, outline Milestone D** (Stages 13–15) against the measurements of Stages 9–12 (0.15).
-- **Before this stage starts, the owner runs two steps S8 left unmeasured** (0.13; Deferred): a machine sleep in
-  the middle of a run, to confirm the 2 s threshold, and a run measured from its start, to price a container's
-  startup.
+- **Before this stage starts, the owner runs the one step S8 left unmeasured** (0.13; Deferred): a run measured from
+  its start, to price a container's startup. The machine-sleep test moved to Stage 3b (R5), where it checks the clock
+  table of 0.2 and the 2 s threshold.
 - The sampler at 1 s (S8: 0.11% of one core). Disk I/O per workspace, and disk space per cache. Exit totals and disk space per
   workspace are always recorded from Stage 3.
 - Network through one streamed `nettop` with its stdin held open (0.13). Device GPU utilization and memory
@@ -3925,7 +4600,7 @@ local model, GPU went, at the granularity S8 established.
 **Tests**: Sampler attribution against a fake process tree; the `metrics.processes` contract; importer fixtures,
 including iter sub-calls; redaction fixtures; sleep accounting; retention; a lane container listed through the
 Docker API; the sampling row's wording: exact for CPU and approximate for short-lived processes.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 14: Lines
 
@@ -3952,7 +4627,7 @@ Docker API; the sampling row's wording: exact for CPU and approximate for short-
 
 **Tests**: Line snapshot and trust isolation; lock scope; per-line provider writes; collision refusal on launch;
 observer scoping; the managed root's refusal.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 15: Experiments and bench
 
@@ -4006,7 +4681,8 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   - `AB`, `ABBA` and a 6-pair `crossover` show effect sizes and "no verdict", and say why;
   - an 8-pair `crossover` on a fake with a large fixed difference gives a verdict, labelled "on this task";
   - at 8 pairs the preview allows one secondary metric with a verdict, and says so;
-  - a reported `metric` line cannot be chosen as the primary metric.
+  - a reported `metric` line cannot be chosen as the primary metric, and a line a hook's child wrote through an
+    inherited descriptor does not count as a hook's own report (0.5, 0.14; R5).
 - **Repetitions:** a status written by `on_start` in repetition 1 does not stop repetition 2 from launching,
   because the experiment root was reset.
 - **Pack data:** a hook that writes to `ctx.dataDir` in an arm leaves the board's data directory unchanged.
@@ -4029,16 +4705,16 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - The exact crossover test and Holm over secondaries against fixed fixtures (smallest p 0.029 at 8 pairs, 0.008 at
   10).
 - Abort mid-arm.
-**Status**: Not Started
+**Status**: Not Started. Items from revision 13, not yet split into items.
 
 ---
 
 ## Deferred (with the trigger that brings each back)
 
 - **Other agent tools and model sources for runs** (a real ACP agent, Codex, OpenAI, Ollama): after Stage 10. S7
-  checked the traits against ACP, and Stage 3 builds the ACP engine against a fake child. The first real agent is
+  checked the traits against ACP, and Stage 3d builds the ACP engine against a fake child. The first real agent is
   opencode: a profile in `host` and a probe of what it supports, so a capability that cannot be known is `Unknown`.
-  The ask box already uses opencode from Stage 6, with a read-only profile (0.3), and a run profile is still this
+  The ask box already uses opencode from Stage 6b, with a read-only profile (0.3), and a run profile is still this
   item. Aliases and capabilities exist from Stage 3. With other endpoints, repeated
   endpoint failures pause the runs that use it, like a usage limit, rather than failing each phase in turn (Ferry's
   circuit breaker).
@@ -4112,8 +4788,11 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **Claude Code telemetry on by default for headless phases:** when the traces flag leaves beta. S8 showed it is
   more exact for some things, so Stage 13 offers it to a pack that asks (0.13). Interactive sessions and `agentWork`
   phases use it from Stage 9 (measured S2).
-- **S8's two owner steps** (owner, 2026-11-14): a machine sleep in the middle of a run, and a run measured from its
-  start so that a container's startup cost is priced. Before Stage 13 (Full metrics) starts.
+- **S8's owner step** (owner, 2026-11-14): a run measured from its start so that a container's startup cost is priced.
+  Before Stage 13 (Full metrics) starts. The machine-sleep test moved into Stage 3b (R5).
+- **A Collide-managed copy of Claude** (owner, 2026-11-14; R5 Opus challenge 5): Collide would keep its own pinned
+  copy of `claude` and run it, so an update on the machine could not change what a run does. Trigger: a Claude update
+  breaks a run despite the version-range check and smoke check (0.3, Stage 3b).
 - **A daemon kept alive by launchd** (a `KeepAlive` LaunchAgent): when users want a crashed daemon back with the app
   quit. v0 starts it on demand, and the resident app restarts it (0.2).
 - **Open at login** (an `SMAppService` login item that starts the app hidden in the menu bar): when users ask. The
@@ -4121,7 +4800,7 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **A separate menu bar helper without WebKit:** when the resident app's memory with its window closed matters
   (53 MiB, the S2 record's addendum).
 - **Live observation of Claude sessions started outside Collide:** when the past-session import shows users want it.
-- **More detectors** (files read again, prompt size, cache churn, model fit): when the first five are in use.
+- **More detectors** (files read again, prompt size, cache churn, model fit): when the first seven are in use.
 - **In-session guards** (a whole-file read, a third identical failing command): a pack or plugin can ship them, and
   the token strategy preset can test them. Core adds them when such an experiment shows they pay.
 - **Cohorts** (automatic grouping of ordinary runs by fingerprint, with verdicts): after experiments have real use.
@@ -4146,6 +4825,9 @@ what changed in time, resources and outcome, and nothing outside the experiment 
      metrics, lines, experiments, the skeleton) each became a stage.
    - Each milestone ends usable.
    - Milestone D can be deferred whole without touching A–C.
+   - R5 (revision 13) split Stages 3, 4, 6 and 9 into lettered sub-stages, with no renumbering: 3a–3d, 4a–4c, 6a–6c
+     and 9a–9d. That is 15 stages and 15 sub-stages, each sized as one small change. Two are new work, not splits: the
+     thin loop (3c) and GitHub Projects v2 (6c, moved from Stage 5) (owner, 2026-11-14).
 5. **When the desktop app appears.** Decided (owner, 2026-11-12): a read-only task board in Stage 6, and the run UI
    in Stage 9.
 6. **An experiment spending cap.** Decided (owner, 2026-11-12): none for now. Per-role budgets still apply, and the
@@ -4188,8 +4870,10 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 
 ## Risks
 
-- **Claude Code's stream-json is not a versioned contract.** Mitigation: the real-claude contract test (Stage 3)
-  and a pinned version.
+- **Claude Code's stream-json is not a versioned contract.** Mitigation: the real-claude contract test (Stage 3b), a
+  tested version range with a smoke check and a settings canary (0.3; R5), and the version in the fingerprint. A
+  Claude update can still break a run between checks. A Collide-managed copy of `claude` is Deferred, with that
+  as its trigger.
 - **Same-user agents** (0.1): guardrails only until an OS sandbox exists. This includes experiment isolation, which
   cannot stop an agent's Bash from writing outside it.
 - **Packs from anywhere run as the user.** A `git:` pack is someone else's code, and its hooks run with the user's
@@ -4252,6 +4936,14 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   (0.2). An ACP ask agent's own tools are limited only by Collide's permission answers, and its own configuration is
   its promise (0.3), so a hostile task text could steer such an agent further than a Claude Code ask, which has only
   three read tools.
+  - R5 notes two more doors. The ask child's token is the endpoint's, so a process that reads the ask's `mcp.json`
+    during the ask can call the endpoint until the ask ends (the ask token's lifetime bounds it). Interactive
+    launches (New session, take-over, Plan…) pass the snapshot's `--mcp-config` with `--strict-mcp-config`, so
+    they hold no endpoint token unless the person adds one (0.7). One rotatable endpoint token is kept. Named
+    per-client tokens were considered and not built (owner, 2026-11-14).
+  - The endpoint stays in the app shell. The stdio bridge (`collide mcp`) and a daemon-hosted endpoint were
+    considered and not chosen: the shell is the only process that can answer a screen-changing call, and a bridge or
+    daemon would add a hop to it (0.2).
 - **An ask's token load and wait.** S6's asks loaded 28K to 107K input tokens on a launch that was not strict, and
   a lens takes 15 to 22 s (measured). The strict line, the budget (Claude only) and the timeout bound the cost, and
   Stage 6 measures the strict line.
@@ -4726,7 +5418,7 @@ question 7 asks whether a developer may override a shared key on their own machi
   keeps hook outcomes, never hook output; two detectors (a hook that failed open, a call to a missing tool), with
   denies and blocks as counts (0.3, 0.13, the spikes stage, the headless-core stage, the run UI stage).
 - **Planning** (owner, part I; `docs/research/planning.md`): planning is the built-in `collide/plan` pack; core
-  gains kinds, op effects, links, an assignee, a checklist field, five task points and derived points; a markdown
+  gains kinds, op effects, links, `owners`, a checklist field, five task points and derived points; a markdown
   provider with private and shared roots at a path set per repo; Share as a move op; fan-out instances and a run
   budget; spike S10. The owner took the note's recommendations on its eleven questions: one planning source with a
   mapping and an opt-in badged fallback; the mapping in `collide/plan`'s settings with provider tags as defaults;
@@ -4866,3 +5558,74 @@ landed and, for each rejection or deferral, the reason or trigger.
 - **For the owner to confirm:** a Tracks view saved as a personal view (0.10 has views of tasks only), and a view
   schema that gains `layout.sort`; the cap of 20 screen-changing calls per ask; the default timeout of 180 s, the
   value S6 used; and the choice of `config: none` as the ask default.
+
+**R5 and revision 13, 2026-11-14 (owner).** Two adversarial reviewers on revision 12: Fable (25 findings, 5
+challenges) and Opus (20 findings, 5 challenges). Both reached the verdict "ready after the fixes". Neither found a
+case for a redesign. Both found Stage 2's contracts incomplete (replay, `wait`, the actor, `integrate` for PRs,
+intent and outcome, the UI-tools request) and the largest stages too big. Every recommendation and challenge has a row
+in the ledger at the end of
+`.collide/planning/epics/ep-001-ef-spikes/tasks/ts-0006-ze-adversarial-review-of-revisions-10-12.md`, with its
+disposition, where it landed and, for each rejection or deferral, the reason or trigger.
+- **Changed:**
+  - the status line and the revision summary;
+  - 0.1 (the same-user rule), 0.2 (the shim and journal, daemon start, the socket and "Who is asking", the clock table,
+    durability, the OTLP receiver, intent and outcome events, the UI-tools endpoint), 0.3 (`AgentSession`, Claude's
+    version range, smoke check and canary, the ask line, opencode's probe and listener, ACP paths and models), 0.4
+    (the accept row, `integrating`, built-in packs compiled in), 0.5 (`pending`, hook-own report lines), 0.6, 0.7
+    (layers, `wait`, agent entries, interactive-launch MCP rule, `git:` fetch rules), 0.8, 0.9 (protected files, list
+    caps, the webview), 0.10 (the `spike` kind, ids, atomic writes, the slice, build-task rules), 0.11 (`query`, Plan…,
+    ask failures, the drawer), 0.13, 0.14 and 0.15;
+  - Milestone A;
+  - Stages 1 and 2 (contracts, slice, criteria, Status);
+  - Stage 3, now 3a, 3b, the new 3c and 3d; Stage 4, now 4a, 4b and 4c; Stage 5 (Issues only); Stage 6, now 6a, 6b
+    and the new 6c; Stages 7, 8, 11, 12, 13 and 15; Stage 9, now 9a, 9b, 9c and 9d; the Status line of every stage;
+  - Deferred, Open questions (item 4) and Risks;
+  - the four spike records' `status:` line, and the R5 task's file name.
+- **Owner's decisions** (applied):
+  1. Every accepted item of the merged list: M1–M10 (Stage 2's contracts), B1–B23 (the stage that builds each) and S1
+     (the split). Items for Stage 2 are in 0.x and in its contracts and criteria.
+  2. **The endpoint stays in the app shell.** The shell answers `initialize`, `ping` and `tools/list` from a
+     build-time manifest, returns 202 to notifications and 405 to GET and DELETE, forwards only `tools/call` as
+     `ui_tools.request {requestId, caller, deadline, message}`, counts the per-ask cap of 20, fails `tools/call`
+     with an "open Collide" message when the window is closed, and cancels asks when the window closes or reloads.
+     Stage 6b tests a window closed when the client starts. The stdio bridge (`collide mcp`) and a daemon-hosted
+     endpoint were considered and not chosen (0.2).
+  3. **A thin loop, Stage 3c,** after Stage 3b: prompt, `collide/quick` run, review, accept, in the app, against
+     scratch tasks, before the plan adapter, GitHub and the board. It names what it pulls forward from Stages 4b, 6,
+     7, 8 and 9a, and its cost: the launch and accept paths are written twice and replaced in 9a. Nothing is cut.
+     Milestone A and the first-dogfooding wording are updated.
+  4. **GitHub Projects v2 moved after the board.** Stage 5 keeps Issues over REST. Stage 6c holds the GraphQL items and
+     fields, the `project` scope check and the poll-cost measurement. Stage 2 still freezes the full provider
+     contract, Projects keys included.
+  5. **Stages 3, 4, 6 and 9 split into lettered sub-stages** with no renumbering, each with its own goal, criteria and
+     Status (Fable F8 and Opus F10, merged). Stage 4's agent-secrets "at launch" test moved to Stage 6b, which is
+     where an agent launches.
+  6. **Rejected:** a three-letter id suffix (the owner's rule of 2026-11-13 stands); the markdown provider in Rust
+     (Stage 2 must prove the TypeScript provider path, the extension model's main risk); named per-client endpoint
+     tokens (one rotatable token is kept).
+  7. **Deferred:** a Collide-managed copy of Claude (Opus C5). Trigger: a Claude update breaks a run despite the
+     version-range check and smoke check.
+  8. **`--restricted` and `--bare`** (Fable challenge 4) are handled by B3: Stage 6b measures `--restricted` under `-p`
+     and the adapter adopts it if it confines reads. `--bare` is not adopted, because it changes how the login is read.
+  9. **Builders are Sonnet agents** (0.15). Each Stage 2+ item is sized for one such agent and one session.
+- **Contradictions fixed** (B22):
+  - detectors: seven, as 0.13 lists them. Deferred said "the first five" and now says seven;
+  - layers: four (schema defaults, the user's file, the repo's file, the run's profile). Stage 4's settings bullet said
+    three and now says four;
+  - `owners`, not `assignee`: 0.10 and the item files use `owners`, and 0.8 meant the same claim, so 0.8 and the
+    revision 10 summary now say `owners`.
+- **Spike kind** (M4): 0.10 defines `spike` with the statuses `planned` (ready), `running` (active), `results`
+  (review), `concluded` (done) and `dropped` (dropped), taken from the records. `sp-0005-fv-schema-expressions`,
+  `sp-0006-kq-agentadapter-acp`, `sp-0009-bb-interface-prototype` and `sp-0010-bn-metrics-sources` are now
+  `concluded`. The slice criterion is narrowed, not the records made read-only items: the slice reads `epics/` only,
+  and Stage 4c adds `spikes/`, because a spike record's statuses and shape are not a task's.
+- **Status-line rule** (M4): each stage's Status names the plan revision its items came from, and only the next stage
+  is split into items. Stage 2's items were written against revision 12 and are to be brought to revision 13 before
+  they start.
+- **Where an item's placement differs from the first sketch:** the hostile-issue webview test is in Stage 6a, where the
+  drawer is built, not 6b.
+- **Rejected:** a three-letter id suffix, the markdown provider in Rust, and named per-client tokens (above).
+- **Deferred:** a Collide-managed copy of Claude (above).
+- **For the next review to check:** the replay journal's byte-order guarantee under a daemon crash; the shell-side MCP
+  manifest against a client that sends `tools/list_changed`; that 3c's hard-coded sequence is replaced and not
+  extended in 9a; and the id-collision redraw against a fetched remote.
