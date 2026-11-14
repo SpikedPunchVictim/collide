@@ -2,13 +2,40 @@
 
 Task-oriented desktop IDE: pick tasks from any source, run agents on them in isolated workspaces through
 pack-defined workflows. Rust + Tauri + React. v0 runs Claude Code only; the design keeps other agent tools and
-model sources (OpenAI, Ollama, …) addable without core changes.
+model sources (OpenAI, Ollama, …) addable without core changes. The one exception is the ask box (0.11), which also
+takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 11, frozen until R5.** S1–S9 and S11 are applied; S10 runs when the group-runs stage starts. An
-adversarial review, R5, comes next, and no product code is written before it. R5's findings and the owner's decisions
-on them may change this plan; nothing else does until then.
+**Status: revision 12, frozen until R5.** S1–S9 and S11 are applied; S10 runs when the group-runs stage starts. An
+adversarial review, R5, comes next, and it now reviews the in-app agent too (0.2, 0.3, 0.7, 0.9, 0.11). No product
+code is written before it. R5's findings and the owner's decisions on them may change this plan; nothing else does
+until then.
+
+Revision 12 (2026-11-14) adds the in-app agent, from S6's in-app agent section
+(`.collide/planning/spikes/sp-0009-bb-interface-prototype/record.md`) and the owner's design and decisions:
+- An agent in the UI changes the UI through tool calls. It does the analysis with its own read-only tools, then calls
+  five generic tools (`query`, `set_view`, `show_groups`, `highlight`, `open`). The UI knows nothing about code
+  files, and no tool launches, accepts, edits or deletes in v0 (0.11).
+- A **view** is typed, live and saveable as a View. A **lens** is the agent's timestamped judgement, with a reason per
+  group, and is saved only as a snapshot. Every call is a typed reducer action with a snapshot Undo, and the chip,
+  not the agent's prose, says what changed (0.11, 0.15).
+- The ask agent is a separate role from run agents. Run agents still have no access to Collide. The ask agent's
+  launch line is strict (`config: none`, `--tools Read,Grep,Glob`, `--no-session-persistence`), with a per-agent
+  opt-in "use my Claude config". The default is Claude Code with haiku (0.3).
+- The UI-tools endpoint lives in the app process, which owns the window. It needs a token from day one: one for
+  external clients, shown and rotated in Settings, and one per ask for the agents Collide launches. Where it lives is
+  inferred, and R5 checks it (0.2).
+- Agent entries are Collide's own settings in the same layers, with a visible source per field, secrets by name from
+  the keychain, readable folders and tool kinds as data, a test action, and snippets for external clients generated
+  from the real endpoint (0.7).
+- Agent tool inputs are untrusted: unknown ids are rejected and nothing is applied, groups are limited, and the error
+  tells the agent what to do (0.9).
+- A budget is optional and off by default, and Claude Code is the only agent that can enforce it. Every agent has a
+  timeout (0.3, 0.7).
+- Work lands in Stages 2, 4, 6, 9 and 11. A real-agent contract test (opt-in) and an owner walkthrough grade it
+  (Stages 4, 6, 9, 11). Tools that act, and the cases the record left unmeasured, are deferred with triggers
+  (Deferred, Risks).
 
 Revision 11 (2026-11-14) applies spikes S5–S8 (`.collide/planning/spikes/`) and the owner's decisions on them:
 - Schemas: Rust types → `schemars` → JSON Schema → `json-schema-to-typescript`, a Node build step. YAML is read by
@@ -288,8 +315,45 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     child and write `exit.json`.
   - When the CLI starts a daemon from inside a run (an agent's Bash), it strips `COLLIDE_RUN`, `COLLIDE_RUN_START`
     and `COLLIDE_SPAN` first, so that run's stop cannot kill the daemon.
-- The socket requires a per-client token. The token is never put in an agent's or hook's environment. Agents need
-  no access to Collide in v0 (no MCP server; see 0.3).
+- The socket requires a per-client token. The token is never put in an agent's or hook's environment. Run agents
+  need no access to Collide in v0 (0.3). The one other way in is the UI-tools endpoint below, which gives an agent
+  five view-only tools and nothing else.
+- **The UI-tools endpoint** (owner, 2026-11-14; S6's in-app agent section). It lets an agent change what the window
+  shows (0.11). Where it lives is inferred, S6 did not test it, and R5 checks it.
+  - **It lives in the app process** (the Tauri shell), which owns the window. It is stateless streamable HTTP with
+    JSON responses, on 127.0.0.1 only, on a port picked once and kept in the user's settings. A port already in use
+    fails with a message that names it.
+  - **The shell does transport only.** It refuses a foreign `Host` or `Origin`, a content type that is not JSON, a
+    body over 1 MB, and a missing or wrong token. It forwards each JSON-RPC message to the window as an event on the
+    one event channel, and returns the window's reply. The window runs the MCP layer and the tools (0.11) in
+    TypeScript against its own reducer state, and answers through `rpc` (`ui_tools.reply`). The shell handles the
+    `ui_tools.*` methods itself and does not forward them, so one `rpc` command and one event channel still carry
+    everything (above).
+  - **Two kinds of token**, never put in an environment variable and compared in constant time:
+    - the **endpoint token** is for external clients (0.7). It is 32 random bytes in the OS keychain, made at first
+      use, shown and rotated in Settings. Rotating it ends every client that used the old one. It is sent as an
+      `Authorization: Bearer` header, or as the last path segment (`/mcp/<token>`) for a client that cannot send
+      headers;
+    - an **ask token** is made by the shell for each ask the app launches, and works for that ask only. The shell
+      adds the endpoint URL and the ask token to `ask.start` as it forwards it, so the webview never holds one.
+      Claude gets it in a config file of mode 0600 in the ask's directory, never in argv, because `ps` shows argv. An
+      ACP agent gets it in `session/new`, which the shim's stdin log records (above). That is why it is per ask: the
+      log never holds the endpoint token, and the ask token is dead when the ask ends.
+  - **The ask agent child is launched and owned the normal way:** the UI calls `ask.start`, the daemon builds the
+    launch spec from the adapter, and a shim starts the child (0.3). Stop, the sweep and a daemon restart treat it as
+    they treat a run's child, and it carries the same markers, with the ask's id in `COLLIDE_RUN`.
+  - **A closed or silent window is a plain error to the agent**, as in S6: `Collide has no window open; open it and
+    ask again`, and `the Collide window did not answer within 10 s`. With the window closed (0.11) the app stays in
+    the menu bar, the endpoint stays up, and every call fails that way.
+  - **Alternatives, with what each gives up.**
+    - The endpoint in the daemon, which reaches the window over the event channel: the daemon is the one owner, but
+      the tools need the window's state, so every call crosses one more hop, and the endpoint still has no use with
+      the window closed.
+    - The MCP layer in the shell, in Rust: no TypeScript SDK in the window, but the tool schemas are written twice
+      and the validation still needs the window's ids.
+    - S6's Vite plugin and websocket: dev only.
+    - The choice costs a listener in the shell, which is new attack surface, so the guards and tokens above come
+      first. A window that is hidden or throttled may answer slowly, and that is unmeasured.
 - Crates: `core` (domain, state machines, workflow engine, pack model, implementation resolution; traits `AgentAdapter`,
   `AgentSession`, `HookRunner`, `TaskProvider` only; no Tauri, SQLite or process types) and `host` (implementations,
   store, `collide-daemon` and `collide` binaries; the shim is `collide shim`). `app/src-tauri` stays thin.
@@ -304,7 +368,7 @@ Two separate ideas:
 - **Model source:** where inference runs. v0: whatever Claude Code is configured for. Later: OpenAI, Ollama
   (0.40.15 installed), others, reached through the agent tools that support them.
 
-Collide never calls a model API itself. Judgment steps are agent phases.
+Collide never calls a model API itself. Judgment steps are agent phases, or an ask (the ask agent, below).
 
 - **Two core traits** (S7, `sp-0006-kq-agentadapter-acp`; owner, 2026-11-14). A one-shot command line whose stdout
   describes itself is Claude's shape. ACP is a stateful JSON-RPC conversation: the host sends `initialize`,
@@ -366,7 +430,7 @@ Collide never calls a model API itself. Judgment steps are agent phases.
     | `model_select` | `launch` (Claude), `session` (ACP) or `none` |
     | `take_over` | it can name an interactive command for a session |
     | `mcp_servers` | `stdio`, `http`, `sse` |
-- **v0 ships one adapter, Claude.** The launch line, measured by S1 on 2.1.323:
+- **v0 ships one adapter, Claude, for runs.** The launch line, measured by S1 on 2.1.323:
 
   ```
   claude -p --input-format stream-json --output-format stream-json --verbose --include-hook-events
@@ -573,8 +637,74 @@ Collide never calls a model API itself. Judgment steps are agent phases.
     claude's own JSON usage, and a short run flushed before it exited (measured S2). That usage counts as measured.
     A phase whose sessions reported this way has its `usage` lines shown but not added, so nothing counts twice.
     Passing the settings into a container is the pack's job (unmeasured).
-- Later adapters: an ACP adapter, opencode first, then Codex. S7 mapped `AgentAdapter` onto ACP before the skeleton
-  outlined the traits, so they are not shaped by Claude alone.
+- **The ask agent is a separate role from run agents** (owner, 2026-11-14; S6's in-app agent section). It answers a
+  request typed in the ask box (0.11) by reading, then calling the UI tools (0.2). Run agents still have no access to
+  Collide in v0: they get no UI-tools endpoint and no token for one.
+  - **It is not a run.** It has no task, workspace, phase or Tracks entry, and it is never resumed. Its adapter builds
+    the launch spec from an `ask` profile (a model, a folder, tool kinds, an MCP config path, a timeout and an
+    optional budget) instead of a role and phase. The daemon starts it under a shim, so stop (0.5), the sweep and a
+    restart treat it as they treat a child of a run. Its record holds the argv without secrets, timings, each tool
+    call, its usage with its quality and its outcome. If its shim dies the ask ends `lost`, and the user asks again.
+    Its spend is shown on the Agents page (0.7) and is never added to a run or an experiment.
+  - **The ask box takes a Claude Code entry or an ACP entry.** An External entry (0.7) is an agent the user runs
+    themselves, so Collide launches nothing for it and the ask box cannot use it.
+  - **The ask role requires `mcp_servers: http`.** Collide refuses to start an ask on a tool whose adapter says `No`
+    or `Unknown` for it, as it does for a run's required capability, and the message names the agent and says so. For
+    an ACP agent the `initialize` response is the probe.
+  - **Claude Code's launch line.** The default entry is Claude Code with haiku (owner, 2026-11-14). It is stricter
+    than a run's default (`config: user`): settings from Collide's own file and no user hooks, CLAUDE.md or memory
+    (S9's `config: none`), only its own MCP server, three read tools and no session file. The user can opt in per
+    agent to "use my Claude config", which passes `--setting-sources user` and nothing else different. S6's prototype
+    did none of this, and each of its asks loaded 28K to 107K input tokens (measured). How much of that was the
+    user's config is unmeasured, and Stage 6 measures it.
+
+    ```
+    claude -p --output-format stream-json --verbose
+      --model <entry's model>                   # haiku by default
+      --setting-sources ""                      # `config: user` passes `user` instead
+      --settings <ask dir>/settings.json        # { "autoMemoryEnabled": false }
+      --mcp-config <ask dir>/mcp.json --strict-mcp-config      # the endpoint and the ask token (0.2)
+      --tools Read,Grep,Glob
+      --allowedTools Read,Grep,Glob,mcp__collide__query,mcp__collide__set_view,mcp__collide__show_groups,
+                     mcp__collide__highlight,mcp__collide__open
+      --no-session-persistence
+      --append-system-prompt "<Collide's fixed ask prompt>"
+      [--max-budget-usd <budget>]               # only when the entry sets one
+    ```
+
+    - The request goes on stdin, so it is not in argv. The working directory is the entry's first readable folder.
+    - `--tools` removes Bash, Edit and Write from the child. `--allowedTools` alone would only skip prompts (the S6
+      record's reasoning; not tested on its own). With `--tools` cut to three, the scheduling and worktree tools of
+      the run line's `--disallowed-tools` are absent already, so the ask line does not list them.
+    - **`--disable-slash-commands` is not passed.** S6's prototype passed it. It raises the start weight (22.0K,
+      measured S9), so this line drops it.
+    - The child's environment is the base environment (0.2) minus the adapter's stripped variables. S6 removed every
+      `CLAUDE*` and `OTEL_*` variable, and the adapter strips the `CLAUDE*` ones (above).
+    - Whether a Read outside the working directory is refused without a prompt under `-p` is unmeasured. Stage 6 tests
+      it and records the result.
+  - **ACP profile.** An ACP ask agent gets the engine of Stage 3 and an ask profile in `host`, with no `fs`,
+    `terminal` or `elicitation` client capability, as above. The profile answers permission requests by kind:
+    - `read` and `search` are allowed (`allow_once`) when every path the request reports is inside the entry's
+      readable folders. A request that reports no path is refused, so the rule fails closed. Whether opencode asks at
+      all for a read it is configured to allow is unmeasured;
+    - everything else, `edit`, `execute`, `fetch`, `delete` and the rest, is refused with a message;
+    - when no `allow_once` exists the answer is `Cancel`, as in every adapter, and no "always" option is ever picked.
+
+    Collide cannot cut an ACP agent's own tools down by flags. S6 found that the readable folder is only its working
+    directory and what it is told, and that opencode's own configuration decides what it can read or write. So the
+    folder and tool kinds are checked by Collide on each permission request, and the Agents page says that an ACP
+    agent's own settings are its promise, not Collide's guarantee (0.7).
+  - **Budget and timeout.** A per-ask budget is optional and off by default (owner, 2026-11-14). Only Claude Code
+    enforces one (`--max-budget-usd`, a soft cap that can overshoot by a call, above). An ACP agent reports no cost
+    (measured S6), so a budget on one is a load error that says only a timeout applies. Every agent has a timeout,
+    which is Collide's: it stops the child as a phase is stopped (above) and the ask box says `timed out after N s`.
+    The Agents page states this plainly: ACP and External agents get a timeout only.
+  - **Models.** A Claude entry's model is a name such as `haiku`. An ACP entry's model is an opaque id such as
+    `ollama/qwen2.5:7b`, set with `session/set_model` after `session/new` and checked against the agent's advertised
+    list, as above.
+- Later adapters for runs: an ACP adapter, opencode first, then Codex. S7 mapped `AgentAdapter` onto ACP before the
+  skeleton outlined the traits, so they are not shaped by Claude alone. The ask agent's ACP profile (above) is the
+  first use of the engine with a real agent, and it ships in Stage 6, before any run uses ACP.
   - **An ACP adapter is one engine plus a profile per agent, both in `host`.** The engine handles JSON-RPC, the
     handshake, update parsing and the permission mapping. The profile is data: argv, the env to strip and to set, the
     repo config paths and how to stop the agent reading other tools' config, the take-over command, the model-id
@@ -1016,11 +1146,71 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     4. the run's profile, if it has one (below).
   - Collide's own settings (concurrency cap, metrics level, retention, default model aliases) use the same layers
     and the same files. Collide marks its machine-dependent keys, such as the concurrency cap, `overridable`.
-  - Some keys are per user by nature and are refused in the repo file: secrets, trust entries, source accounts and
-    personal views.
+  - Some keys are per user by nature and are refused in the repo file: secrets, trust entries, source accounts,
+    personal views, and an agent's kind, command, arguments, model, environment, secrets, folders and tool kinds
+    (below).
   - **Secrets** (`secret: true`) come only from the OS keychain, set in the UI or with `collide config set --secret`.
     A secret in either file is a load error. Hooks receive settings as `config` on stdin (0.5).
   - `.collide/config.yaml` loads from the line's snapshot and is in the trust hash, like `board.yaml` (0.9).
+  - **Agent entries** (owner, 2026-11-14; S6's in-app agent section). The agents the ask box can use (0.3, 0.11) are
+    Collide's own settings under `agents:`, one entry per id, and `ask.agent` names the one the ask box uses. They
+    follow the layers above. The first layer holds one built-in entry, Claude Code with haiku, which the user's file
+    may change field by field.
+
+    ```yaml
+    # ~/.config/collide/config.yaml
+    agents:
+      claude-haiku:                  # the built-in entry, shown with every field it has
+        kind: claude-code            # claude-code | acp | external
+        model: haiku
+        config: none                 # none | user ("use my Claude config", 0.3)
+        read: ["<board root>"]       # folders it may read; the default is the board's default line root
+        tools: [read, search]        # tool kinds it may use
+        timeout_s: 180               # every agent has one: 5 to 1800
+        budget_usd: null             # optional, off by default; Claude Code only
+      local-opencode:
+        kind: acp
+        command: opencode
+        args: [acp]
+        model: ollama/qwen2.5:7b     # opaque ACP model id (0.3)
+        env: { OPENCODE_DISABLE_CLAUDE_CODE: "1" }
+        secrets: { SOME_API_KEY: keychain-item-name }    # a reference by name, never a value
+      my-client: { kind: external }  # an agent the user runs; Collide launches nothing
+    ask: { agent: claude-haiku }
+    ```
+
+    - **Layers and sources.** The repo's file may set only `budget_usd` and `timeout_s` for an entry, because a team
+      has a say in cost and not in what runs on a developer's machine. `timeout_s` is `overridable`, since a slow
+      local model is a fact about one machine. Every other field is refused in the repo file, naming the key, because
+      a command in a committed file would be code that Collide runs on the strength of a trust prompt. The Agents page
+      and `collide config get agents.<id>.<field>` show each value with its layer: built-in, the user's file or the
+      repo's file.
+    - **Secrets are names.** An entry's `secrets` map an environment variable to an item in the OS keychain. The value
+      is read at launch and goes only into the child's environment, never into argv, a log, the ask's record or a
+      file. A missing item is a launch error that names it. An `env` line whose name ends in `KEY`, `TOKEN`, `SECRET`
+      or `PASSWORD` and carries a literal value is a load error that says to use `secrets` (inferred: a name test
+      catches the common slip, not every one).
+    - **Folders and tool kinds are data, shown in words.** `read` and `tools` are checked by Collide for any agent
+      that flags cannot cut down (0.3). The page says "can read these folders, cannot write or run commands". `tools`
+      accepts only `read` and `search` in v0, and any other kind is a load error that names the key. For an ACP agent
+      the page adds that its own settings decide what it can really do.
+    - **Budget and timeout in words.** A budget on an entry that cannot enforce one is a load error. The page shows
+      "budget: Claude Code only; ACP and External agents get a timeout only".
+    - **Test this agent.** A button that runs the smallest ask: the agent is told to call `query` once for one task
+      and say done. It changes nothing on the screen. The result shows whether the endpoint was reached with the
+      ask's token, the time to the first tool call, the finish time, the cost (Claude) or "not reported" (ACP), the
+      readable folders and tool kinds in effect, and a plain failure text, such as `claude was not found on PATH`
+      or `the agent did not call a tool within 180 s`. An untested entry shows "not tested".
+    - **Endpoint card.** The card shows the endpoint URL, whether a window is connected, the time and name of the
+      last call, and the endpoint token, masked, with Reveal, Copy and **Rotate** (0.2). Each agent row shows when it
+      was last used and its spend this week, from the ask records. An external client's name comes from its
+      `initialize` message and is shown as unverified, with the time it was last seen.
+    - **Snippets for external clients are generated** from the real endpoint and token, never written by hand: the
+      `claude mcp add --transport http collide <url> --header "Authorization: Bearer <token>"` command, a JSON
+      `mcpServers` block, and an opencode `mcp` block. A client that cannot send headers gets the URL with the token
+      as its last path segment. Collide writes to no agent's configuration. S6 measured the forms without a token
+      (opencode's `mcp list` reported the endpoint connected); the header forms are inferred, and Stage 6's opt-in
+      client test measures them.
 - **Pack data.** Each pack gets a data directory per board under Collide's data directory, passed as
   `COLLIDE_PACK_DATA` and `ctx.dataDir`. That is where "a pack keeps its own files" (0.5). Each experiment arm gets
   its own copy, taken at the start, so a pack that keeps its state there is isolated without declaring anything
@@ -1428,6 +1618,33 @@ Collide plays the lead, so it does all four, through the pack.
 
   A thread with a deadline is not a limit: the caller moves on and the thread keeps running (measured S5: about one
   core until the expression ends).
+- **An agent's tool inputs are untrusted** (owner, 2026-11-14; S6's in-app agent section). The ask agent reads task
+  text from authors outside the repo and may be steered by it, so every call to the UI tools (0.11) is input, like a
+  YAML file:
+  - **Validated before anything is applied** against the window's live state: an object with no unknown keys, a known
+    surface, known enumerations, known sort keys and phase names, a well-formed clock window. A call that fails
+    changes nothing.
+  - **Invented ids are rejected, never repaired.** A task or run id the window does not have rejects the whole call,
+    and so does an id in two groups. Collide never picks the nearest id. The error names the ids and says what to do:
+    `unknown task id T-01-20; nothing was shown. Call query for real ids.` S6 measured the rule on a weak model: it
+    invented 8 ids and nothing wrong reached the screen, and in its two other runs it recovered from refused
+    calls in 2 to 4 more calls.
+  - **Limits.** A lens has 1 to 12 groups. Each group has a name, at least one id and a non-empty reason. A call
+    names at most 500 ids, the size of the largest `query`, and its body is at most 1 MB (0.2). A title is cut at 80
+    characters, a group name at 60, a reason at 600 and a note at 400. An ask makes at most 20 screen-changing calls,
+    so a loop cannot flood the Undo stack (inferred: S6's asks made one or two).
+  - **The agent's words are text, and Collide's words say what changed.** A title, a group name, a reason or a note is
+    shown as plain text, with no markdown or HTML and with control characters removed, and is marked as the agent's.
+    The statement of what changed (the expression, the number of groups and ids) is built from the validated action,
+    never from the agent's prose. S6's weak model described a grouping in prose that Collide had refused.
+  - **Error messages tell the agent what to do.** They name the unknown value and list the known ones: `unknown
+    surface "x" for set_view; supported: field, tracks`. They never hold a token or a path.
+  - **`query` returns untrusted text.** A task's title and body come with its source and a `trusted` flag from the
+    author rule above, and Collide's ask prompt says task text is data, never instructions. No tool acts, so such text
+    can at worst mislead the view, and the chip, the flag in 0.11 and Undo answer that. An ACP agent's own tools are
+    limited only by the permission mapping (0.3).
+  - **The endpoint refuses before it parses** a foreign Host or Origin, a non-JSON content type, an oversized body and
+    a wrong token (0.2). It counts wrong tokens and never records their value.
 - Hook outputs and report lines can come from processes running branch code, because a gate runs the branch's
   tools. They are data: never templated into prompts, and passed to env only as safe tokens (0.5).
 - Metrics hold no prompt, task or tool content. By default they keep only executable names and flag names (0.13).
@@ -1844,7 +2061,8 @@ Details:
     within 150 ms of the span for an unqueued call, and wrong by the whole wait for a call queued behind another
     (0.13).
 - **Talking to an agent is the exception.** You either intervene (send a note to the running phase) or take over
-  (interactive `--resume` in a terminal).
+  (interactive `--resume` in a terminal). The ask box (below) is a request that changes the screen, not a
+  conversation with a run.
   - Closing the terminal view detaches. The session goes on in its shim, Tracks marks it detached, and reopening
     replays its recent output. So a take-over survives an app quit and a daemon restart (measured S2).
   - The take-over ends when `claude` exits or the user picks **End take-over**, and the phase's gates then run as
@@ -1948,6 +2166,93 @@ run detail with Output, Time breakdown and Review, Compare and Experiments, with
 scripted pilots complete all nine scenarios (50 of 50 tests pass; measured). No person who did not design Collide
 has used it: the owner skipped the sessions (2026-11-14), so the interface is the owner's judgement, and the later
 stages check it with ported UI tests and an owner walkthrough (Stage 1).
+
+**The in-app agent: the ask box** (owner, 2026-11-14; S6's in-app agent section in
+`.collide/planning/spikes/sp-0009-bb-interface-prototype/record.md`). The interface is built to be flexible in ways
+that are not obvious, and an agent can use that. A request typed in the ask box, in the top bar of every surface,
+starts an **ask**. The agent reads whatever it needs with its own read-only tools (for Claude Code, Read, Grep and
+Glob over the code), decides, and then changes the screen through five generic tools. The UI knows nothing about
+code files. It presents what it is told, and the agent does the analysis (0.3 for the launch, 0.2 for the endpoint).
+- **Two requests the owner gave as examples.** On the Field: "Can you show me tasks that can be grouped together,
+  where code changes would affect similar files?" The agent reads the code, then shows groups of tasks with a reason
+  for each, so that a person can run a group together (Stage 11). On Tracks: "Can you show me the tracks that have
+  taken the longest in their build portion?" The agent sorts the tracks by seconds in the build phase.
+- **It is not a chat.** One request gives tool calls and chips, with no transcript and no session kept, so the next
+  ask starts fresh. The agent's closing words show under the chip, marked as the agent's and unverified.
+- **The five tools.** Each takes ids and labels, never a file path. A surface a stage has not built is refused with
+  the supported ones listed.
+
+  | tool | input | effect |
+  |---|---|---|
+  | `query` | `subject` (`tasks` or `runs`), `filter?`, `limit?` (1 to 500, default 200) | none. Returns the rows the window holds. A task: id, title, body, epic, status, labels, source, `depends_on`, `trusted`. A run: id, task, status, workflow, started, `total_seconds`, `wait_seconds`, `spend_usd`, and each phase's seconds |
+  | `set_view` | `surface` (`field`, `tracks`), `title`, `reason?`, `filter?` (`{}` clears), `sort?` `{by, dir}`, `group_by?` (Field), `window?` `{from, to}` (Tracks) | sets those parts of that surface's view and leaves the rest. A chip shows the expression |
+  | `show_groups` | `surface`, `title`, `groups` (1 to 12 of `{name, ids, reason}`), `rest?` (`dim` or `hide`) | draws a lens: the groups with their reasons, and the rest dimmed or hidden. An id in one group only. A chip |
+  | `highlight` | `surface`, `ids`, `note?`, `title?` | marks the ids and filters nothing. A chip |
+  | `open` | `surface` (`field`, `tracks`, `queue`, `experiments`), `id?` | opens that surface, and one item on it |
+
+  - Task filters are epic, status, label, source, text and ids. Run filters are status, task, workflow and ids. Field
+    sorts are id, title, epic, labels and status. Tracks sorts are total, start, end, spend, wait and
+    `phase:<name>`, the seconds a run spent in that phase, with a missing value last. `group_by` is status
+    (category), epic, label or source. A `window` is two clock times such as `09:15`.
+  - **No tool launches, accepts, edits or deletes in v0.** A group the agent shows is a selection a person can launch
+    from the Field (Stage 11), and the agent has no tool for it. Tools that act are deferred (Deferred).
+- **A view and a lens are two things** (S6 proposal 2). Keeping them apart means a saved View never silently holds an
+  agent's guess.
+  - A **view** is typed state: filter, sort and grouping on the Field, and filter, sort and window on Tracks. It stays
+    live, because it is an expression over the corpus. On the Field, **Save as View** writes the filter as CEL through
+    the same chips that the filter bar uses, with its static cost estimate (0.9, 0.10), and the grouping as
+    `layout.groupBy`. A sort is saved as `layout.sort`, a key the view schema gains (Stage 2). A Tracks view saves as
+    a personal view in the user's board settings, with its filter and sort. It drops its window, because a window is
+    a span of clock time on one day, and says so. Views of runs do not exist in 0.10, so this is new (inferred).
+  - A **lens** is the agent's own judgement: named groups of ids, each with a reason, stamped with the time it was
+    made and with the agent and model that made it. An id is in one group at most, and the ids left out show as
+    "not grouped". A lens does not follow the corpus: a task that changes after it was made stays where it was put.
+    It is saved only as a **snapshot**, a personal file under the board's data directory, and never as a View, because
+    a View holds membership by expression and a snapshot holds a judgement at a moment. The Field draws a lens as a
+    board of groups with the reason under each name. Tracks draws it as bands, and writes the sort value on each row.
+- **Chips** (S6 proposal 1). Every call that changes the screen becomes a typed reducer action (0.15) and a chip.
+  - The chip's first line is Collide's statement of what changed, built from the validated action: the expression
+    (`sorted by seconds in build, descending: 9 of 9 runs`), or the number of groups and tasks. Below it, marked as
+    the agent's words, are its title and its reasons. The chip also names the source (the agent and model, or
+    "external client") and the time.
+  - **Undo** restores exactly the view state that the change replaced, from a snapshot taken at that call, and undoes
+    the last change only. **Save as View** or **Save snapshot** is on the chip, as above.
+  - A lens made from task text alone carries the flag below.
+- **The ask box.**
+  - It shows one line per tool call as it happens, written by Collide from the call (`query tasks: 12 rows`,
+    `show_groups: 4 groups, 11 tasks`), then the chip. **Cancel** works while the ask runs.
+  - A failure is plain text, never an empty box. The texts are: `the agent finished without changing the screen (N
+    tool calls, none changed anything)`, `timed out after N s`, `stopped at the $X budget`, `cancelled`, `agent
+    error: <the first line of its error>`, `<command> was not found on PATH`, `this agent cannot use HTTP MCP
+    servers`, `Collide has no window open; open it and ask again` and `the Collide window did not answer within
+    10 s`. A change made before a failure keeps its chip and its Undo.
+  - **"No files were read"** (S6 proposal 3). S6's run 5 grouped 107 tasks by title wording and never read the code,
+    and said so in prose. So Collide, not the prompt, checks it. Collide's `AgentSession` already sees the ask's
+    stream: Claude's Read, Grep or Glob calls, and an ACP agent's tool calls of kind `read` or `search` (inferred for
+    ACP: S6's opencode runs never read the folder). When the ask ends with no such call in it, a `show_groups` chip
+    carries "No files were read in this ask. These groups come from task text alone." For an external client Collide
+    cannot see reads, and the chip says "this client's reads are not visible". The flag informs and blocks nothing,
+    since a request about risk or order needs no code.
+- **What S6 measured** (prototype, fixture data only, Claude Code haiku through `claude -p`, nine live runs):
+  - **Time.** The first tool call came 2.2 to 3.5 s after the request, mostly Claude Code starting. A sort appeared
+    after 3.5 to 5.4 s and finished in 6.0 to 8.3 s. A lens appeared after 14.8 to 22.4 s, nearly all of it the
+    model writing a reason for every group, and finished in 18.2 to 25.4 s (measured). Showing the first group
+    before the rest was not tried (unmeasured).
+  - **Cost and size.** One ask cost $0.0005 to $0.0082 and loaded 27.6K to 107.3K input tokens (measured). The whole
+    task, nine runs plus three more, cost about $0.04. That launch was not strict (0.3), so how much of the load
+    was the user's config is unmeasured.
+  - **Right or wrong.** Four sort runs were right. Of three grouping runs, the first (prompt v1, which said to read
+    the code "when the request is about code") was wrong, and two (prompt v2, which says it must read first) were
+    right: four groups equal to the intended ones, with the two ambiguous tasks in either area. Six of seven runs
+    that have a reference answer were right, and a prompt change repaired the seventh, which is one data point for
+    a prompt tuned to one demo (inferred).
+  - **A weak local model** (opencode with `ollama/qwen2.5:7b`) did not sort in either of its two sort runs (one
+    drew three bands, one highlighted the right two runs), and it invented 8 task ids in the grouping run. Collide
+    refused all of it, so nothing wrong reached the screen, and the model's prose still described a grouping that
+    was not shown. That is why the chip states what changed (0.9). opencode's own hosted default timed out at 90 s
+    with no event, and no reason was found (unmeasured).
+  - **A closed or restarting window** failed every call with the 10 s message, and the agent said it had changed
+    nothing and guessed no ids (measured, run 9).
 
 **Planning** (owner, 2026-11-13; `collide/plan`):
 - A Queue lane can be fed by a view (`queue: true` on the view). Its items are answered through the source's ops.
@@ -2305,7 +2610,8 @@ Skeleton first, then test-first passes (owner, 2026-11-13).
     - the shell's `rpc` command and event channel;
     - the React component tree for Field, Tracks, Queue, run detail (Output, Time breakdown, Review), Compare and
       Experiments, following S6's surfaces, with typed props, and one reducer for UI state in which every user
-      action is a reducer action, as in S6's prototype, so reducer tests need no browser.
+      action is a reducer action, as in S6's prototype, so reducer tests need no browser. So is every call of the
+      in-app agent's tools (0.11), with a snapshot of the state it replaced for Undo.
   - Milestones C and D are outlined by the first step of their first stage (Stages 11 and 13). By then a real loop
     has run, and their outlines are written against it rather than guessed.
 
@@ -2470,6 +2776,11 @@ reproduction script and a record, together in one spike folder under `.collide/p
   recorded as owner judgement in the stage's task item.
   - Left unmeasured: all human performance, learning and carry-over, scale (140 tasks), real agent text, other
     screens and the light theme.
+  - **The in-app agent** (added after the pilots, at the owner's request, 2026-11-14): five MCP tools, an ask box and
+    an Agents page, tried live with Claude Code haiku (nine runs) and with opencode on a local model (three runs),
+    with 47 tests beside the 50 above. Revision 12 applies it (0.2, 0.3, 0.7, 0.9, 0.11; Stages 4, 6, 9, 11). Left
+    unmeasured: the token load of a strict launch line, a hosted opencode model, a second local model, the ACP
+    permission path under a real write attempt, and a window in the background.
 - **S7 `AgentAdapter` against ACP (paper check)** (done:
   `.collide/planning/spikes/sp-0006-kq-agentadapter-acp/record.md`).
   - Map the trait's launch spec, events, permission answers and capabilities onto ACP messages.
@@ -2478,8 +2789,8 @@ reproduction script and a record, together in one spike folder under `.collide/p
     outlines it.
   - Nothing ships.
   - Result: fourteen gaps, each declared as a capability or an optional field. The trait is two traits (0.3).
-  - Left unmeasured: other ACP agents (goose, Zed's Claude adapter), a real limit, hook or compaction, MCP servers
-    through `session/new`, `terminal/*` and `elicitation/*`, signals.
+  - Left unmeasured: other ACP agents (goose, Zed's Claude adapter), a real limit, hook or compaction, `terminal/*` and
+    `elicitation/*`, signals. S6 later measured an HTTP MCP server through `session/new` with opencode 1.1.56.
 - **S8 metrics sources** (done, with two owner steps deferred:
   `.collide/planning/spikes/sp-0010-bn-metrics-sources/record.md`). On an orchard `iter` run and a lane test:
   - Sampler overhead at 1 s, and at a shorter interval if 1 s misses too much.
@@ -2509,9 +2820,9 @@ reproduction script and a record, together in one spike folder under `.collide/p
   owner's decisions on its findings are applied. No product code is written before that; spike code is throwaway
   and exempt (owner, 2026-11-13).
 - S6: its pilots complete each scenario with the end state detected (measured: 50 of 50 tests), and the record
-  lists what changed in the prototype and why. The sessions with a first-time participant were skipped (owner,
-  2026-11-14), so the owner's judgement on the prototype stands in, and the later stages check each scenario with
-  ported UI tests and an owner walkthrough.
+  lists what changed in the prototype and why. Its in-app agent answered both of the owner's requests live (0.11).
+  The sessions with a first-time participant were skipped (owner, 2026-11-14), so the owner's judgement on the
+  prototype stands in, and the later stages check each scenario with ported UI tests and an owner walkthrough.
 - The trait has no member that S7 found ACP cannot express, or each such member is marked as a capability.
 - S8 names a sampling interval whose overhead is below 1% of one core. It states each resource's granularity and
   what it cannot attribute.
@@ -2548,6 +2859,12 @@ part L).
     beside its stdout log (0.2);
   - the JSON-RPC between UI or CLI and the owner, including the Queue item's context record: six sections, each
     filled or "Not available" (0.11; S6);
+  - the ask methods `ask.start`, `ask.cancel` and `ask.test`, and their `ask.*` events, which carry the normalized
+    stream events and the ask's outcome (0.3, 0.11);
+  - the shell's own `ui_tools.*` methods (`reply`, `token`, `rotate`) and its `ui_tools.request` event, which the
+    shell handles and never forwards (0.2). The five tools' definitions are TypeScript in the window, not Rust
+    contracts, because the window answers every call, and Stage 6 and the later stages that add surfaces write them;
+  - the `agents` and `ask` settings keys (0.7), and `layout.sort` in a view (0.11);
   - the point and event catalogues (0.4);
   - state, events and spans, with a parent id and a kind on every span, and a wait span that names its Queue item
     (0.13; S6);
@@ -2563,7 +2880,7 @@ part L).
   with stubbed bodies.
 - The shell's `rpc` command and event channel. The React component tree for Field, Tracks, Queue, run detail (Output,
   Time breakdown, Review), Compare and Experiments, following S6's surfaces, with typed props and placeholder
-  rendering, and one reducer for UI state (every user action a reducer action).
+  rendering, and one reducer for UI state (every user action, and every in-app agent tool call, a reducer action).
 - Test doubles as outlines: a fake adapter that emits normalized events, a second `AgentSession` that is a scripted
   fake ACP child (below), a fake provider, a fake hook runner.
 - CI: build, lint, typecheck, the stub count per tag, the dependency-direction check and the no-names check.
@@ -2606,6 +2923,8 @@ part L).
 - A test fails if `core` gains a Tauri, SQLite or process dependency.
 - A seeded `orchard` string in `core`, and a seeded `CLAUDECODE` or `ANTHROPIC_` string outside the Claude adapter,
   each fail CI.
+- The `agents` and `ask` settings keys are in the generated schema. An agent entry with an unknown key, or with a tool
+  kind other than `read` or `search`, fails validation.
 - A provider with one kind and no links validates unchanged. `collide schema` lists every new key and point. A
   derived point that names an unknown core point, or a gate bound to an `after_*` point, is refused at load.
 - Planning slice (part L):
@@ -2644,8 +2963,9 @@ a broken link is counted, not dropped.
   `No` and `Unknown`. The Claude adapter is the first `AgentSession`. `models.yaml` loading and alias resolution,
   including `model.name`, with `model.id` kept opaque.
 - **The ACP engine** (`host`), tested with a scripted fake ACP child: the handshake, a prompt turn, a permission
-  request, `session/cancel`, an empty turn (`empty_turn`) and a child that exits first (`lost`). A real ACP agent is
-  Deferred (below); the second `AgentSession` keeps the trait honest meanwhile (S7).
+  request, `session/cancel`, an empty turn (`empty_turn`) and a child that exits first (`lost`). A real ACP agent
+  is Deferred for runs (below); the ask box uses one from Stage 6. The second `AgentSession` keeps the trait honest
+  meanwhile (S7).
 - File-backed child logs; SQLite store + event log; per-client socket token; version handshake.
 - Built-in workspace: `git worktree add`, returning `{ path, gitDir }`; refuses to remove a dirty or unmerged
   worktree.
@@ -2768,6 +3088,13 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
   - per-user-only keys refused in the repo file, naming the key;
   - secrets from the OS keychain only (`collide config set --secret`). A secret in either file is a load error;
   - Collide's own settings through the same layers;
+  - **agent entries** (0.7; owner, 2026-11-14): the `agents` and `ask` keys through the same layers, with the
+    built-in Claude Code and haiku entry in the first layer. The repo's file may set only `budget_usd` and
+    `timeout_s` (overridable); an entry's kind, command, arguments, model, environment, secrets, folders and tool
+    kinds are per user and refused in the repo file. Each agent has a timeout (5 to 1800 s, default 180). `tools`
+    takes only `read` and `search`. A budget on an agent that cannot enforce one, a literal value on a secret-named
+    `env` line and a `read` folder that does not exist are load errors that name the key. A secret is a keychain item
+    name, resolved at launch only. `collide config get agents.<id>.<field>` shows the layer;
   - `collide config get <key>` shows the value and the layer it came from.
 - **Pack data:** one directory per pack per board, passed as `COLLIDE_PACK_DATA` (0.7).
 - **Provider protocol v0** per 0.10, with the pack's settings passed to `initialize`. A provider supervisor restarts
@@ -2835,6 +3162,19 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
 - `collide pack link <name>` with no folder runs the uncommitted pack folder from the user's checkout, badged dev. A
   new `.collide/packs/` folder there is listed as a working copy.
 - An `overridable` key resolves to the user's value. A user profile that sets any other key is refused.
+- Agent entries (owner, 2026-11-14):
+  - with no config at all, the built-in entry resolves to Claude Code, `haiku`, `config: none`, a 180 s timeout and no
+    budget, and `ask.agent` names it;
+  - a repo file that sets `command`, `args`, `env`, `secrets`, `read`, `tools`, `model`, `config` or `ask.agent` fails
+    the load and names the key. The same file's `budget_usd` and `timeout_s` load, and the repo's `budget_usd` wins
+    over the user's while the user's `timeout_s` wins over the repo's;
+  - `collide config get agents.claude-haiku.timeout_s` names the layer, and so does every other field;
+  - `tools: [write]` fails. A `budget_usd` on an ACP entry fails with "only a timeout applies". An `env` line
+    `OPENAI_API_KEY: sk-test` fails with the hint to use `secrets`;
+  - a `secrets` entry resolves from a fake keychain at launch and appears in no file, argv or log (checked by searching
+    them for a seeded value). A missing item is an error that names the item;
+  - the owner runs `collide config get` on an entry they wrote and reads the layers back, recorded as owner
+    judgement in the stage's task item.
 - A scratch task created with `collide task new` is listed for that board only.
 - Planning:
   - Collide's spike records in `.collide/planning/spikes/` list in `collide tasks --view spikes --json` with their
@@ -2868,6 +3208,8 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
   including a value that fails the safe-token rule.
 - Settings: layering, per-user-only keys, the secret rule against a fake keychain, the pointer file (a `dir:`
   outside the repo is refused), `overridable` keys, profile layering.
+- Agent entries: layering and the per-field source; each refusal above; the secret-name test with names that should
+  and should not match; the timeout range; the seeded-value search over files, argv and logs.
 - Pack sources: resolution for each kind; a `dev:` folder's tree id equals `git write-tree` over the same files;
   the name clash; trust per source.
 - Root busy, against a fixture repo stopped mid-rebase.
@@ -2921,7 +3263,7 @@ removal; draft and PR items; category mapping; mixed-source view test.
 - **Task drawer, read-only:** body, dependencies both ways, collections, per-checkout state.
 - **Board switcher.**
 - **Settings:** each key's effective value and the layer it came from (0.7). Secrets are set into the keychain from
-  here.
+  here. The Agents page is part of it (below).
 - **No-setup open** (0.11): any git repo opens with the built-in packs, a GitHub source when `origin` is on GitHub
   and `gh` is logged in, and the default aliases. Board settings stay per user until Share with team writes
   `.collide/`. First-run checks: `claude` installed and logged in, a git repo (else offer `git init`), `gh` optional.
@@ -2930,6 +3272,25 @@ removal; draft and PR items; category mapping; mixed-source view test.
   the detected sources, and Add a pack.
 - **Planning** (owner, 2026-11-13): a read-only planning view; links both ways in the drawer; checklists shown
   read-only; the branch-only chip.
+- **The in-app agent on the Field** (owner, 2026-11-14; 0.2, 0.3, 0.7, 0.9, 0.11; S6's in-app agent section). It
+  changes nothing in a repo and starts no run, so it belongs to a read-only board:
+  - **The endpoint** in the shell, with its guards, the endpoint token in the keychain, ask tokens and the
+    `ui_tools.*` methods (0.2). The HTTP server is a crate already in Tauri's dependency tree if one fits, and the
+    stage says which it picked. The window answers each JSON-RPC message with the MCP layer and the tools in
+    TypeScript, ported from S6's `exec.ts` and `mcp.ts`.
+  - **The Field's tools:** `query` over tasks, `set_view` and `highlight` and `show_groups` on the Field, and `open`
+    for the Field, Queue and Experiments. Each call is a typed reducer action with a snapshot Undo. Views, lenses,
+    chips, **Save as View** (the chips' CEL, `layout.groupBy` and `layout.sort`) and **Save snapshot** are as 0.11
+    says. A call for Tracks, or for runs, is refused with the supported values listed, until Stage 9.
+  - **The ask box** in the top bar, with one line per call, the chip, Cancel, the failure texts and the "no files were
+    read" flag (0.11). `ask.start`, `ask.cancel` and `ask.test` go to the daemon. The Claude adapter's `ask` launch
+    spec and the ACP engine's ask profile for opencode are built here, on Stage 3's traits, with no new trait (0.3).
+  - **The Agents page** in Settings (0.7): the entries with each field's source, the words for folders and tool kinds
+    and for budget and timeout, **Test this agent**, the endpoint card with Rotate, per-agent last use and spend this
+    week, the snippets for external clients, and the choice of the ask agent.
+  - **The token cost of the strict line is measured here.** The two example asks run under `config: none` and under
+    `config: user`, and the input tokens of each go in the record. S6 measured 28K to 107K under a line that was not
+    strict (0.11).
 
 **Success Criteria**:
 - S6 scenario 2, and scenario 1 up to the board, pass as UI tests ported from S6's pilots against the real app, each
@@ -2944,11 +3305,54 @@ removal; draft and PR items; category mapping; mixed-source view test.
 - The UI's tests run in a browser against a fake owner, with no Tauri.
 - A proposal shared on a branch and checked out as a worktree shows its items with the branch-only chip. The
   planning view's counts match the CLI's.
+- **The in-app agent** (owner, 2026-11-14). The first five need no model and no browser:
+  - S6's 47 agent tests are ported and pass against the real reducer and tool code: each tool's valid call, each
+    refusal (an unknown id applies nothing, an id in two groups, a group with no reason, 13 groups, a bad sort key, an
+    unknown surface or subject, a call for a surface not built yet), Undo restoring exactly the replaced state, a lens
+    that does not change when a task does, a lens saved only as a snapshot, a view saved as a View through the chips'
+    CEL, and the 21st screen-changing call of one ask refused;
+  - the endpoint, tested with a fake window: a wrong token, a foreign `Host`, a foreign `Origin`, a content type that
+    is not JSON and a body over 1 MB are each refused and nothing reaches the window; a closed window and a window
+    that stays silent for 10 s each give the plain text of 0.2; after **Rotate** the old token is refused at once; an
+    ask token stops working when its ask ends; the endpoint token appears in no log, no argv and no `ask` record;
+  - the launch specs, with no process: the Claude `ask` argv equals the line in 0.3 exactly, holds no token and no
+    request text, and has no `--disable-slash-commands`; `config: user` changes only `--setting-sources`;
+    `--max-budget-usd` appears only when the entry sets a budget; `mcp.json` is mode 0600 and gone after the ask. The
+    fake ACP child shows a read inside the readable folders allowed, a read outside them, a read with no path, an
+    edit and a command each refused, `Cancel` when no `allow_once` exists, an agent with no HTTP MCP support refused
+    with the plain text, a timeout that stops the child and says so, and Cancel that ends the ask;
+  - the flag: over fake streams, a `show_groups` ask with no read shows "No files were read in this ask"; with a
+    Read, a Grep or a Glob (Claude) or a `read` or `search` tool call (the fake ACP child), it does not; for an
+    external client it says the reads are not visible;
+  - the Agents page: each field shows its layer, the budget and timeout words are on the page, **Test this agent**
+    against a fake agent reports the endpoint reached, the time to the first tool call and the cost or "not
+    reported", and each failure of the test names its cause. A snippet's URL and token are parsed out and used
+    against the endpoint, and each works; after **Rotate** each shows the new token;
+  - **Real-agent contract test** (opt-in with `COLLIDE_REAL_AGENT=1`, never in the default suite, because it is
+    nondeterministic and costs money; in the style of Stage 3's real-claude contract test). It asks the Field request
+    of 0.11 three times through the real ask path with Claude Code haiku, against S6's fixture repo (24 files) and its
+    12-task epic, copied into the fixtures. A run passes when the groups hold the intended sets (quantities 001 and
+    002; expiry 004, 005 and 006; reports 008, 009 and 010; data file 011 and 012) with no intended set split or
+    mixed, tasks 003 and 007 in either area or left out, and no "no files were read" flag. The test passes when two
+    of three runs pass, and the pass count, time, cost and input tokens of each run go in the stage's task item. S6's
+    runs of this request were one wrong on prompt v1 and two right on v2 (0.11), so this is a re-check on a model or
+    prompt change, not a gate. Three more opt-in checks: the Claude snippet of the Agents page connects a real
+    `claude -p` that calls `query` once; `opencode mcp list` shows the endpoint connected with its snippet, skipped
+    when opencode is not installed; and the strict line's token comparison above;
+  - **Owner walkthrough, recorded as owner judgement** in the stage's task item, alone: ask the Field request on
+    S6's fixture board and read the chip against the code for two groups; Undo; Save snapshot, restart the app and
+    open it; ask "what should I work on next?" and read the lens; on the Agents page add an ACP agent, **Test** it,
+    read each field's source, put a key in the keychain and see that it is in no file, set a budget on the Claude
+    entry and see the words for the ACP one, then rotate the token and connect an external client with a fresh
+    snippet; close the window during an ask and read the error.
 
 **Tests**: Reducers over provider notifications; view save round-trip; the no-setup open and first-run checks; the
 settings view; one
 Playwright smoke run of scenarios 1 and 2.
 Planning: planning-view counts against the CLI; the branch-only chip.
+In-app agent: the ported reducer and tool tests; the endpoint against a fake window, in Rust, with the guards and
+both tokens; the launch specs and the ACP profile over the fake ACP child; the flag over fake streams; the Agents page
+and its test action over a fake agent; the real-agent contract test (opt-in).
 **Status**: Not Started. Items: epic `ep-006-wq` in `.collide/planning/epics/` (part L).
 
 ## Milestone B: Workflows and packs (Orchard drives it)
@@ -3188,6 +3592,16 @@ gets real use here: prompt, run, review, accept.
   - comparing two finished runs;
   - annotations;
   - JSONL/CSV export.
+- **The in-app agent on Tracks** (owner, 2026-11-14; 0.11): the Stage 6 tools learn the surfaces this stage builds.
+  - `query` over runs returns each run's id, task, status, workflow, start, total and wait seconds, spend, and the
+    seconds in each phase. Seconds in a phase are the phase's wall time, the width of its segment, taken from the
+    spans (0.13). A phase with no span has no value.
+  - `set_view` on Tracks takes the run filters, the sorts (total, start, end, spend, wait and `phase:<name>`, where
+    the name is a phase a workflow on the board declares, and a missing value sorts last) and a clock window. An
+    unknown phase name is refused, and the error lists the known ones. `show_groups` draws bands on Tracks with the
+    sort value on each row. `highlight` marks runs, and `open` opens a run, a Queue item or an experiment.
+  - A Tracks view saves as a personal view in the board's settings, with its filter and sort, and not its window
+    (0.11).
 - Command palette. Reattach after the app restarts. Owner logs viewable.
 - **Menu bar** (0.11): the icon, badge, countdown, notifications and actions. Closing the window destroys the webview
   and keeps the app running. The app restarts a daemon that stopped answering, with 0.2's back-off.
@@ -3234,6 +3648,20 @@ gets real use here: prompt, run, review, accept.
 - A fake-adapter phase with `on_cold: fresh`, resumed after the cache TTL, starts a new session whose first prompt is
   the handoff note.
 - Group launch and group accept are graded in Stage 11.
+- **The in-app agent on Tracks** (owner, 2026-11-14):
+  - the Stage 6 reducer and tool tests gain Tracks cases, with no model and no browser: over a fixture of nine
+    finished runs with distinct build seconds, `set_view` sorting by `phase:build` descending gives the known order,
+    and a run with no build span sorts last; a run filter and a clock window select the known runs; a lens draws
+    bands with the sort value on each row; an unknown phase name is refused with the known names listed; a Tracks
+    view saved and reloaded has its filter and sort and no window;
+  - **real-agent contract test** (opt-in with `COLLIDE_REAL_AGENT=1`, never in the default suite, as in Stage 6):
+    the Tracks request of 0.11 ("the tracks that have taken the longest in their build portion") runs three times
+    with Claude Code haiku against that fixture. A run passes when the chip's expression is a sort by `phase:build`
+    descending and the rows show the known order. The test passes at two of three, and the counts, times and costs go
+    in the stage's task item (S6 measured four of four right, 6.0 to 8.3 s, $0.0005 to $0.0023);
+  - **owner walkthrough, recorded as owner judgement** in the stage's task item, alone: on live and finished runs, ask
+    the Tracks request and check the order against the Time breakdown of the top run; ask for the runs that waited
+    longest and read the chip; Undo; on a run with no build span see it last.
 - Planning:
   - a one-agent spike in a private proposal ends with the spike concluded and the proposal's Decision section
     marked `human:<date>`. The decide step writes the record's Decision section, and nothing appears in `git status`;
@@ -3250,7 +3678,8 @@ gets real use here: prompt, run, review, accept.
   - a gate that times out on a drawer write leaves the write unapplied, with the hook's name in the message;
   - an `after_status` hook that fails after a drawer write leaves the write in place and adds a Queue item.
 
-**Tests**: Reducer tests for Tracks and Queue against fake-adapter streams; keyboard triage tests; critical-path
+**Tests**: Reducer tests for Tracks and Queue against fake-adapter streams; the in-app agent's Tracks tools over the
+nine-run fixture and the real-agent contract test (opt-in); keyboard triage tests; critical-path
 fixtures; export round-trip; detector fixtures; the output pane on hostile output (HTML, ANSI, links, a 10 MB
 result); the breakdown's filters (a ≥2 s filter and a clock window, counted against a fixture) and wall-clock against
 summed time with parallel calls; a call that starts before the window counted, with only its in-window time in the
@@ -3316,6 +3745,9 @@ recorded in a spike folder under `.collide/planning/spikes/`.
   - a dependent starts once its dependencies are done at the base ref (integrated), not merely started;
   - a cycle is an error.
 - Review and accept per run as in Stage 9, for every run of a group.
+- **A group from a lens** (owner, 2026-11-14; 0.11). Grouping tasks to run together is an option, and the in-app agent
+  proposes the groups. A group on the Field's lens selects its tasks and opens the group-run preview above. The agent
+  has no tool for it: a person presses Launch, and the lens stays as the agent made it.
 - Syncing (0.4): how far each workspace's base is behind its line's ref (the conflict check before `integrate`
   ships in Stage 9); a pack's `sync` implementation, run as a `script` phase or before `integrate`.
 - The two integrate implementations:
@@ -3341,6 +3773,11 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 - Accepting into the board root during a rebase waits, and the Queue says why.
 - Re-prompting a run reuses no other run's workspace name or iter label run.
 - A task from an untrusted author asks for confirmation.
+- A lens group of three tasks, made by a fake agent, selects exactly those three on the Field. Launch opens the
+  group-run preview for them, and nothing starts until the person confirms. The preview names a task in the group
+  that is not `ready`, as it does for any selection. The tool list of 0.11 has no tool that launches (a test counts
+  the five names). The owner asks the Field request on the fixture board and launches one group the agent found,
+  recorded as owner judgement in the stage's task item.
 - A failing gate on `run.before_integrate` blocks accept, and the Queue says why.
 - S6 scenarios 3 and 5 pass as UI tests ported from S6's pilots, in the real app at full scope (group launch,
   accept), and the owner's walkthrough is recorded as owner judgement in the stage's task item.
@@ -3351,8 +3788,9 @@ recorded in a spike folder under `.collide/planning/spikes/`.
     `unverified`;
   - the preview's estimate shows instances, merge and verify separately.
 
-**Tests**: Order, readiness and cycle tests; conflict-to-Queue test; implementation resolution per workflow; the
-merge-tree conflict check; both integrate implementations against fixtures; untrusted-author gate.
+**Tests**: Order, readiness and cycle tests; conflict-to-Queue test; implementation resolution per workflow; the lens
+group to preview path; the merge-tree conflict check; both integrate implementations against fixtures;
+untrusted-author gate.
 Planning: the merge cases, one per row of the merge table; verify verdicts; `wait` on linked questions.
 **Status**: Not Started
 
@@ -3597,10 +4035,11 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 
 ## Deferred (with the trigger that brings each back)
 
-- **Other agent tools and model sources** (a real ACP agent, Codex, OpenAI, Ollama): after Stage 10. S7 checked the
-  traits against ACP, and Stage 3 builds the ACP engine against a fake child. The first real agent is opencode: a
-  profile in `host` and a probe of what it supports, so a capability that cannot be known is `Unknown`. Aliases
-  and capabilities exist from Stage 3. With other endpoints, repeated
+- **Other agent tools and model sources for runs** (a real ACP agent, Codex, OpenAI, Ollama): after Stage 10. S7
+  checked the traits against ACP, and Stage 3 builds the ACP engine against a fake child. The first real agent is
+  opencode: a profile in `host` and a probe of what it supports, so a capability that cannot be known is `Unknown`.
+  The ask box already uses opencode from Stage 6, with a read-only profile (0.3), and a run profile is still this
+  item. Aliases and capabilities exist from Stage 3. With other endpoints, repeated
   endpoint failures pause the runs that use it, like a usage limit, rather than failing each phase in turn (Ferry's
   circuit breaker).
 - **Per-process GPU time:** with the first local-model adapter (owner, 2026-11-13). S8 measured what macOS gives,
@@ -3612,7 +4051,8 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   `ready`: when measured provisioning wait becomes the bottleneck. Acting needs an authenticated way in, which v0
   deliberately does not give scripts.
 - **A local REST API** for external tools (CI, chat bots, team dashboards) to read or control Collide: when one
-  needs it (owner, 2026-11-13: not now). Until then, `collide … --json` is the query interface.
+  needs it (owner, 2026-11-13: not now). Until then, `collide … --json` is the query interface. The UI-tools endpoint
+  (0.2) is not that API: it changes the open window's view and reads what the window holds, and it cannot act.
 - **More task operations:** GitHub `create` and `setFields`, and plan notes: when a user needs them in the UI. They
   are not needed in Milestone A.
 - **Moving a scratch task into a source** (GitHub `create`, plan `create`): when a user wants a scratch task tracked
@@ -3622,10 +4062,11 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   - Advisory gate checks on observed changes come first. A pack's `before_*` gates run as checks on the machine that
     sees the change, and report "gate X would refuse". It needs `via` and the `task.changed` shape, not a new point.
   - Run-made writes are covered in 0.4 (S11).
-- **Read access to the corpus for hooks and agents** (owner, 2026-11-13; part K): a read-only
+- **Read access to the corpus for hooks and run agents** (owner, 2026-11-13; part K): a read-only
   `collide tasks --where '<CEL>' --json` that hooks may call under a per-call read capability, or a read-only MCP
-  server for agents. When a gate needs links two hops out, or an agent needs planning state its backend's own CLI
-  cannot give. Until then hooks get `tasks[].links` one hop out (0.5), and agents use the backend's CLI.
+  server for run agents. When a gate needs links two hops out, or an agent needs planning state its backend's own CLI
+  cannot give. Until then hooks get `tasks[].links` one hop out (0.5), and run agents use the backend's CLI. The ask
+  agent is separate: its `query` tool (0.11) reads the window's tasks and runs.
 - **A GitHub App identity for agents** (owner, 2026-11-13; part K): agents write through an App installation token,
   so GitHub shows the change as the App's and attribution is exact. When the attributed matching (0.4) gets it wrong
   in practice, or a team wants agents' writes marked on GitHub.
@@ -3633,6 +4074,25 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   request, asks why, and leaves the live run untouched, with its cost shown before it is sent. Whether a session
   waiting on a permission can be forked is unverified. When S6's scenario 9 or real use shows the context view is not
   enough to decide.
+- **Tools that act** (launch, accept, edit, delete; owner, 2026-11-14): when the owner has launched groups from a
+  lens by hand in real use (Stage 11) and wants the agent to do the last step. The token the endpoint needs exists
+  from Stage 6, so the older condition is met. The first such tool would not launch: it would open the run preview
+  with the selection filled in, so a person still presses Launch. Accept, edit and delete each need their own design
+  and a confirmation that the agent cannot answer (0.9).
+- **Pack-supplied agent entries and a profile per kind of work** (S6's list for a real Settings page): when a pack
+  author wants to ship a recommended ask agent, or the owner wants one agent for asks and another for plans. In v0
+  agent entries come from the built-in default and the user's file (0.7).
+- **Settings changes with a diff before save and an undo** (S6): when a bad agent entry costs the owner a wasted ask
+  or a lost key twice. In v0 a save is validated and the page shows each field's layer.
+- **What S6 left unmeasured about the ask agent**, each run before the case is named supported:
+  - a hosted opencode model, since its own default timed out at 90 s and no reason was found;
+  - a second local model, and three runs per request on opencode instead of one;
+  - the ACP permission path under a real write attempt, and under a read that reports no path (0.3);
+  - a window that is in the background and may throttle its answer;
+  - a lens whose first group is shown before the rest, to cut the 15 to 22 s;
+  - another MCP client through the endpoint's token forms, such as goose or Codex.
+
+  The trigger for each is the owner naming that agent or case for daily use.
 - **Packs from package managers** (npm: the tarball fetched by Collide over the registry API, never `npm install`,
   integrity-checked, only its `collide-pack/` folder used, hashed to a tree id) and **a pack index** (a git repo
   that maps names to git URLs): npm when a pack author asks for semver ranges or a team for a private registry; the
@@ -3711,6 +4171,20 @@ what changed in time, resources and outcome, and nothing outside the experiment 
      adapter.
 
    Decided (owner, 2026-11-14): (b). Stage 13's test uses a fixture pack that declares a local model (0.13).
+9. **The in-app agent's four open questions** (S6, revision 12). The prototype left these open:
+   - which agent the ask box uses by default;
+   - whether the UI-tools endpoint needs a token before any tool can act, or only once a tool launches;
+   - whether Collide launches Claude Code for an ask with the user's own config or with the strict line a run gets;
+   - whether a per-ask budget is a promise of the product, given that only Claude Code can enforce one.
+
+   Decided (owner, 2026-11-14), applied in 0.2, 0.3 and 0.7:
+   - (a) Claude Code with haiku. ACP agents and External MCP clients are set up on the Agents page;
+   - (b) a per-session token from day one, in a header or the URL, shown in the External snippets and rotatable from
+     Settings, in the spirit of the socket's per-client token;
+   - (c) the strict line, with settings from Collide's snapshot and not the user's CLAUDE.md, hooks or memory, and a
+     per-agent opt-in "use my Claude config";
+   - (d) a budget that is optional and off by default, enforceable for Claude Code only, with a timeout for every
+     agent. The Agents page says plainly that ACP and External agents get a timeout only.
 
 ## Risks
 
@@ -3762,6 +4236,25 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **Experiment cost.** Each arm provisions several worktrees: an experiment root, a task workspace and sandboxes. A
   orchard arm can spend tens of minutes and several GB of disk before an agent starts. A verdict needs at least 8
   crossover pairs, which for an Orchard loop means days. Effect sizes and `collide bench` are the cheaper paths.
+- **The in-app agent's judgement can be wrong** (owner, 2026-11-14). A lens can put tasks that touch different code
+  in one group, and a person could launch that group. S6's haiku was right in 6 of 7 runs that have a reference
+  answer, and the seventh was repaired by a prompt change, so the prompt may be tuned to one demo (inferred).
+  Mitigations (0.9, 0.11):
+  - the chip says what changed in Collide's words, and the agent's words are marked as its own;
+  - a `show_groups` chip carries "No files were read" when the ask read nothing;
+  - Undo restores the screen, and a lens is a timestamped snapshot, never a View, so it cannot pass as a fact;
+  - invented ids are rejected, never repaired;
+  - the agent has no tool that launches, and a person presses Launch (Stage 11);
+  - the opt-in real-agent contract tests re-run on any change of model or prompt, and record their pass counts.
+- **The UI-tools endpoint is a new local door** (owner, 2026-11-14). Any process that holds a token can change what
+  the window shows. Mitigations: 127.0.0.1 only, Host and Origin checks, a token from day one (the endpoint token in
+  the keychain and rotatable, an ask token per ask), no tool that acts, and tokens never in argv or the environment
+  (0.2). An ACP ask agent's own tools are limited only by Collide's permission answers, and its own configuration is
+  its promise (0.3), so a hostile task text could steer such an agent further than a Claude Code ask, which has only
+  three read tools.
+- **An ask's token load and wait.** S6's asks loaded 28K to 107K input tokens on a launch that was not strict, and
+  a lens takes 15 to 22 s (measured). The strict line, the budget (Claude only) and the timeout bound the cost, and
+  Stage 6 measures the strict line.
 - **Scope:** each milestone ends usable on the Orchard repo.
 
 ---
@@ -4312,3 +4805,64 @@ landed and, for each rejection or deferral, the reason or trigger.
 - **Owner's decision after the draft:** the device GPU is polled only when a local model is declared (S8 rec 5;
   0.13, Stage 13, Open questions item 8).
 - **Deferred:** S8's sleep mid-run test and a run measured from its start, before Stage 13 starts.
+
+**Revision 12, 2026-11-14 (S6's in-app agent; owner).** The in-app agent section of
+`sp-0009-bb-interface-prototype` is applied with the owner's design and the owner's decisions of 2026-11-14 (the section
+"Owner's decisions (2026-11-14)" in that record repeats the four decisions).
+- **Changed:** the status line and the revision summary; the intro (the ask box takes more than Claude Code); 0.2 (the
+  token bullet, the UI-tools endpoint); 0.3 (the ask agent as a role, its launch line, the ACP profile, budget and
+  timeout, and the later-adapters note); 0.7 (the repo file's per-user keys, agent entries); 0.9 (an agent's tool
+  inputs); 0.11 (the ask box, tools, views and lenses, chips, the flag, what S6 measured, and one sentence on talking
+  to an agent); 0.15 and Stage 2's reducer sentence; Stage 1 (S6's addendum and S7's unmeasured list); Stage 2
+  (contracts and criteria); Stage 3 (the ACP sentence); Stages 4, 6, 9 and 11; Deferred; Open questions (item 9);
+  Risks.
+- **Owner's design** (applied): an agent in the UI that changes the UI through tool calls; generic tools and a UI that
+  knows no code files; the agent does its analysis with read-only tools; bring your own agent (Claude Code, an ACP
+  agent, an external MCP client) from a Settings page; grouping tasks to run together is an option, and sorting and
+  filtering Tracks by seconds in a phase. 0.11 holds the design, 0.7 the settings, Stages 6, 9 and 11 the work. Not cut
+  on any reviewer-style ground.
+- **Owner's decisions 1 to 4** (applied):
+  1. The ask box's default agent is Claude Code with haiku; ACP agents and External clients are selectable on the
+     Agents page (0.3, 0.7). An External entry cannot be the ask agent, because Collide launches nothing for it. It is
+     there for its snippets and its last-seen record.
+  2. A token from day one (0.2, 0.7): the endpoint token for external clients, shown and rotated in Settings, and an
+     ask token per ask for what Collide launches.
+  3. The strict launch line with a per-agent opt-in "use my Claude config" (0.3). The default is `config: none`.
+  4. A per-ask budget, optional and off by default, Claude only, and a timeout for every agent (0.3, 0.7).
+- **S6's proposed plan changes** (record, "Proposed plan changes"):
+  1. Typed reducer actions with a snapshot Undo: applied (0.11, 0.15, Stage 2, Stage 6).
+  2. Views and lenses kept apart: applied (0.11, Stages 6 and 9).
+  3. The "no files were read" flag: applied, computed by Collide from the ask's stream and not by the prompt (0.11,
+     Stage 6).
+  4. Reject invented ids and let the chip state what changed: applied (0.9, 0.11).
+  5. A per-session token: the owner's decision 2.
+  6. The budget as a promise: the owner's decision 4.
+  7. A test action and the layers as acceptance: applied (0.7, Stages 4 and 6).
+- **S6's list for a real Settings page:** layers and a visible source (applied, 0.7, Stage 4); secrets by name from the
+  keychain (applied); permissions as data, in words (applied); connection state, the test action, last use and spend
+  this week (applied, 0.7, Stage 6); endpoint security (applied, 0.2); External snippets and a record of which clients
+  connected (applied, 0.7). Packs and profiles bringing agent entries, and a diff before save with an undo of
+  settings changes: deferred with triggers (Deferred).
+- **Changed from the prototype:**
+  - the endpoint moves from a Vite plugin and an HMR websocket to the app process (0.2);
+  - the ask line drops `--disable-slash-commands`, which 0.3 never passes (S9: 22.0K), and the per-ask budget of $0.25
+    becomes off by default;
+  - the token no longer travels in argv: Claude reads a file of mode 0600, and an ACP agent gets it in `session/new`;
+  - the prototype's one flat file becomes layered settings, and its single folder becomes `read` and `tools` as data
+    (0.7). Arguments are a list, not a string;
+  - `config: none` is the ask default, where a run's default is `config: user`. The owner's words (settings from the
+    snapshot, not the user's CLAUDE.md, hooks or memory) describe `config: none` (0.3).
+- **Rejected:** none. The owner's design and decisions are applied as given.
+- **Deferred** (Deferred): tools that act, with the trigger that a person has launched lens groups by hand; agent
+  entries supplied by packs, and a profile per kind of work; settings diff and undo; and what S6 left unmeasured (a
+  hosted opencode model, a second local model, the ACP permission path under a real write, a background window, a
+  lens that shows its first group early, other MCP clients).
+- **For R5 to check:**
+  - the endpoint in the shell with the MCP layer in the window, against the alternatives in 0.2, and the three
+    `ui_tools.*` methods that the shell handles itself and does not forward;
+  - the two kinds of token, and the endpoint token reaching the webview on a user's Reveal;
+  - the ACP read rule that fails closed on a request that reports no path;
+  - the repo file's two allowed agent keys, and `timeout_s` as `overridable`.
+- **For the owner to confirm:** a Tracks view saved as a personal view (0.10 has views of tasks only), and a view
+  schema that gains `layout.sort`; the cap of 20 screen-changing calls per ask; the default timeout of 180 s, the
+  value S6 used; and the choice of `config: none` as the ask default.

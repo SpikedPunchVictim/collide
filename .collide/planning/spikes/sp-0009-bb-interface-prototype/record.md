@@ -474,6 +474,19 @@ The prototype has one flat list in one git-ignored file. A real one needs:
    timeout.
 7. Add a settings test action and the layers above to the settings stage, as acceptance, not as later polish.
 
+### Owner's decisions (2026-11-14)
+
+The owner answered the open questions of the in-app agent, and the plan's revision 12 applies them. (1) The ask box's
+default agent is Claude Code with haiku; ACP agents are selectable on the Agents settings page, and External MCP
+clients are set up there too (they connect on their own, so the ask box cannot launch one). (2) The UI-tools MCP
+endpoint requires a per-session token from day one, in the URL or a header, shown in the External snippets and
+rotatable from Settings. (3) When Collide launches Claude Code for the ask box it uses a strict launch line
+(Collide's own settings, not the user's CLAUDE.md, hooks or memory, which is stricter than a run's default;
+`--strict-mcp-config`; `--tools Read,Grep,Glob`; `--no-session-persistence`), with a per-agent opt-in "use my Claude
+config"; the prototype did none of this, and each ask loaded 28k to 107k input tokens [U whether that is the user
+config]. (4) A per-ask budget is optional and off by default, enforceable only for Claude Code (`--max-budget-usd`);
+every agent gets a timeout, and the Agents page says plainly that ACP and External agents get a timeout only.
+
 ## Reproduction
 
 ```sh
