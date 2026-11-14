@@ -12,11 +12,12 @@ links:
 
 ## Goal
 
-`core` traits (`AgentAdapter` with S7's changes, `HookRunner`, `TaskProvider`), domain types, state enums, the workflow engine and implementation resolution as signatures with doc comments and tagged stubs; `host` outlines for the Claude adapter, daemon, shim, store, hook executor, provider supervisor, sampler and CLI.
+`core` traits (`AgentAdapter` and `AgentSession` in the two-trait shape of 0.3 with S7's changes P1–P9, `HookRunner`, `TaskProvider`), domain types, state enums, the workflow engine and implementation resolution as signatures with doc comments and tagged stubs; `host` outlines for the Claude adapter, the ACP engine and its per-agent profile, daemon, shim, store, hook executor, provider supervisor, sampler and CLI.
 
 ## Success criteria
 
 - Every stub carries a tag that belongs to a stage.
+- `AgentSession` is sans-IO: its methods take bytes and events and return events, with no I/O in `core`.
 - `cargo build` and `cargo clippy` pass.
 
 ## Tests

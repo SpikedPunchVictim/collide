@@ -6,8 +6,38 @@ model sources (OpenAI, Ollama, …) addable without core changes.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 10, frozen until the next spikes.** S5 and S7 are running, then S6 and S8 (owner, 2026-11-13);
-S2, S9 and S11 are applied. Their decision records and the owner's decisions may change this plan; nothing else does until then.
+**Status: revision 11, frozen until R5.** S1–S9 and S11 are applied; S10 runs when the group-runs stage starts. An
+adversarial review, R5, comes next, and no product code is written before it. R5's findings and the owner's decisions
+on them may change this plan; nothing else does until then.
+
+Revision 11 (2026-11-14) applies spikes S5–S8 (`.collide/planning/spikes/`) and the owner's decisions on them:
+- Schemas: Rust types → `schemars` → JSON Schema → `json-schema-to-typescript`, a Node build step. YAML is read by
+  `serde-saphyr` 2.x with a hardened option set in Rust, and by the `yaml` package in core mode in TypeScript. Tagged
+  enums use `Wait {}`, not a unit variant (0.6, 0.7, 0.9, 0.15; S5).
+- Expressions: the `cel` crate has no cost limit. Collide vendors 0.15 with a step counter and offers it upstream,
+  and adds per-task and per-pass budgets, a 1 KB source cap, list caps at load, `catch_unwind` around compile, no
+  corpus variable in views and a static cost estimate when a view is saved or loaded (0.9, 0.10, 0.15; S5).
+- `AgentAdapter` is two traits: a stateless adapter and a sans-IO `AgentSession` per child. The session id is an
+  event, permission answers are Allow, Deny or Cancel, usage says how complete it is, capabilities are Yes, No or
+  Unknown, and an empty turn is a failed phase. `model.id` is opaque beside `model.name`. An ACP adapter is an engine
+  plus a profile in `host`, with no `fs`, `terminal` or `elicitation` client capability in v0 (0.2, 0.3, 0.11, 0.13,
+  Deferred, Stage 2, Stage 3; S7).
+- S6's sessions were skipped, because the owner has no participant who did not design Collide. Every criterion that
+  named a non-owner participant now asks for S6's scripted pilots ported to UI tests against the real app, plus an
+  owner walkthrough recorded as owner judgement. S6's time and error limits stay recorded and are advisory. The
+  open questions take their defaults (run identity `id`, Queue keys `literal`, `o` opens the `moment`, the line
+  switcher in the `top` bar), and "review ×2" means two reviewers in parallel. Waits are spans, a breakdown gives
+  three time totals, the context view is a data contract, colour never identifies a run, the Queue has one keys
+  table with undo, and an experiment result states its scope (0.11, 0.13, Stage 1, Stages 2, 6, 9, 11, 15; S6).
+- Metrics sources: sampling at 1 s, a run's lane containers always counted through the Docker API, a streamed
+  `nettop`, the GPU polled at 5 s only when a local model is declared, a 2 s sleep threshold, about 34 bytes per
+  sample row, report-file caps, telemetry traces for headless phases that need exact timing, and three breakdown
+  choices. The sleep test and a run measured from its start are deferred until before Stage 13 (0.5, 0.11, 0.13,
+  Deferred, Stage 13; S8).
+- Not taken: S5's id rule `^[a-z]{2,}-[0-9a-z]{4,}$`, replaced by the owner's id rule of 2026-11-13 (0.10), and S6's
+  usability gate with a first-time user. The owner chose S8's GPU rule over revision 10's: the device is polled
+  only when a local model is declared (Open questions, item 8). The ledger of every recommendation is at the end of
+  the item `ts-0005-st` in `.collide/planning/epics/ep-001-ef-spikes/tasks/`.
 
 Revision 10 (2026-11-13) applies spikes S1–S4 and S9 (`.collide/planning/spikes/`), two research notes
 (`docs/research/`) and the owner's decisions on them:
@@ -165,7 +195,8 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
 ```
 
 - Children never talk to the owner over pipes. They write stdout, stderr and stream-json to files that the owner
-  tails, so an owner restart loses nothing. Recovery is reattach by pid, or `claude --resume <session-id>`.
+  tails, so an owner restart loses nothing. Recovery is reattach by pid, or the adapter's resume
+  (`claude --resume <session-id>`).
 - **The owner is `collide-daemon`, with a per-child shim** (S3; owner, 2026-11-13).
   - The shim is the `collide shim` mode of the same binary. For one child it:
     - calls setsid;
@@ -173,6 +204,8 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     - holds the child's stdin pipe, and for an interactive session the PTY master, across a daemon restart
       (measured S2: a `claude -p` turn and a PTY take-over both went on across a daemon SIGKILL and restart, with no
       gap in input or output);
+    - logs the bytes written to that stdin, as it logs stdout, because an ACP session is rebuilt by replaying both
+      (S7; 0.3). The log of host-to-agent bytes is new, and no measurement covers it;
     - for a PTY, keeps the last 1 MiB of output and replays it on attach, atomically with subscribing, so a view
       opened after an app restart shows the session so far (measured S2);
     - reaps the child with `libc::wait4`;
@@ -258,8 +291,8 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
 - The socket requires a per-client token. The token is never put in an agent's or hook's environment. Agents need
   no access to Collide in v0 (no MCP server; see 0.3).
 - Crates: `core` (domain, state machines, workflow engine, pack model, implementation resolution; traits `AgentAdapter`,
-  `HookRunner`, `TaskProvider` only; no Tauri, SQLite or process types) and `host` (implementations, store,
-  `collide-daemon` and `collide` binaries; the shim is `collide shim`). `app/src-tauri` stays thin.
+  `AgentSession`, `HookRunner`, `TaskProvider` only; no Tauri, SQLite or process types) and `host` (implementations,
+  store, `collide-daemon` and `collide` binaries; the shim is `collide shim`). `app/src-tauri` stays thin.
   `packages/pack-sdk` is the TypeScript SDK.
 
 ### 0.3 Agents and model sources
@@ -273,16 +306,71 @@ Two separate ideas:
 
 Collide never calls a model API itself. Judgment steps are agent phases.
 
-- `AgentAdapter` (core trait) turns a role + phase into a launch spec, parses the tool's stream into normalized
-  events (message, tool call, permission request, usage, final report), answers permission requests, and declares
-  **capabilities**: `headless_stream`, `permission_host`, `session_resume`, `background`, `budget_cap`,
-  `agent_definitions`, `usage_report`. A role may `require` capabilities; Collide refuses to start a phase on a
-  tool that lacks one rather than silently losing it.
+- **Two core traits** (S7, `sp-0006-kq-agentadapter-acp`; owner, 2026-11-14). A one-shot command line whose stdout
+  describes itself is Claude's shape. ACP is a stateful JSON-RPC conversation: the host sends `initialize`,
+  `session/new` and `session/prompt`, matches request ids and replies to the agent's requests. A parser alone cannot
+  do that, so there are two traits, and neither names a process, Tauri or SQLite type:
+  - `AgentAdapter` is stateless, one per tool. It declares its **capabilities**, turns a role and phase into a
+    launch spec (argv, env, working directory, the variables to strip), builds a session, lists the tool's config
+    paths in a repo and names an interactive command for take-over.
+  - `AgentSession` is one per child, a sans-IO state machine with `start`, `feed` (one line of the child's stdout and
+    the time it arrived), `send_turn`, `answer`, `cancel` and `finish` (the exit info, returning the phase outcome).
+    Each call returns events and the bytes to write. The same input gives the same output, so a daemon restart
+    rebuilds a session by feeding it the child's logged stdout and stdin (0.2). A Claude session is nearly empty: the
+    launch line carries the first turn and `feed` is the S1 parser. An ACP session holds its handshake, request ids
+    and pending permission requests.
+  - **Normalized events:** message, tool call, permission request, `SessionBound`, `Usage`, `TurnEnd`,
+    `FinalReport` and `Other`.
+  - **A session starts as `Assign(uuid)`, `AgentAssigned` or `Resume(id)`.** Claude supports the first and last; ACP
+    the last two. The id is recorded on `SessionBound`: at once for Claude, on the `session/new` response for ACP. If
+    the daemon dies between the spawn and `SessionBound`, the id is lost, and recovery lists sessions by working
+    directory when the agent offers that, or fails the phase as `lost`.
+  - **Permissions.** A request carries its tool call, `kind`, `input: Option` (opencode sends `rawInput: {}` for a
+    Bash call, so the command is unknown until the host answers; measured S7), why it was asked and the agent's own
+    options. An answer is `Allow`, `Deny { message: Option }` or `Cancel`.
+    - Claude maps `Allow` and `Deny` to `behavior`, with the message. ACP maps them to the options of kind
+      `allow_once` and `reject_once`, drops the message and, when no `allow_once` exists, answers `Cancel` and
+      reports a `PermissionUnanswerable` event.
+    - **No adapter picks an "always" option.** The agent owns the scope and storage of those, and they would write
+      rules into its own config.
+    - A request whose input is unknown shows in the Queue as "input not available until approved" and is never
+      auto-allowed by a pack rule that reads the input (0.11).
+  - **Usage** is an event with a scope (`Turn`, `Step` or `RunningTotal`), every number an `Option`, a cost with
+    its currency, and a `quality`: `Exact`, `Partial` or `Unreported`. A total built from partial figures is shown
+    as "at least" and never summed with exact ones (0.13).
+  - **A turn ends with** `TurnEnd { reason, cancel_requested, empty }`. `reason` is `EndTurn`, `MaxTokens`,
+    `MaxTurns`, `Refusal`, `Cancelled` or `Error { status }`. `empty` is true when the turn gave no message, no tool
+    call and zero or unreported usage. `FinalReport` carries `source`: `ResultField` (Claude) or `Reconstructed` (ACP:
+    the message chunks after the last tool call).
+  - **Capabilities.** Each is `Yes`, `No` or `Unknown` (a profile for an ACP agent that has not been probed). A role
+    may `require` capabilities, and Collide refuses to start a phase on a tool whose adapter says `No` or `Unknown`
+    for one, rather than silently losing it:
+
+    | capability | meaning |
+    |---|---|
+    | `headless_stream` | the host reads a stream the tool writes without a terminal |
+    | `permission_host` | the host answers permission requests. Sub-flags `deny_message`, `input_at_request`, `request_reason` |
+    | `session_resume` | `none`, `replay` or `silent` |
+    | `background` | the tool can run detached. Claude has it; ACP does not |
+    | `budget_native` | the tool enforces a budget itself (Claude). Any adapter with `usage_report.cost` can have the budget enforced by the core instead (below) |
+    | `system_prompt` | `none`, `append` or `override` |
+    | `tool_allowlist` | the tool takes a list of the tools an agent may use |
+    | `named_agent` | the tool takes a named agent definition (Claude's `--agents`) |
+    | `usage_report` | what usage gives: `granularity` (`turn`, `step`, `running_total`), `cost`, `cache_write_tiers`, `context`, `quality` |
+    | `limit_signal` | a structured usage limit with its reset time. Claude has it; ACP does not |
+    | `compaction_events` | the tool reports compactions. Claude does; ACP only if the agent sends the update |
+    | `hook_events` | hook outcomes appear in the stream. Claude has it; ACP does not |
+    | `refusal_source` | a refused call says who refused it. Claude has it; ACP does not |
+    | `strict_config` | the tool can run with nothing from the worktree or the user's agent config (Claude: the snapshot line; ACP: per profile) |
+    | `context_options` | which of `compact_at`, `bash_output_max` and `mcp_output_max` it supports (Claude: all three) |
+    | `model_select` | `launch` (Claude), `session` (ACP) or `none` |
+    | `take_over` | it can name an interactive command for a session |
+    | `mcp_servers` | `stdio`, `http`, `sse` |
 - **v0 ships one adapter, Claude.** The launch line, measured by S1 on 2.1.323:
 
   ```
   claude -p --input-format stream-json --output-format stream-json --verbose --include-hook-events
-    --session-id <uuid>                       # a resumed phase passes --resume <uuid> instead
+    --session-id <uuid>                       # `Assign`; a resumed phase passes --resume <uuid> instead
     --permission-prompts host --permission-prompt-tool stdio
     --model <model.name> --max-budget-usd <budget left for this phase>
     --agents <snapshot>/agents.json --agent collide-<pack>-<role>
@@ -308,6 +396,9 @@ Collide never calls a model API itself. Judgment steps are agent phases.
     to `ask_human` with cause budget (measured S1).
   - Cost (`total_cost_usd`) adds up per session, across `--resume`. So the adapter passes the remaining budget on
     each resume, and a phase's cost is the last total its session reported (measured S1).
+  - **A budget is native or host-enforced** (S7). Claude's flag above is `budget_native`. For an adapter whose
+    `usage_report` has cost, the core sends `cancel` when the running cost passes the budget, and may overshoot as
+    Claude's cap does. A role with a budget requires one of the two, and is refused on a tool with neither.
   - **Disallowed tools.** The headless default tool set includes scheduling, worktree and messaging tools
     (`CronCreate`, `ScheduleWakeup`, `RemoteTrigger`, `PushNotification`, `EnterWorktree`, `ExitWorktree`,
     `Workflow`, `SendMessage`; measured S1). They start work the owner cannot see, or move the session out of its
@@ -320,11 +411,17 @@ Collide never calls a model API itself. Judgment steps are agent phases.
     `is_error`. A `result/success` with `is_error: true` is an API failure, not a report (measured S1: one with
     `api_error_status: 429`). A 429 is handled as a usage limit (Usage and rate limits, below); any other status
     fails the phase, with the status;
+  - **an adapter whose protocol has no failure flag (ACP) fails an empty turn.** A turn that ends `end_turn` with no
+    output and no usage is a failed phase, cause `empty_turn`, and the record keeps the agent's stderr tail as the
+    evidence. Measured S7: a model Ollama lacked gave `end_turn`, zero usage and no message, and its error text
+    appeared only on stderr. A turn that ends `refusal` or `max_tokens` fails the phase with that cause;
   - an error `result` still carries its spend, and the spend counts (measured S1: a budget error with
     `total_cost_usd` 0.00353);
   - a phase settles once the child has exited and its stdout has reached its end, in either order, so the last
     lines, usually the `result`, are never dropped (inferred: Ferry's platform supervisor settles on exit, which can
-    lose them);
+    lose them). That rule decides when reading stops, not whether the phase succeeded. An ACP phase's outcome is its
+    prompt response, and a child that exits before one is `lost` (measured S7: closing stdin with a permission
+    request pending made opencode exit 0 with no response);
   - **refused tool calls and hook outcomes** (measured: S9's addendum, Bash on haiku only). The `result` looks the
     same whether a call ran, a hook denied it or the host did, so:
     - a refused call is classified from the `user` event's `tool_result_meta`, joined on `tool_use_id`, never from
@@ -349,13 +446,18 @@ Collide never calls a model API itself. Judgment steps are agent phases.
     run still ends `result/success` with exit 0. The shim holds stdin across an owner restart (0.2), and a
     `permission stream closed` denial fails the phase;
   - stopping a phase sends `interrupt`, then closes stdin, then follows 0.5. SIGTERM alone ends `claude` with exit
-    143 and no result.
+    143 and no result. An ACP session sends `session/cancel`, waits for the prompt response, closes stdin, then
+    follows 0.5. The session reports `Cancelled` itself, because opencode answered a cancel with `end_turn`, not
+    `cancelled` (measured S7).
 - **Who picks what:**
   - A role's `agent:` picks the tool.
   - A pack's `model:` names an alias (`fast`, `strong`). Each user maps aliases to a model and source *for that
     tool* in `~/.config/collide/models.yaml`. An alias never switches the tool.
   - Each mapping also names `model.name` (`opus`, `sonnet`). Collide requires only a safe token (0.5), because the
-    name reaches env values, paths and arguments. A pack whose labels need a narrower form
+    name reaches env values, paths and arguments. It may also name an opaque `model.id`, which only the adapter
+    reads and which never reaches env, paths or argv: ACP model ids such as `ollama/qwen2.5:7b` fail the safe token.
+    For Claude, `model.id` is `model.name`. For ACP it is the agent's `modelId`, checked after `session/new` against
+    the list the agent advertises. A pack whose labels need a narrower form
     declares it in `requires.modelName`. Orchard's pack declares `^[a-z]+$`, because its iter labels end in
     `[a-z]+`. Launch refuses a mapping that fails a pack's pattern, and names the pattern.
   - A fan-out whose aliases resolve to the same model is refused at launch, rather than silently losing its second
@@ -445,6 +547,8 @@ Collide never calls a model API itself. Judgment steps are agent phases.
       block (measured S9 without `--include-hook-events`; with it, unmeasured).
     - Experiment arms use `config: none` (S1).
 - **Usage and rate limits.** Parallel runs share one account, so a limit is normal in the first week.
+  - A `limited` event exists only for an adapter with `limit_signal`. For any other, the phase fails with the agent's
+    message, and a role may require `limit_signal` to get the pause and resume below.
   - The adapter turns the tool's limit signal into a `limited` event with the reset time. For Claude that is a
     `rate_limit_event` whose `rate_limit_info.status` is `rejected`, with `resetsAt` in epoch seconds, or an
     assistant message with `error: "rate_limit"`. No text parsing is needed. Read from the binary's schemas and
@@ -469,9 +573,18 @@ Collide never calls a model API itself. Judgment steps are agent phases.
     claude's own JSON usage, and a short run flushed before it exited (measured S2). That usage counts as measured.
     A phase whose sessions reported this way has its `usage` lines shown but not added, so nothing counts twice.
     Passing the settings into a container is the pack's job (unmeasured).
-- Later adapters: an ACP adapter (one implementation for every ACP-speaking tool), then Codex. S7 maps
-  `AgentAdapter` onto ACP before the skeleton (Stage 2) outlines the trait, so it is not shaped by Claude alone.
-  Local-model capacity (GPU memory) becomes a scheduler resource token with the first non-Claude adapter.
+- Later adapters: an ACP adapter, opencode first, then Codex. S7 mapped `AgentAdapter` onto ACP before the skeleton
+  outlined the traits, so they are not shaped by Claude alone.
+  - **An ACP adapter is one engine plus a profile per agent, both in `host`.** The engine handles JSON-RPC, the
+    handshake, update parsing and the permission mapping. The profile is data: argv, the env to strip and to set, the
+    repo config paths and how to stop the agent reading other tools' config, the take-over command, the model-id
+    mapping and known deviations. `core` holds only the two traits and the capability names.
+  - A profile is probed by the agent's `initialize` response, and a capability it did not probe is `Unknown`.
+  - **No client capability `fs`, `terminal` or `elicitation` in v0.** The agent keeps its own file and shell tools, so
+    Collide stays out of the data path and a daemon restart cannot stall a write. Per-command CPU and memory then
+    come only from the sampler (0.13). `elicitation` is added when a Queue item type for agent questions exists. The
+    client advertises `session.notices`, `session.compaction` and `configOptions`, which only add observability.
+  - Local-model capacity (GPU memory) becomes a scheduler resource token with the first non-Claude adapter.
 
 Run modes: **headless** (workflow phases; stream-json → timeline) and **interactive** (portable-pty →
 `ipc::Channel` → xterm.js, for ad-hoc work and for taking over a phase with `claude --resume <session-id>`).
@@ -770,8 +883,12 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     It writes the file directly and needs no socket or token. Outside Collide it does nothing and says so on stderr.
   - **Who cannot report:** a process in a container, and a process started with a cleaned environment (Orchard's
     lane servers). Neither has `COLLIDE_REPORT`. A hook can copy their numbers into its own report afterwards.
-  - A line is at most 4 KB. Each span's file has a size and rate cap, set by S8. Malformed or excess lines are
-    counted on the span, not hidden.
+  - **Caps** (S8; proposed, so inferred): a line is at most 4 KB, a file takes 100 lines per second sustained with a
+    burst of 1,000 (a token bucket), and 16 MiB in all. At the size cap the span is marked "report truncated", and
+    the tailer keeps counting. Malformed or excess lines are counted on the span, not hidden.
+  - **Collide polls the file every 50 ms** and holds a partial last line until its newline. Measured S8: no line was
+    lost or torn at any rate tried, up to 50,000 lines per second, with p99 lag 52–57 ms. The caps protect the store
+    and the view, not the tailer.
   - Reported data is labelled "reported" and never mixed with what Collide measured. It is data, never templated,
     and the redaction list applies to its attributes (0.13).
   - Why a file and not an API:
@@ -838,15 +955,34 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   pack's install `hint:`. Collide never installs anything (owner, 2026-11-13). A pack that drives another CLI, as a
   Ferry pack would drive Ferry, declares it here.
 - Rejected: embedding a JS engine. Hooks start CLIs anyway, so a sandbox would buy little and cost Node and npm.
-- Types: Rust serde types → `schemars` → JSON Schema → TS types. The same schema validates `pack.yaml`,
-  `board.yaml` and views.
+- **Types** (S5, `sp-0005-fv-schema-expressions`; owner, 2026-11-14): Rust serde types → `schemars` → JSON Schema →
+  TypeScript types with `json-schema-to-typescript`, which is a Node step in the build. Not `specta` (a release
+  candidate when tested) and not `ts-rs` (it types a `#[serde(default)]` field as required). The same schema
+  validates `pack.yaml`, `board.yaml` and views.
+  - Every struct and tagged variant sets `additionalProperties: false`, so unknown keys are rejected (measured S5: 0
+    of 13 invalid cases accepted, and the generated TypeScript accepted every valid case).
+  - **`Wait {}`, not a unit variant, in an internally tagged enum:** serde does not enforce `deny_unknown_fields` on a
+    unit variant.
+  - Input and output contracts are generated separately: an input has defaults, an output is complete. The
+    validator needs the `uint*` formats registered or relaxed.
+  - Numeric ranges are invisible to the generated types. The schema is the contract.
 
 ### 0.7 Pack manifest (`pack.yaml`)
 
-- YAML 1.2 core schema with typed fields; that is what keeps `no` a string. Unknown keys are rejected to catch
-  typos. Every `{{ }}` template must be quoted (unquoted it parses as a flow mapping).
-- `serde_yaml` is archived; S5 picks a maintained crate. `$schema` points at `collide schema --path`, not a path
-  relative to the Collide repo.
+- **YAML is read with `serde-saphyr` 2.x and a hardened option set, never its defaults** (S5; owner, 2026-11-14).
+  Its defaults take YAML 1.1 booleans (`no` becomes `false`), which would break the promise that `no` stays a
+  string. The options are part of the loader and a test pins them: `strict_booleans`, `no_schema`, merge keys as
+  errors, no anchors or aliases, at most 100,000 nodes and depth 32, and duplicate keys an error.
+  - Typed String fields keep `no`, `0.10` and `1e10` strings in every crate tested (measured S5). An ambiguous
+    unquoted scalar in a string field is an error.
+  - Duplicate keys are an error everywhere, inside maps too, where the `serde_yaml` family keeps the last. Anchors,
+    aliases and merge keys are rejected, and the error text says so. Files are size-capped before parsing.
+  - Unknown keys are rejected to catch typos. Names and ids need `minLength: 1`, and a `config` map is checked
+    against its schema.
+  - Every `{{ }}` template must be quoted: unquoted it parses as a flow mapping. The loader reports it at its
+    column with the hint "quote the template".
+- `serde_yaml` is archived and not used. `$schema` points at `collide schema --path`, not a path relative to the
+  Collide repo.
 - **The Collide directory** holds every committed Collide file: `board.yaml`, `packs.lock`, `config.yaml` and
   `views/`. It is `.collide/` at the repo root. A repo that wants it elsewhere commits a `.collide` **file** instead,
   containing `dir: <path relative to the repo root>`, the same way git's `.git` file points a worktree at its git
@@ -1268,8 +1404,30 @@ Collide plays the lead, so it does all four, through the pack.
       because agents could edit their own pack.
     - a working copy that an integrate changed asks for an acknowledgement, with the diff, before the next run
       loads it (0.7).
-- CEL runs on untrusted task data with a cost limit and an expression size limit (S5). CEL has no unbounded loops,
-  but its macros nest superlinearly.
+- **YAML and frontmatter are untrusted input** (S5). The Rust loader and the TypeScript parser both cap the file
+  size before parsing, reject anchors and duplicate keys, and check every field's type instead of coercing it
+  (0.7, 0.10). `gray-matter` is never used: its default runs the JavaScript in a `---js` frontmatter fence (measured
+  S5).
+- **CEL runs on untrusted task data, and the `cel` crate has no cost, step or time limit** (S5; measured on 0.15.0,
+  and none of the other Rust candidates found has one). CEL has no unbounded loops, but its macros nest
+  superlinearly: the plan's nested example over 1,567 tasks took 3.4 s, and a triple nesting did not finish in 30 s.
+  Collide adds:
+  - **a step counter** in the vendored `cel` (0.15). It is a 34-line patch, one tick at the top of
+    `Value::resolve_val`. Its overhead was within noise on ordinary views, and it stopped every runaway case
+    measured. Collide offers the patch upstream;
+  - **a per-task budget and a per-pass budget**. S5's suggested limits are 10,000 steps per task and 2,000,000 per
+    view pass (inferred from its numbers; not tested as a set). A task that runs out is excluded and counted on the
+    view (0.10);
+  - **a 1 KB source cap.** It is a safety property, not a style one: a 4 KB chain of `+` overflows a 2 MB stack and
+    aborts the process, and a deeply nested expression panics inside the parser's error formatter. Compile also runs
+    under `catch_unwind`;
+  - **list-length caps when a task is loaded:** `labels`, `collections` and `depends_on` at 1,000 entries, and
+    string fields at about 4 KiB. Hiding the corpus is not enough: one task with a 5,000-entry `labels` list took
+    4.2 s under an innocent `all`/`exists` pair;
+  - **no corpus variable in views**, and a static cost estimate when a view is saved or loaded (0.10).
+
+  A thread with a deadline is not a limit: the caller moves on and the thread keeps running (measured S5: about one
+  core until the expression ends).
 - Hook outputs and report lines can come from processes running branch code, because a gate runs the branch's
   tools. They are data: never templated into prompts, and passed to env only as safe tokens (0.5).
 - Metrics hold no prompt, task or tool content. By default they keep only executable names and flag names (0.13).
@@ -1425,7 +1583,17 @@ layout: { default: board, groupBy: category }
   - Normalized fields are always present: `key`, `source`, `title`, `status`, `category`, `labels` (empty when a
     source has none), `collections`, `deps`, `author`.
   - Source-specific fields live under `fields.*` and are tested with `has(fields.x)`.
-  - An evaluation error excludes the task and is counted on the view, not hidden.
+  - An evaluation error, or a task that runs out of its step budget (0.9), excludes the task and is counted on the
+    view, not hidden.
+  - **Views bind per-task fields only, never the corpus** (S5; owner, 2026-11-14). There is no `tasks` variable, so
+    a view cannot compare one task with all the others.
+  - **A static cost estimate runs when a view is saved and when it is loaded.** It walks the expression and
+    multiplies each macro's iterations by the size of the list it ranges over (S5: it never underestimated, and
+    overestimated by 1.1 to 11 times). A view whose estimate passes the per-pass budget is refused, with the
+    estimate shown (inferred from S5's "this view is cubic in the corpus: refused"). It bounds only expressions
+    whose list sizes it knows, so it adds to the runtime budget and never replaces it. The source is capped at 1 KB
+    (0.9). `matches` recompiles its regex on every call and costs about 20 times a plain test, so the view editor
+    says so.
 - **`closure`** is the prototype board's run order. Its set and its steps are identical to the prototype board's
   generator's for the same goal at the same commit: it walks open tasks only, and it handles the goal the same way.
   - R2 measured why the open-only rule matters: walking every path adds three stranded tasks (T-01-044, T-01-045,
@@ -1478,8 +1646,14 @@ layout: { default: board, groupBy: category }
     - the suffix makes the id unique, so a merge never renumbers a file or rewrites a link. `collide task 12`
       resolves when one item has that number; otherwise it lists the matches and asks for `12-ua`;
     - the suffix is letters only, without `i`, `l` or `o`, so it never reads as part of the number. Ids match
-      `^[a-z]{2}-[0-9]{3,}-[a-z]{2}$` and are always strings in YAML (S5). Two files with one id are a
-      `task.invalid`;
+      `^[a-z]{2}-[0-9]{3,}-[a-z]{2}$` and are always strings in YAML (S5: a hyphen inside the scalar rules out every
+      number, boolean and null form in the five parsers tried, and two letters avoid the `e-` prefix that `yaml`'s
+      1.1 mode reads as NaN). A field that holds a hash, such as `preregistered`, is written quoted, because an
+      unquoted short sha can parse as a number (`3e10`, `1234567`). Two files with one id are a `task.invalid`;
+    - frontmatter is parsed with the `yaml` package in its default (core) mode, never `gray-matter` and never the 1.1
+      mode (S5). The file is capped before parsing (S5 suggests 64 KiB), duplicate keys and the alias limit stay on, and a
+      schema checks every field's JavaScript type, with no coercion and no `Date`. A parse takes about 42 us a file
+      (measured S5: 1,599 task files, 67 ms), so the provider needs no parse cache;
   - two roots: a private one in the pack's data directory, and a shared one at the configured path,
     `.collide/planning/` by default, committed as views are;
   - the path is set in `.collide/config.yaml` and is part of the trust hash, so a change asks for trust again. A
@@ -1520,8 +1694,8 @@ detail inside a phase. No chat bubbles, no centred conversation column, no sideb
 Three surfaces, one keystroke apart:
 
 - **Field:** the corpus through a view, laid out as a board or a run order.
-  - Tasks are the primary objects. A task being worked on is lit in its run's colour (the prototype board's lit
-    border).
+  - Tasks are the primary objects. A task being worked on has a lit border (the prototype board's), in the state
+    colour. Colour never says which run it is: a run is named by its label (below).
   - The main action is: select tasks, then Launch.
   - A read-only Field ships first (Stage 6); Launch arrives with the run UI (Stage 9).
   - An empty board still offers a way in: a prompt box (type a task, then Launch), **New session**, the sources
@@ -1529,7 +1703,12 @@ Three surfaces, one keystroke apart:
   - **Home is the Field** (owner, 2026-11-13; from the Field-first mockup). Its weakness is that a decision sits one step
     from its cause. The menu bar badge and notifications cover most of that (below).
 - **Tracks:** every live run as a horizontal track of phase segments (provision → build → brief → review ×2 →
-  adjudicate → fix → close).
+  adjudicate → fix → close). "Review ×2" is two reviewers, A and B, who run in parallel and whose findings are shown
+  separately. It is not two rounds (owner, 2026-11-13; S6 built it that way).
+  - **A run is named by its id label** (`R-118`), never by colour, which is reserved for state (owner, 2026-11-14;
+    S6 Q1, default `id`). S6 also built a lane letter, a position (`#2`, which can change when the order does) and a
+    colour control for comparison. The sessions that would have tested them were skipped, so the default is not a
+    result. The owner may change it while iterating on the prototype.
   - Gates show as checkpoints, with time and spend meters against budget.
   - Workspace provisioning is a segment with its own progress: orchard's takes minutes (worktree 230–330 s, map
     build about 1500 s, measured R1). Its progress comes from the pack's `progress` report lines (0.5).
@@ -1559,7 +1738,8 @@ Three surfaces, one keystroke apart:
     - disabled observers and finished runs to review.
   - **Layout** (owner, 2026-11-13; from the Queue-first mockup): a list grouped by kind, and a detail pane. It is
     not a narrow rail, because a permission request with untrusted arguments needs the room. The pane shows:
-    - the exact command or arguments, with untrusted ones flagged (0.9);
+    - the exact command or arguments, with untrusted ones flagged (0.9), or "input not available until approved"
+      when the adapter's request carries none (0.3);
     - the prompt-cache countdown and the cost of answering later;
     - a mini track of the run;
     - recent activity;
@@ -1580,8 +1760,29 @@ Three surfaces, one keystroke apart:
 
       Each Queue kind has a default set, and a pack adds to it through the phase's `show:` list (0.7). Asking the
       agent itself is deferred.
-  - Keyboard triage: `j`/`k` to move, `a` approve, `d` deny, `o` open the context (from a Queue item, its run's track
-    at the moment of the decision). S6 settles what `a` and `d` mean for each kind.
+
+      **The context view is a data contract** (S6; owner, 2026-11-14). The six sections are the fields of one record
+      that Collide and the pack fill, and the UI shows a section the data lacks as "Not available in this view",
+      never hides it. The gap shows what people want and cannot get (S6's scenario 9 left two sections empty on
+      purpose). The agent's own words come last.
+  - **Keyboard triage:** `j`/`k` move, `i` opens the context view, `o` opens the item's run on its track, zoomed on
+    the moment of the decision (S6 Q3, default `moment`), `u` undoes the last answer and `Esc` backs out. `a`, `d`
+    and `r` mean this for each kind (S6 Q2, default `literal`; owner, 2026-11-14):
+
+    | kind | `a` | `d` | `r` |
+    |---|---|---|---|
+    | permission request | allow once | deny | |
+    | command | allow once | deny | |
+    | edit | apply the edit | reject the edit | |
+    | failed gate | proceed unchecked | stop the run | retry the gate |
+    | budget exceeded | raise the cap (the prototype raised it by $2) | stop the run | |
+    | review | accept | discard | re-prompt |
+
+    `a` never means "always allow" (0.3). Every kind in the list above that is not in the table gets its row when its
+    stage builds it. S6 also built `safe` keys (`a` is retry or accept) and `confirm` (the literal keys, with a second
+    press for a consequential action), and the sessions that would have chosen between them were skipped. Whatever
+    the choice, an undo stays: S6's `u` restored the run's state. The real undo can reach only what Collide has not
+    yet done, which the run UI stage lists (inferred: an answer already sent to the agent cannot be taken back).
 
 Details:
 
@@ -1610,19 +1811,38 @@ Details:
     stripped, long results cut with their size shown. The list is virtualized and paged from the daemon's log;
   - the raw JSONL and the terminal stay behind a toggle.
 - **Tool-call time breakdown** (owner, 2026-11-13; part K), for a track or a phase:
-  - a table: model time, each tool by name (MCP tools grouped by server, a subagent's calls nested under it), hooks,
-    permission waits and Queue waits, with calls, total, share, median, maximum and errors. Bash splits by the
-    command's executable (`cargo`, `pnpm`, `git`), which 0.13's privacy rule keeps;
+  - a table: model time, each tool by name (MCP tools grouped by server), hooks, permission waits and Queue waits,
+    and an "unattributed" row, with calls, total, share, an "of wall" share, median, maximum and errors. Bash
+    splits by the command's executable (`cargo`, `pnpm`, `git`), which 0.13's privacy rule keeps. Three choices
+    settled by S8 (`sp-0010-bn-metrics-sources`; labelled inferred, from nine small runs):
+    - **Model time and the gap threshold.** From telemetry spans when the phase has them. Otherwise from the stream:
+      the time from the previous input line (a tool result or the prompt) to `message_stop`. A gap of up to 1 s
+      is model time (client overhead between a tool's end and the next request measured 13–185 ms). A longer gap
+      that no tool, hook or wait explains is "unattributed (hooks, start-up, waits)", never model time. A turn started
+      by a background-agent notification has no input line, so it uses the span, or reads "not reported";
+    - **A subagent's calls.** The Agent row shows self time: its span minus the time covered by its own nested model
+      and tool spans. The nested calls appear under their own tool rows, marked "in subagent". Counting the Agent
+      span in full as well double-counts (foreground subagent runs summed to 144–158% of wall time). Nesting uses
+      `agent_id` and the parent id, never time containment, because a background Agent's span ends before its nested
+      spans do;
+    - **Share.** The share column is a part of the sum of the table's rows, so the rows add to 100%, and under
+      parallel calls it can exceed wall time. A separate "of wall" column splits each instant among what runs, with
+      the "unattributed" row, so it adds to 100% of wall time. A share of plain wall-clock time is not shown, because
+      it passes 100% when calls overlap;
   - a timeline with one row per tool type on the run's real-time axis. Colour stays reserved for state, so rows, not
     hues, tell the types apart;
-  - wall-clock time and summed tool time shown apart, because parallel calls overlap;
+  - **three time totals shown apart** (S6): the wall time of the phase, the sum of its calls, and the union of its
+    calls (the time with at least one running). They differ once calls run in parallel or nest. The span model needs
+    a parent id for this (0.13);
   - filters that combine: tool type; **minimum duration**, how long one call took ("every call over 2 s"); and
     **time window**, a span of clock time ("every call between 11:00 and 11:10"), dragged on the axis, typed, or
     set by picking a phase. A call matches when it overlaps the window (owner, part L). Calls, median, maximum and
     the minimum-duration filter use the whole call; total and share count only the time inside the window. The
     chips write CEL over spans, as the Field's chips do for tasks;
   - a table row filters the timeline to that tool, and a bar scrolls the output pane to that call;
-  - each phase's times are labelled exact (telemetry) or approximate (stream timing). S8 measures the difference.
+  - each phase's times are labelled exact (telemetry) or approximate (stream timing). Measured S8: the stream is
+    within 150 ms of the span for an unqueued call, and wrong by the whole wait for a call queued behind another
+    (0.13).
 - **Talking to an agent is the exception.** You either intervene (send a note to the running phase) or take over
   (interactive `--resume` in a terminal).
   - Closing the terminal view detaches. The session goes on in its shim, Tracks marks it detached, and reopening
@@ -1688,8 +1908,9 @@ Details:
   - board settings stay per user until **Share with team** writes `.collide/` into the repo (`collide init`);
   - a trust prompt only for packs from the repo or ones the user adds;
   - source auth when a source needs it, e.g. `gh auth refresh -s project` with the account to use.
-- **Lines.** Each board has a line switcher. Launch lists the selected line's workflows, and a run's track is tagged
-  with its line.
+- **Lines.** Each board has a line switcher, a menu in the top bar, visible on every surface (S6 Q4, default `top`;
+  the alternative was chips in the Field's filter bar). Launch lists the selected line's workflows, and a run's
+  track is tagged with its line.
 - **Metrics.** A run opens to a waterfall:
   - phases, hooks, gates and reported spans on a time axis, with the critical path over the phase graph marked.
     Reported spans are marked as reported;
@@ -1712,7 +1933,8 @@ Details:
     - the total cost and the expected duration from this workflow's earlier runs (or "unknown"), updated as the
       choices change. An Orchard loop takes hours per run, so a verdict design is shown in days.
   - The result puts the arms side by side: per-phase-kind and per-span deltas, the critical-path delta, outcomes and
-    the verdict rule's answer, labelled "on this task".
+    the verdict rule's answer. It states its scope (S6): "on this task" stands beside the verdict, with the
+    critical-path difference and whether the outcomes are equal, so one run is not read as a general rule.
 - **Visual language:**
   - dense and keyboard-first, with a command palette
   - monospace for ids and refs
@@ -1721,7 +1943,11 @@ Details:
 
   The particle-physics flavour of the name may shape the brand; it does not shape navigation.
 
-S6 tests this direction with a clickable prototype before Stages 6 and 9 build it.
+S6 built this direction as a clickable prototype over fake data (`sp-0009-bb-interface-prototype`): Field, Tracks, Queue,
+run detail with Output, Time breakdown and Review, Compare and Experiments, with its UI state in one reducer. Its
+scripted pilots complete all nine scenarios (50 of 50 tests pass; measured). No person who did not design Collide
+has used it: the owner skipped the sessions (2026-11-14), so the interface is the owner's judgement, and the later
+stages check it with ported UI tests and an owner walkthrough (Stage 1).
 
 **Planning** (owner, 2026-11-13; `collide/plan`):
 - A Queue lane can be fed by a view (`queue: true` on the view). Its items are answered through the source's ops.
@@ -1790,11 +2016,23 @@ Every run is a trace. The core needed for run state is always recorded; the reso
 - **Model.**
   - Spans are shaped like OpenTelemetry's. The trace is the run. A span is a phase, agent turn, tool call, hook,
     gate, provisioning step, subprocess or wait, with attributes.
+  - Every span has an id, a kind and a parent id. Spans nest (a subagent's calls under its Agent call, a reported
+    span under the span that owns the file), and the breakdown's three totals need the parent (0.11).
+  - **A wait on the user is a span of its own kind**, with the id of the Queue item it waited on (S6). A phase's time
+    then splits into work and waiting, and a question such as "where did this run wait" is answerable from the
+    spans.
   - Resource samples are tied to spans.
   - Everything is stored in SQLite next to the event log, per machine. Nothing leaves the machine in v0.
   - **Sleep is not work.** A laptop that sleeps mid-run would otherwise add hours of "active" time. The owner
     records sleep intervals and counts them as waiting. On macOS the uptime clock stops during sleep while the
-    continuous clock does not, so the gap between them is the sleep (inferred; S8 checks it).
+    continuous clock does not, so the gap between them is the sleep: `slept = Δcontinuous − Δuptime`, computed on
+    each sampler tick. A gap over 2 s (two ticks at 1 s) is recorded as a sleep interval and subtracted from active
+    time.
+    - Measured S8: awake, the formula gave 0.05–0.19 ms. Since boot the two clocks differ by the machine's total
+      sleep, and the OS's own record of its last sleep lies inside that total. A dark wake runs the CPU, so it is not
+      counted (inferred).
+    - **No sleep mid-run has been tried.** The owner's step (`sleep-check.sh`) is deferred until before Stage 13
+      (Deferred).
   - **Missing is not zero** (owner, 2026-11-13, after Ferry's runner). A value its source did not give is stored as
     null and shown as "not reported". A value nobody asked for, because an opt-in was off, is shown as "not
     recorded". Neither is ever 0, which would read as "instant" or "free".
@@ -1806,9 +2044,10 @@ Every run is a trace. The core needed for run state is always recorded; the reso
     token and context metrics below, the shim's exit totals (CPU time and peak memory per reaped child), and disk
     space per workspace at phase end (owner, 2026-11-13). Reported data (0.5) is also always recorded, because a pack
     chose to send it.
-  - `full`, opt-in per board or per run: resource samples, per-process attribution, network, device GPU,
-    container and detached-process stats, pack span import, and the machine part of the fingerprint. S8 measures
-    its overhead, and the UI shows it.
+  - `full`, opt-in per board or per run: resource samples, per-process attribution, network, device GPU (when a
+    local model is declared), container and detached-process stats, pack span import, and the machine part of the
+    fingerprint. Measured S8: the sampler costs 0.11% of one core at 1 s for a run's tree, and 0.08–0.09% on real
+    Orchard runs. The UI shows its cost.
 - **Sources:**
 
 | source | gives | accuracy and granularity |
@@ -1816,21 +2055,31 @@ Every run is a trace. The core needed for run state is always recorded; the reso
 | Collide's own spans | phases, hooks, gates, provisioning, `record`, `integrate` | exact |
 | Waits | Queue decisions, permission prompts, usage limits, `wait` phases, the concurrency cap, the line lock, queued writes, machine sleep | exact; shown apart from active time |
 | Agent stream (stream-json) | turns, tool calls, tokens (cache reads, and cache writes split 1-hour and 5-minute), cost, wall and model time per turn, context size per response, compactions (`system/compact_boundary`) | input and cache tokens exact, counted once per `message.id`: the stream repeats one usage per content block (measured S9). Output tokens on those rows are partial, so per-turn totals come from `result.usage`; a compaction call, which `result.usage` leaves out, comes from `model_usage_since_last_result` (measured S9). A result's `duration_ms` covers its turn, but `duration_api_ms` (time in the model) and `total_cost_usd` are running totals over the process, so a turn's model time and cost are differences between results. A result with `num_turns: 0` (a `/compact`, a blocked prompt) reports `duration_api_ms` 0, so the difference is taken from the last result with turns (measured: S9's recordings). Timings approximate, because the owner tails log files |
+| Agent stream through another adapter (ACP; S7) | turns, tool calls, and usage when the agent sends it | `Usage.quality` says how complete it is. opencode's per-prompt usage covers the last model step only (9,433 tokens reported, 18,847 spent; measured S7) and is zero after a cancel. For `Partial` usage, tokens are a lower bound shown as "at least", and cost is null, not 0, when the agent reports none. They are never summed with exact figures |
 | Interactive sessions (New session, take-over) and `agentWork` phases | the same as the agent stream, plus per-call cost, time to first token, and the title and suggestion calls the transcript lacks | Claude Code's telemetry to Collide's local receiver (measured S2: tokens equal to the transcript's). A tool's `duration_ms` is the whole tool call, spawn included, not the command alone (a 2.0 s command, a 3.3–4.4 s call). The transcript is the fallback when the user's own endpoint is set. Only the phase's session ids count, followed across `/clear`. A `claude` that an agent starts from its Bash tool does not report, because Claude strips `OTEL_*` from its tools' environment (measured S2) |
 | Past sessions (opt-in import; owner, 2026-11-13) | usage per response, tool names, timings, command shapes, compactions; never prompt, reply or tool content | from `~/.claude/projects/<repo key>/`, one usage per `message.id`: transcripts repeat usage per content block (measured in 84 of S1's 105 sessions). A baseline only; the contract test pins the format |
 | Process exit totals (`wait4` rusage, from the shim) | CPU time and peak memory | exact for every child started through the shim, including across a daemon restart (measured S3). A child's total includes the descendants it waited for; orphans are excluded. Peak memory is the largest single process's, not the tree's |
-| Process sampling (S8 picks the interval) | CPU, memory and disk I/O over time (`proc_pid_rusage`; its CPU fields are mach time units, converted with `mach_timebase_info`, 125/3 here, measured S3) | process-level. A process is attributed to the span in its `COLLIDE_SPAN`; tool subprocesses are matched to tool calls by parent pid and time overlap. Misses processes shorter than the interval |
+| Process sampling: 1 s on the run's tree, 250 ms optional (S8) | CPU, memory and disk I/O over time (`proc_pid_rusage`; its CPU fields are mach time units, converted with `mach_timebase_info`, never a constant: 125/3 here, measured S3). Disk bytes come from the sampler, because `wait4` reports none (`ru_oublock` is 0; measured S8). Reads count only uncached I/O, so a build that re-reads warm files shows almost none | process-level, one point per second. A process is attributed to the span in its `COLLIDE_SPAN`; tool subprocesses are matched to tool calls by parent pid and time overlap. **Sampling is the time series and the shim's `wait4` totals are the truth.** It misses short processes at every interval: on three real Orchard runs, attached part-way through, the 1 s sampler missed 33–73% of the processes a 50 ms reference saw, yet caught 93–100% of their CPU, and the processes it never saw used 0–4.3% (measured S8). A synthetic workload spread over many short processes had only 60% of its CPU in the 1 s samples. Shortening the interval does not fix this: 50 ms costs 16 times the CPU and still misses most processes. The UI says that per-process rows are samples, and shows the missed share when a reference exists. Cost: 0.11% of one core at 1 s, 0.37% at 250 ms, 0.91% at 100 ms, 1.80% at 50 ms (measured S8, one synthetic tree), so the default stays at or above 250 ms |
 | Disk space | size of each workspace and each cache directory | per workspace. R3 measured a provisioned orchard worktree at 4.1 GB |
-| `nettop -P` | network bytes per process | measured: per process, without root |
-| GPU | device utilization and memory (Stage 13); per-process GPU time (spiked in S8, collected from the first local-model adapter) | measured without root: `ioreg -r -c AGXDeviceUserClient` gives `AppUsage.accumulatedGPUTime` per client, with the owner's pid in `IOUserClientCreator`; `ioreg` IOAccelerator gives device utilization. In v0, Claude's inference is remote, and orchard's Ollama runs in Docker with no Apple GPU (measured R3), so per-process GPU matters only from the first local-model adapter |
-| Containers and detached processes | lane CPU, memory, I/O, network (Docker API); the same for host processes a pack starts outside Collide's tree | per container or process. The pack's `metrics.processes` hook returns a workspace's container ids and pids. orchard: lane containers carry only a per-clone label, so the pack reads each lane's record, which also gives its host server and UI pids (measured: the dev CLI's lane records). Containers need the hook because Docker Desktop runs them in a VM the host cannot see (measured: context `desktop-linux`) |
+| `nettop -P` | network bytes per process, without root | one streaming `nettop` per host while a `full` run is live, started with stdin as an open pipe that is never written: with stdin at end-of-file it spins at 56–134% of a core, and with an open pipe it costs about 1% (measured S8). It is read through a pty, because a pipe delivers 4 KB blocks and the first second arrived after 7–8 s. A closed socket's counters vanish, so a process's total is the sum of the stream's deltas, and the stream must run for the whole span. Per process only: no remote address, and a name cut to 16 characters |
+| GPU | device utilization and memory (Stage 13), when a local model is declared; per-process GPU time (measured S8, collected from the first local-model adapter) | measured without root: `ioreg -r -c AGXDeviceUserClient` gives `AppUsage.accumulatedGPUTime` per client, with the owner's pid in `IOUserClientCreator`; `ioreg` IOAccelerator gives device utilization. Each `ioreg` call costs about 25 ms of CPU, 48 ms for both, so they are polled every 5 s (about 1% of a core for both). The device and the per-process counters are polled only when a process in the run's tree or its pack declares a local model (S8; owner, 2026-11-14). A run that declares none has no GPU column, rather than one that shows the desktop. A process's counter is cumulative busy time and ends with the process, so a delta needs two reads while it lives. It is shown as "GPU busy seconds" beside the device's utilization, which is never per process. A busy device is not the run's: on two real Orchard runs it reached 63% and 44% while no process of the run's tree had GPU time. In v0, Claude's inference is remote, and orchard's Ollama runs in Docker with no Apple GPU (measured R3), so per-process GPU matters only from the first local-model adapter |
+| Containers and detached processes | lane CPU, memory, I/O, network (Docker API); the same for host processes a pack starts outside Collide's tree. **A run's lane containers are always counted** with the sampler (owner, 2026-11-14), never left as a setting | per container or process, from the Docker API one-shot at 1 s or slower (the daemon samples once a second), never the CLI: `docker stats` takes 2 s of wall time and 30 ms of CPU, an API call 8–14 ms (measured S8). In one real lane run the three lane containers did 612 s of CPU against 551 s in the host tree, so 53% of the run's CPU would be invisible to a sampler that watches only the tree (measured S8, one run). Containers' processes cannot be told apart, and a process whose pid was never reported stays unseen. The pack's `metrics.processes` hook returns a workspace's container ids and pids. orchard: lane containers carry only a per-clone label, so the pack reads each lane's record, which also gives its host server and UI pids (measured: the dev CLI's lane records). Containers need the hook because Docker Desktop runs them in a VM the host cannot see (measured: context `desktop-linux`) |
 | Pack span import (`metrics.import`) | e.g. orchard's `iter-timings.jsonl`: stage, label, seconds, verdict, load average | Selected by the run's worktree paths (or the arm's own file), never by label alone. iter stamps sub-calls with their parent's start, so they nest as durations without a timeline position. Existing history (3545 lines, measured R3) is backfilled as a baseline without resources |
 | Reported (`COLLIDE_REPORT`, 0.5) | spans, metrics and progress from hooks, gates, `script` and `wait` phases and their subprocesses, live; never from agent phases. `usage` lines from `agentWork` script phases (0.3) | as accurate as the reporter; labelled "reported". Reported usage is shown beside measured tokens and cost, never added to them. A tool that reports live makes its import a fallback |
 
 - **Claude Code's own telemetry** (OpenTelemetry). The 2.1.323 binary contains `CLAUDE_CODE_ENABLE_TELEMETRY`,
   `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` (measured).
   - Interactive sessions and `agentWork` phases use it, with a local receiver (measured S2; owner, 2026-11-13).
-    Headless phases keep the stream unless S8 shows better timings.
+    Headless phases keep the stream by default. S8 showed telemetry is more exact for four things: calls queued
+    behind another call, permission and hook waits, model time with time to first token, and subagent nesting. A
+    headless phase that needs exact timing may turn on the traces beta flag (`CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`
+    with `OTEL_TRACES_EXPORTER=otlp`).
+    - Measured S8: `tool_result.duration_ms` equals the `tool.execution` span within 0–6 ms (30 calls). The stream
+      overestimates an unqueued call by 8–149 ms (median 54 ms), and for a call queued behind another it is wrong by
+      the whole wait (6.3–6.5 s against a true 3.1 s), because Claude runs Bash calls one at a time even when two are
+      asked for together.
+    - The flag is a beta, so the stream stays the fallback. Records reach the receiver up to a second late, so a live
+      view shows stream timing and is corrected when the spans arrive.
   - Collide sets the export intervals short (`OTEL_LOGS_EXPORT_INTERVAL`, `OTEL_METRIC_EXPORT_INTERVAL`; defaults
     5 s and 60 s). At 1 s, log records arrived p50 978 ms after the event (measured S2).
   - Records are attributed by `session.id` and by `OTEL_RESOURCE_ATTRIBUTES` (`collide.run`, `collide.phase`). Each
@@ -1867,7 +2116,8 @@ Every run is a trace. The core needed for run state is always recorded; the reso
     - cold returns with their cause: a Queue wait, a usage limit, a take-over or an owner restart;
     - per tool name: calls, refused calls by who refused them (0.3), tool errors among the calls that ran,
       tool-result bytes, and total, median and maximum time. Bash also splits by the command's executable. Summed
-      time is kept apart from wall-clock time, because parallel calls overlap (part K). A refused call is never
+      time is kept apart from wall-clock time and from the union of call time, because parallel calls overlap (part K;
+      0.11). A refused call is never
       counted as a tool error;
     - per hook: calls, blocks and failures (exit 1 or a timeout), from `hook_response` (0.3).
   - Seven detectors work over these shapes, never over content: cold return, heavy start, compaction mid-task,
@@ -1914,8 +2164,8 @@ Every run is a trace. The core needed for run state is always recorded; the reso
   - Imported pack lines are reduced the same way.
   - Sharing a planning proposal commits run summaries without spend, unless the board sets `share.spend: totals`
     (owner, 2026-11-13). Transcripts, prompts and metrics never leave the machine.
-- **Volume and retention.** S8 estimates store growth at the chosen interval. Retention is set per board, default 90
-  days.
+- **Volume and retention.** Sample rows take about 34 bytes each: 0.6–6 MB per hour at 1 s for 5–50 live
+  processes (measured S8; 2.5–24 MB at 250 ms). Retention is set per board, default 90 days.
 
 ### 0.14 Experiments (A/B)
 
@@ -2033,8 +2283,17 @@ An experiment runs one task under two **arms**, one after the other on this mach
 
 Skeleton first, then test-first passes (owner, 2026-11-13).
 
-- **Spikes come first.** S1, S3, S5 and S7 decide the Claude launch line, the process owner, the YAML and CEL crates
-  and the shape of `AgentAdapter`. An outline written before them would be rewritten.
+- **Spikes come first.** S1, S3, S5 and S7 decided the Claude launch line, the process owner, the YAML and CEL crates
+  and the shape of `AgentAdapter`. An outline written before them would have been rewritten.
+- **Chosen crates and packages** (S5; owner, 2026-11-14). Beyond the platform's own, the plan names these. All three
+  Rust crates are pure Rust, so `core` may use them:
+  - `schemars`: Rust types to JSON Schema (0.6);
+  - `serde-saphyr` 2.x: YAML in Rust, with the hardened option set (0.7);
+  - `cel` 0.15, patched and vendored: views and `when:`, with a step counter (0.9);
+  - `json-schema-to-typescript`: JSON Schema to TypeScript, a Node build step only, never shipped (0.6);
+  - `yaml`, in its default core mode: YAML in TypeScript, such as the markdown provider's frontmatter (0.10).
+
+  Not used: `specta`, `ts-rs`, `serde_yaml` (archived), `gray-matter`, and any YAML parser's 1.1 mode.
 - **Pass 1, the skeleton (Stage 2).** Two parts (owner, 2026-11-13, choosing R4's middle option):
   - **Every cross-process contract, in full:** the hook protocol (stdin, result file, report lines), the provider
     and observer protocols, the JSON-RPC between UI or CLI and the owner, the event log, and the schemas for
@@ -2044,7 +2303,9 @@ Skeleton first, then test-first passes (owner, 2026-11-13).
     - Rust crates and modules, traits, types, state enums and function signatures;
     - the SDK's functions and types;
     - the shell's `rpc` command and event channel;
-    - the React component tree for Field, Tracks and Queue, with typed props.
+    - the React component tree for Field, Tracks, Queue, run detail (Output, Time breakdown, Review), Compare and
+      Experiments, following S6's surfaces, with typed props, and one reducer for UI state in which every user
+      action is a reducer action, as in S6's prototype, so reducer tests need no browser.
   - Milestones C and D are outlined by the first step of their first stage (Stages 11 and 13). By then a real loop
     has run, and their outlines are written against it rather than guessed.
 
@@ -2164,13 +2425,19 @@ reproduction script and a record, together in one spike folder under `.collide/p
   - Result: 69 touchpoints, ten core gaps (G1–G10) and six pack gaps. G1, writes a run's agent makes through the
     backend, is the largest. Applied in part J (0.4, 0.5, 0.10, the skeleton, workflow-engine, run UI, group-runs
     and second-pack stages, Deferred). `docs/research/planning.md` is corrected where S11 found it wrong.
-- **S5 schema and expressions.**
+- **S5 schema and expressions** (done: `.collide/planning/spikes/sp-0005-fv-schema-expressions/record.md`).
   - Rust → JSON Schema → TS.
   - Choice of YAML crate and CEL crate.
   - YAML hazards: `no`, `0.10`, unquoted `{{ }}`.
   - The CEL cost limit: a nested-macro expression over 1567 tasks is stopped within the limit.
-- **S6 interface prototype.** A clickable prototype of Field, Tracks and Queue (0.11) over fake data: fake-agent
-  streams and an Orchard-shaped corpus. Nine scenarios:
+  - Result: `schemars` then `json-schema-to-typescript`; `serde-saphyr` 2.x hardened, and `yaml` in core mode in
+    TypeScript; `cel` has no limit, and the step-counter patch stops the plan's nested example within the limit
+    (applied in revision 11: 0.6, 0.7, 0.9, 0.10, 0.15).
+  - Left unmeasured: `specta` through a real Tauri command; a Rust JSON Schema validator; the step counter across
+    threads; memory bounds during evaluation; the real Orchard corpus through CEL; Windows and Linux.
+- **S6 interface prototype** (done, with its sessions skipped:
+  `.collide/planning/spikes/sp-0009-bb-interface-prototype/record.md`). A clickable prototype of Field, Tracks and
+  Queue (0.11) over fake data: fake-agent streams and an Orchard-shaped corpus. Nine scenarios:
   1. A fresh repo with no pack and no tasks, through to a finished run, reviewed.
   2. Build a view from the filter bar and save it.
   3. Launch a group of 3 tasks from a view.
@@ -2184,25 +2451,37 @@ reproduction script and a record, together in one spike folder under `.collide/p
      was missing (part L).
 
   Open questions from the owner's three mockups (Field-first, Queue-first, Tracks-first), for S6 to settle (owner,
-  2026-11-13):
-  - **Run identity against state colour.** Colour is reserved for state (0.11). How is one run told apart from
-    another: by id, lane or position? The Field's "lit in its run's colour" waits on the answer.
-  - **`a` and `d` per Queue kind.** What approve and deny mean for each kind: permission, failed gate, review,
-    budget, and so on.
-  - **`o` from a Queue item** opens its run's track at the moment of the decision.
-  - **Where the line switcher lives.**
-  - **"review ×2" means two reviewers, not two rounds.** The mockups showed rounds. Correct the prototype's fake
-    data.
+  2026-11-13). The sessions were skipped, so each takes its default (owner, 2026-11-14), which the owner may change
+  while iterating on the prototype:
+  - **Run identity against state colour.** Colour is reserved for state (0.11). Default `id`: a run's id label.
+  - **`a` and `d` per Queue kind.** Default `literal`: the table in 0.11.
+  - **`o` from a Queue item** opens its run's track at the moment of the decision. Default `moment`.
+  - **Where the line switcher lives.** Default `top`: a menu in the top bar.
+  - **"review ×2" means two reviewers in parallel (A and B), not two rounds.** The mockups showed rounds. The
+    prototype's data is corrected.
 
-  The owner sets time and error thresholds before the sessions. Participants are the owner and at least one person
-  who did not design it, using it for the first time.
-- **S7 `AgentAdapter` against ACP (paper check).**
+  The owner set time and error thresholds before the sessions (the record's "Thresholds"). They stay recorded and are
+  advisory, not a gate. The planned sessions, with the owner and at least one person who did not design the
+  prototype using it for the first time, did not run: the owner has no participant who did not design Collide
+  (owner, 2026-11-14). S6's proposed usability gate with a first-time user is withdrawn. Its scripted pilots (50 of
+  50 tests pass) show each scenario is completable and its end state detected, and nothing about how long a person
+  takes or where they go wrong. **From here, an S6 scenario is checked in the real app by two things:** a UI test
+  ported from S6's pilot, which completes the scenario and detects its end state, and the owner's walkthrough,
+  recorded as owner judgement in the stage's task item.
+  - Left unmeasured: all human performance, learning and carry-over, scale (140 tasks), real agent text, other
+    screens and the light theme.
+- **S7 `AgentAdapter` against ACP (paper check)** (done:
+  `.collide/planning/spikes/sp-0006-kq-agentadapter-acp/record.md`).
   - Map the trait's launch spec, events, permission answers and capabilities onto ACP messages.
   - Run `opencode acp` once by hand with one Ollama model.
   - Record every trait member that ACP cannot express, and change the trait before the skeleton (Stage 2)
     outlines it.
   - Nothing ships.
-- **S8 metrics sources.** On an orchard `iter` run and a lane test:
+  - Result: fourteen gaps, each declared as a capability or an optional field. The trait is two traits (0.3).
+  - Left unmeasured: other ACP agents (goose, Zed's Claude adapter), a real limit, hook or compaction, MCP servers
+    through `session/new`, `terminal/*` and `elicitation/*`, signals.
+- **S8 metrics sources** (done, with two owner steps deferred:
+  `.collide/planning/spikes/sp-0010-bn-metrics-sources/record.md`). On an orchard `iter` run and a lane test:
   - Sampler overhead at 1 s, and at a shorter interval if 1 s misses too much.
   - The share of short-lived processes that sampling misses, compared with `wait4` totals.
   - Per-process disk I/O through `proc_pid_rusage`.
@@ -2217,26 +2496,29 @@ reproduction script and a record, together in one spike folder under `.collide/p
   - Store growth per hour of run at the chosen interval.
   - Claude Code telemetry received locally: does it give tool timings more precise than tailing stream-json?
   - Report files: tailing lag under a chatty writer, and the size and rate caps.
+  - Result: 1 s sampling at 0.11% of a core; three real Orchard runs measured, one with its lane containers.
+    Deferred (see Deferred): the mid-run sleep test and a run measured from its start.
 
 **Success Criteria**:
 - Ten decision records (S1–S9 and S11), with measured numbers.
 - The process owner is chosen, and the record says whether runs continue between phases with the app closed. The
   Claude launch line is fixed, including where settings come from. The snapshot + SDK path works.
-- S1, S3 and S4 run first. Their records are read against this plan before the other spikes start (owner,
-  2026-11-13). Done: revision 10 applies them, S2 and S9 (part E), and S11 (part J). S5 and S7 run now, then S6
-  and S8.
-- Revision 11 applies S5–S8. Then an adversarial review, **R5** (Fable and Opus, read-only, as in R1–R4), attacks the
-  finalized plan, and the owner's decisions on its findings are applied. No product code is written before that;
-  spike code is throwaway and exempt (owner, 2026-11-13).
-- The non-owner participant completes each S6 scenario within the thresholds. The record lists what changed in the
-  prototype, or says "none" with the reason.
+- S1, S3 and S4 ran first. Their records were read against this plan before the other spikes started (owner,
+  2026-11-13). Done: revision 10 applies them, S2 and S9 (part E), and S11 (part J). Revision 11 applies S5–S8.
+- An adversarial review, **R5** (Fable and Opus, read-only, as in R1–R4), now attacks the finalized plan, and the
+  owner's decisions on its findings are applied. No product code is written before that; spike code is throwaway
+  and exempt (owner, 2026-11-13).
+- S6: its pilots complete each scenario with the end state detected (measured: 50 of 50 tests), and the record
+  lists what changed in the prototype and why. The sessions with a first-time participant were skipped (owner,
+  2026-11-14), so the owner's judgement on the prototype stands in, and the later stages check each scenario with
+  ported UI tests and an owner walkthrough.
 - The trait has no member that S7 found ACP cannot express, or each such member is marked as a capability.
 - S8 names a sampling interval whose overhead is below 1% of one core. It states each resource's granularity and
   what it cannot attribute.
 
 **Tests**: Each reproduction script runs from a clean checkout and prints its measurement.
-**Status**: In Progress (S1–S4, S9 and S11 complete; S5 and S7 have results awaiting the owner). Items: epic
-`ep-001-ef` in `.collide/planning/epics/`; records in `.collide/planning/spikes/` (part L).
+**Status**: Complete except S10, which runs when the group-runs stage starts (S1–S9 and S11 done; revision 11 applies
+S5–S8). Items: epic `ep-001-ef` in `.collide/planning/epics/`; records in `.collide/planning/spikes/` (part L).
 
 ## Stage 2: Skeleton
 
@@ -2250,25 +2532,40 @@ part L).
   - two fixture packs: a review loop (`fixtures/packs/loop`) and an issue → PR → CI shape (`fixtures/packs/pr-ci`);
   - a fixture copy of the reference pack's manifest and hooks. The pack itself lives in the Orchard repo (0.7);
   - `packs/collide`, the built-in pack (0.4).
-- Contracts in full, with JSON Schema and TypeScript types generated from them:
+- Contracts in full, with JSON Schema and TypeScript types generated from them. The pipeline is `schemars` →
+  JSON Schema → `json-schema-to-typescript`, a Node build step (0.6; S5):
+  - the rules of 0.6 hold from the first schema: `additionalProperties: false` on every struct and tagged variant,
+    `Wait {}` rather than a unit variant in tagged enums, and separate input and output generations;
+  - YAML loads through `serde-saphyr` 2.x with the hardened option set of 0.7, pinned by a test, and TypeScript
+    reads YAML with `yaml` in core mode (0.10). The Rust side checks the schema through serde's
+    `deny_unknown_fields`; S5 did not measure a Rust JSON Schema validator, so this stage picks one or keeps serde
+    alone, and says which;
   - `pack.yaml` (including `config`, workflows as transition tables, and the keys used only in Milestones C and D),
     `board.yaml`, `config.yaml`, views, profiles, `packs.lock` with its `source` field, the user's `packs.yaml`, and
     the `.collide` pointer file;
   - the hook, provider and observer protocols, and the report line format;
-  - the shim protocol, versioned on its own, and `exit.json`;
-  - the JSON-RPC between UI or CLI and the owner;
+  - the shim protocol, versioned on its own, and `exit.json`, with the log of the bytes written to the child's stdin
+    beside its stdout log (0.2);
+  - the JSON-RPC between UI or CLI and the owner, including the Queue item's context record: six sections, each
+    filled or "Not available" (0.11; S6);
   - the point and event catalogues (0.4);
-  - state, events and spans.
-- `core` outlines for Milestones A and B: the traits (`AgentAdapter`, `HookRunner`, `TaskProvider`), domain types,
-  state enums, the workflow engine and implementation resolution, as signatures with doc comments and tagged
-  stubs. S7's trait changes are in.
+  - state, events and spans, with a parent id and a kind on every span, and a wait span that names its Queue item
+    (0.13; S6);
+  - the normalized events and the capability table of 0.3, as types with `Yes`, `No` and `Unknown` (S7).
+- `core` outlines for Milestones A and B: the traits (`AgentAdapter` with `AgentSession`, `HookRunner`,
+  `TaskProvider`), domain types, state enums, the workflow engine and implementation resolution, as signatures with
+  doc comments and tagged stubs. S7's trait changes P1–P9 are in: two traits, `SessionStart` and `SessionBound`,
+  permission answers `Allow`, `Deny` and `Cancel`, `Usage.quality`, the capability table, `TurnEnd`, `model.id`.
+  The ACP engine and profile belong to `host` and are not outlined here.
 - `host` outlines: the Claude adapter, `collide-daemon` with its launchd start, `collide shim`, the store, the hook
   executor, the provider supervisor, the sampler and the CLI commands.
 - `@collide/pack-sdk`: `defineHook`, `defineProvider`, `defineObserver`, the `ctx` object and the generated types,
   with stubbed bodies.
-- The shell's `rpc` command and event channel. The React component tree for Field, Tracks and Queue, following S6,
-  with typed props and placeholder rendering.
-- Test doubles as outlines: a fake adapter that emits normalized events, a fake provider, a fake hook runner.
+- The shell's `rpc` command and event channel. The React component tree for Field, Tracks, Queue, run detail (Output,
+  Time breakdown, Review), Compare and Experiments, following S6's surfaces, with typed props and placeholder
+  rendering, and one reducer for UI state (every user action a reducer action).
+- Test doubles as outlines: a fake adapter that emits normalized events, a second `AgentSession` that is a scripted
+  fake ACP child (below), a fake provider, a fake hook runner.
 - CI: build, lint, typecheck, the stub count per tag, the dependency-direction check and the no-names check.
 - **Planning contracts** (owner, 2026-11-13), defined first (part L): the provider schema's `kinds`, op effects,
   `links`, `assignee` and checklist field type; fan-out `instances:`; the run budget; the five new task points with
@@ -2301,6 +2598,11 @@ part L).
 - The built-in pack's, the reference pack's and both fixture packs' manifests validate against the generated
   schema. A manifest with an unknown key fails.
 - Serde round-trips pass for every protocol type, and the generated TypeScript types match the schema.
+- The pipeline rejects what S5's cases rejected: a manifest with an unknown key at any depth, and a tagged variant
+  with a key its definition lacks, including `Wait {}`. A test pins the YAML loader's options: `no` stays a string, a
+  duplicate key, an anchor and an unquoted `{{ }}` are errors, and the last carries the hint "quote the template".
+- A fake `AgentSession` replayed over a logged stdout and stdin reaches the same state as the live one, including a
+  pending permission request.
 - A test fails if `core` gains a Tauri, SQLite or process dependency.
 - A seeded `orchard` string in `core`, and a seeded `CLAUDECODE` or `ANTHROPIC_` string outside the Claude adapter,
   each fail CI.
@@ -2316,6 +2618,8 @@ part L).
 
 **Tests**: Schema generation; manifest validation (all four packs, plus invalid fixtures); serde round-trips;
 dependency-direction test; the no-names check with its positive controls.
+The YAML hazards (`no`, `0.10`, `1e10`, a duplicate key, an alias bomb, 100,000-deep nesting). The step counter's
+patch, vendored, stops a runaway expression. Session replay.
 Planning: derived-point validation; the new keys' schemas; the `change` and `watch` shapes. The slice: provider
 contract tests over fixture items; the ready rule (blocked, unblocked by `done` and by `dropped`, a cycle); ids
 (the next number across refs, including a fetched remote branch; a repeated number after a merge; short-form
@@ -2332,10 +2636,16 @@ a broken link is counted, not dropped.
 - **The daemon and the shim** (0.2), speaking the skeleton's JSON-RPC:
   - the shim is synchronous: `std::process::Command` with `pre_exec(setsid)`, then `libc::wait4` on the pid. An
     agent's exit is never taken from std's or tokio's `wait`, and a tokio `Child` is never dropped (measured S3);
+  - the shim logs the bytes written to the child's stdin as well as its stdout, so a session can be replayed (S7);
   - the daemon reaps shims with tokio, because it reads totals from `exit.json`;
   - on-demand start under the lock file, as a one-shot launchd job on macOS; the base environment captured once;
   - the durability rules of 0.2.
-- `AgentAdapter` capabilities per S7. `models.yaml` loading and alias resolution, including `model.name`.
+- The two traits of 0.3 (`AgentAdapter`, `AgentSession`) with S7's changes P1–P9, and the capability table with `Yes`,
+  `No` and `Unknown`. The Claude adapter is the first `AgentSession`. `models.yaml` loading and alias resolution,
+  including `model.name`, with `model.id` kept opaque.
+- **The ACP engine** (`host`), tested with a scripted fake ACP child: the handshake, a prompt turn, a permission
+  request, `session/cancel`, an empty turn (`empty_turn`) and a child that exits first (`lost`). A real ACP agent is
+  Deferred (below); the second `AgentSession` keeps the trait honest meanwhile (S7).
 - File-backed child logs; SQLite store + event log; per-client socket token; version handshake.
 - Built-in workspace: `git worktree add`, returning `{ path, gitDir }`; refuses to remove a dirty or unmerged
   worktree.
@@ -2402,6 +2712,12 @@ a broken link is counted, not dropped.
 - A recorded limit message pauses the phase with its reset time, and the phase resumes by session id. The pause
   counts as waiting.
 - A sleep gap injected through fake clocks counts as waiting, not active time.
+- Over the fake ACP child, a turn that ends with no output is `empty_turn`, never a clean finish. A cancel sends
+  `session/cancel` and the phase settles from the prompt response; a child that exits before it is `lost`. A usage
+  record whose quality is `Partial` or `Unreported` is shown as such and never as zero.
+- A permission request with unknown input shows "input not available until approved", and no answer offers an
+  "always" option.
+- A session replayed from its logged stdout and stdin reaches the same state as the live one.
 
 **Tests**: State-machine unit tests; store migrations; hostile-process tests adapted from herdr-core (SIGKILL and
 SIGSTOP of the shim, children that ignore HUP and TERM, python3 fixtures, a recorded `/bin/sleep` orphan); a
@@ -2411,7 +2727,8 @@ compaction; per-turn differences of running totals; missing values stored as nul
 spend; other model calls; settling on exit and end of output in either order; the hook-blocked prompt;
 refusal classification and hook outcomes;
 context-option validation; sleep accounting with fake clocks; span-tree tests
-against fake-Claude streams; fake-Claude end-to-end; real-claude contract test (opt-in in CI).
+against fake-Claude streams; fake-Claude end-to-end; the fake ACP child, with the same scenarios as the fake
+Claude where they apply; `Usage.quality`; `TurnEnd` reasons; real-claude contract test (opt-in in CI).
 **Status**: Not Started. Items: epic `ep-003-da` in `.collide/planning/epics/` (part L).
 
 ## Stage 4: Pack loading, settings, plan adapter, corpus and views
@@ -2457,7 +2774,8 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
   providers with backoff, isolated from the process owner.
 - `@collide/pack-sdk` v0, compiled: `defineProvider`, `defineHook`, `ctx.config`, `ctx.dataDir`.
 - **`plan` adapter (TypeScript):**
-  - parses frontmatter per checkout and keys tasks by (shortId, path), and declares the `labelId` template field;
+  - parses frontmatter per checkout with `yaml` in core mode, behind a size cap (0.10), and keys tasks by (shortId,
+    path), and declares the `labelId` template field;
   - declares its statuses with their categories, and the status each category write produces;
   - exposes collections (epics with slices and streams);
   - reports renames from the id map and reports collisions;
@@ -2478,7 +2796,10 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
   - An unparseable item (conflict markers, a sync conflict file) emits `task.invalid` and counts on its view (S11).
   - The plan adapter declares `preview`, using the plan CLI's `--dry-run` (S11).
 - **Views** from the snapshot's `.collide/views/*.yaml` and from personal views: the set algebra, normalized fields,
-  closure per the prototype board's generator, and per-view error counts.
+  closure per the prototype board's generator, and per-view error counts. CEL runs as 0.9 says: the vendored
+  `cel` 0.15 with S5's step-counter patch, a per-task and a per-pass step budget, a 1 KB source cap, list caps at
+  load, `catch_unwind` around compile, no corpus variable, and a static cost estimate when a view is saved and when
+  it loads.
 - **CLI:** `collide init`, `collide tasks [--view <name>] [--checkout <path>]`, `collide task <id> [--json]` (one
   item: fields, status, links one hop out, version and latest run; part K), `collide task <id> <op> …`,
   `collide config get|set`, `collide pack …`.
@@ -2537,7 +2858,12 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
   - set algebra;
   - a missing source field;
   - a closure over a dependency cycle;
-  - the cost limit.
+  - the step budgets: S5's nested-comprehension runaway stops at the per-task budget, and a pass of many cheap
+    tasks stops at the per-pass budget;
+  - a source over 1 KB and a list over its cap are refused at load, with the reason;
+  - a view that panics in compile is an error on that view, and the others still load (`catch_unwind`);
+  - the static estimate on a view that cannot finish within the budget;
+  - a view that names a corpus variable is refused.
 - Snapshot-not-workspace test; materialization refusals and the re-hash; id and template-field validation,
   including a value that fails the safe-token rule.
 - Settings: layering, per-user-only keys, the secret rule against a fake keychain, the pointer file (a `dir:`
@@ -2545,7 +2871,8 @@ filtered by views. Everything loads from a trusted snapshot, with the pack's set
 - Pack sources: resolution for each kind; a `dev:` folder's tree id equals `git write-tree` over the same files;
   the name clash; trust per source.
 - Root busy, against a fixture repo stopped mid-rebase.
-- Planning: parser fixtures, with strict plan CLI frontmatter left untouched; provider contract tests against
+- Planning: parser fixtures, with strict plan CLI frontmatter left untouched, and S5's hazards (an unquoted
+  `no`, a hash like `1e10`, a duplicate key, an alias bomb, a file over the cap); provider contract tests against
   markdown and plan fixtures; id generation; view counts; layout checks.
 **Status**: Not Started. Items: epic `ep-004-qd` in `.collide/planning/epics/` (part L).
 
@@ -2605,8 +2932,9 @@ removal; draft and PR items; category mapping; mixed-source view test.
   read-only; the branch-only chip.
 
 **Success Criteria**:
-- The non-owner participant completes S6 scenario 2, and scenario 1 up to the board, in the real app within S6's
-  thresholds.
+- S6 scenario 2, and scenario 1 up to the board, pass as UI tests ported from S6's pilots against the real app, each
+  completing and detecting its end state. The owner's walkthrough of both is recorded as owner judgement in the
+  stage's task item. S6's thresholds are advisory (Stage 1).
 - A fresh git repo with no `.collide/`, on a machine profile with no Collide config, opens to a board with no setup
   step. Share with team writes `.collide/`, and a second clone opens with it after the trust prompt.
 - A folder that is not a git repo offers `git init`. A missing or logged-out `claude` is named, with the fix.
@@ -2872,8 +3200,8 @@ gets real use here: prompt, run, review, accept.
     suggestions shown with their evidence.
 
 **Success Criteria**:
-- These are completed in the real app with the fake adapter, and the non-owner participant stays within S6's
-  thresholds:
+- These pass as UI tests ported from S6's pilots, in the real app with the fake adapter, and the owner's
+  walkthrough of each is recorded as owner judgement in the stage's task item (S6's thresholds are advisory):
   - S6 scenarios 4 and 6;
   - single-task versions of scenarios 3 and 5: launch one task, then review its finished run.
 - The critical path matches hand-built fixtures with known answers, including a fan-out and a human wait.
@@ -3014,7 +3342,8 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 - Re-prompting a run reuses no other run's workspace name or iter label run.
 - A task from an untrusted author asks for confirmation.
 - A failing gate on `run.before_integrate` blocks accept, and the Queue says why.
-- S6 scenarios 3 and 5 pass in the real app at full scope (group launch, accept).
+- S6 scenarios 3 and 5 pass as UI tests ported from S6's pilots, in the real app at full scope (group launch,
+  accept), and the owner's walkthrough is recorded as owner judgement in the stage's task item.
 - Planning:
   - a two-instance panel on fixture records produces a merge table whose cases match a hand-made table;
   - a changed number in one instance becomes a question item, and the run waits until it is resolved;
@@ -3121,35 +3450,43 @@ the current workflow.
 
 ## Stage 13: Full metrics
 
-**Goal**: With `full` on, a real orchard run shows where its CPU, memory, disk, network and GPU went, at the
-granularity S8 established.
+**Goal**: With `full` on, a real orchard run shows where its CPU, memory, disk, network and, when it declares a
+local model, GPU went, at the granularity S8 established.
 
 - **First, outline Milestone D** (Stages 13–15) against the measurements of Stages 9–12 (0.15).
-- The sampler at S8's interval. Disk I/O per workspace, and disk space per cache. Exit totals and disk space per
+- **Before this stage starts, the owner runs two steps S8 left unmeasured** (0.13; Deferred): a machine sleep in
+  the middle of a run, to confirm the 2 s threshold, and a run measured from its start, to price a container's
+  startup.
+- The sampler at 1 s (S8: 0.11% of one core). Disk I/O per workspace, and disk space per cache. Exit totals and disk space per
   workspace are always recorded from Stage 3.
-- Network through `nettop -P`. Device GPU utilization and memory (IOAccelerator). Per-process GPU time waits for the
-  first local-model adapter (0.13; owner, 2026-11-13).
-- Containers and detached host processes through the pack's `metrics.processes` hook, which returns container ids
-  and pids.
+- Network through one streamed `nettop` with its stdin held open (0.13). Device GPU utilization and memory
+  (IOAccelerator), polled every 5 s while a run declares a local model (0.13; owner, 2026-11-14). Per-process GPU
+  time waits for the first local-model adapter (0.13; owner, 2026-11-13).
+- Lane containers are always counted, listed through the Docker API (`one-shot=true`, 8-14 ms a call) and not the CLI (2 s a call; S8: 53% of CPU in one run).
+  Detached host processes and the container ids come through the pack's `metrics.processes` hook, which returns
+  container ids and pids.
 - `metrics.import`, selected by the run's worktree paths, with the backfill of existing history.
-- Machine sleep recorded as waiting, by S8's method.
+- Machine sleep recorded as waiting, by S8's method (a gap over 2 s).
 - The machine part of the fingerprint; load sampled throughout.
 - Privacy defaults per 0.13; retention.
-- Claude telemetry only if S8 showed it adds precision.
+- Claude telemetry traces (a beta flag) for the headless phases whose pack asks for exact timing, as 0.13 describes.
+  The stream stays the default.
 
 **Success Criteria**: On a real orchard run with `full` on:
 - the lane container's usage, and its host server processes' usage (`serverPid`, `uiPid`), appear under the
   workspace's spans through the pack's `metrics.processes`;
-- a known GPU workload (a fixed Metal compute loop run for a set time) shows device utilization over that interval,
-  within one sample at each end;
+- a run from a fixture pack that declares a local model and runs a known GPU workload (a fixed Metal compute loop
+  for a set time) shows device utilization over that interval, within one sample at each end, and a run that
+  declares no local model shows no GPU column;
 - iter's lines for that run's worktrees import as child spans, and no other worktree's lines do;
 - the backfilled history appears as baseline spans;
-- the sampler stays within S8's overhead budget, measured on the run;
+- the sampler stays within 1% of one core at 1 s, measured on the run (S8 measured 0.11%);
 - argv is stored as basenames and flag names, and a credential seeded in a URL argument is absent from the store;
 - a run during which the machine slept shows the sleep as waiting.
 
 **Tests**: Sampler attribution against a fake process tree; the `metrics.processes` contract; importer fixtures,
-including iter sub-calls; redaction fixtures; sleep accounting; retention.
+including iter sub-calls; redaction fixtures; sleep accounting; retention; a lane container listed through the
+Docker API; the sampling row's wording: exact for CPU and approximate for short-lived processes.
 **Status**: Not Started
 
 ## Stage 14: Lines
@@ -3242,7 +3579,8 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **Bench:** `collide bench` on the fixture pack's `workspace.create`, with B adding `sleep 2`, gives a verdict from
   its default 10-pair crossover and shows the A/A pairs.
 - **Estimate:** the preview of an 8-pair Orchard crossover shows its expected duration from earlier runs, in days.
-- The non-owner participant completes S6 scenario 7 within its threshold.
+- S6 scenario 7 passes as a UI test ported from S6's pilot, and the owner's walkthrough is recorded as owner
+  judgement in the stage's task item (S6's threshold is advisory).
 
 **Tests**:
 - Isolation, with positive controls.
@@ -3259,12 +3597,14 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 
 ## Deferred (with the trigger that brings each back)
 
-- **Other agent tools and model sources** (ACP adapter, Codex, OpenAI, Ollama): after Stage 10. S7 has already
-  checked the trait against ACP, and aliases and capabilities exist from Stage 3. With other endpoints, repeated
+- **Other agent tools and model sources** (a real ACP agent, Codex, OpenAI, Ollama): after Stage 10. S7 checked the
+  traits against ACP, and Stage 3 builds the ACP engine against a fake child. The first real agent is opencode: a
+  profile in `host` and a probe of what it supports, so a capability that cannot be known is `Unknown`. Aliases
+  and capabilities exist from Stage 3. With other endpoints, repeated
   endpoint failures pause the runs that use it, like a usage limit, rather than failing each phase in turn (Ferry's
   circuit breaker).
-- **Per-process GPU time:** with the first local-model adapter (owner, 2026-11-13). S8 still spikes it, and device
-  GPU ships in Stage 13. In v0, Claude's inference is remote, so no process of the user's uses the GPU for it.
+- **Per-process GPU time:** with the first local-model adapter (owner, 2026-11-13). S8 measured what macOS gives,
+  and device GPU ships in Stage 13. In v0, Claude's inference is remote, so no process of the user's uses the GPU for it.
 - **Resource tokens** (local-model GPU capacity, shared services): with the first non-Claude adapter, or when two
   packs in use throttle the same shared service themselves. R1 noted that orchard lanes are throttled by `iter`
   itself, and Ferry throttles its Docker runners the same way.
@@ -3309,8 +3649,11 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   Projects: when a real board needs one.
 - **Metrics beyond one machine.** Sharing metrics with a team, and OTLP export to an external collector: when
   someone asks to compare across machines. Spans are shaped like OpenTelemetry's, so export is cheap.
-- **Claude Code telemetry for headless phases:** when S8 shows it adds precision over the stream. Interactive
-  sessions and `agentWork` phases use it from Stage 9 (measured S2).
+- **Claude Code telemetry on by default for headless phases:** when the traces flag leaves beta. S8 showed it is
+  more exact for some things, so Stage 13 offers it to a pack that asks (0.13). Interactive sessions and `agentWork`
+  phases use it from Stage 9 (measured S2).
+- **S8's two owner steps** (owner, 2026-11-14): a machine sleep in the middle of a run, and a run measured from its
+  start so that a container's startup cost is priced. Before Stage 13 (Full metrics) starts.
 - **A daemon kept alive by launchd** (a `KeepAlive` LaunchAgent): when users want a crashed daemon back with the app
   quit. v0 starts it on demand, and the resident app restarts it (0.2).
 - **Open at login** (an `SMAppService` login item that starts the app hidden in the menu bar): when users ask. The
@@ -3357,6 +3700,17 @@ what changed in time, resources and outcome, and nothing outside the experiment 
      overrides every key, so it quietly undoes the "team setting applies to everyone" rule.
 
    Decided (owner, 2026-11-13): (b). User profiles follow the same rule (0.7).
+8. **When the device GPU is polled** (S8, revision 11). S8 measured about 25 ms of CPU per `ioreg` call, so a 5 s
+   poll is cheap, and recommended polling only when a process in the run's tree or its pack declares a local model.
+   Revision 10 and Stage 13 poll the device in every `full` run, and Stage 13's Metal-loop test depends on it.
+   Options:
+   - (a) Poll the device in every `full` run, at 5 s: about 0.5% of a core for the device call alone, and the Metal
+     test runs as written. A run with no local model gets a utilization column that mostly shows the desktop.
+   - (b) Poll only when a local model is declared (S8): no cost and no noise for Claude-only runs, but Stage 13's
+     test then needs a fixture that declares one, and device GPU does not appear until the first local-model
+     adapter.
+
+   Decided (owner, 2026-11-14): (b). Stage 13's test uses a fixture pack that declares a local model (0.13).
 
 ## Risks
 
@@ -3402,7 +3756,9 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   - concurrent runs recorded and flagged;
   - "measured by different gates";
   - outcomes beside timings.
-- **Metrics overhead.** Sampling must stay within S8's budget, or `full` mode distorts what it measures.
+- **Metrics overhead.** Sampling must stay under 1% of one core, or `full` mode distorts what it measures. S8
+  measured 0.11% at 1 s for the sampler, and 8-14 ms per container for one Docker API stats call (measured). The
+  sampler's figure does not include a run with many lanes (unmeasured).
 - **Experiment cost.** Each arm provisions several worktrees: an experiment root, a task workspace and sandboxes. A
   orchard arm can spend tens of minutes and several GB of disk before an agent starts. A verdict needs at least 8
   crossover pairs, which for an Orchard loop means days. Effect sizes and `collide bench` are the cheaper paths.
@@ -3934,3 +4290,25 @@ question 7 asks whether a developer may override a shared key on their own machi
   chat app. Proposal statuses merge planning.md's session and decision tables. `proposed` replaces the `open`
   first suggested, because 0.10 already uses "open" for not `done` or `dropped`. Only a person accepts, defers,
   rejects or resolves, as only a person marks a checklist item (0.10, 0.11, run UI stage).
+
+**Revision 11, 2026-11-14 (spikes S5–S8; owner).** The four records are applied with the owner's decisions of
+2026-11-14: `sp-0005-fv-schema-expressions`, `sp-0006-kq-agentadapter-acp`, `sp-0009-bb-interface-prototype` and
+`sp-0010-bn-metrics-sources`. Every recommendation and proposed change has a row in the ledger at the end of
+`.collide/planning/epics/ep-001-ef-spikes/tasks/ts-0005-st-apply-s5-s8-to-the-plan.md`, with its disposition, where it
+landed and, for each rejection or deferral, the reason or trigger.
+- **Changed:** the revision summary; 0.2 (shim logs stdin); 0.3 (two traits, session start, permissions, usage,
+  `TurnEnd`, capability table, budgets, ACP rules, `model.id`, later adapters); 0.5 (report caps, poll); 0.6 (schema
+  pipeline); 0.7 (YAML loader); 0.9 (untrusted YAML, CEL limits); 0.10 (fields, ids, frontmatter); 0.11 (review ×2
+  as two reviewers, literal keys, context view as a data contract, tool-call breakdown, lines switcher, S6 closing
+  paragraph); 0.13 (spans, sleep, sampling, `nettop`, GPU, containers, telemetry, volume); 0.15 (chosen crates and
+  packages, component tree); Stages 1, 2, 3, 4, 6, 9, 11, 13 and 15; Deferred; Risks.
+- **Owner's decisions:** S6's sessions skipped, so every non-owner participant criterion is a ported UI test plus an
+  owner walkthrough recorded as owner judgement, and S6's thresholds are advisory; S6's usability gate withdrawn;
+  S6 defaults `id`, `literal`, `moment`, `top`; "review ×2" is two reviewers in parallel; CEL vendored with the step
+  counter and offered upstream; `schemars` then `json-schema-to-typescript`; S7 P1–P9 and changes 1–13; S8's
+  extras (lane containers always counted through the Docker API, the three breakdown choices, honest sampling
+  wording).
+- **Rejected:** S5's id rule `^[a-z]{2,}-[0-9a-z]{4,}$` (the owner's rule of 2026-11-13 stands), and S6's usability gate.
+- **Owner's decision after the draft:** the device GPU is polled only when a local model is declared (S8 rec 5;
+  0.13, Stage 13, Open questions item 8).
+- **Deferred:** S8's sleep mid-run test and a run measured from its start, before Stage 13 starts.

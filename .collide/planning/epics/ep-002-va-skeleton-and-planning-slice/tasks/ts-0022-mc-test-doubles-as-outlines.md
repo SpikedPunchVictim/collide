@@ -10,11 +10,12 @@ links:
 
 ## Goal
 
-A fake adapter that emits normalized events, a fake provider, a fake hook runner.
+A fake adapter that emits normalized events, a second `AgentSession` that is a scripted fake ACP child, a fake provider, a fake hook runner.
 
 ## Success criteria
 
 - The doubles compile against the outlined traits.
+- Both `AgentSession` doubles drive the same contract test.
 
 ## Notes
 

@@ -10,12 +10,13 @@ links:
 
 ## Goal
 
-The shell's `rpc` command and event channel; the React component tree for Field, Tracks and Queue, following S6, with typed props and placeholder rendering.
+The shell's `rpc` command and event channel; the React component tree following S6's surfaces: Field, Tracks, Queue, run detail (Output, Time breakdown, Review), Compare and Experiments, with typed props and placeholder rendering, and one reducer for UI state in which every user action is a reducer action.
 
 ## Success criteria
 
-- The app builds and renders the three surfaces with placeholders.
+- The app builds and renders each surface with placeholders.
+- Every user action is a reducer action, and a reducer test drives one without a browser.
 
 ## Tests
 
-- Component smoke tests.
+- Component smoke tests; reducer tests.

@@ -83,7 +83,7 @@ The owner also asked which hooks the planning lifecycle needs. Section 7 answers
 | # | Question | Verdict | Where | Stage |
 |---|---|---|---|---|
 | 1 | Working with the team's system | A provider declares its **kinds** (each with its own statuses), its **typed links** and its ops. `collide/plan` maps kinds to planning roles. One planning source per board, with no silent fallback to repo markdown. | core (kind, links) + `collide/plan` + provider | 2, 4 |
-| 2 | A repo with no planning system | A markdown provider in `collide/plan`, with random ids and an alias. Private root in Collide's data directory; shared root `.collide/planning/` by default, **configurable per repo (owner, 2026-11-13)**. Collide's own records are its first user. | `collide/plan` | 4 |
+| 2 | A repo with no planning system | A markdown provider in `collide/plan`, with ids of a kind prefix, a number and a letter suffix (`ts-0012-ua`), and an alias. Private root in Collide's data directory; shared root `.collide/planning/` by default, **configurable per repo (owner, 2026-11-13)**. Collide's own records are its first user. | `collide/plan` | 4 |
 | 3 | Lifecycle hooks | Generic task points in core: after a status write, around other ops, around Share. `collide/plan` names the planning moments as **derived points**: a core point plus a filter. Provider ops write the register, hooks react and may block, observers notify. | core (points) + `collide/plan` (derived points) | 2, 8, 9, 12 |
 | 4 | Several agents on one spike | Adversarial rounds and a merge phase already fit the engine. Panels and specialists need **fan-out instances** (a role, prompt, model or profile per instance) and a run-level budget. | core + `collide/plan` | 2, 8, 11 |
 | 5 | Verify gate | A `script` gate re-runs each claim's `repro:` and compares the result within a declared tolerance. It samples under a verify budget, and asks before running a teammate's scripts. | `collide/plan` | 11 |
@@ -336,8 +336,10 @@ checklist sit in Collide markdown is one planning record held in two systems:
 - **Frontmatter belongs to this provider**, so it can be Collide's own format (section 4).
 - **The shared root is data, not config** [inferred]. Unlike views and `board.yaml` [read plan 0.9, Trust], it
   stays out of the trust hash. Its text is fenced as untrusted, like any task text [read plan 0.9, Task text is data].
-- **Ids are random and short** (`sp-4k7q`), with an optional human `alias` (`S10`). Collide does not allocate
-  sequential numbers, for three reasons (open question Q6):
+- **Ids are a kind prefix, a number and a two-letter suffix** (`sp-0008-bk`; owner, 2026-11-13, plan 0.10), with an
+  optional human `alias` (`S10`). This replaces the random ids first proposed here (`sp-4k7q`). The suffix keeps ids
+  unique across branches, so a merge never rewrites a link. Three reasons from the first proposal, against plain
+  sequential numbers (open question Q6, historical):
   - the plan CLI's per-checkout ids need a renumber at merge [read plan 0.10, Identity];
   - its lock once produced duplicates [read the Orchard repo's bug-hunt notes on the plan CLI, #3];
   - beads uses hash ids so that branches and agents do not collide [fetched `bd:readme`].
@@ -615,24 +617,29 @@ pre-registration, and makes claims machine-readable.
 
 ```yaml
 ---
-id: sp-4k7q                     # random, never reused (2.4)
+id: sp-0010-bn                  # kind, number, suffix; never reused (2.4)
 alias: S10
 kind: spike
 status: concluded               # proposed | preregistered | running | results | concluded | abandoned | superseded
 title: Planning seams
 question: Can three agents' records merge mostly mechanically?
 owners: [lead]                  # the claim
-session: ss-9d2m
+session: ss-9d2m                # no longer applies (see the banner)
 links:
-  - { type: informs, to: dc-2m8x }
-  - { type: supersedes, to: sp-1a2b }
+  - { type: informs, to: dc-0003-mq }
+  - { type: supersedes, to: sp-0001-ab }
 classification: measured        # the weakest label among load-bearing answers (the plan CLI's field)
 checklist: collide/plan/spike@1
-preregistered: 3f1c2a9          # commit of the Pre-registration section
+preregistered: "3f1c2a9"        # commit of the Pre-registration section; quote it (a hash like 1e10 parses as a number)
 instances: [opus-a, sonnet-b]   # a merged record only
 spend: { usd: 0.85, cap_usd: 4 }
 ---
 ```
+
+**Parsing the frontmatter (S5, `sp-0005-fv-schema-expressions`).** The provider reads it with the `yaml` package in
+core mode, never `gray-matter` (its YAML 1.1 mode turns `no` into `false`) and never a 1.1 mode. The file is capped
+before parsing, duplicate keys and aliases stay errors, and a commit hash is quoted so that `1e10` stays a string.
+Ids always stay strings. Plan 0.10 has the numbers.
 
 With the plan CLI, each key stays in the file whose schema declares it [read the plan CLI's source]:
 - PLAN.md's frontmatter keeps `status`, `owners`, `question`, `supersedes` and `tags`;
@@ -819,7 +826,7 @@ Claude sessions are local to each machine, so a teammate cannot `--resume` the s
   - A file left with conflict markers after a pull fails to parse. The provider counts it as a parse error, and
     `collide/plan` adds a Queue item to resolve it (7.9).
   - The plan CLI adds two more conflicts: per-checkout ids collide [read plan 0.10, Identity], and `plan generate`
-    rewrites generated regions [inferred]. The markdown provider's random ids avoid the first.
+    rewrites generated regions [inferred]. The markdown provider's ids carry a two-letter suffix, which avoids the first.
 - **beads.** Dolt merges at cell level, and `bd dolt pull` reports what it cannot merge [fetched `bd:faq`].
 - **Writes.** The source's `version` check returns `conflict` on apply, as it does today [read plan 0.10, Protocol].
 
@@ -1192,9 +1199,9 @@ Every point gets the 0.5 input [read plan 0.5, Input]. Task points add `change`,
   "launch": null,
   "config": { "adrDir": "docs/adr" },
   "tasks": [
-    { "key": "plan:dc-2m8x", "shortId": "dc-2m8x", "path": ".collide/planning/ss-9d2m/dc-2m8x-sharing.md",
+    { "key": "plan:dc-0003-mq", "shortId": "dc-0003-mq", "path": ".collide/planning/ss-9d2m/dc-0003-mq-sharing.md",
       "kind": "decision", "status": "accepted", "category": "done", "version": "9f2c41",
-      "links": [{ "type": "evidence", "to": "sp-4k7q" }], "title": "Sharing is git-backed" }
+      "links": [{ "type": "evidence", "to": "sp-0010-bn" }], "title": "Sharing is git-backed" }
   ],
   "change": {
     "op": "setStatus",
@@ -1203,7 +1210,7 @@ Every point gets the 0.5 input [read plan 0.5, Input]. Task points add `change`,
     "to": { "status": "accepted", "category": "done" },
     "actor": { "kind": "person" },
     "checkout": "main",
-    "files": [".collide/planning/ss-9d2m/dc-2m8x-sharing.md"]
+    "files": [".collide/planning/ss-9d2m/dc-0003-mq-sharing.md"]
   },
   "latestRun": { "id": "r-77", "workflow": "collide/plan/spike", "outcome": "concluded", "state": {} },
   "phase": null,
@@ -1540,7 +1547,7 @@ Requirement 3 is split, so part of it arrives early:
   category it moves to, if any) and optional tags. A provider with one kind may omit `kinds`.
 - It also returns `links`: the link types it holds, their direction, and whether they block.
 - **A built-in markdown provider** in `collide/plan`:
-  - one file per item, identified by its frontmatter `id`, with random ids and an alias;
+  - one file per item, identified by its frontmatter `id` (a kind prefix, a number and a two-letter suffix), with an alias;
   - two roots: private, in the pack's data directory, and shared, at the configured path, `.collide/planning/` by
     default, committed as views are (owner, 2026-11-13);
   - the path is set in `.collide/config.yaml`. A change offers Move, and the old path stays readable until it is
