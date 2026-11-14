@@ -1,5 +1,8 @@
 # S6 session protocol
 
+**Not run.** The owner skipped the sessions on 2026-11-14 (no participants who did not design Collide). Kept in case
+participants become available; see `record.md`, "Session results".
+
 For the facilitator. One session is one participant, about 60 to 75 minutes. The participant must not have designed
 or built Collide. The pass thresholds are in `record.md` (section "Thresholds"); the owner set them on 2026-11-14,
 before the first session. Do not change them after seeing data.

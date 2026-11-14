@@ -27,5 +27,5 @@ disk and network per process, GPU, Docker, sleep detection, store growth, teleme
 
 The record and its scripts go in a new spike folder under `.collide/planning/spikes/` (plan 0.10). Settles the breakdown's open timing choices: model-time gap threshold, nested subagent calls, share denominator.
 
-Results are in `sp-0010-bn` (2026-11-14), including two real runs measured part-way through. Still open: the sleep test
-(owner, `sleep-check.sh`) and a lane test measured from its start with its containers.
+Results are in `sp-0010-bn` (2026-11-14), including three real runs measured part-way through (one with its lane
+containers). Still open: the sleep test (owner, `sleep-check.sh`) and a run measured from its start.

@@ -60,10 +60,12 @@ Answers in one place:
 - **Store growth** is 34 bytes per sample row [M]: 0.6 MB per hour for a 5-process tree at 1 s, 6 MB per hour for 50.
 - **Report files:** a 50 ms poll tails 50,000 lines per second with no loss, p99 lag 52-55 ms. Proposed caps: 4 KB
   per line (unchanged), 100 lines per second sustained (burst 1000) and 16 MiB per file.
-- **Real Orchard runs (two, attached part-way through):** the 1 s sampler missed 62.5% of the processes the 50 ms
-  reference saw in one run and 33% in the other, yet caught 96.8% and 100% of their CPU time; the processes it never
-  saw used 2.0% and 0.0% [M]. On real runs the misses are many but cheap. It cost 0.08-0.09% of a core [M]. See
-  "Two real Orchard runs".
+- **Real Orchard runs (three, attached part-way through):** the 1 s sampler missed 33-73% of the processes the
+  50 ms reference saw, yet caught 93-100% of their CPU time; the processes it never saw used 0-4.3% [M]. On real runs
+  the misses are many but cheap. It cost 0.08-0.09% of a core [M].
+- **A lane run's containers did more work than its host processes:** 612 s of CPU in three lane containers against
+  551 s in the host tree, so 53% of run C's CPU is invisible to a tree-only sampler [M]. Count lane containers always.
+  See "Real Orchard runs".
 - **Not run:** the sleep test (owner step, `sleep-check.sh`; a watcher waited 60 minutes on 2026-11-14 and saw no
   sleep).
 
@@ -454,7 +456,7 @@ No command was run in the repository or a copy of it. Names are generic here; ra
   The census counts calls, not processes, so it cannot give the share of short processes; the synthetic workload's
   54% under 10 ms is an assumption, and `measure-attach.sh` is what measures the real share.
 
-## Two real Orchard runs (`measure-attach.sh`)
+## Real Orchard runs (`measure-attach.sh`)
 
 On 2026-11-14 two Orchard iteration runs were already going in the owner's other sessions. `measure-attach.sh` was
 attached to the shell at the top of each, about 8 minutes after each started, and ran until each ended. It only read
@@ -507,6 +509,56 @@ What this changes [I]:
 - **A busy GPU is not the run's GPU.** The device reached 63% while no process of the tree had GPU time, so device
   utilization cannot be charged to a run.
 
+### Run C: a review run with its lane containers
+
+A third run, a review iteration that uses lanes, started in another session later the same day. The sampler was
+attached about 3 minutes after it started, this time with a `docker ps` label filter that matches the lane containers
+of that run's checkout, and ran until the run ended: 1,596 s. Two containers already existed; a third was created
+during the window. All [M].
+
+| host tree | run C |
+|---|---|
+| 1 s sampler CPU | 0.094% of one core (tick work p50 796 us, p99 5,687 us) |
+| 50 ms reference CPU | 1.73% |
+| processes seen by the 50 ms reference | 475 |
+| ... missed by the 1 s sampler | 346 (72.8%) |
+| CPU in the window, 50 ms reference | 551.3 s |
+| ... caught by the 1 s sampler | 513.7 s (93.2%) |
+| ... used by processes the 1 s sampler never saw | 23.7 s (4.3%) |
+| peak processes at one tick | 13 |
+| process names | node 285, bash 107, sh 39, docker 18, psql 8, dirname 7, openssl 4, shells |
+| network (tree, nettop) | 5 node processes; top two 203 MB in / 102 MB out and 115 MB in / 440 MB out |
+| GPU | device up to 41%; none in the tree |
+| sleep gaps | none |
+
+By lifetime (50 ms reference; CPU is each process's total since it started): under 0.1 s 254 processes (239 missed
+at 1 s, 6.0 s CPU); 0.1-0.5 s 140 (103, 26.8 s); 0.5-1 s 28 (4, 11.8 s); 1-5 s 15 (0, 17.8 s); 5-30 s 19 (0, 83.1 s);
+30 s or more 19 (0, 424.0 s).
+
+The lane containers, from the Docker API (CPU, network and memory over the window; processes is the most seen at once):
+
+| container | CPU | peak memory | network in / out | processes |
+|---|---|---|---|---|
+| lane database (Postgres) | 486.7 s | 259 MB | 357 / 380 MB | 18 |
+| demo server | 90.0 s | 350 MB | 908 / 55 MB | 9 |
+| second lane database, created during the run | 35.6 s | 303 MB | 62 / 6 MB | 17 |
+| total | 612.4 s | | | |
+
+Readings came every 2.18 s per container at the median (p95 2.5 s, max 5.4 s), not every 1 s.
+
+What run C adds [I]:
+
+- **Containers are half the run.** 612 s of 1,164 s CPU (53%) ran inside lane containers, mostly the database. A
+  run view that shows only the host tree would show less than half the work and none of the database's. The lane
+  filter is required, not an extra.
+- **Short processes still cheap.** 394 processes lived under 0.5 s (32.8 s of CPU, 6% of the tree); 1 s still caught
+  93% of the host CPU.
+- **The 2.2 s Docker step is the helper's loop, not the API.** The helper sleeps 1 s, then runs the `docker ps` CLI
+  and one stats call per container on every pass; the API call alone took 8-14 ms in the Docker section above. A
+  product sampler should list a lane's containers through the API on a timer, not the CLI. Not measured separately.
+- **Container startup is still unmeasured.** The second database was created about 77 s into the window and was read
+  from then on; the first two were created before the attach.
+
 ## Recommendations
 
 1. Sample the run's process tree at 1 s (0.11% of a core); offer 250 ms (0.37%); never go below 250 ms by default.
@@ -515,7 +567,8 @@ What this changes [I]:
 3. Take disk bytes from `proc_pid_rusage`, never from `wait4`.
 4. Run one streaming `nettop` per host for `full` runs, spawned with an open stdin pipe, read through a pty.
 5. Poll GPU every 5 s and only when a local model is in play; label per-process time as "GPU busy seconds".
-6. Use the Docker API one-shot at 1 s or slower, and the pack's `metrics.processes` hook for identities.
+6. Use the Docker API one-shot at 1 s or slower, and the pack's `metrics.processes` hook for identities. Always
+   include a run's lane containers: in run C they did 53% of the CPU. List them through the API, not the CLI.
 7. Detect sleep with the two-clock formula on each sampler tick, threshold 2 s.
 8. Plan for about 34 bytes per sample row (0.6-6 MB per hour for 5-50 processes at 1 s).
 9. Tail report files by polling every 50 ms; caps of 4 KB per line, 100 lines per second (burst 1000), 16 MiB per file.
@@ -547,10 +600,11 @@ Proposals only; this spike did not edit the plan.
 
 ## Left unmeasured
 
-1. **The rest of a real Orchard run** [U]. Two runs were measured (see "Two real Orchard runs"), but not from their
-   start, not a lane test, and not their containers. To cover those: start the run, find the pid of its top process
-   with `ps` or `pgrep -f`, run `./measure-attach.sh PID DOCKER_FILTER` at once with a `docker ps` filter such as a
-   lane label, and add the printed report to that section. Why run B's network came out empty is not known.
+1. **The start of a real Orchard run** [U]. Three runs were measured (see "Real Orchard runs"), run C with its lane
+   containers, but none from its start, so lane and container startup cost is not known. To cover it: start the run,
+   find the pid of its top process with `ps` or `pgrep -f`, run `./measure-attach.sh PID DOCKER_FILTER` at once with
+   the lane label filter, and add the printed report to that section. Why run B's network came out empty is not
+   known.
 2. **Sleep mid-run** [U]. `./sleep-check.sh`, about two minutes: it starts a watcher, the owner puts the Mac to sleep by
    hand for about a minute, wakes it, and reads "slept N s" next to the OS's own record. Nothing in the spike
    slept the machine. A watcher ran for 60 minutes on 2026-11-14 and saw no sleep, so this is still open.

@@ -24,3 +24,8 @@ Read the four decision records against the plan, take the owner's decisions, and
 ## Notes
 
 The plan stays frozen until this lands.
+
+Owner, 2026-11-14: S6's sessions with a non-owner participant are skipped (none available); the owner iterates on
+the prototype. Replace every plan criterion that names "the non-owner participant" (Stage 1's S6 item and criteria,
+and the later stages that reuse S6 scenarios and thresholds in the real app) with checks the owner can run. See the
+S6 record, "Session results".

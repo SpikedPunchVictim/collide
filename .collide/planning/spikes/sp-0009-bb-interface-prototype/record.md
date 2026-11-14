@@ -2,7 +2,7 @@
 id: sp-0009-bb
 alias: S6
 kind: spike
-status: running
+status: results
 title: "S6: interface prototype"
 owners: []
 links: []
@@ -46,7 +46,8 @@ Production build: 338 kB JavaScript (103 kB gzip), 20 kB CSS [M].
   JSON export.
 - **[I]** A scripted pilot proves a scenario can be done and the end state is detected. It says nothing about how
   long a person takes or where they go wrong. That is what the sessions are for.
-- **[U]** No participant has used it. The owner set the thresholds below (2026-11-14) before any session.
+- **[U]** No participant has used it. The owner set the thresholds below, then skipped the sessions (2026-11-14): no
+  one who did not design Collide is available. The owner iterates on the prototype directly instead.
 
 ## What was built and how each scenario is done in it
 
@@ -149,7 +150,8 @@ Variants are switched in the facilitator panel. The protocol gives the rotation 
 
 **Set by the owner on 2026-11-14: the proposed time and error limits and the pass rule, unchanged. Do not change them
 after the first session.** The numbers began as my estimates [I] from the number of steps in the scripted pilots and
-from the x30 speeds. They are not measured on people.
+from the x30 speeds. They are not measured on people. Not used so far: the sessions were skipped (see "Session
+results"). They stand if sessions with first-time users ever run.
 
 Rule for each scenario: it passes if the median time over participants is at or under the limit, no more
 than one participant in four gives up, and the median errors are at or under the error limit.
@@ -235,7 +237,8 @@ All of these are [I] until sessions run.
 6. **An experiment result states its scope.** Show "on this task" with the verdict, the critical-path difference and
    whether outcomes are equal, so one run is not read as a general rule.
 7. **Add a fake-data usability gate before product code.** The owner sets the thresholds first (done here), then a
-   person who did not design it runs the nine scenarios.
+   person who did not design it runs the nine scenarios. Withdrawn: the owner has no such participants (2026-11-14).
+   Revision 11 must instead replace the plan's "non-owner participant" criteria (see "Session results").
 
 ## Left unmeasured
 
@@ -254,8 +257,21 @@ All of these are [I] until sessions run.
 
 ## Session results
 
-Not run. Fill this in from `sessions/s6-p<N>.json` once sessions are done: time and errors per scenario against the
-thresholds, the winner or the tie for each of Q1 to Q4, and the words used for Q5.
+**Skipped by the owner on 2026-11-14.** No one who did not design Collide is available to take part. The owner and
+the agent iterate on the prototype directly instead. What follows from that [I]:
+
+- The thresholds are not tested. Times the owner takes are a designer's times, not a first-time user's, so they say
+  nothing about the limits.
+- Q1 to Q4 keep the defaults (`id`, `literal`, `moment`, `top`) unless the owner picks another variant while
+  iterating; that pick is the owner's judgement, recorded as such, not a session result.
+- Q5 (what "review ×2" means to a reader) stays unchecked; the owner already knows it means two reviewers.
+- The plan names a non-owner participant in Stage 1's S6 item and criteria, and in later stages' criteria that
+  reuse S6 scenarios and thresholds in the real app. Revision 11 (`ts-0005-st`) must replace those with checks the
+  owner can run.
+
+`SESSION-PROTOCOL.md` is kept in case participants become available. If sessions ever run, fill this section from
+`sessions/s6-p<N>.json`: time and errors per scenario against the thresholds, the winner or the tie for each of Q1 to
+Q4, and the words used for Q5.
 
 ## Reproduction
 

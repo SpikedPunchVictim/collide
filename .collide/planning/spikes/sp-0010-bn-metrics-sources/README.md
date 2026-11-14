@@ -41,8 +41,8 @@ The numbered files match the section order in `record.md`, not the order in the 
 ## Owner steps (not run by the spike)
 
 Both were prepared but not run by the spike, so that nothing real was touched and the machine was never put to
-sleep. On 2026-11-14 the attach was run beside two live runs (record, "Two real Orchard runs"); the sleep test is
-still open.
+sleep. On 2026-11-14 the attach was run beside three live runs, one with its lane containers (record, "Real Orchard
+runs"); the sleep test is still open.
 
 **Sleep detection.** `./sleep-check.sh` starts a watcher. Put the Mac to sleep by hand for about a minute, wake it,
 and read the line `slept N s`. It also prints the OS's own record to compare with.
@@ -50,7 +50,7 @@ and read the line `slept N s`. It also prints the OS's own record to compare wit
 **A real iteration run.** Start an Orchard iteration run (or a lane test) as usual. Find the pid of its top process,
 then in this folder run `./measure-attach.sh PID [DOCKER_FILTER]`. It runs two read-only samplers (1 s and 50 ms) and
 one helper for network, GPU, sleep and Docker, and prints a report when the run ends. It only reads. It never signals
-any process other than the ones it started. Add the report to `record.md`, section "Two real Orchard runs".
+any process other than the ones it started. Add the report to `record.md`, section "Real Orchard runs".
 
 ## Notes
 
