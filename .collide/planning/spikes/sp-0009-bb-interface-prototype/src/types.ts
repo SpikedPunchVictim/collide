@@ -195,6 +195,11 @@ export interface View {
   name: string
   cel: string
   filter: Filter
+  /** absent means the Field, as before the in-app agent */
+  surface?: 'field' | 'tracks'
+  sort?: SortSpec | null
+  groupBy?: GroupBy
+  runFilter?: RunFilter
 }
 
 export interface Filter {
@@ -203,6 +208,8 @@ export interface Filter {
   label: string[]
   source: string[]
   text: string
+  /** exact task ids; set by the in-app agent, not by a chip */
+  ids?: string[]
 }
 
 export interface Branch {
@@ -301,7 +308,7 @@ export interface Session {
   detected: boolean
 }
 
-export type Surface = 'field' | 'tracks' | 'queue' | 'experiments' | 'compare'
+export type Surface = 'field' | 'tracks' | 'queue' | 'experiments' | 'compare' | 'settings'
 export type DetailTab = 'output' | 'breakdown' | 'review'
 
 export interface Detail {
@@ -353,4 +360,144 @@ export interface State {
   packAdded: boolean
   variants: Variants
   session: Session
+  fieldView: FieldView
+  tracksView: TracksView
+  lens: Lens | null
+  highlight: Highlight | null
+  snapshots: Lens[]
+  agent: AgentState
+  agentSettings: AgentSettingsState
+}
+
+// ---- in-app agent (UI tools) ----
+
+export interface SortSpec {
+  /** Field: id, title, epic, labels, status. Tracks: total, start, end, spend, wait, phase:<key> */
+  by: string
+  dir: 'asc' | 'desc'
+}
+export type GroupBy = 'status' | 'epic' | 'label' | 'source'
+export interface RunFilter {
+  status: RunStatus[]
+  task: string[]
+  workflow: string[]
+  ids: string[]
+}
+export interface FieldView {
+  sort: SortSpec | null
+  groupBy: GroupBy
+}
+export interface TracksView {
+  filter: RunFilter
+  sort: SortSpec | null
+}
+
+export interface LensGroup {
+  name: string
+  ids: string[]
+  reason: string
+}
+/** The agent's judgement: named groups of ids with a reason each. A snapshot, stamped with its time. */
+export interface Lens {
+  id: string
+  surface: 'field' | 'tracks'
+  title: string
+  groups: LensGroup[]
+  rest: 'dim' | 'hide'
+  /** real clock, ms since epoch, when the agent made it */
+  at: number
+  source: string
+  /** set once the user saves it as a snapshot */
+  name?: string
+}
+export interface Highlight {
+  surface: 'field' | 'tracks'
+  ids: string[]
+  note: string
+}
+
+/** What Undo puts back. The agent cannot change runs, the queue or tasks, so only view state is kept. */
+export interface Snap {
+  surface: Surface
+  filter: Filter
+  activeView: string | null
+  fieldView: FieldView
+  tracksView: TracksView
+  tracks: State['tracks']
+  lens: Lens | null
+  highlight: Highlight | null
+  drawerTask: string | null
+  detail: Detail | null
+  queueSel: string | null
+  expOpen: string | null
+}
+
+export type AgentTool = 'set_view' | 'show_groups' | 'highlight' | 'open'
+
+export interface AgentChange {
+  id: string
+  tool: AgentTool
+  surface: string
+  title: string
+  /** the expression for a view; empty for a lens */
+  expr: string
+  /** a lens: one line per group; a highlight or view: the reason, if given */
+  reasons: { name: string; reason: string; n: number }[]
+  note: string
+  source: string
+  at: number
+  prev: Snap
+  /** a view change carries the view it produced, so Save as view does not depend on later edits */
+  view: Omit<View, 'id' | 'name'> | null
+  lensId: string | null
+  saved: string | null
+}
+
+export interface AskState {
+  status: 'idle' | 'working' | 'done' | 'failed' | 'nochange'
+  request: string
+  agent: string
+  startedAt: number
+  firstToolAt: number | null
+  chipAt: number | null
+  doneAt: number | null
+  lines: { t: number; text: string }[]
+  text: string
+  error: string
+  usage: { costUsd: number | null; inputTokens: number | null; outputTokens: number | null } | null
+  calls: number
+}
+export interface AgentState {
+  changes: AgentChange[]
+  n: number
+  ask: AskState
+}
+
+export type AgentKind = 'claude-code' | 'acp' | 'external'
+export interface AgentConfig {
+  id: string
+  name: string
+  kind: AgentKind
+  /** claude-code: the executable (claude). acp: the command to run. external: unused */
+  command: string
+  /** acp: extra arguments, space separated */
+  args: string
+  model: string
+  /** the folder the agent may read; also its working directory */
+  folder: string
+  budgetUsd: number
+  timeoutSec: number
+  /** acp: KEY=VALUE per line, added to a minimal environment */
+  env: string
+}
+export interface AgentSettings {
+  agents: AgentConfig[]
+  askAgent: string | null
+}
+export interface AgentSettingsState {
+  settings: AgentSettings | null
+  loaded: boolean
+  dirty: boolean
+  error: string | null
+  savedAt: number | null
 }

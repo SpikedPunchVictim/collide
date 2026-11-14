@@ -1,6 +1,6 @@
 import { plannedPhases } from '../sim'
 import { SIM_ZERO } from '../sim'
-import { fmtClock, fmtDur, isLive, taskOf } from '../world'
+import { fmtClock, fmtDur, hasRunFilter, runExpr, runSortValue, taskOf, trackRuns } from '../world'
 import { Chip, RunTag, runColour } from './common'
 import { useApp } from './store'
 import type { Phase, Run, State } from '../types'
@@ -42,6 +42,17 @@ function Seg({ s, r, p, planned }: { s: State; r: Run; p: Phase; planned?: boole
   )
 }
 
+function sortLabel(s: State, r: Run): string | null {
+  const sort = s.tracksView.sort
+  if (!sort) return null
+  const v = runSortValue(s, r, sort.by)
+  const name = sort.by.startsWith('phase:') ? sort.by.slice(6) : sort.by
+  if (v === null) return `${name}: none`
+  if (sort.by === 'start' || sort.by === 'end') return `${name}: ${fmtClock(v)}`
+  if (sort.by === 'spend') return `${name}: ${'$'}${v.toFixed(2)}`
+  return `${name}: ${fmtDur(v)}`
+}
+
 function Row({ s, r }: { s: State; r: Run }) {
   const { d } = useApp()
   const task = taskOf(s, r.taskId)
@@ -51,7 +62,7 @@ function Row({ s, r }: { s: State; r: Run }) {
   const pending = s.queue.filter((q) => q.runId === r.id && q.status === 'pending')
   return (
     <div
-      className={`trk${s.hover === r.id ? ' hl' : ''}${focus?.runId === r.id ? ' focus' : ''}`}
+      className={`trk${s.hover === r.id ? ' hl' : ''}${focus?.runId === r.id ? ' focus' : ''}${s.highlight?.surface === 'tracks' && s.highlight.ids.includes(r.id) ? ' agent-hl' : ''}`}
       data-run={r.id}
       style={col ? { borderLeft: `4px solid ${col}` } : undefined}
       onMouseEnter={() => d({ type: 'hover', runId: r.id })}
@@ -89,6 +100,7 @@ function Row({ s, r }: { s: State; r: Run }) {
       <div className="meta mono note">
         ${r.spend.toFixed(2)} of ${r.budget.toFixed(2)}
         <br />{fmtDur(((r.endWall ?? s.simNow) - r.startWall))}
+        {sortLabel(s, r) && <><br /><b className="sortval">{sortLabel(s, r)}</b></>}
       </div>
     </div>
   )
@@ -145,9 +157,36 @@ function Finished() {
   )
 }
 
+function ViewBar() {
+  const { s, d } = useApp()
+  const tv = s.tracksView
+  const active = !!tv.sort || hasRunFilter(tv.filter)
+  const mine = s.views.filter((v) => v.surface === 'tracks')
+  if (!active && !mine.length && s.lens?.surface !== 'tracks') return null
+  return (
+    <div className="viewbar">
+      {active && (
+        <span className="fchip viewmod" role="status">
+          <code>{runExpr(tv.filter, tv.sort)}</code>
+          <button type="button" aria-label="Reset the runs view" onClick={() => d({ type: 'tracksViewReset' })}>x</button>
+        </span>
+      )}
+      {mine.length > 0 && <span className="lbl">Views</span>}
+      {mine.map((v) => <button key={v.id} type="button" className="fchip" onClick={() => d({ type: 'openView', id: v.id })}>{v.name}</button>)}
+      {s.lens?.surface === 'tracks' && (
+        <span className="note">
+          Lens: {s.lens.title}, a snapshot from {new Date(s.lens.at).toLocaleTimeString()}.{' '}
+          <button type="button" className="btn sm" onClick={() => d({ type: 'lensClear' })}>Clear lens</button>
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function Tracks() {
   const { s, d } = useApp()
-  const live = s.runs.filter((r) => isLive(r) || (r.endWall !== null && r.endWall > s.tracks.start && r.status === 'done' && s.simNow - r.endWall < 3600))
+  const live = trackRuns(s)
+  const lens = s.lens?.surface === 'tracks' ? s.lens : null
   const nowX = pct(s, s.simNow)
   const limX = pct(s, LIMIT_RESET)
   return (
@@ -163,11 +202,22 @@ export function Tracks() {
         <button type="button" className="btn sm" aria-pressed={s.tracks.follow} onClick={() => d({ type: 'trackFollow', on: !s.tracks.follow })}>Follow now</button>
         {s.returnTo && <button type="button" className="btn sm primary" onClick={() => d({ type: 'back' })}>Back to {s.returnTo} (Esc)</button>}
       </header>
+      <ViewBar />
       <div className="trkgrid">
         <div className="trk axisrow"><span /><Ticks s={s} /><span /></div>
         <div className="rows">
-          {live.map((r) => <Row key={r.id} s={s} r={r} />)}
-          {!live.length && <p className="note pad">No live runs. Launch a task from the Field.</p>}
+          {lens
+            ? [...lens.groups.map((g) => ({ name: g.name, reason: g.reason, runs: live.filter((r) => g.ids.includes(r.id)) })),
+                { name: 'not grouped', reason: 'The agent left these out.', runs: live.filter((r) => !lens.groups.some((g) => g.ids.includes(r.id))) }]
+                .filter((g) => g.runs.length)
+                .map((g) => (
+                  <div key={g.name} className={`band${g.name === 'not grouped' ? ' dim' : ''}`}>
+                    <div className="bandhead"><b>{g.name}</b> <span className="note">{g.reason}</span></div>
+                    {g.runs.map((r) => <Row key={r.id} s={s} r={r} />)}
+                  </div>
+                ))
+            : live.map((r) => <Row key={r.id} s={s} r={r} />)}
+          {!live.length && <p className="note pad">{s.tracksView.sort || hasRunFilter(s.tracksView.filter) ? 'No runs match this view.' : 'No live runs. Launch a task from the Field.'}</p>}
           <div className="vline now" style={{ left: `calc(170px + (100% - 170px - 120px) * ${nowX / 100})` }} title={`now ${fmtClock(s.simNow)}`}><span>now</span></div>
           {limX > 0 && limX < 100 && (
             <div className="vline limit" style={{ left: `calc(170px + (100% - 170px - 120px) * ${limX / 100})` }} title="usage limit resets"><span>limit resets {fmtClock(LIMIT_RESET).slice(0, 5)}</span></div>

@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
+import { collideAgent } from './server/plugin.ts'
 
 // Dev-server endpoint: the facilitator panel can POST a session log here and it lands in out/sessions/.
 function saveSessions(): Plugin {
@@ -36,7 +37,7 @@ function saveSessions(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), saveSessions()],
+  plugins: [react(), saveSessions(), collideAgent()],
   server: { host: '127.0.0.1' },
   test: { environment: 'jsdom', include: ['test/**/*.test.{ts,tsx}'], testTimeout: 30_000 },
 })

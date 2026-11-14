@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { queueOrder } from '../reducer'
-import { WORKFLOWS, celOf, fmtDur, isLive, runOf, statusOf, visibleTasks } from '../world'
+import { WORKFLOWS, celOf, fmtClock, fmtDur, isLive, runOf, sortTasks, statusOf, taskColumns, taskOf, visibleTasks } from '../world'
 import { Chip, Kbd, RunTag, runColour } from './common'
 import { useApp } from './store'
 import type { Filter, Task, TaskStatus } from '../types'
@@ -33,7 +33,7 @@ export function LineSwitcher({ where }: { where: 'top' | 'filter' }) {
   )
 }
 
-function ChipGroup({ label, group, values }: { label: string; group: keyof Omit<Filter, 'text'>; values: string[] }) {
+function ChipGroup({ label, group, values }: { label: string; group: Exclude<keyof Filter, 'text' | 'ids'>; values: string[] }) {
   const { s, d } = useApp()
   return (
     <div className="fgroup" role="group" aria-label={label}>
@@ -86,12 +86,25 @@ function FilterBar() {
         />
         <div className="cel"><span className="lbl">CEL</span><code>{celOf(s.filter)}</code></div>
         <span className="note" role="status">{shown} of {s.tasks.length} tasks</span>
+        {(s.fieldView.sort || s.fieldView.groupBy !== 'status') && (
+          <span className="fchip viewmod" role="status">
+            {s.fieldView.sort && `sorted by ${s.fieldView.sort.by} ${s.fieldView.sort.dir}`}
+            {s.fieldView.sort && s.fieldView.groupBy !== 'status' && ', '}
+            {s.fieldView.groupBy !== 'status' && `grouped by ${s.fieldView.groupBy}`}
+            <button type="button" aria-label="Reset sort and grouping" onClick={() => d({ type: 'fieldViewReset' })}>x</button>
+          </span>
+        )}
         <span className="spacer" />
         <div className="views" role="group" aria-label="Views">
           <span className="lbl">Views</span>
-          {s.views.map((v) => (
+          {s.views.filter((v) => v.surface !== 'tracks').map((v) => (
             <button key={v.id} type="button" className="fchip" aria-pressed={s.activeView === v.id} onClick={() => d({ type: 'openView', id: v.id })}>
               {v.name}
+            </button>
+          ))}
+          {s.snapshots.filter((l) => l.surface === 'field').map((l) => (
+            <button key={l.id} type="button" className="fchip snap" aria-pressed={s.lens?.id === l.id} title={`Snapshot from ${new Date(l.at).toLocaleTimeString()}`} onClick={() => d({ type: 'openSnapshot', id: l.id })}>
+              {l.name}
             </button>
           ))}
         </div>
@@ -139,7 +152,7 @@ function LaunchPreview() {
   )
 }
 
-function Card({ t }: { t: Task }) {
+function Card({ t, dim }: { t: Task; dim?: boolean }) {
   const { s, d } = useApp()
   const st = statusOf(s, t)
   const run = [...s.runs].reverse().find((r) => r.taskId === t.id && (isLive(r) || r.review === 'pending'))
@@ -148,10 +161,11 @@ function Card({ t }: { t: Task }) {
   const sel = s.selected.includes(t.id)
   const hl = !!run && s.hover === run.id
   const depsOpen = t.dependsOn.length > 0 && st === 'blocked'
+  const marked = s.highlight?.surface === 'field' && s.highlight.ids.includes(t.id)
   return (
     <li>
       <article
-        className={`card s-${st}${lit ? ' lit' : ''}${sel ? ' selected' : ''}${hl ? ' hl' : ''}${run && lit ? ` r-${run.status}` : ''}`}
+        className={`card s-${st}${lit ? ' lit' : ''}${sel ? ' selected' : ''}${hl ? ' hl' : ''}${marked ? ' agent-hl' : ''}${dim ? ' dim' : ''}${run && lit ? ` r-${run.status}` : ''}`}
         style={col ? { borderColor: col, borderLeftColor: col } : undefined}
         data-task={t.id}
         tabIndex={0}
@@ -193,21 +207,64 @@ function Card({ t }: { t: Task }) {
 
 function Board() {
   const { s } = useApp()
-  const tasks = visibleTasks(s)
+  if (s.lens?.surface === 'field') return <LensBoard />
+  const tasks = sortTasks(s, visibleTasks(s), s.fieldView.sort)
+  const cols = taskColumns(s, tasks, s.fieldView.groupBy, COLUMNS)
   return (
     <div className="cols" aria-label="Field board">
-      {COLUMNS.map((c) => {
-        const col = tasks.filter((t) => statusOf(s, t) === c)
-        return (
-          <div className="col" key={c} aria-label={c}>
-            <h3>{c} <span className="count">{col.length}</span></h3>
-            <ul>
-              {col.slice(0, MAX_PER_COLUMN).map((t) => <Card key={t.id} t={t} />)}
-              {col.length > MAX_PER_COLUMN && <li className="note">+{col.length - MAX_PER_COLUMN} more, narrow the filter</li>}
-            </ul>
+      {cols.map((c) => (
+        <div className="col" key={c.key} aria-label={c.key}>
+          <h3>{c.label} <span className="count">{c.tasks.length}</span></h3>
+          <ul>
+            {c.tasks.slice(0, MAX_PER_COLUMN).map((t) => <Card key={t.id} t={t} />)}
+            {c.tasks.length > MAX_PER_COLUMN && <li className="note">+{c.tasks.length - MAX_PER_COLUMN} more, narrow the filter</li>}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The agent's grouping: named groups, each with its reason. Drawn with the same cards; the launch stays the user's. */
+function LensBoard() {
+  const { s, d } = useApp()
+  const lens = s.lens!
+  const inGroup = new Set(lens.groups.flatMap((g) => g.ids))
+  const rest = visibleTasks(s).filter((t) => !inGroup.has(t.id))
+  const gone = lens.groups.flatMap((g) => g.ids).filter((id) => !taskOf(s, id)).length
+  return (
+    <div className="lens" aria-label="Lens">
+      <header className="lenshead">
+        <b>{lens.title}</b>
+        <span className="note">
+          Agent grouping, a snapshot from {new Date(lens.at).toLocaleTimeString()}{lens.name ? `, saved as "${lens.name}"` : ''}. It does not update when tasks change.
+          {gone > 0 && ` ${gone} task${gone === 1 ? ' is' : 's are'} no longer here.`}
+        </span>
+        <span className="spacer" />
+        <button type="button" className="btn sm" onClick={() => d({ type: 'lensClear' })}>Clear lens</button>
+      </header>
+      <div className="cols">
+        {lens.groups.map((g) => {
+          const tasks = sortTasks(s, g.ids.map((id) => taskOf(s, id)).filter((x): x is Task => !!x), { by: 'id', dir: 'asc' })
+          return (
+            <div className="col lensgroup" key={g.name} aria-label={g.name}>
+              <h3>{g.name} <span className="count">{tasks.length}</span></h3>
+              <p className="reason">{g.reason}</p>
+              <button type="button" className="btn sm" onClick={() => d({ type: 'selectIds', ids: tasks.filter((t) => statusOf(s, t) !== 'done').map((t) => t.id) })}>
+                Select these {tasks.length}
+              </button>
+              <ul>{tasks.map((t) => <Card key={t.id} t={t} />)}</ul>
+            </div>
+          )
+        })}
+        {lens.rest === 'dim' && rest.length > 0 && (
+          <div className="col lensrest" aria-label="not grouped">
+            <h3>not grouped <span className="count">{rest.length}</span></h3>
+            <p className="reason">The agent left these out.</p>
+            <ul>{sortTasks(s, rest, { by: 'id', dir: 'asc' }).slice(0, MAX_PER_COLUMN).map((t) => <Card key={t.id} t={t} dim />)}</ul>
           </div>
-        )
-      })}
+        )}
+      </div>
     </div>
   )
 }

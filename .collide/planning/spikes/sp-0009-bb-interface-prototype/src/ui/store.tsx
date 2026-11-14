@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useReducer, type ReactNode } from 'react'
 import { reduce, type Action } from '../reducer'
+import { useToolBridge } from '../agent/page'
 import { initialState } from '../world'
 import type { State } from '../types'
 
@@ -19,6 +20,7 @@ export function Provider({ children, facilitator = false, initial, clock = true 
 }) {
   const [s, dispatch] = useReducer(reduce, undefined, () => initial ?? initialState('orchard', facilitator))
   const d = useCallback((a: Action) => dispatch({ ...a, t: Date.now() }), [])
+  useToolBridge(s, d)
   useEffect(() => {
     if (!clock) return
     const id = setInterval(() => dispatch({ type: 'tick', t: Date.now() }), 250)

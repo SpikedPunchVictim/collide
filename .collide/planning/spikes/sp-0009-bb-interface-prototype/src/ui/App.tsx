@@ -1,4 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { loadAgentSettings } from '../agent/page'
+import { AgentBar, AskBox } from './AgentBar'
+import { Settings } from './Settings'
 import { queueOrder } from '../reducer'
 import { scenarioById } from '../scenarios'
 import { fmtClock } from '../world'
@@ -20,7 +23,7 @@ const TABS: { id: Surface; key: string; label: string }[] = [
   { id: 'experiments', key: '4', label: 'Experiments' },
 ]
 
-function useKeys() {
+function useKeys(askRef: React.RefObject<HTMLInputElement | null>) {
   const { s, d } = useApp()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -50,6 +53,12 @@ function useKeys() {
         return
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === '/') {
+        e.preventDefault()
+        askRef.current?.focus()
+        return
+      }
+      if (e.key === '5') return d({ type: 'nav', surface: 'settings' })
       const tab = TABS.find((t) => t.key === e.key)
       if (tab) return d({ type: 'nav', surface: tab.id })
       if (s.surface === 'tracks') {
@@ -73,7 +82,7 @@ function useKeys() {
   }, [s, d])
 }
 
-function TopBar() {
+function TopBar({ askRef }: { askRef: React.RefObject<HTMLInputElement | null> }) {
   const { s, d } = useApp()
   const n = queueOrder(s).length
   return (
@@ -89,6 +98,10 @@ function TopBar() {
           </button>
         ))}
       </nav>
+      <AskBox ref={askRef} />
+      <button type="button" className="btn sm" aria-pressed={s.surface === 'settings'} onClick={() => d({ type: 'nav', surface: 'settings' })}>
+        <Kbd>5</Kbd> Agents
+      </button>
       <span className="spacer" />
       <span className="clock mono" aria-label="Fake clock">{fmtClock(s.simNow)}</span>
       <label className="speed">Speed
@@ -113,13 +126,19 @@ function CardStrip() {
 }
 
 export function App() {
-  const { s } = useApp()
-  useKeys()
+  const { s, d } = useApp()
+  const askRef = useRef<HTMLInputElement | null>(null)
+  useKeys(askRef)
+  // the ask box needs to know which agent it uses
+  useEffect(() => {
+    if (!s.agentSettings.loaded) void loadAgentSettings(d)
+  }, [s.agentSettings.loaded, d])
   return (
     <div className="shell">
     <div className="app" data-surface={s.surface}>
-      <TopBar />
+      <TopBar askRef={askRef} />
       <CardStrip />
+      <AgentBar />
       <main className={`main${s.detail ? ' with-detail' : ''}`}>
         <section className="surface" aria-label={s.surface}>
           {s.surface === 'field' && <Field />}
@@ -127,6 +146,7 @@ export function App() {
           {s.surface === 'queue' && <Queue />}
           {s.surface === 'experiments' && <Experiments />}
           {s.surface === 'compare' && <Compare />}
+          {s.surface === 'settings' && <Settings />}
         </section>
         <RunDetail />
       </main>

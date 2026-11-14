@@ -46,6 +46,10 @@ Production build: 338 kB JavaScript (103 kB gzip), 20 kB CSS [M].
   JSON export.
 - **[I]** A scripted pilot proves a scenario can be done and the end state is detected. It says nothing about how
   long a person takes or where they go wrong. That is what the sessions are for.
+- **[M]** An in-app agent changes the screen through five MCP tools (`query`, `set_view`, `show_groups`, `highlight`,
+  `open`), launched from an ask box by `claude -p` (haiku) or an ACP agent, with a Settings page for which agent.
+  Both requests from the owner worked live with Claude Code haiku (sort 7 to 8 s, lens 18 to 20 s, about $0.002 and
+  $0.005 per request). See "In-app agent (UI tools)" below.
 - **[U]** No participant has used it. The owner set the thresholds below, then skipped the sessions (2026-11-14): no
   one who did not design Collide is available. The owner iterates on the prototype directly instead.
 
@@ -273,12 +277,209 @@ the agent iterate on the prototype directly instead. What follows from that [I]:
 `sessions/s6-p<N>.json`: time and errors per scenario against the thresholds, the winner or the tie for each of Q1 to
 Q4, and the words used for Q5.
 
+## In-app agent (UI tools)
+
+Added after the pilots, at the owner's request: can an agent change this interface through tool calls, and what does
+it take to bring your own agent? Throwaway code, like the rest of the spike. The 50 earlier tests are unchanged and
+the original scenarios use the plain `initialState`; the agent demo has its own state (`src/agentDemo.ts`).
+
+### What was built [M]
+
+- **One reducer still holds all state.** Every agent tool call becomes a typed reducer action (`src/agentReducer.ts`),
+  so tests drive it without a DOM or a server. Each screen-changing call pushes an `AgentChange` (A-1, A-2, ...) onto
+  a stack and stores a snapshot of the view state it replaced, so Undo restores exactly that.
+- **Two kinds of result, kept apart.** A *view* is typed filter, sort and group-by state (Field and Tracks) that can be
+  saved as a View. A *lens* is the agent's own judgement: named groups of ids, each with a reason, a snapshot stamped
+  with the time it was made, ids exclusive across groups, the rest dimmed or hidden. A lens does not update when tasks
+  change; it can be saved as a named snapshot, not as a view.
+- **Field and Tracks.** The Field draws a lens as a board of groups with the reason under each name. Tracks sorts and
+  filters runs (by total, start, end, spend, wait, or seconds in a phase such as build; missing values last), draws a
+  lens as bands, and writes the sort value on each row.
+- **Chips.** "Agent: <title>" with the expression (`true | sort phase_duration("build") desc`) or the group reasons,
+  the source, Undo (last change only), and "Save as view" or "Save snapshot".
+- **Ask box** in the top bar (every surface, also on `/`). It sends the request to the dev server, shows one line per
+  tool call as it happens, then the chip. Failure is shown as text: agent error, timeout, budget, cancelled, or "the
+  agent finished without changing the screen (N tool calls, none changed anything)". Cancel while working.
+- **Agents page** (key 5, "5 Agents"): name, kind (Claude Code, ACP agent, External), command or path, arguments,
+  model, readable folder, budget and timeout per request, environment lines, which agent the ask box uses. An External
+  entry shows the endpoint and three text snippets (`claude mcp add --transport http collide <url>`, a JSON
+  `mcpServers` block, an opencode `mcp` block). Collide writes to no agent's configuration. Saved through
+  `PUT /__settings/agents` to `out/agents.json` (git-ignored).
+- **Fixtures.** `fixtures/repo/` is a 24-file invented Node CLI (a pantry and expiry tracker: `src/cli`, `src/parse`,
+  `src/store`, `src/notify`, `src/report`, `test/`). Epic E-09 has 12 ready tasks whose bodies describe behaviour and
+  name no file. Intended grouping: quantities (T-09-001, 002), expiry (004, 005, 006), reports (008, 009, 010), data
+  file (011, 012). T-09-003 (touches the quantity code and the error messages) and T-09-007 (touches expiry and the
+  list command) are ambiguous: either area, or left out, counts as right. Nine finished runs have distinct build
+  seconds and one is live, so "longest in build" has one right order.
+
+### The tools [M]
+
+MCP server `collide-ui`, in a Vite plugin (`server/plugin.ts`, `server/mcp.ts`). Streamable HTTP, stateless (a new
+server and transport per request), JSON responses, `@modelcontextprotocol/sdk` 1.32.2 with zod 4.6.7, at
+`http://127.0.0.1:5173/mcp`. `?ask=<id>` is added when Collide launched the agent, so the ask box can show each call.
+Calls reach the open page over Vite's HMR websocket (`collide:tool-call`, `collide:tool-result`); the page runs the
+call against its state with a pure `execTool` and dispatches the action. With no page open a call fails with a plain
+error; if the page does not answer in 10 s the call fails with that.
+
+| Tool | Input | Effect |
+| --- | --- | --- |
+| `query` | `subject` ("tasks" or "runs"), `filter?` {epic, status, label, source, text, ids, task, workflow}, `limit?` | none. Returns tasks (id, title, body, epic, status, labels, source, depends_on) or runs (id, task, status, workflow, started, total_seconds, wait_seconds, spend_usd, phases with seconds) |
+| `set_view` | `surface`, `title`, `reason?`, `filter?` ({} clears), `sort?` {by, dir}, `group_by?` (field), `window?` {from, to} (tracks) | sets that part of the view; chip with expression |
+| `show_groups` | `surface`, `title`, `groups` [{name, ids, reason}] (1 to 12), `rest?` ("dim" or "hide") | lens with reasons; chip with Save snapshot |
+| `highlight` | `surface`, `ids`, `note?`, `title?` | marks ids; nothing is filtered |
+| `open` | `surface`, `id?` | opens field, tracks, queue or experiments, and one item |
+
+No tool launches, accepts, edits or deletes. Validation errors say what to do: `unknown surface "x" for set_view;
+supported: field, tracks`, `unknown task id T-01-20; nothing was shown` (nothing is applied when any id is unknown),
+`unknown subject "tracks"; known: tasks, runs`, `unknown run status "running"; known: working, waiting, ...`, an id in
+two groups, a group without a reason, a bad sort key or window. A weak model recovered from these messages in 2 to 4
+calls (opencode runs below) [M].
+
+### Launching Claude Code [M]
+
+`server/agents.ts`. The request goes to the child on stdin. Exact argv (the request is not in it), recorded in each
+`out/asks/ask-*.jsonl` start event:
+
+```
+claude -p --model haiku --output-format stream-json --verbose
+  --mcp-config '{"mcpServers":{"collide":{"type":"http","url":"http://127.0.0.1:5173/mcp?ask=<id>"}}}' --strict-mcp-config
+  --tools Read,Grep,Glob
+  --allowedTools Read,Grep,Glob,mcp__collide__query,mcp__collide__set_view,mcp__collide__show_groups,mcp__collide__highlight,mcp__collide__open
+  --max-budget-usd 0.25 --no-session-persistence --disable-slash-commands
+  --append-system-prompt "<SYSTEM_PROMPT in server/agents.ts>"
+```
+
+cwd is the readable folder (`fixtures/repo`). The child env is the parent's with every `CLAUDE*` and `OTEL_*` variable
+removed (the parent is itself usually a Claude Code session). `--tools Read,Grep,Glob` removes Bash, Edit and Write
+from the child altogether; `--allowedTools` alone would only skip prompts, not remove tools. The budget is enforced by
+Claude Code (`error_max_budget_usd` is shown as "stopped at the $0.25 budget"); the timeout is Collide's (SIGTERM,
+then SIGKILL).
+
+### Live runs, Claude Code haiku [M]
+
+Real `claude -p` runs through the ask endpoint, driven by a script that posts the request and a Chrome tab running the
+page. "First tool" is the first MCP call; "first change" is the first call that is not `query`, which is when the chip
+appears. Times in seconds from the request. Cost and tokens are from the stream's final result (input includes cache
+reads and writes).
+
+| # | Request | Prompt | First tool | First change | Finished | Calls | Correct | Input / output tokens | Cost |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | longest in build | v1 | 2.8 | 5.4 | 8.3 | query runs, set_view | yes: sort `phase:build` desc, order matches | 45.7k / 0.7k | $0.0013 |
+| 2 | longest in build | v1 | 3.5 | 3.5 | 6.0 | set_view | yes, but did not read the numbers first | 27.6k / 0.3k | $0.0005 |
+| 3 | longest in build | v2 | 2.4 | 5.2 | 8.3 | query runs, set_view | yes | 46.0k / 0.8k | $0.0023 |
+| 4 | longest in build | v2 | 2.3 | 4.6 | 7.0 | query runs, set_view | yes | 45.9k / 0.6k | $0.0012 |
+| 5 | same-file grouping | v1 | 2.3 | 22.4 | 25.4 | query tasks, show_groups | no: 11 groups of 107 open tasks across the whole corpus, from title wording; Read, Grep and Glob never used; it said so | 76.4k / 5.3k | $0.0082 |
+| 6 | same-file grouping | v2 | 2.6 | 14.8 | 18.2 | query, Glob, Grep, show_groups | yes: 4 groups equal to the intended ones, T-09-003 with quantities, T-09-007 with expiry; named the other 61 ready tasks as left out | 104.5k / 2.6k | $0.0045 |
+| 7 | same-file grouping | v2 | 2.5 | 17.2 | 20.4 | query, Glob, Grep, show_groups | yes: same four areas, T-09-007 with the reports and list group, T-09-003 with quantities; said which group was loosest | 107.3k / 3.1k | $0.0051 |
+| 8 | "what should I work on next?" | v2 | 3.1 | 18.2 | 21.5 | 2 query, Glob, Grep, show_groups | plausible, no reference answer: put the crash-safe save first with a reason from the code (`store/file.js` writes in place), then the backup, CSV quoting, null expiry; grouped the 12 E-09 tasks by risk | 106.6k / 3.1k | $0.0059 |
+| 9 | longest in build | v2, page reloading | 12.6 | none | 51.0 | 4 query, all failed ("The page did not answer within 10 s") | failure shown, correct: no change, the agent said it had changed nothing and guessed no ids | 72.0k / 1.0k | $0.0029 |
+
+Prompt v1 said to read the code folder "when the request is about code". Run 5 showed a small model does not follow
+a "when"; v2 says it must Glob and Read or Grep before grouping or ranking, to use only tasks that are about the code
+in the folder, and to say which it left out. Nothing else changed between v1 and v2. Run 9 was an accident: editing
+`server/agents.ts` restarted the dev server and the page had not yet reconnected. It is kept because it is the
+timeout and failure path against a real agent. Across the table, the first tool call comes 2.2 to 3.5 s after the
+request (mostly Claude Code starting), a lens takes 15 to 22 s to appear because the model writes every group with a
+reason before the call, and a sort takes 4 to 5 s. Total Claude spend for the whole task: about $0.04 against the
+$1 cap (the nine rows above sum to $0.032; the rest is a first run from before the per-ask log existed, one more sort
+run done for the screenshot, and one probe call that returned no usage) [M].
+
+Only the two requests in the brief plus one vague request were tried, each at most three times. Haiku is not shown to
+be reliable at these; it was right in 6 of the 7 runs that have a reference answer, and the one wrong run was
+repaired by the prompt, which is one data point for a prompt tuned to this demo [I].
+
+### Bring your own agent, opencode 1.1.56 [M] for what ran, [U] for the rest
+
+Setup as S7 ran it: project-local `opencode.json` in the spike folder, and `HOME` plus four `XDG_*` directories
+under `work/opencode/` (git-ignored), `OPENCODE_DISABLE_CLAUDE_CODE=1`; the user's opencode config was not touched.
+The Agents page entry is kind "ACP agent", command `opencode`, arguments `acp`, these as environment lines. Collide
+speaks ACP itself (initialize, `session/new` with an HTTP `mcpServers` entry, optional `session/set_model`,
+`session/prompt`; read permissions allowed, everything else refused).
+
+- `opencode mcp list` with the project-local config: `collide ... connected` to the endpoint, so opencode's remote MCP
+  client works against the streamable HTTP server with no sign-in [M].
+- Default model: opencode's own hosted default (`opencode/big-pickle`). Driven through the ask box, the request
+  timed out at 90 s with no event at all; `initialize` and `session/new` answered in under 4 s. I did not look further:
+  it needs a hosted service I did not set up, and it falls outside "installed". Recorded as [U], not as a failure of
+  the endpoint.
+- With the S7 local model (`ollama/qwen2.5:7b`, config in the same `opencode.json`), the same two requests went through
+  the real ask box and the same MCP endpoint [M]:
+
+| Request | First tool | First change | Finished | Calls | Result |
+| --- | --- | --- | --- | --- | --- |
+| longest in build (run 1) | 46.6 s (model load) | 64.1 s | 69.9 s | query "tracks" (refused, valid subjects listed), query runs, show_groups | worse: three bands "Longest/Medium/Short" with R-101 and R-107 in the middle, the rest hidden; a sort was wanted |
+| longest in build (run 2) | 12.3 s | 31.2 s | 33.5 s | three refused queries, query runs, highlight | partly right: R-102 and R-108 highlighted, the two longest; not sorted |
+| same-file grouping | 4.1 s | none | 82.0 s | query tasks, show_groups (refused) | wrong: the model invented 8 ids ("T-01-20", ...), Collide refused all of it, nothing was shown; the model then listed a grouping in prose and said which ids it could not find. It never read the folder |
+
+  The no-guessed-ids rule did its job: nothing wrong reached the screen. The model's prose still described a grouping
+  that was not shown, so the chip and the status line (not the agent's text) must be what tells the user what
+  changed. No cost or token figure came back (ACP has none) [M].
+- Not measured: a second local model, any hosted opencode model, the ACP permission path under a real write attempt, a
+  full set of three runs per request [U].
+
+### Problems found [M] unless marked
+
+- **The MCP endpoint has no authentication.** It is bound to 127.0.0.1 and refuses a foreign Host (DNS rebinding) and
+  a foreign Origin, and requires a JSON content type (so a browser must preflight). Any local process can still call
+  it, and with a page open can change the screen. No tool is destructive, so the exposure is the view, not the
+  repository; a Collide that adds a launching tool must add a per-session token first [I].
+- **Folder is not a sandbox for ACP.** For Claude Code the folder is the cwd and the tools are cut to Read, Grep and
+  Glob. For an ACP agent the folder is only the cwd and what it is told; opencode's own tools decide what it can read.
+  The child env is limited to PATH, HOME and the settings lines, and opencode's permission block denies edit and bash
+  in its config, but that is the agent's promise, not Collide's guarantee [I].
+- **ACP reports no cost, so the per-request budget cannot be enforced for it.** Only the timeout can [M].
+- **Token load.** Each Claude Code run reads 28k to 107k input tokens, 46k for a one-tool sort. How much is the
+  global user memory file and settings loading into the child, and how much is Claude Code's own prompt, was not
+  separated (one attempt with an emptied environment returned no usage and told me nothing) [U].
+- **A restarted dev server leaves the page unreachable for a few seconds**, and every call fails with the 10 s
+  message (run 9). A real product would not have this, but "the page is not open" is a state an agent must be told
+  plainly, and it is [M].
+- **The lens costs 15 to 22 s**, nearly all of it the model writing reasons. Showing the first group before the rest
+  was not tried [U].
+- A tab in the background may throttle the websocket answer; not tested [U].
+- Visual check: I looked at the Field with a lens, the Tracks sorted by build time with its chip, and the Agents page
+  in Chrome, by eye. It is not usability evidence [M].
+
+### What a real Settings page needs (plan section 0.7) [I]
+
+The prototype has one flat list in one git-ignored file. A real one needs:
+
+- **Layers.** Agents, folders and budgets exist in user, project and pack layers (0.7), with the same precedence
+  and a visible "this value comes from X" per field; here there is only one file.
+- **Packs and profiles.** A pack may bring an agent entry; a profile picks agent, model and budget per kind of work
+  (an ask, a plan, a run). Here one agent serves the ask box and nothing else.
+- **Secrets.** Environment lines are plain text here. API keys must go to the OS keychain and be referenced by name.
+- **Permissions as data.** The readable folder should be a set of allowed paths and tool kinds per agent, shown in
+  words ("can read these folders, cannot write"), checked by Collide for agents that cannot be cut down by flags.
+- **Connection state and a test.** A "test this agent" action that runs the smallest request and reports first tool
+  call and cost; MCP endpoint status (a page connected, the last call); per-agent last-used and spend this week.
+- **Endpoint security.** A token in the MCP URL or header, shown in the snippets, rotated from the page.
+- **Validation and undo of settings changes**, with a diff before save. Here a PUT validates; the page has no undo.
+- **External agents.** Snippets for each common client, generated from the real endpoint and token; a record of
+  which external agents have connected.
+
+### Proposed plan changes (proposals only; the plan was not edited)
+
+1. Treat "the agent changes the screen" as typed reducer actions with a snapshot Undo from the first stage that has an
+   ask box. It worked here without special cases, and tests need no browser.
+2. Keep views and lenses as two things. A lens is a timestamped judgement; saving it is a snapshot, not a View, so a
+   saved View never silently holds an agent's guess.
+3. Make the agent read the repository for code-shaped requests a tool-side requirement, not only a prompt line: a
+   `show_groups` call that names code-based reasons without any file read in the same ask could be flagged on the chip
+   ("no files were read"). Run 5 is the case.
+4. Reject, not repair, ids an agent invents (done here), and make the chip, not the agent's text, the statement of
+   what changed (opencode run 3).
+5. Put the MCP endpoint behind a per-session token before any tool can launch or accept anything.
+6. Decide whether the budget is a product promise. It is enforceable for Claude Code only; for ACP agents it is a
+   timeout.
+7. Add a settings test action and the layers above to the settings stage, as acceptance, not as later polish.
+
 ## Reproduction
 
 ```sh
 cd .collide/planning/spikes/sp-0009-bb-interface-prototype
 pnpm install                   # local store in .pnpm-store/
-pnpm test                      # 50 tests: pilots, UI pilots, protocol check
+pnpm test                      # 97 tests: 50 earlier (pilots, UI pilots, protocol) and 47 for the in-app agent
 pnpm typecheck && pnpm build   # type check and production build (dist/ is git-ignored)
 pnpm dev                       # http://127.0.0.1:5173/?facilitator=1
 ```

@@ -4,11 +4,12 @@ import { actFor, KIND_ORDER, needsConfirm } from './items'
 import { FULL_WORKFLOW, SHORT_WORKFLOW } from './gen'
 import { scenarioById } from './scenarios'
 import { advanceAll, resolveItem } from './sim'
-import { addRun, celOf, EMPTY_FILTER, emptySession, isLive, taskOf, visibleTasks } from './world'
+import { addRun, celOf, EMPTY_FILTER, emptyRunFilter, emptySession, isLive, taskOf, visibleTasks } from './world'
 import type {
   Attempt, BreakdownFilter, DetailTab, Effect, Filter, QueueItem, State, Surface, Variants,
 } from './types'
 import { NO_FILTER } from './breakdown'
+import { applyAgent, fieldExpr, type AgentAction } from './agentReducer'
 
 setAutoFreeze(false)
 
@@ -77,6 +78,7 @@ export type Action =
   | { type: 'setPaused'; paused: boolean }
   | { type: 'setFacilitator'; on: boolean }
   | { type: 'resetSession' }
+  | AgentAction
 
 export type Timed = Action & { t?: number }
 
@@ -172,6 +174,7 @@ function apply(s: State, a: Timed, base: State): void {
       return
     case 'clearFilter':
       s.filter = { ...EMPTY_FILTER, epic: [], status: [], label: [], source: [] }
+      s.fieldView = { sort: null, groupBy: 'status' }
       s.activeView = null
       s.saving = false
       return
@@ -186,7 +189,10 @@ function apply(s: State, a: Timed, base: State): void {
       if (!name) return
       const id = `v-${s.views.length + 1}`
       const f: Filter = JSON.parse(JSON.stringify(s.filter))
-      s.views.push({ id, name, cel: celOf(f), filter: f })
+      const fv = s.fieldView
+      s.views.push({
+        id, name, cel: fieldExpr(s), filter: f, ...(fv.sort || fv.groupBy !== 'status' ? { sort: fv.sort, groupBy: fv.groupBy } : {}),
+      })
       s.activeView = id
       s.saving = false
       return
@@ -194,7 +200,13 @@ function apply(s: State, a: Timed, base: State): void {
     case 'openView': {
       const v = s.views.find((x) => x.id === a.id)
       if (!v) return
+      if (v.surface === 'tracks') {
+        s.tracksView = { filter: JSON.parse(JSON.stringify(v.runFilter ?? emptyRunFilter())), sort: v.sort ?? null }
+        s.surface = 'tracks'
+        return
+      }
       s.filter = JSON.parse(JSON.stringify(v.filter))
+      s.fieldView = { sort: v.sort ?? null, groupBy: v.groupBy ?? 'status' }
       s.activeView = v.id
       return
     }
@@ -511,6 +523,8 @@ function apply(s: State, a: Timed, base: State): void {
     case 'resetSession':
       s.session = emptySession(s.session.facilitator)
       return
+    default:
+      applyAgent(s, a)
   }
 }
 
