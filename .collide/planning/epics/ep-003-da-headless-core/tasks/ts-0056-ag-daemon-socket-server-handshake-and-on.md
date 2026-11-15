@@ -1,7 +1,7 @@
 ---
 id: ts-0056-ag
 kind: task
-status: ready
+status: active
 title: "Daemon: socket server, handshake and on-demand start"
 owners: []
 links:
