@@ -24,6 +24,7 @@ use crate::provider::{
 };
 use crate::report::ReportLine;
 use crate::stage::Stage;
+use crate::workflow::{Adoption, Workflow};
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde_json::Value;
@@ -83,6 +84,7 @@ fn schema_for<T: JsonSchema>(settings: SchemaSettings) -> Value {
 /// Every contract type, which `pnpm gen` writes to `schemas/`. Later items add their types here.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
+    registry.add::<Adoption>();
     registry.add::<ApplyParams>();
     registry.add::<ApplyResult>();
     registry.add::<Change>();
@@ -117,5 +119,6 @@ pub fn registry() -> Registry {
     registry.add::<TaskRemoved>();
     registry.add::<WatchParams>();
     registry.add::<WatchResult>();
+    registry.add::<Workflow>();
     registry
 }

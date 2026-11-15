@@ -1,2 +1,20 @@
 apiVersion: collide/v0
 name: pr-ci
+
+# An issue, a pull request and its CI checks (0.7): a `script` phase pushes and opens the PR, a `wait` phase polls
+# its checks, and a `human` phase reads the PR and the CI summary. The scripts are declared by the full manifest
+# (`ts-0012-ua`).
+workflows:
+  pr:
+    accepts: { sources: [github] }
+    integrate: pr-ci/pull-request
+    on_start: [{ op: setStatus, args: { category: active } }]
+    on_end: [{ op: setStatus, args: { category: review }, when: 'outcome == "approved"' }]
+    phases:
+      build: { role: builder, prompt: build, label: build }
+      open-pr: { script: hooks/open-pr.ts, timeout: 5m, outputs: [url] }
+      ci: { wait: hooks/ci-checks.ts, interval: 30s, timeout: 60m }
+      review:
+        human: Read the pull request and its CI summary, then approve or send it back.
+        on: { approve: { end: approved }, changes: build }
+        show: [pr-ci/open-pr.url, ci/summary.md]

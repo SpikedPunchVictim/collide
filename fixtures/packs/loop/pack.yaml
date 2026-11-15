@@ -1,2 +1,33 @@
 apiVersion: collide/v0
 name: loop
+
+# A review loop (0.7): build, review, then fix or close. The roles, prompts and scripts the phases name are
+# declared by the full manifest (`ts-0012-ua`); the workflow checks only its own table.
+workflows:
+  loop:
+    accepts: { sources: [plan] }
+    integrate: loop/merge-local
+    on_start: [{ op: setStatus, args: { category: active } }]
+    on_end: [{ op: setStatus, args: { category: review }, when: 'outcome == "closed"' }]
+    start: build
+    phases:
+      build: { role: builder, prompt: build, label: build, gates: [evidence] }
+      review:
+        role: reviewer
+        prompt: review
+        label: "r{{ round }}-{{ model.name }}"
+        sandbox: { models: [strong] }
+        on_cold: fresh
+        fanout: { models: [strong, fast], when: "round == 1" }
+      adjudicate:
+        role: orchestrator
+        prompt: adjudicate
+        outputs: [round-record.md, fix-brief.md]
+        record: true
+        then:
+          script: workflow/next.ts
+          tokens: [fix, close, stop]
+          on: { fix: fix, close: close, stop: ask_human }
+          show: [adjudicate/round-record.md]
+      fix: { role: builder, prompt: { artifact: adjudicate/fix-brief.md }, label: "fix{{ round }}", gates: [evidence], then: review }
+      close: { role: builder, prompt: { artifact: adjudicate/fix-brief.md }, label: close, gates: [evidence], then: { end: closed } }

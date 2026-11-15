@@ -1,10 +1,12 @@
 //! The `pack.yaml` keys and values that planning adds (0.7, Keys added for planning), and the few identity keys
-//! the built-in packs need to load (`apiVersion`, `name`, `requires.tools`, `providers`). This is the start of the
-//! manifest type: `ts-0012-ua` adds the other keys beside these, makes the identity keys required and checks
-//! them, and `views:` comes with the view type in `ts-0026-es`.
+//! the built-in packs need to load (`apiVersion`, `name`, `requires.tools`, `providers`). `workflows:` holds the
+//! workflow types of [`crate::workflow`]. This is the start of the manifest type: `ts-0012-ua` adds the other
+//! keys beside these, makes the identity keys required and checks them (and runs the workflow checks over each
+//! entry of `workflows:`), and `views:` comes with the view type in `ts-0026-es`.
 
 use crate::item::Category;
 use crate::points::DerivedPoint;
+use crate::workflow::Workflow;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -82,4 +84,6 @@ pub struct PackManifest {
     pub points: BTreeMap<String, DerivedPoint>,
     #[serde(default)]
     pub checklists: BTreeMap<String, ChecklistTemplate>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub workflows: BTreeMap<String, Workflow>,
 }

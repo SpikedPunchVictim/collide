@@ -1,2 +1,25 @@
 apiVersion: collide/v0
 name: collide
+
+# `collide/review` (0.4, The built-in `collide` pack): build, review, then fix or close. The roles, prompts and
+# scripts the phases name, and the `launch` parameter that sets the most rounds, come with the full manifest
+# (`ts-0012-ua`) and the pack's own files. The decision script stops to `ask_human` at the round limit, and when a
+# round leaves as many open findings as the round before it.
+workflows:
+  review:
+    integrate: collide/merge-local
+    on_start: [{ op: setStatus, args: { category: active } }]
+    on_end: [{ op: setStatus, args: { category: review }, when: 'outcome == "closed"' }]
+    phases:
+      build: { role: builder, prompt: build, label: build }
+      review:
+        role: reviewer
+        prompt: review
+        label: "r{{ round }}"
+        outputs: [findings.md]
+        then:
+          script: workflow/next.ts
+          tokens: [fix, close, stop]
+          on: { fix: fix, close: { end: closed }, stop: ask_human }
+          show: [review/findings.md]
+      fix: { role: builder, prompt: { artifact: review/findings.md }, label: "fix{{ round }}", then: review }

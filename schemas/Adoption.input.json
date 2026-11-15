@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A run that starts at a named phase and round, in an existing workspace, so that a chain already in flight\nmoves into Collide without starting over (0.7, Adopting).",
+  "properties": {
+    "phase": {
+      "type": "string"
+    },
+    "round": {
+      "description": "Starts at 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "phase",
+    "round"
+  ],
+  "title": "Adoption",
+  "type": "object"
+}

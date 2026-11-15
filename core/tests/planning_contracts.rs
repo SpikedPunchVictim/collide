@@ -594,7 +594,8 @@ fn the_pack_keys_points_and_checklists_are_in_the_schema() {
             "name",
             "points",
             "providers",
-            "requires"
+            "requires",
+            "workflows"
         ])
     );
     assert_eq!(keys_of("PackManifest", Some("Requires")), set(&["tools"]));

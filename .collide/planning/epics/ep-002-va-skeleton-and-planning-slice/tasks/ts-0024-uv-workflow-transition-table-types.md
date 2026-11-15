@@ -30,3 +30,24 @@ Write first: validation tests for each phase kind; the missing `timeout:`; a dan
 - Area: `core` (workflow types and their structural checks).
 - `ts-0012-ua` puts these types into `pack.yaml`. Running a workflow is Stage 8.
 - Done when the criteria hold.
+
+### Built
+
+- `core/src/duration.rs`: `Duration` (`30s`, `120m`, `2h`, `1d`; a bare number is refused). `core` had none.
+- `core/src/workflow.rs`: `Workflow`, `PhaseTable` (keeps declaration order), `Phase` (agent, script, wait, human; `PhaseKind` adds `fanout`), `Fanout` with `models` or `instances`, `Instance`, `Then`/`Target`/`Decision`, `OnCold`, `Sandbox`, `Accepts`, `WorkflowOp`, `Adoption`. Every struct is closed.
+- `core/src/workflow_check.rs`: `validate` (dangling `then:`, `start`, undeclared and unhandled decision tokens, empty `on:`, fan-out source, wait timings, implementation names), `check_launch` (identical instances, a model listed twice), `check_adoption`.
+- `workflows:` added to `PackManifest` (one field, so the built-in `collide` pack still loads); `Workflow` and `Adoption` registered for generation. `ts-0012-ua` still owns the rest of the manifest and runs `validate` per entry.
+- Workflow parts written into `fixtures/packs/loop`, `fixtures/packs/pr-ci` and `packs/collide` (`review`). The reference pack's `loop` workflow parses and validates unchanged (tested through its `workflows:` key only).
+- Tests: `core/tests/workflow.rs`.
+
+### Edge decisions
+
+- A phase has no `kind:`. As in the plan's reference example, the key says it: `role:` (agent; with `fanout:` it is a fan-out), `script:`, `wait: <hook>`, `human: <text>`. A key of another kind fails and is named.
+- The plan names no key for the script, wait and human phases beyond their kinds; `wait: <hook path>` and `human: <text of the Queue item>` with `on: { token: target }` are this item's choice.
+- "Undeclared token" needs a declaration, so a decision may carry `tokens:` (not in the plan). When present, `on:` must map exactly those; without it the keys of `on:` declare them. A token the script returns that is not in `on:` stays the engine's runtime `error` (`Decision::target_for` is `None`).
+- `human` has no `then:`; its `on:` is its table.
+- Phase order is declaration order, so it survives JSON text but not a `serde_json::Value` (sorted maps).
+
+### Not done by design
+
+- Roles, prompts, gates and scripts a phase names are not resolved (`ts-0012-ua`); running a workflow, `when:` CEL checks and the model-alias fan-out refusal are later stages.

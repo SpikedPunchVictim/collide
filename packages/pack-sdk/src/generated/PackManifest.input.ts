@@ -4,6 +4,24 @@
  * The category every source status maps to, so views and columns work across sources (0.10).
  */
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
+export type Phase = AgentPhase | ScriptPhase | WaitPhase | HumanPhase
+/**
+ * A prompt: the name of one of the pack's prompts, or an earlier phase's artifact (`{ artifact: brief/x.md }`).
+ */
+export type Prompt = ArtifactPrompt | string
+/**
+ * What follows a phase (0.7, `then:`). Without it, the next phase in declaration order follows, and the last
+ * phase ends the run with outcome `done`.
+ */
+export type Then = Decision | Target
+/**
+ * Where a transition goes: a phase name, `ask_human`, or `{ end: <outcome> }`.
+ */
+export type Target = EndTarget | string
+/**
+ * A whole number and a unit: 30s, 120m, 2h, 1d.
+ */
+export type Duration = string
 
 export interface PackManifest {
   apiVersion?: string | null
@@ -18,6 +36,9 @@ export interface PackManifest {
     [k: string]: ProviderEntry
   }
   requires?: Requires | null
+  workflows?: {
+    [k: string]: Workflow
+  }
 }
 /**
  * A checklist template. `gates` is the category whose status write the pack's gate blocks. The template's name
@@ -64,4 +85,159 @@ export interface Requires {
 export interface ToolRequirement {
   name: string
   version?: string | null
+}
+/**
+ * One entry of `workflows:`.
+ */
+export interface Workflow {
+  accepts?: Accepts | null
+  /**
+   * A `pack/name` integrate implementation. A workflow without one cannot be accepted (0.4).
+   */
+  integrate?: string | null
+  on_end?: WorkflowOp[]
+  on_start?: WorkflowOp[]
+  phases: PhaseTable
+  /**
+   * The first phase. The first one declared when this is missing.
+   */
+  start?: string | null
+  /**
+   * A `pack/name` workspace implementation. Without it the built-in one is used (0.4).
+   */
+  workspace?: string | null
+}
+/**
+ * Which tasks a workflow can take (0.7, `accepts`): the sources, and the template fields it needs.
+ */
+export interface Accepts {
+  fields?: string[]
+  sources?: string[]
+}
+/**
+ * An op of `on_start` or `on_end` (0.4, Lifecycle order). It addresses status categories (`setStatus
+ * { category: active }`). `when:` is CEL; in `on_end` it reads `outcome`.
+ */
+export interface WorkflowOp {
+  args?: {
+    [k: string]: unknown
+  }
+  op: string
+  when?: string | null
+}
+/**
+ * Phase names to phases, in declaration order.
+ */
+export interface PhaseTable {
+  [k: string]: Phase
+}
+/**
+ * An `agent` phase: one role. With `fanout:` it is a `fanout` phase.
+ */
+export interface AgentPhase {
+  fanout?: Fanout | null
+  gates?: string[]
+  label?: string | null
+  /**
+   * `on_cold:` of an agent phase (0.3): what a phase does when its session's cache has expired.
+   */
+  on_cold?: 'resume' | 'fresh'
+  /**
+   * The files the phase writes to its directory.
+   */
+  outputs?: string[]
+  prompt: Prompt
+  record?: boolean
+  role: string
+  sandbox?: Sandbox | null
+  then?: Then | null
+}
+/**
+ * `fanout:` of an agent phase: one role on several `models`, or on several `instances`, never both. `when:` is
+ * CEL over the run (`round == 1`).
+ */
+export interface Fanout {
+  instances?: Instance[]
+  models?: string[]
+  when?: string | null
+}
+/**
+ * One instance of a fan-out (0.10, owner 2026-11-13): each names any of a model, an agent definition, a profile
+ * and a prompt. What an instance leaves out comes from the phase's role.
+ */
+export interface Instance {
+  definition?: string | null
+  model?: string | null
+  profile?: string | null
+  prompt?: Prompt | null
+}
+export interface ArtifactPrompt {
+  artifact: string
+}
+/**
+ * The models whose phase instance gets a sandbox workspace (0.7).
+ */
+export interface Sandbox {
+  models: string[]
+}
+/**
+ * A decision: a hook that returns one token per task, and the target each token goes to (0.7, `then:`).
+ * `tokens:` is optional; when it is there it declares the tokens the script may return, and `on:` must map
+ * exactly those. Without it, the keys of `on:` are the declared tokens.
+ */
+export interface Decision {
+  on: {
+    [k: string]: Target
+  }
+  script: string
+  /**
+   * What the person reads when a token reaches `ask_human` (0.7, `show:`).
+   */
+  show?: string[]
+  tokens?: string[]
+}
+/**
+ * `{ end: <outcome> }`: the run ends with this outcome (0.7, Outcomes and terminal states).
+ */
+export interface EndTarget {
+  end: string
+}
+/**
+ * A `script` phase: a hook in the workspace. `agentWork: true` marks one that runs agents itself (0.3).
+ */
+export interface ScriptPhase {
+  agentWork?: boolean
+  gates?: string[]
+  label?: string | null
+  outputs?: string[]
+  record?: boolean
+  script: string
+  then?: Then | null
+  timeout?: Duration | null
+}
+/**
+ * A `wait` phase: a hook polled every `interval` until it answers `ok` or `fail`, or `timeout` passes (0.7).
+ * `timeout` is required.
+ */
+export interface WaitPhase {
+  /**
+   * A whole number and a unit: 30s, 120m, 2h, 1d.
+   */
+  interval?: string
+  label?: string | null
+  then?: Then | null
+  timeout: Duration
+  wait: string
+}
+/**
+ * A `human` phase: a Queue item where a person picks one of the tokens of `on:`. `human` is the text the item
+ * shows; `show` lists what the person should read (0.7, `show:`).
+ */
+export interface HumanPhase {
+  human: string
+  label?: string | null
+  on: {
+    [k: string]: Target
+  }
+  show?: string[]
 }

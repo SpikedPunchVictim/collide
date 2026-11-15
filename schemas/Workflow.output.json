@@ -1,0 +1,514 @@
+{
+  "$defs": {
+    "Accepts": {
+      "additionalProperties": false,
+      "description": "Which tasks a workflow can take (0.7, `accepts`): the sources, and the template fields it needs.",
+      "properties": {
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "AgentPhase": {
+      "additionalProperties": false,
+      "description": "An `agent` phase: one role. With `fanout:` it is a `fanout` phase.",
+      "properties": {
+        "fanout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fanout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on_cold": {
+          "$ref": "#/$defs/OnCold",
+          "default": "resume"
+        },
+        "outputs": {
+          "description": "The files the phase writes to its directory.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "$ref": "#/$defs/Prompt"
+        },
+        "record": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sandbox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "then": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Then"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "role",
+        "prompt",
+        "on_cold"
+      ],
+      "type": "object"
+    },
+    "ArtifactPrompt": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact"
+      ],
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "description": "A decision: a hook that returns one token per task, and the target each token goes to (0.7, `then:`).\n`tokens:` is optional; when it is there it declares the tokens the script may return, and `on:` must map\nexactly those. Without it, the keys of `on:` are the declared tokens.",
+      "properties": {
+        "on": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Target"
+          },
+          "type": "object"
+        },
+        "script": {
+          "type": "string"
+        },
+        "show": {
+          "description": "What the person reads when a token reaches `ask_human` (0.7, `show:`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tokens": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "script",
+        "on"
+      ],
+      "type": "object"
+    },
+    "Duration": {
+      "description": "A whole number and a unit: 30s, 120m, 2h, 1d.",
+      "pattern": "^[0-9]+(s|m|h|d)$",
+      "type": "string"
+    },
+    "EndTarget": {
+      "additionalProperties": false,
+      "description": "`{ end: <outcome> }`: the run ends with this outcome (0.7, Outcomes and terminal states).",
+      "properties": {
+        "end": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "end"
+      ],
+      "type": "object"
+    },
+    "Fanout": {
+      "additionalProperties": false,
+      "description": "`fanout:` of an agent phase: one role on several `models`, or on several `instances`, never both. `when:` is\nCEL over the run (`round == 1`).",
+      "properties": {
+        "instances": {
+          "items": {
+            "$ref": "#/$defs/Instance"
+          },
+          "type": "array"
+        },
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "HumanPhase": {
+      "additionalProperties": false,
+      "description": "A `human` phase: a Queue item where a person picks one of the tokens of `on:`. `human` is the text the item\nshows; `show` lists what the person should read (0.7, `show:`).",
+      "properties": {
+        "human": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Target"
+          },
+          "type": "object"
+        },
+        "show": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "human",
+        "on"
+      ],
+      "type": "object"
+    },
+    "Instance": {
+      "additionalProperties": false,
+      "description": "One instance of a fan-out (0.10, owner 2026-11-13): each names any of a model, an agent definition, a profile\nand a prompt. What an instance leaves out comes from the phase's role.",
+      "properties": {
+        "definition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Prompt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "OnCold": {
+      "description": "`on_cold:` of an agent phase (0.3): what a phase does when its session's cache has expired.",
+      "oneOf": [
+        {
+          "const": "resume",
+          "description": "Keep the session.",
+          "type": "string"
+        },
+        {
+          "const": "fresh",
+          "description": "Start a new session from a handoff note.",
+          "type": "string"
+        }
+      ]
+    },
+    "Phase": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentPhase"
+        },
+        {
+          "$ref": "#/$defs/ScriptPhase"
+        },
+        {
+          "$ref": "#/$defs/WaitPhase"
+        },
+        {
+          "$ref": "#/$defs/HumanPhase"
+        }
+      ]
+    },
+    "PhaseTable": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Phase"
+      },
+      "description": "Phase names to phases, in declaration order.",
+      "type": "object"
+    },
+    "Prompt": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactPrompt"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "A prompt: the name of one of the pack's prompts, or an earlier phase's artifact (`{ artifact: brief/x.md }`)."
+    },
+    "Sandbox": {
+      "additionalProperties": false,
+      "description": "The models whose phase instance gets a sandbox workspace (0.7).",
+      "properties": {
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "models"
+      ],
+      "type": "object"
+    },
+    "ScriptPhase": {
+      "additionalProperties": false,
+      "description": "A `script` phase: a hook in the workspace. `agentWork: true` marks one that runs agents itself (0.3).",
+      "properties": {
+        "agentWork": {
+          "type": "boolean"
+        },
+        "gates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "record": {
+          "type": "boolean"
+        },
+        "script": {
+          "type": "string"
+        },
+        "then": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Then"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "Target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EndTarget"
+        },
+        {
+          "description": "A phase name, or [`ASK_HUMAN`].",
+          "type": "string"
+        }
+      ],
+      "description": "Where a transition goes: a phase name, `ask_human`, or `{ end: <outcome> }`."
+    },
+    "Then": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Decision"
+        },
+        {
+          "$ref": "#/$defs/Target"
+        }
+      ],
+      "description": "What follows a phase (0.7, `then:`). Without it, the next phase in declaration order follows, and the last\nphase ends the run with outcome `done`."
+    },
+    "WaitPhase": {
+      "additionalProperties": false,
+      "description": "A `wait` phase: a hook polled every `interval` until it answers `ok` or `fail`, or `timeout` passes (0.7).\n`timeout` is required.",
+      "properties": {
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "default": "30s"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "then": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Then"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout": {
+          "$ref": "#/$defs/Duration"
+        },
+        "wait": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait",
+        "interval",
+        "timeout"
+      ],
+      "type": "object"
+    },
+    "WorkflowOp": {
+      "additionalProperties": false,
+      "description": "An op of `on_start` or `on_end` (0.4, Lifecycle order). It addresses status categories (`setStatus\n{ category: active }`). `when:` is CEL; in `on_end` it reads `outcome`.",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "op": {
+          "type": "string"
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One entry of `workflows:`.",
+  "properties": {
+    "accepts": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Accepts"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "integrate": {
+      "description": "A `pack/name` integrate implementation. A workflow without one cannot be accepted (0.4).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "on_end": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOp"
+      },
+      "type": "array"
+    },
+    "on_start": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOp"
+      },
+      "type": "array"
+    },
+    "phases": {
+      "$ref": "#/$defs/PhaseTable"
+    },
+    "start": {
+      "description": "The first phase. The first one declared when this is missing.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workspace": {
+      "description": "A `pack/name` workspace implementation. Without it the built-in one is used (0.4).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "phases"
+  ],
+  "title": "Workflow",
+  "type": "object"
+}
