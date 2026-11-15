@@ -7,10 +7,17 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 14.** Revision 14 puts features in proposals, from the owner's decisions of 2026-11-14 (Review
-log). R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
+**Status: revision 15.** Revision 15 takes two findings from the tokensafe research, and revision 14 puts features
+in proposals, both from the owner's decisions of 2026-11-14 (Review log). R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
 `.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
 starts. The owner accepted revision 13 (2026-11-14); Stage 2 is in progress.
+
+Revision 15 (2026-11-14) takes two findings from the tokensafe research (`docs/research/tokensafe.md`):
+- The run preview flags a redirected model endpoint (`ANTHROPIC_BASE_URL`, from the captured environment or a
+  `settings.json` `env`, which survives Collide's strip of `CLAUDE_*`), and user hooks by the event they hook,
+  because a `SessionStart` or `UserPromptSubmit` hook can add text to the context and a `PostToolUse` hook can
+  replace a tool's result. The fingerprint records the endpoint's host (0.3, 0.13, Stages 3b and 9a).
+- A saving that a reporter claims is an estimate, never subtracted from measured totals (0.5, Stage 7).
 
 Revision 14 (2026-11-14) puts features in proposals. The owner's request: planning is about features, and the
 Planning view should group them into sections that the agent names.
@@ -693,6 +700,11 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     - `claude` sets `CLAUDECODE=1` and its own `CLAUDE_*` values again in its children, so an agent's Bash calls
       always see them (measured S1). That is intended: Orchard's label check applies to agent work.
     - Collide adds no `ANTHROPIC_*` variable; the login comes from the user's own Claude config.
+    - Nor does it strip one, so a user who routes Claude through a gateway or proxy keeps it. An
+      `ANTHROPIC_BASE_URL` from the captured environment, or from a `settings.json` `env` (which `claude` applies
+      itself, after the strip), is flagged in the run preview, and its host is recorded in the fingerprint (0.13). A
+      proxy sees every request and may edit it, so cost and cache comparisons across it are not like for like
+      (tokensafe research: its proxy mode sets this variable in the user's settings).
   - **The tool's config paths in a repo.** For Claude: `.claude/**`, `CLAUDE.md` and `.mcp.json`, plus auto memory
     under `~/.claude/projects/<main checkout key>/memory/`.
     - A reviewer works in the builder's worktree, and the builder can edit all of these. So the Claude adapter takes
@@ -752,8 +764,11 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       `system/init` gives names and counts only.
   - **The user's own tooling loads into phases** under `config: user`. S1 found a user `PreToolUse` hook (rtk)
     rewriting Bash commands, and token tools add hooks that hold prompts or set compaction variables.
-    - The run preview lists the user hooks and plugins a phase will load. It flags those that rewrite tool calls,
-      block prompts or set context variables.
+    - The run preview lists the user hooks and plugins a phase will load. It flags those that can change what the
+      model sees, by the event they hook, because a hook's output is unknown until it runs: `PreToolUse` (can
+      rewrite a call), `UserPromptSubmit` (can block a prompt or add context), `SessionStart` (can add context)
+      and `PostToolUse` (can replace a tool's result with its own summary). It also flags a settings `env` that
+      sets a context variable or the model endpoint (above). Token tools install all of these (tokensafe research).
     - A prompt blocked by a hook becomes a Queue item with the hook's reason, never a silent `result/success`. The
       adapter sees a `system/informational` event with `prompt_submit_outcome` (`kind` `blocked_by_hook` or
       `stopped_by_hook`, and `reason`), then `result/success` with `num_turns: 0` and a null `terminal_reason`.
@@ -1208,6 +1223,11 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     reading would be wrong by the tailing lag.
   - `usage` and `limited` lines count only from a `script` phase with `agentWork: true` (0.3). Elsewhere they are
     rejected and counted.
+  - A `metric` is never combined with measured tokens or cost. A saving that a reporter claims (tokens or cost a
+    hook says it avoided) is an estimate whatever its name, shown labelled reported and never subtracted from the
+    measured totals, which already contain any real effect. A hook that answers after a tool returned, such as a
+    `PostToolUse` hook that blocks with a summary, does not take back what the model read (inferred; tokensafe
+    research). The pack author docs say so.
   - A `usage` line keeps `cacheRead` and `cacheWrite` apart, and may split `cacheWrite` into `cacheWrite1h` and
     `cacheWrite5m`. A line with a merged `cached` count instead is rejected and counted, because a write and a read
     are priced far apart. A field the reporter does not know is left out and shows as "not reported" (0.13).
@@ -2480,7 +2500,8 @@ Details:
     parameters (Orchard: review budget);
   - each task's status at the line's ref, and, for a task the workflow does not accept, the field or operation it
     lacks;
-  - the user hooks and plugins each phase will load, with flags on those that change behaviour (0.3).
+  - the user hooks and plugins each phase will load, with flags on those that change behaviour, and a redirected
+    model endpoint (0.3).
   - the profile, why it applies (picked here, the view's, a rule, the board default), and each resolved setting
     with its layer (0.7);
   - a badge on packs loaded from a `dev:` folder and on `agentWork` phases (0.3).
@@ -2845,6 +2866,8 @@ Every run is a trace. The core needed for run state is always recorded; the reso
       captured environment, and the fingerprint records what `system/init` then said;
     - the model each alias resolved to;
     - the context options in effect, and the names of the user hooks and plugins the phase loaded (0.3);
+    - the host of the model endpoint when `ANTHROPIC_BASE_URL` is set, from the environment or a `settings.json`
+      `env`: the host only, never the path, query or a key (0.3);
     - the tools the phase had: its agent definition's `tools:` list and the disallowed tools. A tool that is only
       pre-approved, not removed, still costs context (0.3);
     - whether the workspace was fresh or reused;
@@ -3499,6 +3522,8 @@ socket checks; sleep accounting with fake clocks.
 - Permission requests answered from the CLI (`--permission-prompts host`).
 - **The adapter's declarations (0.3):**
   - its environment is stripped from everything Collide starts (Claude: `CLAUDECODE` and every `CLAUDE_*`);
+  - the user hooks and settings `env` a phase loads, read for the run preview's flags, and the model endpoint's
+    host, from the environment or a `settings.json` `env`, recorded in the fingerprint (0.3, 0.13; revision 15);
   - a usage or rate limit becomes a `limited` event. The phase pauses (`paused: usage limit`) and resumes by
     session id at the reset time, or when the user resumes it.
 - **Claude's version and settings (0.3; R5):**
@@ -3532,6 +3557,10 @@ socket checks; sleep accounting with fake clocks.
 - The owner restarts mid-run, and the run continues or resumes.
 - A real `claude -p` phase runs under the daemon that the one-shot launchd job started.
 - A permission request is answered from the CLI.
+- Over a fixture `settings.json` (never the user's own) with an `ANTHROPIC_BASE_URL` in its `env` and a
+  `SessionStart`, a `UserPromptSubmit`, a `PreToolUse` and a `PostToolUse` hook, a phase's fingerprint records the
+  endpoint's host and no path, query or key, and each hook with its flag. The same variable in the captured
+  environment is recorded the same way (revision 15).
 - A role whose alias is unmapped is refused with a message that names the alias.
 - A run's trace shows its phase and permission-wait spans, with the wait counted as waiting. Its tokens and cost
   match `result.usage` per turn plus its compaction calls, with no content block counted twice (S9).
@@ -4145,7 +4174,8 @@ Queue.
 - State: workspace state survives an owner restart; per-invocation keys; key-by-key merge.
 - Report: nesting by `parent` and by `COLLIDE_REPORT_PARENT`; two writers sharing a file get distinct ids; a
   repeated open id, a missing `t` and malformed lines are counted; `unclosed` marking; `collide report` outside
-  Collide does nothing and says so.
+  Collide does nothing and says so; a `metric` that claims tokens saved is shown labelled reported and leaves the
+  run's measured tokens and cost unchanged (revision 15).
 - Line lock serialization; the root-busy wait.
 - Env:
   - role before phase, so the phase's value wins;
@@ -4283,7 +4313,8 @@ the Stage 9 epic, with items grouped by letter.
 is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path.
 
 - **Field:** Launch with a run preview (implementations, accepted tasks, the reason for each refused one; the
-  profile, its reason and each setting's layer; dev and `agentWork` badges). Profiles picked in the preview or
+  profile, its reason and each setting's layer; dev and `agentWork` badges; the flagged user hooks and a redirected
+  model endpoint, 0.3). Profiles picked in the preview or
   taken from the view's `profile:`. **Use working copy** on a repo pack whose folder in the user's checkout
   differs from the ref (0.7). The
   drawer's operation forms, create, and Record.
@@ -5794,3 +5825,22 @@ plan puts them there.
   than a `task.invalid`; the op names `addFeature`, `moveFeature` and `renameSection`; Sort answering through
   `show_groups`, so the five tools stay five; the slice reading the `proposal` kind now, with its transitions, the
   person-only rule and `by:` in Stage 4c; and the GitHub board key added in Stage 6c as an optional key.
+
+**Revision 15, 2026-11-14 (owner).** Two findings from the tokensafe research. The owner asked whether anything from
+tokensafe (an MIT token-saving tool: an MCP server, agent hooks and an optional local proxy) belongs in Collide. A
+Sonnet agent read it without running it, and the note is `docs/research/tokensafe.md`. The owner took findings 1 and
+2 ("yes add 1 & 2").
+- **Changed:** the status line and the revision summary; 0.3 (an `ANTHROPIC_BASE_URL` is kept and flagged; the
+  preview flags hooks by event, including those that add context or replace a tool's result); 0.5 (a claimed saving
+  is an estimate); 0.11 (the run preview); 0.13 (the fingerprint records the endpoint's host); Stage 3b (scope and a
+  criterion); Stage 7 (a test); Stage 9a (the Field's preview).
+- **Owner's decisions:** 1. flag a redirected model endpoint and context-changing hooks, and record the endpoint's
+  host; 2. a reported saving is an estimate.
+- **Considered and not taken** (in the note): tokensafe as a dependency; its code outliner, import graph, proxy,
+  prompt compaction and cache normalizer (Collide owns the launch, not the API request). Kept for later, each behind
+  its cheap test in the note: a tokensafe-on-versus-off experiment arm at Stage 15, a guard pack of deny rules, a
+  run-once test environment, and a detector for whole-file rewrites.
+- **Choices made in writing it** (the owner may change any): the endpoint is flagged, not stripped, so a gateway the
+  user chose keeps working; hooks are flagged by the event they hook, because their output is unknown before they
+  run; only the host is recorded, never the path, query or a key; a claimed saving needs no new report field, and is
+  told apart by docs and labels.
