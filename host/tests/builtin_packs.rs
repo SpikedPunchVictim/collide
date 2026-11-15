@@ -126,6 +126,35 @@ fn an_unknown_pack_and_a_pack_without_that_provider_are_errors() {
     );
 }
 
+#[test]
+fn a_built_in_manifest_that_fails_the_manifest_check_is_refused_with_every_reason() {
+    let root = scratch("loader-invalid-manifest");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("plan")).unwrap();
+    fs::write(
+        root.join("plan/pack.yaml"),
+        "apiVersion: collide/v0\nname: collide/plan\nproviders:\n  plan: { script: src/main.ts }\n\
+         gates:\n  g: { script: /usr/bin/check }\n\
+         bindings:\n  - { point: run.after_end, gate: g }\n",
+    )
+    .unwrap();
+    let (path, _, _) = fake_path("loader-invalid-manifest-path");
+    let error = BuiltinPacks::new(&root)
+        .provider("collide/plan", "plan", &Environment { path })
+        .unwrap_err();
+    let text = error.to_string();
+    assert!(
+        matches!(error, BuiltinPackError::InvalidManifest { .. }),
+        "{text}"
+    );
+    assert!(text.contains("built-in pack collide/plan"), "{text}");
+    assert!(
+        text.contains("/usr/bin/check") && text.contains("run.after_end"),
+        "{text}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 // The bundle.
 
 fn files_under(dir: &Path, found: &mut Vec<PathBuf>) {

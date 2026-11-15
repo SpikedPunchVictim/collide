@@ -1,0 +1,8 @@
+apiVersion: collide/v0
+name: demo
+gates:
+  checked: { script: gates/checked.ts }
+points:
+  proposal.after_share: { on: task.after_status, match: [review] }
+bindings:
+  - { point: proposal.after_share, gate: checked }

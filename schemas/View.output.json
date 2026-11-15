@@ -127,6 +127,7 @@
       ]
     },
     "name": {
+      "minLength": 1,
       "type": "string"
     },
     "profile": {

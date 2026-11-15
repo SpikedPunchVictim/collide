@@ -1,0 +1,6 @@
+apiVersion: collide/v0
+name: demo
+roles:
+  builder:
+    agent: claude
+    env: { ITER_AGENT: {{ task.labelId }} }

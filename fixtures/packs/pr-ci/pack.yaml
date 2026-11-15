@@ -1,9 +1,42 @@
 apiVersion: collide/v0
 name: pr-ci
+version: 0.1.0
 
 # An issue, a pull request and its CI checks (0.7): a `script` phase pushes and opens the PR, a `wait` phase polls
-# its checks, and a `human` phase reads the PR and the CI summary. The scripts are declared by the full manifest
-# (`ts-0012-ua`).
+# its checks, and a `human` phase reads the PR and the CI summary. The hooks are declared here, as paths relative
+# to the pack directory; the fixture holds no files, so a test reads the manifest and never runs it.
+requires:
+  tools:
+    - { name: git }
+    - { name: gh, version: ">=2.40" }
+  agents: [claude]
+
+integrations:
+  pull-request:
+    script: hooks/integrate-pr.ts
+    timeout: 10m
+    outputs: { url: { type: string }, head: { type: string } }
+
+roles:
+  builder:
+    agent: claude
+    definition: repo:.claude/agents/builder.md
+    model: fast
+
+prompts:
+  build: briefs/build.md.j2
+
+gates:
+  ci-green: { script: gates/ci-green.ts, timeout: 2m }
+
+bindings:
+  - { point: task.before_status, match: [done], gate: ci-green, when: 'task.kind == "issue"', timeout: 30s }
+
+observers:
+  notify:
+    script: observers/notify.ts
+    events: ["run.*", "ask_human.*"]
+
 workflows:
   pr:
     accepts: { sources: [github] }

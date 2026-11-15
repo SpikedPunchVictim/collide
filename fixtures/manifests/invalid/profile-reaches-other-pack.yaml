@@ -1,0 +1,8 @@
+apiVersion: collide/v0
+name: demo
+profiles:
+  wide:
+    packs: { off: [codemap] }
+    workflow: other/review
+    config:
+      other: { lanePool: 1 }

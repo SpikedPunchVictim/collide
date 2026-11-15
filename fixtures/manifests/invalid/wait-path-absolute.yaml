@@ -1,0 +1,6 @@
+apiVersion: collide/v0
+name: demo
+workflows:
+  pr:
+    phases:
+      ci: { wait: /bin/true, timeout: 60m }

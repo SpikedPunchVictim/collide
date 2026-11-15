@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A run's total budget. At the total, the run goes to `ask_human` with cause budget.",
+  "description": "A budget in US dollars: a run's total (at the total, the run goes to `ask_human` with cause budget), or one\nrole's (0.7, `budget: { usd: 20 }`).",
   "properties": {
     "usd": {
       "format": "double",

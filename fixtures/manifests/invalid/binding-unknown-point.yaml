@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+bindings:
+  - { point: task.before_statuz, script: hooks/x.ts }

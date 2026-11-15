@@ -78,6 +78,7 @@ fn name_or_map<'de, D: Deserializer<'de>, M: Deserialize<'de>>(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EndTarget {
+    #[schemars(length(min = 1))]
     pub end: String,
 }
 
@@ -116,6 +117,7 @@ impl<'de> Deserialize<'de> for Target {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Decision {
+    #[schemars(length(min = 1))]
     pub script: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tokens: Vec<String>,
@@ -201,6 +203,7 @@ pub enum Prompt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactPrompt {
+    #[schemars(length(min = 1))]
     pub artifact: String,
 }
 
@@ -268,6 +271,7 @@ pub struct Fanout {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentPhase {
+    #[schemars(length(min = 1))]
     pub role: String,
     pub prompt: Prompt,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -293,6 +297,7 @@ pub struct AgentPhase {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptPhase {
+    #[schemars(length(min = 1))]
     pub script: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<Duration>,
@@ -319,6 +324,7 @@ pub struct ScriptPhase {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WaitPhase {
+    #[schemars(length(min = 1))]
     pub wait: String,
     #[serde(default = "default_interval")]
     pub interval: Duration,
@@ -338,6 +344,7 @@ fn default_interval() -> Duration {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HumanPhase {
+    #[schemars(length(min = 1))]
     pub human: String,
     pub on: BTreeMap<String, Target>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -682,6 +689,7 @@ pub struct Accepts {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowOp {
+    #[schemars(length(min = 1))]
     pub op: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub args: BTreeMap<String, Value>,

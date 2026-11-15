@@ -1,0 +1,5 @@
+apiVersion: collide/v0
+name: demo
+record:
+  paths: ["/etc/**"]
+  script: hooks/record.ts

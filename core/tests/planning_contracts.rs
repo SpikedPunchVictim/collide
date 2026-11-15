@@ -312,6 +312,8 @@ fn a_derived_point_reads_as_the_plan_writes_it() {
 #[test]
 fn a_pack_manifest_holds_points_and_checklists_and_both_are_optional() {
     let doc = json!({
+        "apiVersion": "collide/v0",
+        "name": "ferry",
         "points": { "spike.before_conclude": { "on": "task.before_status", "match": ["done"] } },
         "checklists": {
             "spike": {
@@ -327,9 +329,19 @@ fn a_pack_manifest_holds_points_and_checklists_and_both_are_optional() {
         Ok(())
     );
     assert_eq!(serde_json::to_value(&manifest).unwrap(), doc);
-    let empty: PackManifest = serde_json::from_value(json!({})).unwrap();
-    assert_eq!(empty, PackManifest::default());
-    assert!(serde_json::from_value::<PackManifest>(json!({ "viewz": {} })).is_err());
+    let identity = json!({ "apiVersion": "collide/v0", "name": "ferry" });
+    assert!(serde_json::from_value::<PackManifest>(identity.clone()).is_ok());
+    for missing in ["apiVersion", "name"] {
+        let mut doc = identity.clone();
+        doc.as_object_mut().unwrap().remove(missing);
+        assert!(
+            serde_json::from_value::<PackManifest>(doc).is_err(),
+            "{missing}"
+        );
+    }
+    let mut typo = identity;
+    typo["viewz"] = json!({});
+    assert!(serde_json::from_value::<PackManifest>(typo).is_err());
 }
 
 #[test]
@@ -341,19 +353,24 @@ fn a_pack_manifest_holds_the_identity_tool_requirements_and_provider_entries_of_
         "providers": { "plan": { "script": "src/main.ts" } }
     });
     let manifest: PackManifest = serde_json::from_value(doc.clone()).unwrap();
-    assert_eq!(manifest.name.as_deref(), Some("collide/plan"));
+    assert_eq!(manifest.name, "collide/plan");
     let written = serde_json::to_value(&manifest).unwrap();
     for key in ["apiVersion", "name", "requires", "providers"] {
         assert_eq!(written[key], doc[key], "{key}");
     }
     for bad in [
-        json!({ "requires": { "sdk": ">=0.1 <0.2" } }),
+        json!({ "requires": { "sdk": ">=0.1 <0.2", "extra": 1 } }),
         json!({ "requires": { "tools": [{ "name": "node", "extra": 1 }] } }),
         json!({ "providers": { "plan": { "script": "x.ts", "timeout": "5s" } } }),
         json!({ "providers": { "plan": {} } }),
     ] {
+        // With the identity keys present, so that only the bad key can be the reason.
+        let mut doc = json!({ "apiVersion": "collide/v0", "name": "collide/plan" });
+        doc.as_object_mut()
+            .unwrap()
+            .extend(bad.as_object().unwrap().clone());
         assert!(
-            serde_json::from_value::<PackManifest>(bad.clone()).is_err(),
+            serde_json::from_value::<PackManifest>(doc).is_err(),
             "{bad}"
         );
     }
@@ -590,17 +607,35 @@ fn the_pack_keys_points_and_checklists_are_in_the_schema() {
         keys_of("PackManifest", None),
         set(&[
             "apiVersion",
+            "bindings",
             "checklists",
+            "config",
+            "experiment",
+            "gates",
+            "integrations",
+            "launch",
+            "metrics",
             "name",
+            "observers",
             "points",
             "profiles",
+            "prompts",
+            "protectedPaths",
             "providers",
+            "record",
             "requires",
+            "roles",
+            "syncs",
+            "version",
             "views",
-            "workflows"
+            "workflows",
+            "workspaces"
         ])
     );
-    assert_eq!(keys_of("PackManifest", Some("Requires")), set(&["tools"]));
+    assert_eq!(
+        keys_of("PackManifest", Some("Requires")),
+        set(&["agents", "modelName", "sdk", "tools"])
+    );
     assert_eq!(
         keys_of("PackManifest", Some("ToolRequirement")),
         set(&["name", "version"])

@@ -1,0 +1,5 @@
+apiVersion: collide/v0
+name: demo
+config:
+  a: &a { type: string }
+  b: *a

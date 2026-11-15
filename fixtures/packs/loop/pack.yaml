@@ -1,8 +1,55 @@
 apiVersion: collide/v0
 name: loop
+version: 0.1.0
 
-# A review loop (0.7): build, review, then fix or close. The roles, prompts and scripts the phases name are
-# declared by the full manifest (`ts-0012-ua`); the workflow checks only its own table.
+# A review loop (0.7): build, review, then fix or close. The roles, prompts, gate, hooks and decision script the
+# phases name are declared here, as paths relative to the pack directory; the fixture holds no files, so a test
+# reads the manifest and never runs it.
+requires:
+  sdk: ">=0.1 <0.2"
+  tools:
+    - { name: node, version: ">=22.18" }
+  agents: [claude]
+
+launch:
+  max_rounds: { type: integer, minimum: 1, default: 3 }
+
+config:
+  evidenceFile: { type: string, default: evidence.json }
+  notifyHook: { type: string, secret: true }
+  lanePool: { type: integer, minimum: 1, default: 2, overridable: true }
+
+integrations:
+  merge-local: { script: hooks/merge-local.ts }
+
+roles:
+  builder:
+    agent: claude
+    definition: agents/builder.md
+    model: fast
+    budget: { usd: 10 }
+  reviewer:
+    agent: claude
+    definition: agents/reviewer.md
+    model: strong
+    readOnly: true
+  orchestrator:
+    agent: claude
+    definition: agents/orchestrator.md
+    model: strong
+    readOnly: true
+    compact_at: 120000
+
+prompts:
+  build: briefs/build.md.j2
+  review: briefs/review.md.j2
+  adjudicate: briefs/adjudicate.md.j2
+
+gates:
+  evidence:
+    script: gates/evidence.ts
+    timeout: 5m
+
 workflows:
   loop:
     accepts: { sources: [plan] }

@@ -1,0 +1,5 @@
+apiVersion: collide/v0
+name: demo
+experiment:
+  prepare: { script: hooks/exp-prepare.ts }
+  armPrefix: scratch/

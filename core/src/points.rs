@@ -151,6 +151,7 @@ impl Point {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DerivedPoint {
+    #[schemars(length(min = 1))]
     pub on: String,
     #[serde(rename = "match", default, skip_serializing_if = "Option::is_none")]
     pub matches: Option<Vec<String>>,
@@ -204,7 +205,7 @@ impl fmt::Display for PointError {
 impl std::error::Error for PointError {}
 
 /// `"before"` or `"after"`, from the part of a point's name after its last dot.
-fn side(point: &str) -> Option<&'static str> {
+pub(crate) fn side(point: &str) -> Option<&'static str> {
     let name = point.rsplit('.').next().unwrap_or(point);
     if name.starts_with("before_") {
         Some("before")

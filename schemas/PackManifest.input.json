@@ -63,6 +63,7 @@
           "type": "boolean"
         },
         "role": {
+          "minLength": 1,
           "type": "string"
         },
         "sandbox": {
@@ -96,11 +97,64 @@
       "additionalProperties": false,
       "properties": {
         "artifact": {
+          "minLength": 1,
           "type": "string"
         }
       },
       "required": [
         "artifact"
+      ],
+      "type": "object"
+    },
+    "Binding": {
+      "additionalProperties": false,
+      "description": "One entry of `bindings:` (0.4): a handler attached to a named point. It names either a `gate` of this pack,\nwhich may bind only to a `before_*` point, or a `script`, a chain handler that may bind to any point.\n`match` narrows a core point (a status category, an op name or a target source); `when:` is CEL over `task`,\n`change` and this pack's `config`. `timeout` is the hook's own (0.5: default 30 s for task points, 120 s for\nmove points).\n\nThe plan describes bindings (0.4, Named points) and writes one as `task.before_status: review`; it does not\ngive the manifest key, so this shape is a decision for the owner. A list, because chain handlers run in the\norder written.",
+      "properties": {
+        "gate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "match": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "point": {
+          "description": "A core point (`task.before_status`), a derived point of this pack (a key of `points:`), or another pack's\nderived point as `pack/point`.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "script": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "point"
       ],
       "type": "object"
     },
@@ -147,6 +201,7 @@
       "description": "One line of a checklist template. `when:` is CEL over the item.",
       "properties": {
         "id": {
+          "minLength": 1,
           "type": "string"
         },
         "required": {
@@ -154,6 +209,7 @@
           "type": "boolean"
         },
         "text": {
+          "minLength": 1,
           "type": "string"
         },
         "when": {
@@ -197,6 +253,7 @@
           "type": "object"
         },
         "script": {
+          "minLength": 1,
           "type": "string"
         },
         "show": {
@@ -233,6 +290,7 @@
           ]
         },
         "on": {
+          "minLength": 1,
           "type": "string"
         },
         "when": {
@@ -257,12 +315,57 @@
       "description": "`{ end: <outcome> }`: the run ends with this outcome (0.7, Outcomes and terminal states).",
       "properties": {
         "end": {
+          "minLength": 1,
           "type": "string"
         }
       },
       "required": [
         "end"
       ],
+      "type": "object"
+    },
+    "Experiment": {
+      "additionalProperties": false,
+      "description": "`experiment:` (0.7; used from Milestone D, 0.14): per-arm isolation for state that the clone shares. `env`,\n`appendOnly` and `unchanged` hold `{{ }}` templates over `arm.dir` and `git.commonDir` (0.5), so they are text\nhere and the experiment stage reads them.",
+      "properties": {
+        "appendOnly": {
+          "description": "Paths that other work appends to during an experiment.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "branchPrefix": {
+          "description": "The prefix of an arm's branches (default `collide-exp/`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "prepare": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unchanged": {
+          "description": "Paths that must be byte-identical at the end.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "Fanout": {
@@ -297,11 +400,54 @@
       ],
       "type": "string"
     },
+    "HookEntry": {
+      "additionalProperties": false,
+      "description": "A hook (0.5): the script that runs, how long it may run, how long it gets to stop, and a JSON Schema for each\noutput it may return. It is the entry of `gates:`, `integrations:`, `syncs:`, `metrics:` and a workspace\nimplementation's sub-hooks. `timeout` and `grace` use [`Duration`] (`120m`, `60s`).",
+      "properties": {
+        "grace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The time a stopped hook gets between SIGTERM and SIGKILL (0.5: default 60 s)."
+        },
+        "outputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SchemaObject"
+          },
+          "description": "A schema per output key. Outputs that fail it make the hook's result `error` (0.5).",
+          "type": "object"
+        },
+        "script": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
     "HumanPhase": {
       "additionalProperties": false,
       "description": "A `human` phase: a Queue item where a person picks one of the tokens of `on:`. `human` is the text the item\nshows; `show` lists what the person should read (0.7, `show:`).",
       "properties": {
         "human": {
+          "minLength": 1,
           "type": "string"
         },
         "label": {
@@ -403,6 +549,54 @@
         "run-order"
       ],
       "type": "string"
+    },
+    "Metrics": {
+      "additionalProperties": false,
+      "description": "`metrics:` (0.7; used from Milestone C, 0.13): how a pack's own data becomes spans. `import` reads the pack's\ntiming lines; `processes` lists the processes a workspace started that sampling cannot attribute.",
+      "properties": {
+        "import": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "processes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ObserverEntry": {
+      "additionalProperties": false,
+      "description": "An observer (0.4): a long-lived process that gets the events its `events:` patterns name, as JSONL on stdin\n(see [`crate::observer`]). A pattern is an event type (`run.transition`), a family (`run.*`) or `*`.",
+      "properties": {
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "script": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "script",
+        "events"
+      ],
+      "type": "object"
     },
     "OnCold": {
       "description": "`on_cold:` of an agent phase (0.3): what a phase does when its session's cache has expired.",
@@ -521,11 +715,52 @@
       ],
       "description": "A prompt: the name of one of the pack's prompts, or an earlier phase's artifact (`{ artifact: brief/x.md }`)."
     },
+    "ProtectedAt": {
+      "description": "When a violation of `protectedPaths` is acted on (0.9). Only `phase-end` exists: the phase fails at its end.",
+      "enum": [
+        "phase-end"
+      ],
+      "type": "string"
+    },
+    "ProtectedPaths": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "$ref": "#/$defs/ProtectedPathsAt"
+        }
+      ],
+      "description": "`protectedPaths:` (0.9): a list of repo globs, whose changes are flagged in review, or\n`{ paths: [...], at: phase-end }`, which also fails the phase at its end. It is read by what it holds (a list\nor a mapping), so that an unknown key in the mapping is refused by name, not as \"no variant matched\"."
+    },
+    "ProtectedPathsAt": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/ProtectedAt"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths",
+        "at"
+      ],
+      "type": "object"
+    },
     "ProviderEntry": {
       "additionalProperties": false,
       "description": "One entry of `providers:`: the script that starts the provider, relative to the pack directory.",
       "properties": {
         "script": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -534,18 +769,142 @@
       ],
       "type": "object"
     },
+    "Record": {
+      "additionalProperties": false,
+      "description": "`record:` (0.7): what the pack's `record` hook may commit at the line root. `paths` are globs over repo paths\nand an upper bound: only the files a write or a phase touched are committed.",
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "script": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "paths",
+        "script"
+      ],
+      "type": "object"
+    },
     "Requires": {
       "additionalProperties": false,
-      "description": "`requires:` in a manifest. Only `tools` is read so far; `sdk` and `agents` come with `ts-0012-ua`.",
+      "description": "`requires:` in a manifest (0.7). Whether the running Collide, its SDK, the tools and the agents satisfy it is\nchecked when a board loads the pack (Stage 4).",
       "properties": {
+        "agents": {
+          "description": "The agents a pack is bound to (`[claude]`, 0.3).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "modelName": {
+          "description": "A regular expression that a `model.name` must match (0.3), such as `\"^[a-z]+$\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sdk": {
+          "description": "The range of `@collide/pack-sdk` the pack accepts (0.6), such as `\">=0.1 <0.2\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tools": {
-          "default": [],
           "items": {
             "$ref": "#/$defs/ToolRequirement"
           },
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "Role": {
+      "additionalProperties": false,
+      "description": "A role (0.3, 0.7): an agent, its definition, and the options that sit beside its model and budget.",
+      "properties": {
+        "agent": {
+          "description": "The agent kind, one of `requires.agents` (`claude`).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "bash_output_max": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunBudget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compact_at": {
+          "description": "Context options (0.3): the same four a profile may override.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "definition": {
+          "description": "A path to the agent definition: in the pack, or `repo:` for one in the line's snapshot.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "mcp_output_max": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "A model alias, resolved per user.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "agent"
+      ],
       "type": "object"
     },
     "RoleConfig": {
@@ -597,6 +956,20 @@
       },
       "type": "object"
     },
+    "RunBudget": {
+      "additionalProperties": false,
+      "description": "A budget in US dollars: a run's total (at the total, the run goes to `ask_human` with cause budget), or one\nrole's (0.7, `budget: { usd: 20 }`).",
+      "properties": {
+        "usd": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "usd"
+      ],
+      "type": "object"
+    },
     "Sandbox": {
       "additionalProperties": false,
       "description": "The models whose phase instance gets a sandbox workspace (0.7).",
@@ -611,6 +984,10 @@
       "required": [
         "models"
       ],
+      "type": "object"
+    },
+    "SchemaObject": {
+      "description": "A JSON Schema. Its own keywords are not checked here; a setting may add `secret` and `overridable`, both booleans.",
       "type": "object"
     },
     "ScriptPhase": {
@@ -642,6 +1019,7 @@
           "type": "boolean"
         },
         "script": {
+          "minLength": 1,
           "type": "string"
         },
         "then": {
@@ -722,6 +1100,7 @@
       "description": "A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `\">=22.18\"`; it is\noptional, as in `- { name: pnpm }`. Checking it is Stage 4.",
       "properties": {
         "name": {
+          "minLength": 1,
           "type": "string"
         },
         "version": {
@@ -774,6 +1153,7 @@
           ]
         },
         "name": {
+          "minLength": 1,
           "type": "string"
         },
         "profile": {
@@ -835,6 +1215,7 @@
           "$ref": "#/$defs/Duration"
         },
         "wait": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -909,6 +1290,7 @@
           "type": "object"
         },
         "op": {
+          "minLength": 1,
           "type": "string"
         },
         "when": {
@@ -922,35 +1304,172 @@
         "op"
       ],
       "type": "object"
+    },
+    "WorkspaceImpl": {
+      "additionalProperties": false,
+      "description": "A workspace implementation (0.4): `demo/worktree`. Every hook returns `{ path, gitDir }` (0.1). `create` is\nthe one a workspace cannot be made without; `resume`, `remove`, `discard` and `cleanup` are the lifecycle's other\nsteps (0.4, Lifecycle order), and `sandbox`, `line` and `doctor` are the kinds and the check the reference pack\nhas (0.7, the example).",
+      "properties": {
+        "cleanup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "create": {
+          "$ref": "#/$defs/HookEntry"
+        },
+        "discard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "doctor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "line": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remove": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resume": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "create"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "apiVersion": {
-      "type": [
-        "string",
-        "null"
-      ]
+      "description": "`collide/v0`.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "bindings": {
+      "items": {
+        "$ref": "#/$defs/Binding"
+      },
+      "type": "array"
     },
     "checklists": {
       "additionalProperties": {
         "$ref": "#/$defs/ChecklistTemplate"
       },
-      "default": {},
       "type": "object"
     },
-    "name": {
-      "type": [
-        "string",
-        "null"
+    "config": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SchemaObject"
+      },
+      "description": "Settings, one JSON Schema per key, with `secret` and `overridable` (0.7, Settings).",
+      "type": "object"
+    },
+    "experiment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Experiment"
+        },
+        {
+          "type": "null"
+        }
       ]
+    },
+    "gates": {
+      "additionalProperties": {
+        "$ref": "#/$defs/HookEntry"
+      },
+      "type": "object"
+    },
+    "integrations": {
+      "additionalProperties": {
+        "$ref": "#/$defs/HookEntry"
+      },
+      "description": "Named `integrate` implementations (0.4).",
+      "type": "object"
+    },
+    "launch": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SchemaObject"
+      },
+      "description": "Launch parameters, asked in the run preview; they reach prompts and hooks as `launch` (0.7).",
+      "type": "object"
+    },
+    "metrics": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Metrics"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ObserverEntry"
+      },
+      "type": "object"
     },
     "points": {
       "additionalProperties": {
         "$ref": "#/$defs/DerivedPoint"
       },
-      "default": {},
       "type": "object"
     },
     "profiles": {
@@ -960,11 +1479,38 @@
       "description": "Named profiles, which cover only this pack's own settings and workflows (0.7, Profiles).",
       "type": "object"
     },
+    "prompts": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Prompt name to the path of its template, in the pack.",
+      "type": "object"
+    },
+    "protectedPaths": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProtectedPaths"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "providers": {
       "additionalProperties": {
         "$ref": "#/$defs/ProviderEntry"
       },
       "type": "object"
+    },
+    "record": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Record"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "requires": {
       "anyOf": [
@@ -976,11 +1522,30 @@
         }
       ]
     },
+    "roles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Role"
+      },
+      "type": "object"
+    },
+    "syncs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/HookEntry"
+      },
+      "description": "Named `sync` implementations (0.4). The plan names the kind and not the key: a decision for the owner.",
+      "type": "object"
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "views": {
       "additionalProperties": {
         "$ref": "#/$defs/View"
       },
-      "description": "Named views a board may adopt by name (0.7, Keys added for planning).",
+      "description": "Named views a board may adopt by name (0.7, Keys added for planning). A key is the view's name, and\n[`crate::pack_check::check_manifest`] refuses a view whose own `name:` differs from its key.",
       "type": "object"
     },
     "workflows": {
@@ -988,8 +1553,19 @@
         "$ref": "#/$defs/Workflow"
       },
       "type": "object"
+    },
+    "workspaces": {
+      "additionalProperties": {
+        "$ref": "#/$defs/WorkspaceImpl"
+      },
+      "description": "Named workspace implementations, as `pack/name` in a workflow's `workspace:` (0.4).",
+      "type": "object"
     }
   },
+  "required": [
+    "apiVersion",
+    "name"
+  ],
   "title": "PackManifest",
   "type": "object"
 }

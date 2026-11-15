@@ -442,14 +442,16 @@ fn profile_keys_are_named_as_the_file_writes_them() {
 #[test]
 fn a_pack_manifest_holds_views_and_profiles() {
     let manifest: PackManifest = load(
-        "views:\n  mvp: { name: MVP, where: 'true' }\nprofiles:\n  greenfield: { workflow: ferry/greenfield }\n",
+        "apiVersion: collide/v0\nname: ferry\nviews:\n  MVP: { name: MVP, where: 'true' }\nprofiles:\n  greenfield: { workflow: ferry/greenfield }\n",
     );
-    assert_eq!(manifest.views["mvp"].name, "MVP");
+    assert_eq!(manifest.views["MVP"].name, "MVP");
     assert_eq!(
         manifest.profiles["greenfield"].workflow.as_deref(),
         Some("ferry/greenfield")
     );
-    let error = parse_error::<PackManifest>("views:\n  mvp: { name: MVP, sort: id }\n");
+    let error = parse_error::<PackManifest>(
+        "apiVersion: collide/v0\nname: ferry\nviews:\n  MVP: { name: MVP, sort: id }\n",
+    );
     assert!(error.contains("sort"), "{error}");
 }
 

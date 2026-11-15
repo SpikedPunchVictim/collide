@@ -1,0 +1,6 @@
+apiVersion: collide/v0
+name: demo
+roles:
+  base: &base { agent: claude }
+  builder:
+    <<: *base

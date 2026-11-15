@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+integrations:
+  merge-local: { script: ../outside/merge.ts }

@@ -3,11 +3,12 @@
 //! finds a pack's directory in the bundle and builds the command that starts one of its providers, with `node`
 //! taken from the environment it is given (the CLI's own until the daemon exists).
 //!
-//! The slice reads only a provider entry and the `node` line of `requires.tools` from the pack's `pack.yaml`
-//! (read through the hardened YAML loader). The full manifest check is `ts-0012-ua`, and checking the tool's
-//! version is Stage 4.
+//! The loader reads the whole `pack.yaml` through the hardened YAML loader and runs the manifest check
+//! ([`collide_core::pack_check::check_manifest`]) before it uses a provider entry or the `node` line of
+//! `requires.tools`. Checking the tool's version is Stage 4.
 
 use collide_core::pack::PackManifest;
+use collide_core::pack_check::{ManifestError, check_manifest};
 use collide_core::yaml::{YamlError, load_yaml_file};
 use std::ffi::OsString;
 use std::fmt;
@@ -55,11 +56,13 @@ pub enum BuiltinPackError {
     UnknownPack(String),
     /// The pack's `pack.yaml` did not load.
     Manifest(YamlError),
-    /// The manifest's `name` is not the pack's.
-    WrongName {
-        expected: String,
-        found: Option<String>,
+    /// The manifest is not valid: every refusal of the manifest check.
+    InvalidManifest {
+        pack: String,
+        errors: Vec<ManifestError>,
     },
+    /// The manifest's `name` is not the pack's.
+    WrongName { expected: String, found: String },
     /// The manifest has no such provider.
     NoProvider { pack: String, provider: String },
     /// The provider's script is not a path inside the pack.
@@ -80,11 +83,16 @@ impl fmt::Display for BuiltinPackError {
         match self {
             Self::UnknownPack(name) => write!(f, "`{name}` is not a built-in pack"),
             Self::Manifest(error) => write!(f, "{error}"),
-            Self::WrongName { expected, found } => write!(
-                f,
-                "the manifest of built-in pack {expected} names {}",
-                found.as_deref().unwrap_or("no pack")
-            ),
+            Self::InvalidManifest { pack, errors } => {
+                write!(f, "the manifest of built-in pack {pack} is not valid")?;
+                for error in errors {
+                    write!(f, "; {error}")?;
+                }
+                Ok(())
+            }
+            Self::WrongName { expected, found } => {
+                write!(f, "the manifest of built-in pack {expected} names {found}")
+            }
             Self::NoProvider { pack, provider } => {
                 write!(f, "built-in pack {pack} has no provider `{provider}`")
             }
@@ -156,7 +164,11 @@ impl BuiltinPacks {
         let pack_dir = self.root.join(folder);
         let manifest: PackManifest =
             load_yaml_file(&pack_dir.join("pack.yaml")).map_err(BuiltinPackError::Manifest)?;
-        if manifest.name.as_deref() != Some(pack) {
+        check_manifest(&manifest).map_err(|errors| BuiltinPackError::InvalidManifest {
+            pack: pack.to_string(),
+            errors,
+        })?;
+        if manifest.name != pack {
             return Err(BuiltinPackError::WrongName {
                 expected: pack.to_string(),
                 found: manifest.name,

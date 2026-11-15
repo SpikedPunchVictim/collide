@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+views:
+  mvp: { name: MVP, where: "true" }

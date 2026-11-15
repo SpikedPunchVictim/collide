@@ -1,0 +1,6 @@
+apiVersion: collide/v0
+name: demo
+gates:
+  evidence: { script: gates/evidence.ts }
+bindings:
+  - { point: run.after_end, gate: evidence }

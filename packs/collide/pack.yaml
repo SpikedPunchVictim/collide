@@ -1,10 +1,11 @@
 apiVersion: collide/v0
 name: collide
 
-# `collide/review` (0.4, The built-in `collide` pack): build, review, then fix or close. The roles, prompts and
-# scripts the phases name, and the `launch` parameter that sets the most rounds, come with the full manifest
-# (`ts-0012-ua`) and the pack's own files. The decision script stops to `ask_human` at the round limit, and when a
-# round leaves as many open findings as the round before it.
+# `collide/review` (0.4, The built-in `collide` pack): build, review, then fix or close. This manifest declares
+# what the pack has today, which is the workflow table. The roles, prompts, `merge-local` and the decision script
+# it names come with the pack's own files (Stage 3), and nothing resolves those names before then. The decision
+# script stops to `ask_human` at the round limit, and when a round leaves as many open findings as the round
+# before it.
 workflows:
   review:
     integrate: collide/merge-local

@@ -1,0 +1,6 @@
+apiVersion: collide/v0
+name: demo
+workflows:
+  loop:
+    phases:
+      build: { role: builder, prompt: build, then: nowhere }

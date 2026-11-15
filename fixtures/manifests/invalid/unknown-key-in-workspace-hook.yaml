@@ -1,0 +1,5 @@
+apiVersion: collide/v0
+name: demo
+workspaces:
+  worktree:
+    create: { script: hooks/ws-create.ts, retries: 3 }

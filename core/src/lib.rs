@@ -7,6 +7,7 @@ pub mod item;
 pub mod lock;
 pub mod observer;
 pub mod pack;
+pub mod pack_check;
 pub mod points;
 pub mod profile;
 pub mod provider;

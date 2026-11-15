@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+providers:
+  plan: { script: "dev:~/code/plan.ts" }

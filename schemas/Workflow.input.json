@@ -63,6 +63,7 @@
           "type": "boolean"
         },
         "role": {
+          "minLength": 1,
           "type": "string"
         },
         "sandbox": {
@@ -96,6 +97,7 @@
       "additionalProperties": false,
       "properties": {
         "artifact": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -115,6 +117,7 @@
           "type": "object"
         },
         "script": {
+          "minLength": 1,
           "type": "string"
         },
         "show": {
@@ -147,6 +150,7 @@
       "description": "`{ end: <outcome> }`: the run ends with this outcome (0.7, Outcomes and terminal states).",
       "properties": {
         "end": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -185,6 +189,7 @@
       "description": "A `human` phase: a Queue item where a person picks one of the tokens of `on:`. `human` is the text the item\nshows; `show` lists what the person should read (0.7, `show:`).",
       "properties": {
         "human": {
+          "minLength": 1,
           "type": "string"
         },
         "label": {
@@ -341,6 +346,7 @@
           "type": "boolean"
         },
         "script": {
+          "minLength": 1,
           "type": "string"
         },
         "then": {
@@ -420,6 +426,7 @@
           "$ref": "#/$defs/Duration"
         },
         "wait": {
+          "minLength": 1,
           "type": "string"
         }
       },
@@ -438,6 +445,7 @@
           "type": "object"
         },
         "op": {
+          "minLength": 1,
           "type": "string"
         },
         "when": {

@@ -193,17 +193,44 @@ fn schema_lists_the_pack_keys_points_and_checklists() {
         keys(&types, "PackManifest"),
         [
             "apiVersion",
+            "bindings",
             "checklists",
+            "config",
+            "experiment",
+            "gates",
+            "integrations",
+            "launch",
+            "metrics",
             "name",
+            "observers",
             "points",
             "profiles",
+            "prompts",
+            "protectedPaths",
             "providers",
+            "record",
             "requires",
+            "roles",
+            "syncs",
+            "version",
             "views",
-            "workflows"
+            "workflows",
+            "workspaces"
         ]
     );
-    assert_eq!(keys(&types, "Requires"), ["tools"]);
+    assert_eq!(
+        keys(&types, "Requires"),
+        ["agents", "modelName", "sdk", "tools"]
+    );
+    assert_eq!(
+        keys(&types, "HookEntry"),
+        ["grace", "outputs", "script", "timeout"]
+    );
+    assert_eq!(
+        keys(&types, "Binding"),
+        ["gate", "match", "point", "script", "timeout", "when"]
+    );
+    assert_eq!(keys(&types, "ObserverEntry"), ["events", "script"]);
     assert_eq!(keys(&types, "ToolRequirement"), ["name", "version"]);
     assert_eq!(keys(&types, "ProviderEntry"), ["script"]);
     assert_eq!(keys(&types, "DerivedPoint"), ["match", "on", "when"]);

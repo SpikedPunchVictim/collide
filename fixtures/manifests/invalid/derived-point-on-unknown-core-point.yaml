@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+points:
+  spike.before_conclude: { on: task.before_statuz }

@@ -66,6 +66,7 @@ pub struct Layout {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct View {
+    #[schemars(length(min = 1))]
     pub name: String,
     /// CEL over one task, as text (0.10). Its length is capped at [`MAX_CEL_SOURCE_BYTES`].
     #[serde(rename = "where", default, skip_serializing_if = "Option::is_none")]

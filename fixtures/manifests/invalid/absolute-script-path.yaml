@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+gates:
+  evidence: { script: /usr/local/bin/check }

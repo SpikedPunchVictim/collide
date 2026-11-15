@@ -1,0 +1,3 @@
+apiVersion: collide/v0
+name: demo
+flavor: mint

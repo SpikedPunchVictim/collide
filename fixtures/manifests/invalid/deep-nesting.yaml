@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+launch:
+  deep: { type: array, default: [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] }
