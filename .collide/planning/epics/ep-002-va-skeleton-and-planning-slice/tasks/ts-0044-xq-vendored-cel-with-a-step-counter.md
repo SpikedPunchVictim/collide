@@ -1,7 +1,7 @@
 ---
 id: ts-0044-xq
 kind: task
-status: active
+status: done
 title: "Vendored cel with a step counter"
 owners: []
 links:
