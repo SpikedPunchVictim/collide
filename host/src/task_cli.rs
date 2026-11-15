@@ -37,6 +37,8 @@ pub mod exit {
     pub const CONFLICT: u8 = 4;
     /// The provider refused the op, and said why.
     pub const REFUSED: u8 = 5;
+    /// The command is in the tree but not built yet; the message names its tag and stage (`crate::commands`).
+    pub const NOT_BUILT: u8 = 6;
 }
 
 pub const USAGE: &str = "\

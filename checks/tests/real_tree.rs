@@ -113,3 +113,54 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
         );
     }
 }
+
+/// The tags of the rest of the `host` outlines (ts-0041-xf) and the stage that fills each one: the Claude adapter, its
+/// version checks and the sampler's tick are Stage 3b, `collide stop` and the stop order Stage 3a, the provider
+/// supervisor and the config and pack commands Stage 4b, the hook executor and `collide report` Stage 7, observers
+/// Stage 12, the resource sources Stage 13. Each must count at least one stub today.
+const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 27] = [
+    ("claude: capabilities", "3b"),
+    ("claude: launch line", "3b"),
+    ("claude: session start", "3b"),
+    ("claude: stream parser", "3b"),
+    ("claude: turn input", "3b"),
+    ("claude: replay", "3b"),
+    ("claude: version check", "3b"),
+    ("claude: smoke check", "3b"),
+    ("claude: settings canary", "3b"),
+    ("hooks: invocation", "7"),
+    ("hooks: result file", "7"),
+    ("stop: find tree", "3a"),
+    ("stop: escalation", "3a"),
+    ("supervisor: provider start", "4b"),
+    ("supervisor: restart with backoff", "4b"),
+    ("supervisor: provider calls", "4b"),
+    ("supervisor: observers", "12"),
+    ("sampler: tick and sleep", "3b"),
+    ("sampler: process tree", "13"),
+    ("sampler: network", "13"),
+    ("sampler: gpu", "13"),
+    ("sampler: containers", "13"),
+    ("cli: run", "3b"),
+    ("cli: stop", "3a"),
+    ("cli: report", "7"),
+    ("cli: config", "4b"),
+    ("cli: pack", "4b"),
+];
+
+#[test]
+fn every_adapter_executor_supervisor_sampler_and_cli_tag_names_its_stage_and_counts_at_least_one_stub()
+ {
+    let report = stubs::check(&repo()).unwrap();
+    for (tag, stage) in HOST_ADAPTER_EXECUTOR_TAGS {
+        assert_eq!(
+            report.stages.get(tag).map(String::as_str),
+            Some(stage),
+            "tag \"{tag}\" is not registered under stage {stage}"
+        );
+        assert!(
+            report.counts.get(tag).copied().unwrap_or(0) >= 1,
+            "tag \"{tag}\" is registered but no stub carries it"
+        );
+    }
+}
