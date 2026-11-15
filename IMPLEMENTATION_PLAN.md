@@ -7,11 +7,16 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 16.** Revision 16 shows Claude's versions as two chips in place of a Queue warning (owner,
+**Status: revision 17.** Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as
+engineers (owner, 2026-11-15). Revision 16 shows Claude's versions as two chips in place of a Queue warning (owner,
 2026-11-15). Revision 15 takes two findings from the tokensafe research, and revision 14 puts features
 in proposals, both from the owner's decisions of 2026-11-14 (Review log). R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
 `.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
 starts. The owner accepted revision 13 (2026-11-14); Stage 2 is in progress.
+
+Revision 17 (2026-11-15) picks shadcn/ui, on Radix and Tailwind, for the app, after the owner compared it with MUI
+on the Tracks mockup, and sets who the interface is for: Collide is a higher-level development environment, so its
+default look is approachable to a product manager, and an engineer's detail stays one step away (0.11, 0.15).
 
 Revision 16 (2026-11-15) shows Claude's versions as two chips, the `claude` in use and the latest published, on the
 Agents page, in the run preview and in the thin loop's window. A version outside the tested range that passes the
@@ -2303,6 +2308,14 @@ layout: { default: board, groupBy: category }
 Collide is not a chat app. Its objects are tasks, runs, phases, gates, workspaces and decisions; conversation is a
 detail inside a phase. No chat bubbles, no centred conversation column, no sidebar of chats.
 
+**Who it is for** (owner, 2026-11-15; revision 17). Collide is a higher-level development environment, used by
+product managers as well as engineers. It must not read as an IDE:
+- the default look is approachable: plain words before ids and terms of art, a state named in words as well as in
+  colour, a readable sans-serif type, and room around things;
+- an engineer's detail (terminal output, tool calls, tokens, timings, CEL, raw JSON) is kept in full and is one step
+  away, behind a disclosure, a tab or a toggle, never removed;
+- monospace is for code, commands and output, not for the interface around them.
+
 Three surfaces, one keystroke apart:
 
 - **Field:** the corpus through a view, laid out as a board or a run order.
@@ -3036,9 +3049,12 @@ Skeleton first, then test-first passes (owner, 2026-11-13).
   - `serde-saphyr` 2.x: YAML in Rust, with the hardened option set (0.7);
   - `cel` 0.15, patched and vendored: views and `when:`, with a step counter (0.9);
   - `json-schema-to-typescript`: JSON Schema to TypeScript, a Node build step only, never shipped (0.6);
-  - `yaml`, in its default core mode: YAML in TypeScript, such as the markdown provider's frontmatter (0.10).
+  - `yaml`, in its default core mode: YAML in TypeScript, such as the markdown provider's frontmatter (0.10);
+  - shadcn/ui, on Radix primitives and Tailwind, for the app's components, copied into `app/` so the code is the
+    repo's own (owner, 2026-11-15; revision 17, after comparing MUI on the Tracks mockup). Its look follows 0.11's
+    audience rule, not shadcn's defaults.
 
-  Not used: `specta`, `ts-rs`, `serde_yaml` (archived), `gray-matter`, and any YAML parser's 1.1 mode.
+  Not used: `specta`, `ts-rs`, `serde_yaml` (archived), `gray-matter`, any YAML parser's 1.1 mode, and MUI.
 - **Pass 1, the skeleton (Stage 2).** Two parts (owner, 2026-11-13, choosing R4's middle option):
   - **Every cross-process contract, in full:** the hook protocol (stdin, result file, report lines), the provider
     and observer protocols, the JSON-RPC between UI or CLI and the owner, the event log, and the schemas for
@@ -5882,3 +5898,13 @@ version."
   `stable` in the tooltip, because Claude Code's two update channels carry the same names (inferred); the fetch is daily and at start, carries
   no user data, and can be turned off per user; a version outside the range marks its chip rather than adding a
   third chip; an installed version behind `latest` gets no mark, since the two chips side by side show it.
+
+**Revision 17, 2026-11-15 (owner).** The UI library and the interface's audience. The owner compared MUI with shadcn/ui
+on the Tracks mockup (C, versions 6 and 7) and chose shadcn/ui, with a condition: "the look and feel must feel more
+approachable to those who aren't engineers. It looks too engineering focused now. It indexes too far into the IDE look
+and feel. Since we are making a higher level development environment, it should still be approachable by product
+managers, while still having the advanced features an engineer would expect."
+- **Changed:** the status line and the revision summary; 0.11 (who it is for); 0.15 (shadcn/ui among the chosen
+  packages; MUI not used).
+- **Next:** the mockups get an approachable pass, Tracks first, before the app's theme is set; the component tree
+  (`ts-0043-fr`) renders placeholders, so it does not wait for it.
