@@ -1,7 +1,7 @@
 ---
 id: ts-0040-kd
 kind: task
-status: active
+status: done
 title: "host outlines: daemon, shim, store, clocks, OTLP"
 owners: []
 links:
