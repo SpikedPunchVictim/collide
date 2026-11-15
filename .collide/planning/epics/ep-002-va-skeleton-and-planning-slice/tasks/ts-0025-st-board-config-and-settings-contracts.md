@@ -1,7 +1,7 @@
 ---
 id: ts-0025-st
 kind: task
-status: active
+status: done
 title: "Board, config and settings contracts"
 owners: []
 links:
