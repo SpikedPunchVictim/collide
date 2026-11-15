@@ -1,7 +1,7 @@
 ---
 id: ts-0016-ka
 kind: task
-status: ready
+status: active
 title: "Shim protocol, journal, frames and exit.json"
 owners: []
 links:
