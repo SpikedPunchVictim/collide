@@ -1943,11 +1943,13 @@ Why the plan adapter parses files itself:
   - `links`: the link types it holds, their direction, and whether they block
 - `list({ checkout?, cursor? })` returns tasks and collections. `get({ id, checkout? })`.
 - `watch({ checkouts })` sends notifications: `task.collision`, `source.stale`, and (owner, 2026-11-13; S11):
-  - `task.changed {key, version, from, to, diff, cause, actor?, automated?}`, where `cause` is `head | worktree |
-    remote | journal | startup`, `actor` is the source's own when it is known (GitHub events, the beads journal)
-    and `automated` is GitHub's `wasAutomated`;
+  - `task.changed {key, version, from, to, diff, cause, actor?, automated?, checkout?}`, where `cause` is
+    `head | worktree | remote | journal | startup`, `actor` is the source's own when it is known (GitHub events,
+    the beads journal), `automated` is GitHub's `wasAutomated`, and `checkout` names the checkout whose copy
+    changed, absent for a global source (owner, 2026-11-14);
   - `task.renamed {from, to, checkout}`, with history, runs and `latestRun` following the key;
-  - `task.removed {key, cause}`, where `cause` is `deleted | transferred | unknown`;
+  - `task.removed {key, cause, checkout?}`, where `cause` is `deleted | transferred | unknown` and `checkout` is as
+    in `task.changed`;
   - `task.invalid {path, checkout, reason}`, which core turns into a Queue item.
 - On start, core reconciles each source against its persisted cache and emits one change per item, with
   `cause: startup`.
@@ -1956,7 +1958,9 @@ Why the plan adapter parses files itself:
     `items[]`: every item the op changed, with its version, from and to
   - `conflict`, with the current task
   - `refused`, with the source's message, e.g. plan's "illegal transition"
-- Optional capability `preview` takes `apply`'s arguments, writes nothing, and returns `items[]` and `files`.
+- Optional capability `preview` takes `apply`'s arguments, writes nothing, and returns `apply`'s three outcomes
+  (owner, 2026-11-14): `ok` with `items[]` and `files`, `conflict` with the current task, or `refused` with the
+  source's message.
 - The op name `move` is reserved for Share. plan's `move --epic` is declared as `rehome`.
 
 **Versions.**

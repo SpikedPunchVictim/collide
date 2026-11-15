@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One line on an observer's stdin. `seq` counts up in the event log. `payload` is any JSON value until\n`ts-0018-dd` types each event of the catalogue.",
+  "properties": {
+    "event": {
+      "type": "string"
+    },
+    "payload": true,
+    "seq": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "seq",
+    "event",
+    "payload"
+  ],
+  "title": "ObserverEvent",
+  "type": "object"
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.invalid`: something the source could not read as a task. Core turns it into a Queue item. `checkout` is\nnull for a source that is not ref-scoped.",
+  "properties": {
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "reason"
+  ],
+  "title": "TaskInvalid",
+  "type": "object"
+}

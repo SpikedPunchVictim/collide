@@ -1,0 +1,36 @@
+{
+  "$defs": {
+    "RemovedCause": {
+      "description": "Why a task is gone.",
+      "enum": [
+        "deleted",
+        "transferred",
+        "unknown"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cause": {
+      "$ref": "#/$defs/RemovedCause"
+    },
+    "checkout": {
+      "description": "The checkout whose copy was removed, for a ref-scoped source; absent for a global source (such as GitHub).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "key",
+    "cause"
+  ],
+  "title": "TaskRemoved",
+  "type": "object"
+}

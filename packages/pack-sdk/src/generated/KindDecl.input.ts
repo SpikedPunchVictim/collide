@@ -16,10 +16,13 @@ export interface KindDecl {
   transitions?: TransitionDecl[]
 }
 /**
- * An op of a kind. Its effect is the category it moves the item to, if any, so that `task.before_status` can
- * fire before the op runs (0.4).
+ * An op, as a provider declares it. Its effect is the category it moves the item to, if any, so that
+ * `task.before_status` can fire before the op runs (0.4). `args` is the JSON Schema of its arguments, which the UI
+ * renders as a form (0.10), and `checkouts` names the checkouts it may target (empty: any).
  */
 export interface OpDecl {
+  args?: unknown
+  checkouts?: string[]
   movesTo?: Category | null
   name: string
 }

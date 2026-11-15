@@ -618,7 +618,7 @@ fn the_kind_link_owner_checklist_and_budget_keys_are_in_the_schema() {
     );
     assert_eq!(
         keys_of("KindDecl", Some("OpDecl")),
-        set(&["movesTo", "name"])
+        set(&["args", "checkouts", "movesTo", "name"])
     );
     assert_eq!(
         keys_of("LinkTypeDecl", None),

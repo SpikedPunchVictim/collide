@@ -185,7 +185,7 @@
     },
     "Effect": {
       "additionalProperties": false,
-      "description": "Another item that an op changed, from `apply`'s `items[]`.",
+      "description": "One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.",
       "properties": {
         "from": {
           "anyOf": [
@@ -302,8 +302,14 @@
     },
     "Rename": {
       "additionalProperties": false,
-      "description": "An id that changed, at Share or `renumber`.",
+      "description": "An id that changed, at Share or `renumber`. It is also the body of the provider's `task.renamed`\nnotification, which names the `checkout`; inside a `change`, the change's own `checkout` applies.",
       "properties": {
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "from": {
           "type": "string"
         },

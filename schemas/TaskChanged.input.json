@@ -1,0 +1,146 @@
+{
+  "$defs": {
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "ChangeCause": {
+      "description": "What made a `task.changed` notification.",
+      "enum": [
+        "head",
+        "worktree",
+        "remote",
+        "journal",
+        "startup"
+      ],
+      "type": "string"
+    },
+    "FieldDiff": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "from": true,
+            "to": true
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "added": {
+              "items": true,
+              "type": "array"
+            },
+            "removed": {
+              "items": true,
+              "type": "array"
+            }
+          },
+          "required": [
+            "added",
+            "removed"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One changed field: `{from, to}`, or `{added, removed}` for a set. `from` is null at create and `to` is null\nat delete."
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.changed`. `from` is null at create and `to` is null at delete, as in `change`. `actor` is the source's\nown, when it knows it (GitHub events, the beads journal); `automated` is GitHub's `wasAutomated`.",
+  "properties": {
+    "actor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "automated": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "cause": {
+      "$ref": "#/$defs/ChangeCause"
+    },
+    "checkout": {
+      "description": "The checkout whose copy changed, for a ref-scoped source; absent for a global source (such as GitHub).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diff": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FieldDiff"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "from": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "key": {
+      "type": "string"
+    },
+    "to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "key",
+    "version",
+    "cause"
+  ],
+  "title": "TaskChanged",
+  "type": "object"
+}

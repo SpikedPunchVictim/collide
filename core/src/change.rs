@@ -71,7 +71,7 @@ pub struct Batch {
     pub size: u32,
 }
 
-/// Another item that an op changed, from `apply`'s `items[]`.
+/// One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Effect {
@@ -81,12 +81,15 @@ pub struct Effect {
     pub to: Option<ItemState>,
 }
 
-/// An id that changed, at Share or `renumber`.
+/// An id that changed, at Share or `renumber`. It is also the body of the provider's `task.renamed`
+/// notification, which names the `checkout`; inside a `change`, the change's own `checkout` applies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Rename {
     pub from: String,
     pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
 }
 
 /// The `change` a task point carries. `op` is null for a write made by a run (`via: run`). `from` is null at

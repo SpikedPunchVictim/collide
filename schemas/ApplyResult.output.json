@@ -1,0 +1,357 @@
+{
+  "$defs": {
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "Checklist": {
+      "additionalProperties": false,
+      "description": "The checklist field type: the state of one template's items, pinned as `name@n`.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChecklistItem"
+          },
+          "type": "array"
+        },
+        "template": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "template",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChecklistItem": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ChecklistState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ChecklistState": {
+      "description": "The state of one checklist item. Only a person marks `done` or `n/a`; the gate is a pack's (ts-0012).",
+      "enum": [
+        "open",
+        "suggested",
+        "done",
+        "n/a"
+      ],
+      "type": "string"
+    },
+    "Effect": {
+      "additionalProperties": false,
+      "description": "One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
+    "Link": {
+      "additionalProperties": false,
+      "description": "A typed link on an item (0.8).",
+      "properties": {
+        "blocking": {
+          "description": "Absent means the link type's `blocking` applies.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "to"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "description": "One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`\ntake. `checkout` and `path` are set by a ref-scoped source. `kind` may be left out when the provider has one.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checklist": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checklist"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "collections": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "type": "array"
+        },
+        "owners": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ItemState"
+        },
+        "templateFields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "id",
+        "aliases",
+        "title",
+        "state",
+        "version",
+        "links",
+        "owners",
+        "labels",
+        "collections",
+        "templateFields",
+        "fields"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`apply` result. `ok` carries the new task and its version, the `files` the write touched (what `record`\ncommits) and `items[]`: every item the op changed, with its version, from and to. `conflict` carries the\ncurrent task. `refused` carries the source's own message, such as plan's \"illegal transition\".",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/Effect"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "const": "ok",
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/Task"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "task",
+        "version",
+        "files",
+        "items"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "$ref": "#/$defs/Task"
+        },
+        "outcome": {
+          "const": "conflict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "current"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "outcome": {
+          "const": "refused",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "message"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ApplyResult"
+}

@@ -1,0 +1,40 @@
+{
+  "scope": "ref",
+  "idPattern": "^[a-z]{2}-[0-9]{4}-[a-z]{2}$",
+  "shortIdPattern": "^[0-9]{4}$",
+  "templateFields": [{ "name": "labelId", "pattern": "^t[0-9]{2}-[0-9]{3}$" }],
+  "statuses": [
+    { "name": "ready", "category": "ready" },
+    { "name": "active", "category": "active" },
+    { "name": "done", "category": "done" }
+  ],
+  "categoryStatus": { "ready": "ready", "active": "active", "done": "done" },
+  "fields": [{ "id": "epic", "type": "string", "filterable": true }],
+  "ops": [
+    {
+      "name": "setStatus",
+      "args": {
+        "type": "object",
+        "properties": { "status": { "type": "string" } },
+        "required": ["status"],
+        "additionalProperties": false
+      },
+      "checkouts": ["main"]
+    },
+    { "name": "create" }
+  ],
+  "capabilities": { "watch": true, "create": true, "collections": true, "preview": false },
+  "kinds": [
+    {
+      "name": "task",
+      "statuses": [
+        { "name": "ready", "category": "ready" },
+        { "name": "active", "category": "active" },
+        { "name": "done", "category": "done" }
+      ],
+      "transitions": [],
+      "ops": [{ "name": "setStatus" }],
+      "roles": []
+    }
+  ]
+}

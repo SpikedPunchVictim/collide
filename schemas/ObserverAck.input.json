@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One line on an observer's stdout: the event with this `seq` has been handled.",
+  "properties": {
+    "seq": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "seq"
+  ],
+  "title": "ObserverAck",
+  "type": "object"
+}

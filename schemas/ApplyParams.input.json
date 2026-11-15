@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`apply` params, and `preview`'s. `id` is left out for an op that makes a task, and `version` is the version the\ncaller last read: the source answers `conflict` when it has moved on. Only `args` is op-specific; its schema is\nthe op's `args` in `initialize`.",
+  "properties": {
+    "args": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "op": {
+      "type": "string"
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "title": "ApplyParams",
+  "type": "object"
+}

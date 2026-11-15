@@ -1,0 +1,310 @@
+{
+  "$defs": {
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "Checklist": {
+      "additionalProperties": false,
+      "description": "The checklist field type: the state of one template's items, pinned as `name@n`.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChecklistItem"
+          },
+          "type": "array"
+        },
+        "template": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "template",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChecklistItem": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ChecklistState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ChecklistState": {
+      "description": "The state of one checklist item. Only a person marks `done` or `n/a`; the gate is a pack's (ts-0012).",
+      "enum": [
+        "open",
+        "suggested",
+        "done",
+        "n/a"
+      ],
+      "type": "string"
+    },
+    "Collection": {
+      "additionalProperties": false,
+      "description": "A grouping the source holds itself, such as an epic or a milestone (0.10). Each task names the collections it\nbelongs to in `Task.collections`.",
+      "properties": {
+        "groups": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CollectionGroup"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "CollectionGroup": {
+      "additionalProperties": false,
+      "description": "One ordered group of a collection, such as a slice of an epic: the keys of its tasks, in order.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
+    "Link": {
+      "additionalProperties": false,
+      "description": "A typed link on an item (0.8).",
+      "properties": {
+        "blocking": {
+          "description": "Absent means the link type's `blocking` applies.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "to"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "description": "One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`\ntake. `checkout` and `path` are set by a ref-scoped source. `kind` may be left out when the provider has one.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checklist": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checklist"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "collections": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "type": "array"
+        },
+        "owners": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ItemState"
+        },
+        "templateFields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "id",
+        "title",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`list` result. `nextCursor` is set when there is another page.",
+  "properties": {
+    "collections": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Collection"
+      },
+      "type": "array"
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tasks": {
+      "items": {
+        "$ref": "#/$defs/Task"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "tasks"
+  ],
+  "title": "ListResult",
+  "type": "object"
+}

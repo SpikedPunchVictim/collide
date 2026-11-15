@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An id that changed, at Share or `renumber`. It is also the body of the provider's `task.renamed`\nnotification, which names the `checkout`; inside a `change`, the change's own `checkout` applies.",
+  "properties": {
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "from": {
+      "type": "string"
+    },
+    "to": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "from",
+    "to"
+  ],
+  "title": "Rename",
+  "type": "object"
+}

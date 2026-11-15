@@ -10,9 +10,15 @@
 //!   `deny_unknown_fields` on a unit variant of an internally tagged enum;
 //! - to add a type, add one `registry.add::<T>()` line to [`registry`].
 
-use crate::change::{Change, TaskPointPayload};
+use crate::change::{Change, Rename, TaskPointPayload};
 use crate::item::{KindDecl, LinkTypeDecl, PlanningFields};
+use crate::observer::{ObserverAck, ObserverEvent};
 use crate::pack::{PackManifest, RunBudget};
+use crate::provider::{
+    ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult, ListParams,
+    ListResult, PreviewResult, SourceStale, Task, TaskChanged, TaskCollision, TaskInvalid,
+    TaskRemoved, WatchParams, WatchResult,
+};
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde_json::Value;
@@ -72,12 +78,33 @@ fn schema_for<T: JsonSchema>(settings: SchemaSettings) -> Value {
 /// Every contract type, which `pnpm gen` writes to `schemas/`. Later items add their types here.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
+    registry.add::<ApplyParams>();
+    registry.add::<ApplyResult>();
     registry.add::<Change>();
+    registry.add::<GetParams>();
+    registry.add::<GetResult>();
+    registry.add::<InitializeParams>();
+    registry.add::<InitializeResult>();
     registry.add::<KindDecl>();
     registry.add::<LinkTypeDecl>();
+    registry.add::<ListParams>();
+    registry.add::<ListResult>();
+    registry.add::<ObserverAck>();
+    registry.add::<ObserverEvent>();
     registry.add::<PackManifest>();
     registry.add::<PlanningFields>();
+    registry.add::<PreviewResult>();
+    // `Rename` is also the body of the provider's `task.renamed` notification.
+    registry.add::<Rename>();
     registry.add::<RunBudget>();
+    registry.add::<SourceStale>();
+    registry.add::<Task>();
+    registry.add::<TaskChanged>();
+    registry.add::<TaskCollision>();
+    registry.add::<TaskInvalid>();
     registry.add::<TaskPointPayload>();
+    registry.add::<TaskRemoved>();
+    registry.add::<WatchParams>();
+    registry.add::<WatchResult>();
     registry
 }

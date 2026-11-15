@@ -67,7 +67,7 @@ export interface Batch {
   size: number
 }
 /**
- * Another item that an op changed, from `apply`'s `items[]`.
+ * One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.
  */
 export interface Effect {
   from?: ItemState | null
@@ -83,9 +83,11 @@ export interface ItemState {
   status: string
 }
 /**
- * An id that changed, at Share or `renumber`.
+ * An id that changed, at Share or `renumber`. It is also the body of the provider's `task.renamed`
+ * notification, which names the `checkout`; inside a `change`, the change's own `checkout` applies.
  */
 export interface Rename {
+  checkout?: string | null
   from: string
   to: string
 }

@@ -4,10 +4,13 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt;
 
 /// The category every source status maps to, so views and columns work across sources (0.10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Category {
     Backlog,
@@ -34,14 +37,19 @@ pub struct TransitionDecl {
     pub to: String,
 }
 
-/// An op of a kind. Its effect is the category it moves the item to, if any, so that `task.before_status` can
-/// fire before the op runs (0.4).
+/// An op, as a provider declares it. Its effect is the category it moves the item to, if any, so that
+/// `task.before_status` can fire before the op runs (0.4). `args` is the JSON Schema of its arguments, which the UI
+/// renders as a form (0.10), and `checkouts` names the checkouts it may target (empty: any).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpDecl {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moves_to: Option<Category>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checkouts: Vec<String>,
 }
 
 /// One item kind, as a provider declares it (0.10, Protocol). `roles` are plain tags that core never reads.

@@ -1,0 +1,323 @@
+{
+  "$defs": {
+    "Capabilities": {
+      "additionalProperties": false,
+      "description": "What the provider can do beyond `initialize`, `list`, `get` and `apply`.",
+      "properties": {
+        "collections": {
+          "default": false,
+          "type": "boolean"
+        },
+        "create": {
+          "default": false,
+          "type": "boolean"
+        },
+        "preview": {
+          "default": false,
+          "type": "boolean"
+        },
+        "watch": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "watch",
+        "create",
+        "collections",
+        "preview"
+      ],
+      "type": "object"
+    },
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "FieldDecl": {
+      "additionalProperties": false,
+      "description": "A source field. `type` is the provider's own name for the type, such as `string` or `checklist`.",
+      "properties": {
+        "filterable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "filterable"
+      ],
+      "type": "object"
+    },
+    "KindDecl": {
+      "additionalProperties": false,
+      "description": "One item kind, as a provider declares it (0.10, Protocol). `roles` are plain tags that core never reads.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ops": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OpDecl"
+          },
+          "type": "array"
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "statuses": {
+          "items": {
+            "$ref": "#/$defs/StatusDecl"
+          },
+          "type": "array"
+        },
+        "transitions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TransitionDecl"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "statuses",
+        "transitions",
+        "ops",
+        "roles"
+      ],
+      "type": "object"
+    },
+    "LinkDir": {
+      "description": "Which end of a link the item that stores it holds: `out` for `blocked-by`, which points at the blocker.\nCollide derives the other direction (0.10).",
+      "enum": [
+        "out",
+        "in"
+      ],
+      "type": "string"
+    },
+    "LinkTypeDecl": {
+      "additionalProperties": false,
+      "description": "A link type a provider holds: its direction and whether it blocks.",
+      "properties": {
+        "blocking": {
+          "type": "boolean"
+        },
+        "dir": {
+          "$ref": "#/$defs/LinkDir"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "dir",
+        "blocking"
+      ],
+      "type": "object"
+    },
+    "OpDecl": {
+      "additionalProperties": false,
+      "description": "An op, as a provider declares it. Its effect is the category it moves the item to, if any, so that\n`task.before_status` can fire before the op runs (0.4). `args` is the JSON Schema of its arguments, which the UI\nrenders as a form (0.10), and `checkouts` names the checkouts it may target (empty: any).",
+      "properties": {
+        "args": true,
+        "checkouts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "movesTo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Category"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Scope": {
+      "description": "Whether one task has one state (`global`) or one state per checkout (`ref`).",
+      "enum": [
+        "global",
+        "ref"
+      ],
+      "type": "string"
+    },
+    "StatusDecl": {
+      "additionalProperties": false,
+      "description": "One status of a kind and the category it maps to.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "category"
+      ],
+      "type": "object"
+    },
+    "TemplateFieldDecl": {
+      "additionalProperties": false,
+      "description": "A field that templates may use (0.5): its name and the regex every value must match.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "TransitionDecl": {
+      "additionalProperties": false,
+      "description": "A status change the provider allows.",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`initialize` result. `kinds` and `links` may be left out: a provider with one kind and no links validates\nwithout them. `categoryStatus` gives, for each category, the status that a category write produces (plan:\n`active` is `doing`).",
+  "properties": {
+    "capabilities": {
+      "$ref": "#/$defs/Capabilities"
+    },
+    "categoryStatus": {
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "active": {
+          "type": "string"
+        },
+        "backlog": {
+          "type": "string"
+        },
+        "done": {
+          "type": "string"
+        },
+        "dropped": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "string"
+        },
+        "review": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "fields": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/FieldDecl"
+      },
+      "type": "array"
+    },
+    "idPattern": {
+      "type": "string"
+    },
+    "kinds": {
+      "items": {
+        "$ref": "#/$defs/KindDecl"
+      },
+      "type": "array"
+    },
+    "links": {
+      "items": {
+        "$ref": "#/$defs/LinkTypeDecl"
+      },
+      "type": "array"
+    },
+    "ops": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OpDecl"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope"
+    },
+    "shortIdPattern": {
+      "type": "string"
+    },
+    "statuses": {
+      "items": {
+        "$ref": "#/$defs/StatusDecl"
+      },
+      "type": "array"
+    },
+    "templateFields": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TemplateFieldDecl"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "scope",
+    "idPattern",
+    "shortIdPattern",
+    "templateFields",
+    "statuses",
+    "categoryStatus",
+    "fields",
+    "ops",
+    "capabilities"
+  ],
+  "title": "InitializeResult",
+  "type": "object"
+}

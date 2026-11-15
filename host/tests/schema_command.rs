@@ -130,13 +130,51 @@ fn schema_lists_kinds_op_effects_links_owners_checklist_and_budget() {
         keys(&types, "KindDecl"),
         ["name", "ops", "roles", "statuses", "transitions"]
     );
-    assert_eq!(keys(&types, "OpDecl"), ["movesTo", "name"]);
+    assert_eq!(
+        keys(&types, "OpDecl"),
+        ["args", "checkouts", "movesTo", "name"]
+    );
     assert_eq!(keys(&types, "LinkTypeDecl"), ["blocking", "dir", "name"]);
     assert_eq!(
         keys(&types, "PlanningFields"),
         ["checklist", "kind", "links", "owners"]
     );
     assert_eq!(keys(&types, "RunBudget"), ["usd"]);
+}
+
+#[test]
+fn schema_lists_the_provider_and_observer_protocol_types() {
+    let types = listed_types(&schema_stdout());
+    assert_eq!(
+        keys(&types, "InitializeResult"),
+        [
+            "capabilities",
+            "categoryStatus",
+            "fields",
+            "idPattern",
+            "kinds",
+            "links",
+            "ops",
+            "scope",
+            "shortIdPattern",
+            "statuses",
+            "templateFields"
+        ]
+    );
+    assert_eq!(
+        keys(&types, "ApplyResult"),
+        [
+            "current", "files", "items", "message", "outcome", "task", "version"
+        ]
+    );
+    assert_eq!(
+        keys(&types, "PreviewResult"),
+        ["current", "files", "items", "message", "outcome"]
+    );
+    assert_eq!(keys(&types, "TaskInvalid"), ["checkout", "path", "reason"]);
+    assert_eq!(keys(&types, "TaskRemoved"), ["cause", "checkout", "key"]);
+    assert_eq!(keys(&types, "ObserverEvent"), ["event", "payload", "seq"]);
+    assert_eq!(keys(&types, "ObserverAck"), ["seq"]);
 }
 
 #[test]
