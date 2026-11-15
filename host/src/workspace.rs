@@ -12,11 +12,11 @@
 //! | [`BuiltinWorkspace::provision`] | `provisioning → ready`, or `→ failed` when git fails | the floor, then `git worktree add` |
 //! | [`BuiltinWorkspace::start_phase`] | `ready` or `idle → in_use` | the floor, before each phase (0.2) |
 //! | [`BuiltinWorkspace::end_phase`] | `in_use → idle` | measures the disk it uses (0.13) |
-//! | [`BuiltinWorkspace::remove`] | `idle → removable → removed` | the two refusals, then `git worktree remove` |
+//! | [`BuiltinWorkspace::remove`] | `idle` or `ready → removable → removed` | the two refusals, then `git worktree remove` |
 //!
 //! A pause for disk leaves the state as it was: nothing was made or started, and the call is tried again when space
-//! returns. A workspace that was never used (`ready`) cannot be removed, because core's table has no move from
-//! `ready` to `removable`.
+//! returns. A workspace that was made and never used (`ready`) is removed like an idle one: core's table has the move
+//! from `ready` to `removable` since ts-0065-kx.
 //!
 //! ## Removal
 //!
@@ -267,7 +267,7 @@ impl BuiltinWorkspace {
     }
 
     /// Removes the worktree and its branch, unless it holds work (see the module notes). `idle → removable →
-    /// removed`. A refusal, or a git failure, leaves the worktree as it was.
+    /// removed`; a `ready` workspace goes the same way. A refusal, or a git failure, leaves the worktree as it was.
     pub fn remove(&mut self) -> Result<(), WorkspaceError> {
         match self.state {
             WorkspaceState::InUse => {
@@ -276,11 +276,13 @@ impl BuiltinWorkspace {
                     message: format!("{} is in use by a run", self.spec.path.display()),
                 });
             }
-            WorkspaceState::Idle => self.check_move(WorkspaceState::Removable)?,
+            WorkspaceState::Idle | WorkspaceState::Ready => {
+                self.check_move(WorkspaceState::Removable)?
+            }
             _ => self.check_move(WorkspaceState::Removed)?,
         }
         self.refuse_work()?;
-        if self.state == WorkspaceState::Idle {
+        if matches!(self.state, WorkspaceState::Idle | WorkspaceState::Ready) {
             self.move_to(WorkspaceState::Removable)?;
         }
         let path = self.spec.path.to_string_lossy().into_owned();

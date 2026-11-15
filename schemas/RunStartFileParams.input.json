@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.start_file` params: a run of one task file, with no board and no workflow (ts-0065-kx). The daemon runs the\nbuilt-in `collide/builder` role in a new worktree of `repo`, and the text of `task_file` is the first turn. It is\na call of its own, so `run.start`'s request (which `run.preview` shares) does not change.",
+  "properties": {
+    "alias": {
+      "description": "The model alias to run, as the user's `models.yaml` maps it. The role's default when absent.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "budget_usd": {
+      "description": "The phase's budget in US dollars, passed to the tool when it enforces one itself.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "repo": {
+      "description": "The checkout the worktree is made from: an absolute path.",
+      "type": "string"
+    },
+    "task_file": {
+      "description": "The task file whose text is the phase's first turn: an absolute path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "repo",
+    "task_file"
+  ],
+  "title": "RunStartFileParams",
+  "type": "object"
+}

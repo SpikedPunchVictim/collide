@@ -17,6 +17,14 @@
 //! - one lock for each connection's writer, held while one frame is written to that shim, and a second, short one for
 //!   the requests waiting for an answer.
 //!
+//! ## A phase with an agent
+//!
+//! [`Phases::start_agent_phase`] gives a phase an [`crate::agent_feed::AgentFeed`]. The phase's watcher tails the
+//! journal on every poll and feeds each stdout line to the session with its `wall_ns`; what the session writes goes
+//! to the shim, and the journal has it before the child does. The phase settles when the shim reports the exit, which
+//! the shim does only after it has drained the child's stdout, so the journal is whole and the order of the exit and
+//! the end of stdout does not matter. The phase's last usage and its failure cause are stored in the phase's record.
+//!
 //! ## How the daemon finds the shims it left behind
 //!
 //! [`crate::daemon::adopt_shims`] scans `runs_dir` for `<run>/<phase>` directories that hold a `spec.json`, which is
@@ -71,9 +79,11 @@
 //! |---|---|---|
 //! | `daemon: adopt shims` | [`crate::daemon::adopt_shims`], [`Phases::adopt`] | scan, classify, reattach, settle, before the bind |
 
+use crate::agent_feed::AgentFeed;
 use crate::auth::check_socket_path;
 use crate::clock::{Clock, Clocks};
 use crate::daemon::{AdoptedShim, AdoptedState};
+use crate::disk::{DiskGuard, Floor, FreeSpace};
 use crate::shim::{
     ChildIdentity, ChildStdio, DaemonStart, PROBLEM_PREFIX, ShimSpec, files as shim_files,
 };
@@ -81,8 +91,9 @@ use crate::shim_link::{Next, ShimConnection, connect_shim, send};
 use crate::stop::{
     Cleanup, Processes, RUNTIME_MARKER, Root, StopReport, StopRequest, read_detached, stop_tree,
 };
-use crate::store::{Store, StoreError};
+use crate::store::{PhaseRecord, Store, StoreError};
 use crate::sysproc;
+use collide_core::adapter::{PhaseFailure, PhaseOutcome};
 use collide_core::change::{Actor, ActorKind};
 use collide_core::events::{Event, EventBody};
 use collide_core::non_empty::NonEmpty;
@@ -350,6 +361,9 @@ pub struct PhasesConfig {
     /// The workspace implementation's `cleanup` hook, which a stop runs after SIGKILL. `None` until the hook executor
     /// exists (Stage 7).
     pub cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
+    /// Where free space is read from and the floor, for a phase that ends with no `result`: on a full volume it fails
+    /// with cause `disk`, not `lost` or `failed` (0.2, Durability). `None` never calls a volume full.
+    pub disk: Option<(Arc<dyn FreeSpace + Send + Sync>, Floor)>,
 }
 
 /// A lock that a panicking thread poisoned is still a lock.
@@ -413,6 +427,9 @@ struct Entry {
     key: PhaseKey,
     dir: PathBuf,
     inner: Mutex<EntryState>,
+    /// The agent session of an agent phase and what it has read of the journal. A phase with none (a plain command,
+    /// an adopted one) settles by its exit code. Held for one read or one settle, never while a request waits.
+    feed: Option<Mutex<AgentFeed>>,
 }
 
 impl Entry {
@@ -475,6 +492,7 @@ struct PhasesShared {
     log: Arc<dyn Fn(&str) + Send + Sync>,
     processes: Arc<dyn Processes + Send + Sync>,
     cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
+    disk: Option<(Arc<dyn FreeSpace + Send + Sync>, Floor)>,
     table: Mutex<HashMap<PhaseKey, Arc<Entry>>>,
     /// Held to take the next event number and write the event, so two threads never take the same one.
     events: Mutex<()>,
@@ -488,6 +506,15 @@ struct PhasesShared {
 #[derive(Clone)]
 pub struct Phases {
     shared: Arc<PhasesShared>,
+}
+
+/// The text stored as a phase's failure when it ended with no `result` on a full volume.
+const DISK_FAILURE: &str = "disk";
+
+/// What an agent phase's session settled on, and whether the volume was full when it ended with no `result`.
+struct Settled {
+    outcome: PhaseOutcome,
+    volume_full: bool,
 }
 
 /// What a change of state did.
@@ -512,6 +539,7 @@ impl Phases {
             log,
             processes,
             cleanup,
+            disk,
         } = config;
         let mut last: HashMap<PhaseKey, PhaseState> = HashMap::new();
         for event in store.events_since(0)? {
@@ -529,6 +557,7 @@ impl Phases {
                     key: key.clone(),
                     dir,
                     inner: Mutex::new(EntryState::new(state)),
+                    feed: None,
                 });
                 (key, entry)
             })
@@ -545,6 +574,7 @@ impl Phases {
                 log,
                 processes,
                 cleanup,
+                disk,
                 table: Mutex::new(table),
                 events: Mutex::new(()),
                 watchers: Mutex::new(Vec::new()),
@@ -712,6 +742,27 @@ impl Phases {
     /// `running`. Nothing is made for a name that is bad or taken, or whose socket path is over the limit. A shim that
     /// cannot be started makes the phase `failed`, and the error says why.
     pub fn start_phase(&self, key: &PhaseKey, spec: &PhaseSpec) -> Result<(), PhaseError> {
+        self.start_phase_with(key, spec, None)
+    }
+
+    /// Starts an agent phase: [`Phases::start_phase`], with the session whose stream the phase's watcher feeds from
+    /// the journal ([`AgentFeed`]) and whose outcome settles the phase. The caller sends the first turn with
+    /// [`Phases::send_turn`].
+    pub fn start_agent_phase(
+        &self,
+        key: &PhaseKey,
+        spec: &PhaseSpec,
+        feed: AgentFeed,
+    ) -> Result<(), PhaseError> {
+        self.start_phase_with(key, spec, Some(feed))
+    }
+
+    fn start_phase_with(
+        &self,
+        key: &PhaseKey,
+        spec: &PhaseSpec,
+        feed: Option<AgentFeed>,
+    ) -> Result<(), PhaseError> {
         let shim_exe = self.shared.shim_exe.clone().ok_or(PhaseError::NoShimExe)?;
         let dir = self.shared.runs_dir.join(&key.run).join(&key.phase);
         let socket = dir.join(shim_files::SOCKET_DIR).join(shim_files::SOCKET);
@@ -725,6 +776,7 @@ impl Phases {
                 key: key.clone(),
                 dir: dir.clone(),
                 inner: Mutex::new(EntryState::new(PhaseState::Pending {})),
+                feed: feed.map(Mutex::new),
             });
             table.insert(key.clone(), entry.clone());
             entry
@@ -909,18 +961,13 @@ impl Phases {
         from: Option<PhaseState>,
         to: PhaseState,
     ) -> Result<(), StoreError> {
-        let _events = locked(&self.shared.events);
-        let seq = self.shared.store.last_seq()? + 1;
-        let event = Event {
-            seq,
-            wall_ms: self.now_ms(),
-            actor: Actor {
+        self.append_event(
+            Actor {
                 kind: ActorKind::Workflow,
                 run: Some(key.run.clone()),
                 phase: Some(key.phase.clone()),
             },
-            experiment: None,
-            body: EventBody::PhaseTransition {
+            EventBody::PhaseTransition {
                 run: key.run.clone(),
                 phase: key.phase.clone(),
                 round: 1,
@@ -929,6 +976,21 @@ impl Phases {
                 log: None,
                 transcript: None,
             },
+        )
+    }
+
+    /// Appends one event, numbered and stamped here. Every writer of the event log goes through this, so two threads
+    /// never take the same number: the phases' own transitions and the run and workspace events of a file-task run
+    /// ([`crate::file_run`]).
+    pub fn append_event(&self, actor: Actor, body: EventBody) -> Result<(), StoreError> {
+        let _events = locked(&self.shared.events);
+        let seq = self.shared.store.last_seq()? + 1;
+        let event = Event {
+            seq,
+            wall_ms: self.now_ms(),
+            actor,
+            experiment: None,
+            body,
         };
         self.shared.store.append_event(&event)
     }
@@ -1009,6 +1071,7 @@ impl Phases {
             key: shim.key.clone(),
             dir: shim.dir.clone(),
             inner: Mutex::new(EntryState::new(PhaseState::Running {})),
+            feed: None,
         });
         locked(&self.shared.table).insert(shim.key.clone(), entry.clone());
         if let Err(error) = self.record(&shim.key, None, PhaseState::Running {}) {
@@ -1092,15 +1155,44 @@ impl Phases {
         {
             self.log(&format!("phase {}: {error}", entry.key));
         }
+        // An agent phase's outcome is its session's: the stream's `result` (and not the exit code) says whether the
+        // agent finished. The journal is read to its end first, which is complete once the shim reports the exit.
+        let outcome = self.settle_feed(entry, &exit);
         // A phase a stop was asked to end is `stopped`, whatever its exit was: the person asked for it.
         let to = if locked(&entry.inner).stop_requested {
             PhaseState::Stopped {}
         } else {
-            phase_ending(&PhaseEnding {
-                exit_recorded: true,
-                result_seen: exit.end == ExitEnd::Exited { code: 0 },
-                volume_full: false,
-            })
+            match outcome {
+                Some(Settled {
+                    outcome: PhaseOutcome::Stopped,
+                    ..
+                }) => PhaseState::Stopped {},
+                Some(Settled {
+                    outcome: PhaseOutcome::Lost,
+                    ..
+                }) => PhaseState::Lost {},
+                Some(Settled {
+                    outcome: PhaseOutcome::Ended,
+                    ..
+                }) => phase_ending(&PhaseEnding {
+                    exit_recorded: true,
+                    result_seen: true,
+                    volume_full: false,
+                }),
+                Some(Settled { volume_full, .. }) => phase_ending(&PhaseEnding {
+                    exit_recorded: true,
+                    result_seen: false,
+                    volume_full,
+                }),
+                None => {
+                    let result_seen = exit.end == ExitEnd::Exited { code: 0 };
+                    phase_ending(&PhaseEnding {
+                        exit_recorded: true,
+                        result_seen,
+                        volume_full: !result_seen && self.volume_full(entry),
+                    })
+                }
+            }
         };
         match self.advance(entry, to, Some(exit)) {
             Ok(advanced) => advanced,
@@ -1112,6 +1204,128 @@ impl Phases {
                 }
             }
         }
+    }
+
+    /// Settles an agent phase's session with the shim's record: the journal is read to its end, the session says how
+    /// the phase ended, and the phase's record (its last usage, its report, why it failed) is stored before the phase
+    /// moves, so a reader who sees the phase final sees the record. `None` for a phase with no session and for one that
+    /// is final already (its session settled once).
+    fn settle_feed(&self, entry: &Arc<Entry>, exit: &ExitRecord) -> Option<Settled> {
+        let feed = entry.feed.as_ref()?;
+        if is_final(&locked(&entry.inner).state) {
+            return None;
+        }
+        let (outcome, mut record, problem) = locked(feed).settle(Some(exit.clone()));
+        if let Some(problem) = problem {
+            self.log(&format!("phase {}: {problem}", entry.key));
+        }
+        // Only an ending with no `result` can be a full volume: any other failure had its say in the stream.
+        let volume_full = matches!(
+            outcome,
+            PhaseOutcome::Failed {
+                cause: PhaseFailure::NoResult
+            }
+        ) && self.volume_full(entry);
+        if volume_full {
+            record.failure = Some(DISK_FAILURE.to_string());
+        }
+        self.store_record(entry, &record);
+        Some(Settled {
+            outcome,
+            volume_full,
+        })
+    }
+
+    /// Whether the volume that holds the phase's journal is under the free-space floor now. A volume that cannot be
+    /// read counts as not full, so the phase keeps its other cause.
+    fn volume_full(&self, entry: &Arc<Entry>) -> bool {
+        let Some((free, floor)) = &self.shared.disk else {
+            return false;
+        };
+        match DiskGuard::new(free.as_ref(), *floor).volume_full(&entry.dir) {
+            Ok(full) => full,
+            Err(error) => {
+                self.log(&format!("phase {}: {error}", entry.key));
+                false
+            }
+        }
+    }
+
+    fn store_record(&self, entry: &Arc<Entry>, record: &PhaseRecord) {
+        if let Err(error) =
+            self.shared
+                .store
+                .set_phase_record(&entry.key.run, &entry.key.phase, record)
+        {
+            self.log(&format!(
+                "phase {}: its record was not stored: {error}",
+                entry.key
+            ));
+        }
+    }
+
+    /// Reads what the shim has journaled since the last read, feeds it to the phase's session and acts on what the
+    /// session asks: bytes to write (sent without waiting, because the watcher is the thread that reads the answer),
+    /// stdin to close, and a record to store.
+    fn pump_feed(&self, entry: &Arc<Entry>, link: &Arc<Link>) {
+        let Some(feed) = &entry.feed else { return };
+        if is_final(&locked(&entry.inner).state) {
+            return;
+        }
+        let (pumped, record) = {
+            let mut feed = locked(feed);
+            let pumped = feed.pump();
+            let record = pumped.record_changed.then(|| feed.record(None));
+            (pumped, record)
+        };
+        if let Some(problem) = &pumped.problem {
+            self.log(&format!("phase {}: {problem}", entry.key));
+        }
+        for bytes in &pumped.writes {
+            let data = String::from_utf8_lossy(bytes).into_owned();
+            // A request nobody waits on still takes the shim's answer, so the answers stay in step.
+            let (reply, _unwanted) = mpsc::channel();
+            let mut writer = locked(&link.writer);
+            locked(&link.pending).push_back(Pending {
+                sent: Instant::now(),
+                reply,
+            });
+            if let Err(error) = send(&mut writer, &DaemonMessage::Write { data }) {
+                locked(&link.pending).pop_back();
+                self.log(&format!(
+                    "phase {}: a write of the session was not sent: {error}",
+                    entry.key
+                ));
+            }
+        }
+        if pumped.close_stdin
+            && let Err(error) = link.send(&DaemonMessage::CloseStdin {})
+        {
+            self.log(&format!(
+                "phase {}: stdin was not closed after the turn: {error}",
+                entry.key
+            ));
+        }
+        if let Some(record) = record {
+            self.store_record(entry, &record);
+        }
+    }
+
+    /// Sends the phase's session a user turn and writes what it answers to the child, waiting for the shim's answer to
+    /// each write. The first turn of an agent phase is sent this way, once the phase is started.
+    pub fn send_turn(&self, key: &PhaseKey, text: &str) -> Result<(), LinkError> {
+        let entry = self
+            .entry(key)
+            .ok_or_else(|| LinkError::NoLink(key.clone()))?;
+        let feed = entry
+            .feed
+            .as_ref()
+            .ok_or_else(|| LinkError::NoLink(key.clone()))?;
+        let step = locked(feed).send_turn(text);
+        for bytes in step.writes {
+            self.write(key, &String::from_utf8_lossy(&bytes))?;
+        }
+        Ok(())
     }
 
     /// The phase's shim is gone. A record on disk ends the phase as it says; none makes it `lost`, whatever the agent
@@ -1139,7 +1353,13 @@ impl Phases {
         let to = if matches!(locked(&entry.inner).state, PhaseState::Pending {}) {
             PhaseState::Failed { cause: None }
         } else {
-            PhaseState::Lost {}
+            // No record and no `result` on a full volume is `failed` with cause `disk`: the record could not be
+            // written. Anything else is lost (0.2, Durability).
+            phase_ending(&PhaseEnding {
+                exit_recorded: false,
+                result_seen: false,
+                volume_full: self.volume_full(entry),
+            })
         };
         let lost = matches!(to, PhaseState::Lost {});
         let changed = match self.advance(entry, to, None) {
@@ -1224,9 +1444,20 @@ impl Phases {
         read_detached(&self.shared.runs_dir.join(run))
     }
 
-    /// When the run began, for the scan: the earliest `spec.json` of its phases, in microseconds since the epoch. A
-    /// process older than that cannot be the run's.
-    fn run_start_us(&self, run: &str) -> Option<u64> {
+    /// When the run began, for the scan, in microseconds since the epoch: the time of the run's first `run.transition`
+    /// event, which is the run's record (ts-0059 decision 5). A run with no such event (one started with
+    /// [`Phases::start_phase`] alone) falls back to the earliest `spec.json` of its phases. A process older than this
+    /// cannot be the run's.
+    pub fn run_start_us(&self, run: &str) -> Option<u64> {
+        if let Ok(events) = self.shared.store.events_since(0) {
+            let first = events.iter().find_map(|event| match &event.body {
+                EventBody::RunTransition { run: named, .. } if named == run => Some(event.wall_ms),
+                _ => None,
+            });
+            if let Some(wall_ms) = first {
+                return wall_ms.checked_mul(1000);
+            }
+        }
         let entries: Vec<Arc<Entry>> = locked(&self.shared.table)
             .values()
             .filter(|e| e.key.run == run)
@@ -1332,7 +1563,8 @@ impl Phases {
             .map(|e| locked(&e.inner).state.clone())
             .collect();
         if states.is_empty() {
-            return None;
+            // A run that has not started a phase (paused for disk before it did) has only its own record.
+            return self.recorded_run_state(run);
         }
         Some(if states.iter().any(|s| !is_final(s)) {
             RunState::Running {}
@@ -1347,6 +1579,15 @@ impl Phases {
             RunState::Ended {
                 outcome: NonEmpty::new("every phase ended").expect("the text is not empty"),
             }
+        })
+    }
+
+    /// The `to` of the run's last `run.transition` event.
+    fn recorded_run_state(&self, run: &str) -> Option<RunState> {
+        let events = self.shared.store.events_since(0).ok()?;
+        events.into_iter().rev().find_map(|event| match event.body {
+            EventBody::RunTransition { run: named, to, .. } if named == run => Some(to),
+            _ => None,
         })
     }
 
@@ -1535,6 +1776,7 @@ impl Phases {
                     break;
                 }
             }
+            self.pump_feed(entry, &link);
             self.refresh_health(entry, &link, &mut stopped_since);
         }
         locked(&entry.inner).link = None;

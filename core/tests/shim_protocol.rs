@@ -8,7 +8,7 @@ use collide_core::frame::{
 };
 use collide_core::journal::{
     Direction, JournalEnd, JournalError, JournalRecord, MAX_RECORD_BYTES, RECORD_HEADER_BYTES,
-    encode_record, read_journal,
+    encode_record, read_journal, read_journal_from,
 };
 use collide_core::schema;
 use collide_core::shim::{
@@ -780,4 +780,25 @@ fn the_exit_json_schema_requires_every_field() {
     ] {
         assert!(required.contains(&name), "{name} is optional in the schema");
     }
+}
+
+#[test]
+fn a_journal_read_from_a_boundary_numbers_its_first_record_from_the_seq_it_is_given() {
+    let records = three_records();
+    let bytes = journal_bytes(&records);
+    let first = journal_bytes(&records[..1]).len();
+    let later = read_journal_from(&bytes[first..], 1);
+    assert_eq!(later.records, records[1..]);
+    assert_eq!(later.valid_len, bytes.len() - first);
+    assert_eq!(later.end, JournalEnd::Clean);
+}
+
+#[test]
+fn a_journal_read_from_a_boundary_refuses_a_first_record_with_another_number() {
+    let records = three_records();
+    let bytes = journal_bytes(&records);
+    let first = journal_bytes(&records[..1]).len();
+    let read = read_journal_from(&bytes[first..], 0);
+    assert!(read.records.is_empty());
+    assert!(matches!(read.end, JournalEnd::Damaged { .. }));
 }

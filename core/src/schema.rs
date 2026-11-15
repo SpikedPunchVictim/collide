@@ -213,6 +213,7 @@ pub fn registry() -> Registry {
     registry.add::<owner::RunOutputParams>();
     registry.add::<owner::RunOutputResult>();
     registry.add::<owner::RunPreviewResult>();
+    registry.add::<owner::RunStartFileParams>();
     registry.add::<owner::RunStartParams>();
     registry.add::<owner::RunStartResult>();
     registry.add::<owner::RunStopParams>();

@@ -69,6 +69,24 @@ pub struct RunStartParams {
     pub mode: RunMode,
 }
 
+/// `run.start_file` params: a run of one task file, with no board and no workflow (ts-0065-kx). The daemon runs the
+/// built-in `collide/builder` role in a new worktree of `repo`, and the text of `task_file` is the first turn. It is
+/// a call of its own, so `run.start`'s request (which `run.preview` shares) does not change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunStartFileParams {
+    /// The checkout the worktree is made from: an absolute path.
+    pub repo: String,
+    /// The task file whose text is the phase's first turn: an absolute path.
+    pub task_file: String,
+    /// The model alias to run, as the user's `models.yaml` maps it. The role's default when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    /// The phase's budget in US dollars, passed to the tool when it enforces one itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_usd: Option<f64>,
+}
+
 /// `run.preview` params: the same call as `run.start`, so the preview is what the start would do.
 pub type RunPreviewParams = RunStartParams;
 

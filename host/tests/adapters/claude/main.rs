@@ -17,6 +17,7 @@ mod capabilities;
 mod contract;
 mod fake;
 mod fake_claude;
+mod file_run;
 mod hooks;
 mod launch;
 mod limits;

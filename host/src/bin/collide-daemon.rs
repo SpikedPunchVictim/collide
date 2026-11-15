@@ -14,6 +14,7 @@ use collide_host::daemon::{DaemonOptions, DaemonPaths, ROOT_ENV, run};
 use collide_host::launch::{
     FORWARDED_ENV, LAUNCHCTL_ENV, StartKind, StartRequest, ensure_daemon, launchctl_from_env,
 };
+use collide_host::log_cap::{CappedLog, DEFAULT_LOG_CAP_BYTES, fd_is_file};
 use collide_host::shim::DaemonStart;
 use std::process::ExitCode;
 
@@ -41,7 +42,19 @@ fn main() -> ExitCode {
         None => {
             // A login shell's path when the environment names none: macOS's default shell.
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-            let mut options = DaemonOptions::new(paths, shell, Box::new(std::io::stderr()));
+            // The log is written through a file of its own with a size cap and one rotated file. A log that cannot be
+            // opened leaves the daemon on standard error, which a launch has pointed at the same file.
+            // Standard error follows each rotation when a launch has pointed it at the log.
+            let follow = fd_is_file(2, &paths.log_file).then_some(2);
+            let log: Box<dyn std::io::Write + Send> =
+                match CappedLog::open_following(&paths.log_file, DEFAULT_LOG_CAP_BYTES, follow) {
+                    Ok(log) => Box::new(log),
+                    Err(error) => {
+                        eprintln!("collide-daemon: the log file cannot be opened: {error}");
+                        Box::new(std::io::stderr())
+                    }
+                };
+            let mut options = DaemonOptions::new(paths, shell, log);
             // A daemon under an overridden root boots out no job unless `COLLIDE_LAUNCHCTL` names the program.
             options.launchctl = launchctl_from_env(
                 std::env::var(ROOT_ENV).ok().as_deref(),

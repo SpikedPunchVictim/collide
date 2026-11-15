@@ -308,14 +308,15 @@ fn a_workspace_a_run_is_using_is_not_removed() {
 }
 
 #[test]
-fn a_workspace_that_was_never_used_is_not_removable_by_core_s_table() {
+fn a_workspace_that_was_never_used_is_removed_through_removable() {
     let fx = Fixture::new("ready-remove");
     let free = FakeFree::new(u64::MAX);
     let guard = DiskGuard::new(&free, FLOOR);
     let mut ws = fx.workspace();
     ws.provision(&guard).unwrap();
-    assert!(matches!(ws.remove(), Err(WorkspaceError::Transition(_))));
-    assert!(fx.tree().exists());
+    ws.remove().unwrap();
+    assert_eq!(ws.state(), WorkspaceState::Removed);
+    assert!(!fx.tree().exists());
 }
 
 #[test]

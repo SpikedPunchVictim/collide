@@ -16,6 +16,7 @@ export type QueueKind =
   | 'acknowledge'
   | 'review'
   | 'outcome_unknown'
+  | 'disk_full'
   | 'question'
 
 /**

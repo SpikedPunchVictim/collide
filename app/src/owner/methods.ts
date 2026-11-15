@@ -35,6 +35,7 @@ export const OWNER_METHODS = {
   'run.start': call<G.RunStartParamsInput, G.RunStartResultOutput>(),
   // `RunPreviewParams` is a type alias of `RunStartParams` in `core`, so it has no schema of its own.
   'run.preview': call<G.RunStartParamsInput, G.RunPreviewResultOutput>(),
+  'run.start_file': call<G.RunStartFileParamsInput, G.RunStartResultOutput>(),
   'run.list': call<G.RunListParamsInput, G.RunListResultOutput>(),
   'run.get': call<G.RunGetParamsInput, G.RunGetResultOutput>(),
   'run.stop': call<G.RunStopParamsInput, G.RunStopResultOutput>(),

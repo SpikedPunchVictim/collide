@@ -411,10 +411,11 @@ const WORKSPACE_STATES: [WorkspaceState; 7] = [
 
 use WorkspaceState::{Failed, Idle, InUse, Provisioning, Ready, Removable, Removed};
 
-const WORKSPACE_ENGINE: [(WorkspaceState, WorkspaceState); 11] = [
+const WORKSPACE_ENGINE: [(WorkspaceState, WorkspaceState); 12] = [
     (Provisioning, Ready),
     (Provisioning, Failed),
     (Ready, InUse),
+    (Ready, Removable),
     (Ready, Failed),
     (InUse, Idle),
     (InUse, Failed),
@@ -477,6 +478,11 @@ fn a_workspace_goes_down_its_lifecycle_one_state_at_a_time() {
     }
     assert!(workspace_transition(Provisioning, InUse, WorkspaceVia::Engine).is_err());
     assert!(workspace_transition(Ready, Removed, WorkspaceVia::Engine).is_err());
+}
+
+#[test]
+fn a_workspace_that_was_made_and_never_used_can_be_marked_removable() {
+    assert!(workspace_transition(Ready, Removable, WorkspaceVia::Engine).is_ok());
 }
 
 #[test]

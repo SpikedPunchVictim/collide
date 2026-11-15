@@ -418,8 +418,9 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   - a store or `exit.json` that cannot be read is moved aside and reported, never overwritten;
   - on a full disk the shim keeps its exit record in memory and serves it until the daemon acknowledges it;
   - **free space is checked before a workspace is made and before each phase** (R5). Under a floor the run goes to
-    `paused: disk` with a Queue item, and nothing is started. A phase that ends with no `result` on a full volume
-    fails with cause `disk`, not `lost`;
+    `paused: disk` with a Queue item, and nothing is started. The check reads both the workspace's volume and the
+    run directory's; a volume that cannot be read refuses the start instead of pausing it. A phase that ends with no
+    `result` on a full volume fails with cause `disk`, not `lost`;
   - a child's stream lines and each phase's log have caps, so one runaway tool cannot fill the disk: a line over the
     cap is cut and marked, and a log over its cap stops growing with a final marker.
 - **The OTLP receiver** (R5; 0.13) is part of the daemon. It binds `127.0.0.1` on a port the daemon picks, checks
@@ -682,9 +683,10 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     `total_cost_usd` 0.00353);
   - a phase settles once the child has exited and its stdout has reached its end, in either order, so the last
     lines, usually the `result`, are never dropped (inferred: Ferry's platform supervisor settles on exit, which can
-    lose them). That rule decides when reading stops, not whether the phase succeeded. An ACP phase's outcome is its
-    prompt response, and a child that exits before one is `lost` (measured S7: closing stdin with a permission
-    request pending made opencode exit 0 with no response);
+    lose them). That rule decides when reading stops, not whether the phase succeeded. The shim drains the child's
+    stdout and stderr before it writes `exit.json`, so a reported exit means the journal is whole. An ACP phase's
+    outcome is its prompt response, and a child that exits before one is `lost` (measured S7: closing stdin with a
+    permission request pending made opencode exit 0 with no response);
   - **refused tool calls and hook outcomes** (measured: S9's addendum, Bash on haiku only). The `result` looks the
     same whether a call ran, a hook denied it or the host did, so:
     - a refused call is classified from the `user` event's `tool_result_meta`, joined on `tool_use_id`, never from
@@ -3670,7 +3672,9 @@ hook the test injects). The real launchd check runs only with `COLLIDE_REAL_LAUN
 - **Contract test:** recorded from the real, pinned `claude` and re-run on upgrade, so format drift fails a test
   (the fake alone cannot detect it).
 - **Dogfood** (part L): `collide run` takes an item from `.collide/planning/` as its task file.
-- `collide run` on a file task: a new worktree, one Claude phase, the record.
+- `collide run` on a file task: a new worktree, one Claude phase, the record. The run uses the built-in
+  `collide/builder` role with the alias `fast` (a run may name another), and the three context variables are set
+  after the strip, so they win over a role's `env:`.
 
 **Success Criteria**:
 - A real run on the Orchard repo in a fresh worktree.

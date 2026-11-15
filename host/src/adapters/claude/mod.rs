@@ -128,7 +128,7 @@ impl AgentAdapter for ClaudeAdapter {
         launch::launch_spec(request)
     }
 
-    fn session(&self, request: &LaunchRequest) -> Box<dyn AgentSession> {
+    fn session(&self, request: &LaunchRequest) -> Box<dyn AgentSession + Send> {
         Box::new(session::ClaudeSession::new(request.session.clone()))
     }
 

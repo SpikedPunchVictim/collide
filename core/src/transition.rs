@@ -293,7 +293,7 @@ pub enum WorkspaceVia {
 /// a time, and an `idle` workspace is used again by the next run, because it lives longer than any run (0.8). Any
 /// state with work in flight can fail. A `resume` takes `failed` back to `ready`: the hook has made it usable again,
 /// and the engine moves it on from there.
-const WORKSPACE_TABLE: [(WorkspaceState, WorkspaceState, WorkspaceVia); 12] = [
+const WORKSPACE_TABLE: [(WorkspaceState, WorkspaceState, WorkspaceVia); 13] = [
     (
         WorkspaceState::Provisioning,
         WorkspaceState::Ready,
@@ -307,6 +307,12 @@ const WORKSPACE_TABLE: [(WorkspaceState, WorkspaceState, WorkspaceVia); 12] = [
     (
         WorkspaceState::Ready,
         WorkspaceState::InUse,
+        WorkspaceVia::Engine,
+    ),
+    // A workspace that was made and never used can be removed (ts-0055 decision 4).
+    (
+        WorkspaceState::Ready,
+        WorkspaceState::Removable,
         WorkspaceVia::Engine,
     ),
     (

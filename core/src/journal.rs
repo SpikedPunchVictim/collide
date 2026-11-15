@@ -182,6 +182,14 @@ pub fn encode_record(record: &JournalRecord) -> Result<Vec<u8>, RecordTooLarge> 
 /// Reads a journal from its first byte. It returns every whole record up to the first one that is cut short or
 /// damaged, and says which of the two ended the read. A cut at any offset gives the records before it.
 pub fn read_journal(bytes: &[u8]) -> JournalRead {
+    read_journal_from(bytes, 0)
+}
+
+/// Reads the part of a journal that starts at a record boundary, where the first record is the one numbered
+/// `first_seq`. A daemon that has read a journal up to some byte reads what was added since with this, and
+/// [`JournalRead::valid_len`] is then relative to `bytes`. A first record with another number is
+/// [`JournalError::OutOfOrder`].
+pub fn read_journal_from(bytes: &[u8], first_seq: u64) -> JournalRead {
     let mut records = Vec::new();
     let mut offset = 0;
     let end = loop {
@@ -212,7 +220,7 @@ pub fn read_journal(bytes: &[u8]) -> JournalRead {
                 },
             };
         }
-        let expected = records.len() as u64;
+        let expected = first_seq + records.len() as u64;
         if seq != expected {
             break JournalEnd::Damaged {
                 error: JournalError::OutOfOrder {

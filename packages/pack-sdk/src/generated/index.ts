@@ -193,6 +193,8 @@ export type { RunOutputResult as RunOutputResultInput } from './RunOutputResult.
 export type { RunOutputResult as RunOutputResultOutput } from './RunOutputResult.output.ts'
 export type { RunPreviewResult as RunPreviewResultInput } from './RunPreviewResult.input.ts'
 export type { RunPreviewResult as RunPreviewResultOutput } from './RunPreviewResult.output.ts'
+export type { RunStartFileParams as RunStartFileParamsInput } from './RunStartFileParams.input.ts'
+export type { RunStartFileParams as RunStartFileParamsOutput } from './RunStartFileParams.output.ts'
 export type { RunStartParams as RunStartParamsInput } from './RunStartParams.input.ts'
 export type { RunStartParams as RunStartParamsOutput } from './RunStartParams.output.ts'
 export type { RunStartResult as RunStartResultInput } from './RunStartResult.input.ts'

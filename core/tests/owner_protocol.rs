@@ -245,6 +245,11 @@ fn samples() -> Vec<(Method, Value, Value)> {
             json!({ "outcome": "started", "run": "R-118" }),
         ),
         (
+            Method::RunStartFile,
+            json!({ "repo": "/work/repo", "task_file": "/work/task.md", "alias": "sonnet", "budget_usd": 1.5 }),
+            json!({ "outcome": "started", "run": "R-119" }),
+        ),
+        (
             Method::RunPreview,
             json!({ "board": "bd-1", "tasks": ["plan:ts-0001"], "launch": {}, "mode": "headless" }),
             json!({

@@ -266,8 +266,9 @@ pub trait AgentAdapter {
     /// The launch spec for a role and a phase: argv, env, working directory and the variables to strip.
     fn launch(&self, request: &LaunchRequest) -> Result<LaunchSpec, LaunchError>;
 
-    /// A new session for one child, which starts as `request.session` says.
-    fn session(&self, request: &LaunchRequest) -> Box<dyn AgentSession>;
+    /// A new session for one child, which starts as `request.session` says. It is `Send`, because the daemon's
+    /// watcher thread for the phase owns it.
+    fn session(&self, request: &LaunchRequest) -> Box<dyn AgentSession + Send>;
 
     /// The tool's config paths in a repo, and the user's own state it keeps.
     fn config_paths(&self) -> Vec<ConfigPath>;

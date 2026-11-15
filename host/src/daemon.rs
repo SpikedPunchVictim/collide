@@ -48,8 +48,9 @@
 //! [`collide_core::owner::MAX_MESSAGE_BYTES`]. The first request of a connection is `initialize`: the uid is checked
 //! first, then the token, then the protocol version, and a connection that fails any of them is answered once and
 //! closed, so an unauthenticated peer learns no version. A connection that says nothing for [`HANDSHAKE_WAIT`] is
-//! closed. Only `daemon.status`, `daemon.recapture_environment` and `run.stop` are served here; the other methods are
-//! other items' and answer `method not found`.
+//! closed. Only `daemon.status`, `daemon.recapture_environment`, `run.stop`, `run.start_file` (a task file run with
+//! the built-in builder role, [`crate::file_run`]) and `queue.list` (the in-memory queue) are served here; the other
+//! methods are other items' and answer `method not found`.
 //!
 //! ## Who is asking
 //!
@@ -87,6 +88,8 @@
 use crate::auth::{self, Admitted, Caller, Session, StdFs, SystemProcessTree, UnixPeer};
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::clock::{Clock, Clocks, Reading, SystemClocks};
+use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
+use crate::file_run::{FileRunConfig, FileRuns};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::phases::{
     BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, Phases, PhasesConfig, StopRunError,
@@ -98,8 +101,9 @@ use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
     DaemonRecaptureEnvironmentResult, DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method,
-    OWNER_PROTOCOL, OwnerInitializeResult, Request, Response, Routed, RpcError, RunStopParams,
-    RunStopResult, StoreHealth, Survivor, code, encode_line, parse_request, route,
+    OWNER_PROTOCOL, OwnerInitializeResult, QueueListParams, QueueListResult, Request, Response,
+    Routed, RpcError, RunStartFileParams, RunStartResult, RunStopParams, RunStopResult,
+    StoreHealth, Survivor, code, encode_line, parse_request, route,
 };
 use collide_core::shim::ExitRecord;
 use std::fmt;
@@ -439,6 +443,16 @@ pub struct DaemonOptions {
     /// The `launchctl` that boots out the daemon's recorded job when the daemon stops. `None`, which a daemon under an
     /// overridden root gets ([`crate::launch::launchctl_from_env`]), calls no `launchctl`.
     pub launchctl: Option<Arc<dyn Launchctl>>,
+    /// The home directory `models.yaml` is read from, for a file-task run (`$HOME` unless a test gives its own).
+    pub home: Option<String>,
+    /// The folder the worktrees of file-task runs are made in. `None` is `workspaces` beside the runs.
+    pub workspaces_dir: Option<PathBuf>,
+    /// Where free space is read from, and the floor under which nothing starts (0.2, Durability).
+    pub free_space: Arc<dyn FreeSpace + Send + Sync>,
+    pub floor: Floor,
+    /// Added to the environment of every git command a file-task run's workspace runs. A test passes
+    /// `GIT_CONFIG_GLOBAL=/dev/null` here.
+    pub git_env: Vec<(String, String)>,
 }
 
 impl DaemonOptions {
@@ -459,6 +473,11 @@ impl DaemonOptions {
             processes: Arc::new(SystemProcesses),
             cleanup: None,
             launchctl: None,
+            home: std::env::var("HOME").ok(),
+            workspaces_dir: None,
+            free_space: Arc::new(SystemFreeSpace),
+            floor: Floor::default(),
+            git_env: Vec::new(),
         }
     }
 }
@@ -470,7 +489,8 @@ struct Shared {
     store: Arc<Store>,
     health: StoreHealth,
     warnings: Mutex<Vec<String>>,
-    env: Mutex<Option<BaseEnvironment>>,
+    env: Arc<Mutex<Option<BaseEnvironment>>>,
+    file_runs: Arc<FileRuns>,
     shell: String,
     capture: CaptureOptions,
     tree: SystemProcessTree,
@@ -547,6 +567,11 @@ impl Daemon {
             processes,
             cleanup,
             launchctl,
+            home,
+            workspaces_dir,
+            free_space,
+            floor,
+            git_env,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -588,6 +613,37 @@ impl Daemon {
         let store = Arc::new(store);
         let token = load_or_make_token(&paths.token_file)?;
 
+        // File-task runs (ts-0065-kx). They wait for the first capture of the base environment, which is in `env`, and
+        // they end their run and release their workspace in the phase-end hook, ahead of the hook the options carry.
+        let env: Arc<Mutex<Option<BaseEnvironment>>> = Arc::new(Mutex::new(None));
+        let file_runs = Arc::new(FileRuns::new(FileRunConfig {
+            runs_dir: paths.runs_dir.clone(),
+            workspaces_dir: workspaces_dir
+                .unwrap_or_else(|| paths.runs_dir.with_file_name("workspaces")),
+            home,
+            clocks: clocks.clone(),
+            free_space: free_space.clone(),
+            floor,
+            git_env,
+            base_env: {
+                let env = env.clone();
+                Arc::new(move |wait| wait_for_environment(&env, wait))
+            },
+            capture_wait: capture.timeout + CAPTURE_WAIT_MARGIN,
+            log: {
+                let log = log.clone();
+                Arc::new(move |text: &str| log.line(text))
+            },
+        }));
+        let on_phase_end: Option<PhaseEndHook> = {
+            let runs = file_runs.clone();
+            Some(Box::new(move |phases, end| {
+                runs.on_phase_end(phases, end);
+                if let Some(hook) = &on_phase_end {
+                    hook(phases, end);
+                }
+            }))
+        };
         // Adoption comes before the bind: a client that connects sees every phase in the state it is in.
         let phases = Phases::new(PhasesConfig {
             runs_dir: paths.runs_dir.clone(),
@@ -603,6 +659,7 @@ impl Daemon {
             },
             processes,
             cleanup,
+            disk: Some((free_space.clone(), floor)),
         })
         .map_err(SocketError::Store)?;
         match adopt_shims(&paths.runs_dir) {
@@ -627,7 +684,8 @@ impl Daemon {
             store,
             health,
             warnings: Mutex::new(warnings),
-            env: Mutex::new(None),
+            env,
+            file_runs,
             shell,
             capture,
             tree: SystemProcessTree::new(app_executable),
@@ -1227,6 +1285,8 @@ fn call(
             )
         }
         Method::RunStop => run_stop(shared, session, params),
+        Method::RunStartFile => run_start_file(shared, session, params),
+        Method::QueueList => queue_list(shared, params),
         other => Err(RpcError::new(
             code::METHOD_NOT_FOUND,
             format!(
@@ -1235,6 +1295,77 @@ fn call(
             ),
         )),
     }
+}
+
+/// How long past the capture's own timeout a run waits for the first capture: the capture always ends, in the login
+/// shell's environment or the minimal one, within its timeout.
+const CAPTURE_WAIT_MARGIN: Duration = Duration::from_secs(5);
+
+/// The base environment once the first capture has finished, waiting for it for up to `wait`.
+fn wait_for_environment(
+    env: &Mutex<Option<BaseEnvironment>>,
+    wait: Duration,
+) -> Option<BaseEnvironment> {
+    let until = std::time::Instant::now() + wait;
+    loop {
+        if let Some(captured) = env.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            return Some(captured);
+        }
+        if std::time::Instant::now() >= until {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `run.start_file` (`collide run`, for one task file): makes the worktree, starts the builder phase and answers with
+/// the run's id. A run paused for disk is started and answers the same; its state and its Queue item say it is paused.
+/// It may take as long as the first capture of the base environment and the worktree take.
+fn run_start_file(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: RunStartFileParams = serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("the params of run.start_file are not readable: {e}"),
+        )
+    })?;
+    if let Caller::RunAgent { run } = session.caller() {
+        return Err(RpcError::new(
+            code::NOT_PERMITTED,
+            format!("the agent of run {run} may not start a run"),
+        ));
+    }
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let result = match shared.file_runs.start(&shared.phases, &params) {
+        Ok(run) => RunStartResult::Started { run },
+        Err(problems) => RunStartResult::Refused { problems },
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `queue.list`: the Queue items the daemon holds, so far those of a paused file-task run, by run and kind.
+fn queue_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: QueueListParams = serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("the params of queue.list are not readable: {e}"),
+        )
+    })?;
+    let items = shared
+        .file_runs
+        .queue_items(params.run.as_deref())
+        .into_iter()
+        .filter(|item| params.kinds.is_empty() || params.kinds.contains(&item.kind))
+        .collect();
+    Ok(serde_json::to_value(QueueListResult { items }).expect("a result is JSON"))
 }
 
 /// `run.stop` (`collide stop`, 0.5): stops the run's processes in the order of [`crate::stop::ORDER`] and answers with

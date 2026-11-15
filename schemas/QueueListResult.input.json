@@ -291,6 +291,11 @@
           "type": "string"
         },
         {
+          "const": "disk_full",
+          "description": "A run paused because free space is under the floor (0.2, Durability): free some space, then resume, or stop.",
+          "type": "string"
+        },
+        {
           "const": "question",
           "description": "An open question of the planning pack (`Decisions needed`, 0.11).",
           "type": "string"

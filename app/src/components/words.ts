@@ -51,6 +51,7 @@ export const QUEUE_KIND_WORDS: Record<QueueKind, string> = {
   acknowledge: 'Needs an acknowledgement',
   review: 'Ready to review',
   outcome_unknown: 'Outcome unknown',
+  disk_full: 'The disk is full',
   question: 'Has a question',
 }
 

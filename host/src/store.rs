@@ -26,6 +26,7 @@
 //! | `store: event log` | [`Store::append_event`], [`Store::events_since`] | the event log's append and read |
 //! | `store: quarantine` | [`quarantine`] | moves an unreadable store or record aside, with a report |
 
+use collide_core::agent::Usage;
 use collide_core::events::Event;
 use rusqlite::{Connection, ErrorCode, OpenFlags, TransactionBehavior, params};
 use std::ffi::OsString;
@@ -65,15 +66,43 @@ pub struct Migration {
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
 /// written with, and `line` is its JSON.
-pub const MIGRATIONS: [Migration; 1] = [Migration {
-    version: 1,
-    name: "events",
-    sql: "CREATE TABLE events (
+pub const MIGRATIONS: [Migration; 2] = [
+    Migration {
+        version: 1,
+        name: "events",
+        sql: "CREATE TABLE events (
               seq     INTEGER PRIMARY KEY,
               wall_ms INTEGER NOT NULL,
               line    TEXT NOT NULL
           )",
-}];
+    },
+    Migration {
+        version: 2,
+        name: "phase_records",
+        sql: "CREATE TABLE phase_records (
+              run     TEXT NOT NULL,
+              phase   TEXT NOT NULL,
+              usage   TEXT,
+              failure TEXT,
+              report  TEXT,
+              PRIMARY KEY (run, phase)
+          )",
+    },
+];
+
+/// What the daemon keeps of a phase beyond its state events (ts-0065-kx): the last usage its session reported, why it
+/// failed when the session could tell, and its report. Nothing of the agent's stream is stored here: the events of
+/// the stream are ts-0067's.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PhaseRecord {
+    /// The last usage event of the phase's session, as it reported it.
+    pub usage: Option<Usage>,
+    /// `no_result`, `refusal`, `max_tokens`, `max_turns`, `blocked`, `api` or `empty_turn`: what the session said
+    /// the failure was. Core's `PhaseState::Failed` carries only `disk`, so the cause is kept here.
+    pub failure: Option<String>,
+    /// The text of the session's final report.
+    pub report: Option<String>,
+}
 
 /// Why the store could not do what it was asked.
 #[derive(Debug)]
@@ -174,6 +203,67 @@ impl Store {
                 })
             })
             .collect()
+    }
+
+    /// Writes the phase's record, replacing the one it had: the daemon writes it each time the session reports usage,
+    /// and once more when the phase ends.
+    pub fn set_phase_record(
+        &self,
+        run: &str,
+        phase: &str,
+        record: &PhaseRecord,
+    ) -> Result<(), StoreError> {
+        let usage = record
+            .usage
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| StoreError::Io {
+                context: "writing a phase record".to_string(),
+                source: io::Error::new(io::ErrorKind::InvalidData, error),
+            })?;
+        self.connect()?
+            .execute(
+                "INSERT INTO phase_records (run, phase, usage, failure, report) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (run, phase) DO UPDATE SET
+                     usage = excluded.usage, failure = excluded.failure, report = excluded.report",
+                params![run, phase, usage, record.failure, record.report],
+            )
+            .map_err(|e| sql_error("writing a phase record", e))?;
+        Ok(())
+    }
+
+    /// The phase's record, or `None` for a phase that has none.
+    pub fn phase_record(&self, run: &str, phase: &str) -> Result<Option<PhaseRecord>, StoreError> {
+        let conn = self.connect()?;
+        let row = conn.query_row(
+            "SELECT usage, failure, report FROM phase_records WHERE run = ?1 AND phase = ?2",
+            params![run, phase],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        );
+        let (usage, failure, report) = match row {
+            Ok(row) => row,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(error) => return Err(sql_error("reading a phase record", error)),
+        };
+        let usage = usage
+            .map(|text| serde_json::from_str::<Usage>(&text))
+            .transpose()
+            .map_err(|error| StoreError::Io {
+                context: format!("reading the record of phase {run}/{phase}"),
+                source: io::Error::new(io::ErrorKind::InvalidData, error),
+            })?;
+        Ok(Some(PhaseRecord {
+            usage,
+            failure,
+            report,
+        }))
     }
 
     /// The number of the last event, or 0 when the log is empty.
@@ -693,6 +783,55 @@ mod tests {
             assert_eq!(user_version(&conn), known_version(), "from version {older}");
             assert!(table_exists(&conn, "events"), "from version {older}");
         }
+    }
+
+    fn usage(output: u64) -> Usage {
+        Usage {
+            scope: collide_core::agent::UsageScope::Turn,
+            input: Some(10),
+            output: Some(output),
+            cache_read: None,
+            cache_write: None,
+            cache_write_1h: None,
+            cache_write_5m: None,
+            thought: None,
+            context_used: None,
+            context_size: None,
+            cost: None,
+            model_time_ms: None,
+            quality: collide_core::agent::UsageQuality::Exact,
+        }
+    }
+
+    #[test]
+    fn a_phase_record_is_written_replaced_and_read_back() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.phase_record("r", "p").unwrap(), None);
+        let first = PhaseRecord {
+            usage: Some(usage(5)),
+            failure: None,
+            report: None,
+        };
+        store.set_phase_record("r", "p", &first).unwrap();
+        assert_eq!(store.phase_record("r", "p").unwrap(), Some(first));
+        let last = PhaseRecord {
+            usage: Some(usage(9)),
+            failure: Some("no_result".to_string()),
+            report: Some("done".to_string()),
+        };
+        store.set_phase_record("r", "p", &last).unwrap();
+        assert_eq!(store.phase_record("r", "p").unwrap(), Some(last));
+        assert_eq!(store.phase_record("r", "other").unwrap(), None);
+    }
+
+    #[test]
+    fn a_store_at_version_one_gains_the_phase_record_table() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 1);
+        let store = Store::open(dir.path()).unwrap();
+        assert!(table_exists(&raw(&store), "phase_records"));
+        assert_eq!(user_version(&raw(&store)), known_version());
     }
 
     #[test]

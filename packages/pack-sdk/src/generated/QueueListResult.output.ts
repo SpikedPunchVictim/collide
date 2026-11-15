@@ -32,6 +32,7 @@ export type QueueKind =
   | 'acknowledge'
   | 'review'
   | 'outcome_unknown'
+  | 'disk_full'
   | 'question'
 /**
  * What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title

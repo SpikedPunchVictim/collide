@@ -181,3 +181,24 @@ fn every_recording_is_valid_json_per_line_and_says_something() {
     }
     assert_eq!(seen, 21, "the recordings: add a test for a new one");
 }
+
+#[test]
+fn a_dump_env_step_and_a_grandchild_dump_env_step_write_the_environment_each_process_has() {
+    let root = TempRoot::new();
+    let child = root.join("child-env.json");
+    let grandchild = root.join("grandchild-env.json");
+    let path = script(
+        &root,
+        &[
+            &json!({"dump_env": child}).to_string(),
+            &json!({"grandchild_dump_env": grandchild}).to_string(),
+        ],
+    );
+    let mut fake = FakeClaude::start(&root, &path);
+    fake.close_stdin();
+    assert_eq!(fake.finish().code, Some(0));
+    for dumped in [&child, &grandchild] {
+        let env: Value = serde_json::from_str(&fs::read_to_string(dumped).unwrap()).unwrap();
+        assert!(env.get("HOME").is_some(), "{dumped:?}: {env}");
+    }
+}

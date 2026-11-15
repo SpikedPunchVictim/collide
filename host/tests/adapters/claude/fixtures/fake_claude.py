@@ -11,6 +11,9 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
     {"stderr": "..."}       write the text to stderr as one line
     {"expect": {...}}       read one line of stdin and check it holds this JSON (see below)
     {"wait_eof": true}      read stdin until it closes
+    {"dump_env": "path"}    write this process's environment to the file, as one JSON object
+    {"grandchild_dump_env": "path"}
+                            start a child that writes its own environment to the file, and wait for it
     {"exit": N}             exit with code N now
 
 `expect` is a subset match: every key in the expected object must be in the line, with a value that matches, and the
@@ -21,6 +24,8 @@ that is none of the above ends it with 96. After the last step the process waits
 """
 
 import json
+import os
+import subprocess
 import sys
 
 EXIT_STEP_UNKNOWN = 96
@@ -80,6 +85,14 @@ def main():
             expect(number, step["expect"])
         elif "wait_eof" in step:
             sys.stdin.read()
+        elif "dump_env" in step:
+            with open(step["dump_env"], "w") as out:
+                json.dump(dict(os.environ), out)
+        elif "grandchild_dump_env" in step:
+            subprocess.run(
+                [sys.executable, "-c", "import json, os, sys; json.dump(dict(os.environ), open(sys.argv[1], 'w'))", step["grandchild_dump_env"]],
+                check=True,
+            )
         elif "exit" in step:
             sys.stdout.flush()
             sys.exit(step["exit"])

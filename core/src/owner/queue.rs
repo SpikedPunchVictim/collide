@@ -40,6 +40,8 @@ pub enum QueueKind {
     Review,
     /// A step whose outcome is unknown after a restart (0.2): a person says.
     OutcomeUnknown,
+    /// A run paused because free space is under the floor (0.2, Durability): free some space, then resume, or stop.
+    DiskFull,
     /// An open question of the planning pack (`Decisions needed`, 0.11).
     Question,
 }

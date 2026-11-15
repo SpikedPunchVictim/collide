@@ -44,7 +44,7 @@
 //! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.subscribe` |
 //! | board | [`board`] | `board.list`, `board.open`, `board.init`, `board.trust` |
 //! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.preview`, `task.views`, `task.save_view`, `task.sections` |
-//! | run | [`run`] | `run.start`, `run.preview`, `run.list`, `run.get`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
+//! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
 //! | queue | [`queue`] | `queue.list`, `queue.context`, `queue.answer` |
 //! | workspace | [`workspace`] | `workspace.list`, `workspace.remove`, `workspace.resume` |
 //! | config | [`config`] | `config.get`, `config.set`, `config.pack_list`, `config.pack_add`, `config.pack_link`, `config.pack_enable` |
@@ -573,6 +573,9 @@ methods! {
     RunStart, "run.start", Run,
         "collide run, and Launch",
         RunStartParams, RunStartResult;
+    RunStartFile, "run.start_file", Run,
+        "collide run, for one task file with the built-in builder role in a new worktree (Stage 3b)",
+        RunStartFileParams, RunStartResult;
     RunPreview, "run.preview", Run,
         "0.11, the run preview that Launch shows before anything starts",
         RunPreviewParams, RunPreviewResult;

@@ -110,7 +110,7 @@ impl AgentAdapter for FakeAdapter {
         })
     }
 
-    fn session(&self, _request: &LaunchRequest) -> Box<dyn AgentSession> {
+    fn session(&self, _request: &LaunchRequest) -> Box<dyn AgentSession + Send> {
         Box::new(NormalizedSession::new())
     }
 
