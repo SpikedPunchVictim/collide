@@ -7,12 +7,22 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 17.** Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as
+**Status: revision 18.** Revision 18 adds planning quality checks from the Field mockup: a Decision log, an
+Assumption ledger, a coverage map, a kill criterion for spikes, a red-team pass and a session budget meter (owner,
+2026-11-15). Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as
 engineers (owner, 2026-11-15). Revision 16 shows Claude's versions as two chips in place of a Queue warning (owner,
 2026-11-15). Revision 15 takes two findings from the tokensafe research, and revision 14 puts features
 in proposals, both from the owner's decisions of 2026-11-14 (Review log). R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
 `.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
 starts. The owner accepted revision 13 (2026-11-14); Stage 2 is in progress.
+
+Revision 18 (2026-11-15) adopts the planning checks the owner reviewed as ideas on the Field mockup (A). A proposal
+gains a Decision log, with the alternatives each decision passed on and its evidence, an Assumption ledger and a
+Findings part. Collide derives a coverage map from features and `implements` links. A spike's pre-registration gains
+a kill criterion. A red-team pass, with a pre-mortem mode, reads a draft and writes nothing, and a Plan… session
+shows a budget meter that warns and never stops. A Readiness checklist gathers them as advice: Collide still refuses
+`proposed` only for a problem in the Features part. A panel of agents on one spike waits for Stage 15 (0.10, 0.11,
+Stages 4c, 9d and 15).
 
 Revision 17 (2026-11-15) picks shadcn/ui, on Radix and Tailwind, for the app, after the owner compared it with MUI
 on the Tracks mockup, and sets who the interface is for: Collide is a higher-level development environment, so its
@@ -1808,6 +1818,9 @@ Collide plays the lead, so it does all four, through the pack.
   - on a proposal, `features` (revision 14): each feature's `F<n>` id, title, section (empty when unsorted) and
     summary, read from the body's Features part, and `featureProblems`: each line of that part that did not parse,
     with its reason (0.10). A link's `to` may name a feature, as `pr-0003-km#F2`;
+  - on a proposal (revision 18), `decisions`, `assumptions` and `findings`, read from those parts of the body
+    (0.10), with `partProblems` for the lines that did not parse, and `coverage`, derived: its features that no
+    task implements and its included tasks that implement none;
   - `version`, required.
 
   See 0.10.
@@ -2214,6 +2227,28 @@ layout: { default: board, groupBy: category }
         issue's body reads as a file's does. Where a team keeps a feature as an issue of its own, its section is an
         `area:<name>` label (Stage 5) or a Projects v2 single-select field that `board.yaml` names (Stage 6c). That
         board key is optional and is added in Stage 6c, so no existing file changes.
+    - **A proposal's quality parts** (owner, 2026-11-15; revision 18), from the ideas on the Field mockup (A). They
+      use the Features part's entry form, `- **<letter><n> <title>**: <text>`, with continuation lines indented by
+      at least two spaces, and a continuation line may start with a label (`Passed on:`). Numbers count from 1 and
+      are not reused. A problem in one of these parts is reported on the item (`partProblems`, 0.8) and never
+      refuses a move: they are advice, and only the Features part gates `proposed`.
+      - **Decision log.** Entries `D<n>` in the Decision section. Labels: `Passed on:`, the alternatives not taken,
+        each with its reason; `Evidence:`, item ids, a feature as `pr-0003-km#F2`, or repo paths; `Revisit if:`,
+        what would reopen it; and, optional, `Confidence:` `low`, `medium` or `high`, the person's own and never
+        derived. An evidence id that names no item is a problem, and a cited spike shows its status. Text in the
+        section that is not an entry is kept and shown as written, so a Decision section written before revision
+        18 reads unchanged;
+      - **Assumption ledger.** A `## Assumptions` part with entries `A<n>`, each a claim the plan leans on.
+        Labels: `State:`, one of `unverified` (when the label is missing), `verified`, `contradicted` and
+        `accepted risk`, which the agent writes only on the person's word; `Evidence:`, as above; and `Spike:`, the
+        spike that would settle it;
+      - **Findings.** A `## Findings` part with `### Red-team` and `### Pre-mortem` headings and entries
+        `R<n> <severity> <title>`, where the severity is `high`, `medium` or `low`. Labels: `Target:`, an `F<n>`,
+        `D<n>` or `A<n>` of this proposal; then either `Accepted:`, with the change it made to the plan, or
+        `Dismissed:`, with the reason. A finding with neither is open;
+      - **coverage** is derived, never written: the proposal's features that no task implements, and the tasks the
+        proposal includes that implement no feature. Both break the link a feature's derived state needs, so a
+        feature with no task never shows progress.
     - A question holds its own decision once it is resolved (`resolved_by: human:<date>`).
     - Only a person accepts, defers, rejects or resolves. `collide/plan` refuses those ops from a run
       (`actor.kind: agent`), and refuses `accepted` while a question the proposal includes is open. An agent phase
@@ -2231,6 +2266,10 @@ layout: { default: board, groupBy: category }
       `results` and `concluded`; the others are for the spike workflow of Stage 9. A spike links to the
       epics it informs. The slice reads a spike as an item of kind `spike` only from Stage 4c; until then it reads
       only `epics/` (below).
+      A spike's pre-registration (revision 18) is a `## Pre-registration` part of its record, with the labels
+      `Hypothesis:`, `Cheapest test:`, `Kill criterion:` (the result that would end the idea, written before any
+      run) and `Budget:`. Approving it writes `preregistered:` with the part's hash. A later change to the part is
+      an amendment kept below the original, and the view shows that the hash no longer matches.
     - There are no decision or deferred files. The planning view's "Decisions made" lists the Decision sections of
       accepted proposals and resolved questions. A team system keeps its own decision kind through the role mapping;
   - **ids** (owner, 2026-11-13): a kind prefix, a number and a two-letter suffix, as in `ts-0012-ua`. Epics use
@@ -2506,11 +2545,36 @@ Details:
     `section` argument is required and may be empty (owner, 2026-11-14). The prompt has the agent run
     `collide sections` first and reuse a name in use. A new name is a product noun of one to three words, a board
     aims for about 5 to 12 sections, and a feature with no clear section goes in empty, to be sorted later;
+  - decisions go in the Decision section as Decision log entries, and assumptions in the Assumptions part (0.10;
+    revision 18). The prompt has the agent name at least one alternative each decision passed on, and cite
+    evidence for an assumption or leave it `unverified`;
   - the agent moves the proposal to `proposed` when it is ready. Ending the session leaves the proposal as it is.
     Plan… on a draft proposal starts a new session that reads the proposal and its items, not the old
     conversation;
   - everything stays private until Share (0.10). A diff in the session's worktree goes to review, as for New
-    session.
+    session;
+  - **a panel beside the terminal** (revision 18) follows the proposal's files live. Its Plan tab shows the
+    proposal and its status, the features, the spikes, the questions, the tasks and the Readiness checklist. Its
+    Quality tab shows the coverage map, the Decision log, the Assumption ledger, the findings and each spike's
+    pre-registration. Its buttons type a request into the terminal and write nothing themselves, except a
+    person's own ops (accept, answer a question), which take the drawer's path;
+  - **the Readiness checklist is advice** (owner, 2026-11-15): the Features part has no problems (the one line
+    Collide enforces, at `proposed`); no feature is Unsorted; every spike is concluded or dropped; no included
+    question is open (enforced at `accepted`); every feature has a task, and every task implements a feature;
+    each assumption is verified or an accepted risk; a red-team pass has run, with no open high finding; and every
+    decision names an alternative it passed on;
+  - **a red-team pass** (revision 18): a fresh agent, `collide-plan-red-team` from the planning pack, with
+    read-only tools, reads the draft and its items and reports findings, each with a severity and a target:
+    contradictions, unmeasured claims, work with no owner. Its second mode, the pre-mortem, assumes the plan failed
+    three months on and writes why, each story with a mitigation. The session's agent starts it on request and
+    writes its report into the Findings part. The person accepts a finding, and the agent makes the change and
+    writes `Accepted:`, or dismisses it with a reason. A pass that would start an agent shows the cost of the last
+    pass first, when there was one;
+  - **a budget meter** (revision 18) above the terminal shows the session's spend against its phase's budget,
+    and its elapsed time, from telemetry (0.13). A breakdown by part shows the session's agent, each red-team or
+    pre-mortem pass (its calls nest under its Agent call) and the spike runs started from the proposal. The meter
+    warns at 85% and the Queue at the budget, as for a take-over, and nothing stops the session, because the
+    person is at the keyboard.
 - **Menu bar** (owner, 2026-11-13). Closing the window leaves Collide in the menu bar, so the Queue stays in sight
   while runs go on:
   - the icon shows the live runs and a badge with the Queue count, and the menu shows the cache closest to going
@@ -3897,6 +3961,9 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   `renameSection {from, to}` over every proposal that uses `from`, which merges when `to` is in use and reports every
   file it changed in `apply`'s `items[]`. Each leaves the part without problems. The `proposal` kind gets its
   transitions, the person-only rule and `by:` (0.10), with the actor.
+- **Quality parts** (owner, 2026-11-15; revision 18): the provider reads the Decision log, the Assumptions and
+  Findings parts and a spike's Pre-registration part (0.10), reports their problems in `partProblems`, and derives
+  a proposal's `coverage`. The Decision log comes first, then the Assumption ledger.
 
 **Success Criteria**:
 - Planning:
@@ -3914,12 +3981,18 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   - a layout path outside the repo or under `.git/` is refused with the reason;
   - features (revision 14): `addFeature` with an empty section writes under `### Unsorted` with the next number;
     `renameSection` of `Pack` to `packs` over three proposals changes the three files, returns them in `items[]`,
-    and leaves each part without problems.
+    and leaves each part without problems;
+  - quality parts (revision 18): a fixture proposal with a decision that names no alternative, an evidence id that
+    names no item, an assumption with no `State:` and an open high finding lists them in `decisions`,
+    `assumptions` and `findings`, with the bad id in `partProblems`, and still moves to `proposed`. With three
+    features and two included tasks, one implementing a feature and one implementing none, `coverage` names the two
+    features with no task and the second task. A Decision section of plain text reads unchanged, with no problem.
 
 **Tests**:
 - Planning: parser fixtures, with strict plan CLI frontmatter left untouched, and S5's hazards (an unquoted
   `no`, a hash like `1e10`, a duplicate key, an alias bomb, a file over the cap); provider contract tests against
-  markdown and plan fixtures; id generation; view counts; layout checks.
+  markdown and plan fixtures; id generation; view counts; layout checks. Quality parts (revision 18): parser
+  fixtures for each part and the Pre-registration part, and coverage cases.
 **Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-004-qd`, items lettered `4c`
 (part L).
 
@@ -4512,15 +4585,19 @@ surfaces together.
     (0.11).
 - Command palette. Owner logs viewable.
 - **Planning** (owner, 2026-11-13):
-  - `collide/plan/spike` in a private proposal: pre-register, with a `human` phase that approves it; run; verify;
-    decide, with a `human` phase whose `show:` is the record; write back through the source's ops;
+  - `collide/plan/spike` in a private proposal: pre-register, with its kill criterion (revision 18) and a `human`
+    phase that approves it; run; verify; decide, with a `human` phase whose `show:` is the record and the result
+    set against the kill criterion; write back through the source's ops;
   - Plan… (0.11): a New session on a new private proposal, from the Planning view, an epic or a task, with the
     planning workflow's prompt; proposal statuses and the person-only ops (0.10);
   - task points fired from UI writes; the Queue lane from a view; checklist marking in the drawer, with agent
     suggestions shown with their evidence;
   - features (0.11; revision 14): Sort, with `query` and `show_groups` learning the features surface; its chips,
     applied through the feature ops (Stage 4c) with Undo; merging near-duplicate sections; and the naming rule in
-    Plan…'s prompt.
+    Plan…'s prompt;
+  - the quality checks (owner, 2026-11-15; revision 18; 0.11): the Plan… panel with its Readiness checklist,
+    coverage map, Decision log and Assumption ledger; the red-team pass and its pre-mortem mode, with
+    `collide-plan-red-team` in the planning pack; and the budget meter.
 
 **Success Criteria**:
 - **The in-app agent on Tracks** (owner, 2026-11-14):
@@ -4556,12 +4633,23 @@ surfaces together.
   reducer and tool tests (no model) show a Sort answer's groups and chips. Applying a move chip writes through
   `moveFeature`, and Undo restores the file byte for byte. Merging the pair leaves one section in
   `collide sections`. Plan…'s prompt names `collide sections` and the naming rule.
+- Quality checks (revision 18), with the fake adapter:
+  - a red-team pass on a fixture draft adds entries under `### Red-team`, the red-team agent's spans hold no write
+    call, and no other part of the proposal changes. Accepting a finding leaves an `Accepted:` line, and
+    dismissing one leaves `Dismissed:` with the reason. The pre-mortem mode writes under `### Pre-mortem`;
+  - the panel's Readiness lines match the fixture, and the agent's move to `proposed` succeeds while advice lines
+    fail;
+  - on scripted telemetry the meter warns at 85%, the Queue warns at the budget, and the session keeps running.
+    The breakdown puts the red-team pass's spend under its own part;
+  - approving a spike's pre-registration writes `preregistered:`, and an edit to the part after that shows as an
+    amendment. The decide step shows the result beside the kill criterion.
 
 **Tests**: The in-app agent's Tracks tools over the nine-run fixture and the real-agent contract test (opt-in).
 Planning: the spike workflow end to end with the fake adapter; Plan… with the fake adapter scripting the CLI
 calls; the person-only ops refused from a run; the Queue lane reducer; `protectedPaths` on checklist state and
 on a planning file's `status` and `by:` lines; point timeouts and failures outside a run. Features: Sort's reducer
-cases, chips and Undo over the twelve-feature fixture; the merge.
+cases, chips and Undo over the twelve-feature fixture; the merge. Quality checks: the red-team pass and its
+pre-mortem mode with the fake adapter; the Readiness lines; the meter's warning.
 **Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 10: Orchard loop end-to-end
@@ -4864,6 +4952,11 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - The token strategy preset as two profiles, and the before/after comparison at a fingerprint change (0.14).
 - Profile rules: the board's `profiles.rules` pick a run's profile by `when:` over the task (0.7).
 - The experiment UI (S6 scenario 7), with the preview's cost and duration estimate.
+- **Panel of agents** (owner, 2026-11-15; revision 18, from the Field mockup's ideas): agents of mixed models take
+  one spike's question as a `fanout` phase's `instances:` in their own worktrees, and see nothing of each other
+  until they finish. Their claims show side by side as agreed, split or raised by one agent, and a split or a
+  claim raised by one agent can be added to the spike as a check. A split is a reason to test, not a vote. It
+  waits for this stage's comparison.
 
 **Success Criteria**:
 - **Positive control:** arm B is arm A plus a known `sleep 60` in a dev CLI step that `ws-create` runs. The
@@ -5908,3 +6001,19 @@ managers, while still having the advanced features an engineer would expect."
   packages; MUI not used).
 - **Next:** the mockups get an approachable pass, Tracks first, before the app's theme is set; the component tree
   (`ts-0043-fr`) renders placeholders, so it does not wait for it.
+
+**Revision 18, 2026-11-15 (owner).** Planning quality checks, from the ideas on the Field mockup (A). The owner asked
+for more description of the ideas, then: "For Mockup A's decision, I Agree with all of your recs".
+- **Changed:** the status line and the revision summary; 0.8 (a proposal's `decisions`, `assumptions`, `findings`,
+  `partProblems` and `coverage`); 0.10 (the quality parts, coverage, and a spike's Pre-registration part with its
+  kill criterion); 0.11 (Plan…'s panel, the Readiness checklist, the red-team pass with its pre-mortem mode, the
+  budget meter); Stages 4c, 9d and 15.
+- **Owner's decisions:** adopt the coverage map; the Decision log, with the alternatives passed on and the evidence,
+  and confidence optional; the kill criterion; the Assumption ledger, built after the Decision log; the red-team
+  pass, in the planning pack, with the pre-mortem as its second mode; and the budget meter, a soft cap that warns at
+  85%, never stops an interactive session and breaks the spend down by part. The Readiness checklist stays advice:
+  Collide refuses `proposed` only for a problem in the Features part. The panel of agents waits for Stage 15.
+- **Choices made:** the parts reuse the Features part's entry form, and their problems never refuse a move;
+  confidence is the person's, never derived from the evidence; the red-team agent writes nothing and the session's
+  agent records its findings, so no new op is needed; the panel's buttons type into the terminal; the meter's cap
+  is the phase budget the take-over rule already warns at, and time is shown, not capped. Stage 2 is unchanged.
