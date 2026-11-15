@@ -15,11 +15,11 @@ use collide_core::shim::{ExitEnd, ExitRecord, SHIM_PROTOCOL};
 use collide_host::adapters::claude::session::ClaudeSession;
 use serde_json::{Value, json};
 
-fn session() -> ClaudeSession {
+pub(crate) fn session() -> ClaudeSession {
     ClaudeSession::new(assigned())
 }
 
-fn line(value: Value) -> Vec<u8> {
+pub(crate) fn line(value: Value) -> Vec<u8> {
     let mut bytes = serde_json::to_vec(&value).unwrap();
     bytes.push(b'\n');
     bytes
@@ -35,7 +35,7 @@ fn written(step: &Step) -> Vec<Value> {
         .collect()
 }
 
-fn events(step: &Step) -> Vec<AgentEvent> {
+pub(crate) fn events(step: &Step) -> Vec<AgentEvent> {
     step.events
         .iter()
         .map(|stamped| stamped.event.clone())
@@ -43,7 +43,7 @@ fn events(step: &Step) -> Vec<AgentEvent> {
 }
 
 /// The events of `played` that are not `Other`, in order.
-fn named(played: &Played) -> Vec<AgentEvent> {
+pub(crate) fn named(played: &Played) -> Vec<AgentEvent> {
     played
         .agent_events()
         .into_iter()
@@ -51,7 +51,7 @@ fn named(played: &Played) -> Vec<AgentEvent> {
         .collect()
 }
 
-fn exit_with(code: i32) -> ExitInfo {
+pub(crate) fn exit_with(code: i32) -> ExitInfo {
     ExitInfo {
         record: Some(ExitRecord {
             protocol: SHIM_PROTOCOL,
@@ -64,7 +64,7 @@ fn exit_with(code: i32) -> ExitInfo {
     }
 }
 
-fn allow_all(session: &mut ClaudeSession, event: &AgentEvent) -> Step {
+pub(crate) fn allow_all(session: &mut ClaudeSession, event: &AgentEvent) -> Step {
     match event {
         AgentEvent::PermissionRequest { request } => {
             session.answer(&request.id, PermissionReply::Allow {})
@@ -73,11 +73,11 @@ fn allow_all(session: &mut ClaudeSession, event: &AgentEvent) -> Step {
     }
 }
 
-fn answer_nothing(_: &mut ClaudeSession, _: &AgentEvent) -> Step {
+pub(crate) fn answer_nothing(_: &mut ClaudeSession, _: &AgentEvent) -> Step {
     Step::default()
 }
 
-fn turn_end(reason: TurnEndReason, cancel_requested: bool, empty: bool) -> AgentEvent {
+pub(crate) fn turn_end(reason: TurnEndReason, cancel_requested: bool, empty: bool) -> AgentEvent {
     AgentEvent::TurnEnd {
         reason,
         cancel_requested,
@@ -85,7 +85,7 @@ fn turn_end(reason: TurnEndReason, cancel_requested: bool, empty: bool) -> Agent
     }
 }
 
-fn report(text: &str) -> AgentEvent {
+pub(crate) fn report(text: &str) -> AgentEvent {
     AgentEvent::FinalReport {
         text: text.into(),
         source: FinalReportSource::ResultField,
@@ -108,7 +108,7 @@ fn request_line(request_id: &str, input: Option<Value>) -> Vec<u8> {
     line(json!({ "type": "control_request", "request_id": request_id, "request": request }))
 }
 
-fn result_line(fields: Value) -> Vec<u8> {
+pub(crate) fn result_line(fields: Value) -> Vec<u8> {
     let mut result = json!({
         "type": "result", "subtype": "success", "is_error": false, "result": "done",
         "stop_reason": "end_turn", "num_turns": 1,
@@ -741,14 +741,14 @@ fn an_error_result_is_never_the_report_and_ends_the_turn_as_an_error_with_the_st
     let mut session = session();
     let step = session.feed(
         &result_line(
-            json!({"is_error": true, "result": "You've hit your limit", "api_error_status": 429}),
+            json!({"is_error": true, "result": "API Error: 500", "api_error_status": 500}),
         ),
         2,
     );
     assert_eq!(
         events(&step),
         [turn_end(
-            TurnEndReason::Error { status: Some(429) },
+            TurnEndReason::Error { status: Some(500) },
             false,
             false
         )]
@@ -1111,8 +1111,8 @@ fn the_error_recording_is_an_error_turn_with_no_report_and_exit_code_1() {
 #[test]
 fn every_other_recording_is_read_to_its_end_with_one_session_bound_and_one_turn_end_and_nothing_dropped()
  {
-    // The recordings whose cases ts-0063-rw and ts-0064-hw read in full: here each is read to its end without a panic,
-    // and fake Claude exits as the recording says.
+    // The recordings whose cases are read in full by hooks.rs and results.rs (ts-0063-rw), and by ts-0064-hw for usage:
+    // here each is read to its end without a panic, and fake Claude exits as the recording says.
     for (name, code) in [
         ("limit", 0),
         ("blocked-prompt", 0),

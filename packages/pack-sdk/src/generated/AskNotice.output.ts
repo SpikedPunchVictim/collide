@@ -66,11 +66,19 @@ export type AgentEvent =
       type: 'limited'
     }
   | {
+      decision?: HookDecision | null
       event: string
       exit_code?: number | null
       name: string
       outcome: HookOutcome
       type: 'hook_call'
+    }
+  | {
+      cause: HookFailure
+      event: string
+      name: string
+      tool_call_id: string
+      type: 'hook_failed_open'
     }
   | {
       cause: RefusalCause
@@ -137,10 +145,19 @@ export type TurnEndReason =
  */
 export type FinalReportSource = 'result_field' | 'reconstructed'
 /**
+ * What a hook's own output decided, read from the `decision` it printed (0.3, The stream protocol). Only this word is
+ * kept: the output itself may hold secrets. `block` is a `PostToolUse` hook's, which leaves the tool's result as it was.
+ */
+export type HookDecision = 'allow' | 'deny' | 'ask' | 'block'
+/**
  * How a hook call ended, as the agent reports it (S9: `success`, `error` for an exit other than 0, `cancelled` for a
  * timeout).
  */
 export type HookOutcome = 'success' | 'error' | 'cancelled'
+/**
+ * How a hook that was meant to guard a tool call failed without stopping it (0.13, the failed-open detector).
+ */
+export type HookFailure = 'exit_error' | 'no_verdict'
 /**
  * Who refused a tool call, or why it did not run (0.3, The stream protocol). The adapter reads it from the tool's own
  * metadata and never from the result's text. `unknown` is any other shape of refusal.

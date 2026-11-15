@@ -269,3 +269,67 @@ fn a_journal_that_is_not_this_sessions_is_rejected_with_the_record() {
         "{error:?}"
     );
 }
+
+// ---- hooks, refusals and blocked prompts (ts-0063-rw) ----------------------------------------------------------------
+
+#[test]
+fn replayed_from_the_journal_the_hook_refusal_and_blocked_prompt_recordings_reach_the_live_state() {
+    for (name, turn) in [
+        ("hook-failure", "touch the file"),
+        ("hook-no-verdict", "touch the file"),
+        ("hook-deny-json", "touch the file"),
+        ("disallowed-tool", "touch the file"),
+        ("blocked-prompt", "do the task"),
+        ("limit", "go"),
+        ("error-result", "go"),
+    ] {
+        let played = play(name, assigned(), &[turn], allow_all);
+        assert_replay_reaches_the_live_state(&played);
+    }
+}
+
+#[test]
+fn the_failed_open_journal_cut_at_any_byte_replays_up_to_the_last_whole_record() {
+    cut_at_every_byte(&play(
+        "hook-failure",
+        assigned(),
+        &["touch the file"],
+        allow_all,
+    ));
+}
+
+#[test]
+fn a_journal_cut_between_the_failed_hook_and_the_tool_result_still_reports_the_failure_once_it_goes_on()
+ {
+    // The failed hook is session state until the call's result: a rebuilt session that is then fed the rest of the
+    // stream gives the failed-open event the live one did.
+    let played = play("hook-failure", assigned(), &["touch the file"], allow_all);
+    let read = read_journal(&played.journal);
+    let hooked = read
+        .records
+        .iter()
+        .position(|record| {
+            record.direction == Direction::Out
+                && String::from_utf8_lossy(&record.bytes).contains("hook_response")
+        })
+        .expect("the hook response is in the journal");
+    let cut = record_ends(&played.journal)[hooked];
+    let mut rebuilt = ClaudeSession::new(assigned());
+    replay_journal_bytes(&mut rebuilt, &played.journal[..cut]).unwrap();
+    let result = read
+        .records
+        .iter()
+        .find(|record| {
+            record.direction == Direction::Out
+                && String::from_utf8_lossy(&record.bytes).contains("tool_result")
+        })
+        .expect("the tool result is in the journal");
+    let step = rebuilt.feed(&result.bytes, 99);
+    assert!(
+        step.events
+            .iter()
+            .any(|e| matches!(e.event, AgentEvent::HookFailedOpen { .. })),
+        "{:?}",
+        step.events
+    );
+}

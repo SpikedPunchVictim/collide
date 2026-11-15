@@ -2,9 +2,9 @@
 //! the all-`unknown` table, the unknown-key cases, `Other`, and the generated schemas.
 
 use collide_core::agent::{
-    AgentEvent, CAPABILITY_NAMES, Capabilities, FinalReportSource, HookOutcome, Money,
-    PermissionOption, PermissionOptionKind, PermissionReply, PermissionRequest, RefusalCause,
-    SessionStart, ToolKind, TurnEndReason, Usage, UsageQuality, UsageScope,
+    AgentEvent, CAPABILITY_NAMES, Capabilities, FinalReportSource, HookDecision, HookFailure,
+    HookOutcome, Money, PermissionOption, PermissionOptionKind, PermissionReply, PermissionRequest,
+    RefusalCause, SessionStart, ToolKind, TurnEndReason, Usage, UsageQuality, UsageScope,
 };
 use collide_core::schema;
 use serde::Serialize;
@@ -222,6 +222,7 @@ fn a_hook_call_round_trips_and_leaves_out_an_exit_code_it_was_not_given() {
             event: "PreToolUse".into(),
             outcome: HookOutcome::Error,
             exit_code: Some(2),
+            decision: None,
         },
         json!({ "type": "hook_call", "name": "PreToolUse:Bash", "event": "PreToolUse", "outcome": "error", "exit_code": 2 }),
     );
@@ -231,6 +232,7 @@ fn a_hook_call_round_trips_and_leaves_out_an_exit_code_it_was_not_given() {
             event: "Stop".into(),
             outcome: HookOutcome::Cancelled,
             exit_code: None,
+            decision: None,
         },
         json!({ "type": "hook_call", "name": "Stop", "event": "Stop", "outcome": "cancelled" }),
     );
@@ -242,6 +244,62 @@ fn a_hook_call_has_no_place_for_the_hooks_output() {
     for key in ["stdout", "stderr", "output"] {
         let mut wire =
             json!({ "type": "hook_call", "name": "n", "event": "e", "outcome": "success" });
+        wire[key] = json!("secret");
+        let error = serde_json::from_value::<AgentEvent>(wire)
+            .expect_err(key)
+            .to_string();
+        assert!(error.contains(key), "{error}");
+    }
+}
+
+#[test]
+fn a_hook_call_carries_the_decision_its_output_gave_and_nothing_else_of_it() {
+    for (decision, wire) in [
+        (HookDecision::Allow, "allow"),
+        (HookDecision::Deny, "deny"),
+        (HookDecision::Ask, "ask"),
+        (HookDecision::Block, "block"),
+    ] {
+        round_trip(
+            AgentEvent::HookCall {
+                name: "PreToolUse:Bash".into(),
+                event: "PreToolUse".into(),
+                outcome: HookOutcome::Success,
+                exit_code: Some(0),
+                decision: Some(decision),
+            },
+            json!({ "type": "hook_call", "name": "PreToolUse:Bash", "event": "PreToolUse",
+                    "outcome": "success", "exit_code": 0, "decision": wire }),
+        );
+        round_trip(decision, json!(wire));
+    }
+}
+
+#[test]
+fn a_hook_that_failed_open_round_trips_with_each_cause() {
+    for (cause, wire) in [
+        (HookFailure::ExitError, "exit_error"),
+        (HookFailure::NoVerdict, "no_verdict"),
+    ] {
+        round_trip(
+            AgentEvent::HookFailedOpen {
+                name: "PreToolUse:Bash".into(),
+                event: "PreToolUse".into(),
+                tool_call_id: "toolu_01".into(),
+                cause,
+            },
+            json!({ "type": "hook_failed_open", "name": "PreToolUse:Bash", "event": "PreToolUse",
+                    "tool_call_id": "toolu_01", "cause": wire }),
+        );
+        round_trip(cause, json!(wire));
+    }
+}
+
+#[test]
+fn a_hook_that_failed_open_has_no_place_for_the_hooks_output() {
+    for key in ["stdout", "stderr", "output"] {
+        let mut wire = json!({ "type": "hook_failed_open", "name": "n", "event": "e",
+                               "tool_call_id": "c", "cause": "exit_error" });
         wire[key] = json!("secret");
         let error = serde_json::from_value::<AgentEvent>(wire)
             .expect_err(key)
@@ -448,6 +506,7 @@ fn an_unknown_key_fails_in_every_known_event() {
         json!({ "type": "limited", "reset_at_ms": 1 }),
         json!({ "type": "hook_call", "name": "n", "event": "e", "outcome": "success", "exit_code": 0 }),
         json!({ "type": "tool_refused", "id": "c", "cause": "hook" }),
+        json!({ "type": "hook_failed_open", "name": "n", "event": "e", "tool_call_id": "c", "cause": "no_verdict" }),
         json!({ "type": "other", "raw_type": "x" }),
     ];
     for mut event in events {
@@ -586,7 +645,7 @@ fn every_known_event_type_in_the_schema_reads_as_itself_not_as_other() {
                 .to_string()
         })
         .collect();
-    assert_eq!(tags.len(), 12);
+    assert_eq!(tags.len(), 13);
     for tag in &tags {
         let bare = json!({ "type": tag });
         if let Ok(AgentEvent::Other { raw_type, .. }) = serde_json::from_value::<AgentEvent>(bare) {

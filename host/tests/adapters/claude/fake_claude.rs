@@ -179,5 +179,5 @@ fn every_recording_is_valid_json_per_line_and_says_something() {
         assert!(!said(&path).is_empty(), "{}", path.display());
         seen += 1;
     }
-    assert_eq!(seen, 17, "the recordings: add a test for a new one");
+    assert_eq!(seen, 20, "the recordings: add a test for a new one");
 }

@@ -224,8 +224,18 @@
         },
         {
           "additionalProperties": false,
-          "description": "One hook call: its name (`PreToolUse:Bash`), the event it hooked (`PreToolUse`), how it ended and its exit code.\nThe hook's `stdout` and `stderr` are untrusted text that may hold secrets, so the event has no place for them\n(0.3, The stream protocol).",
+          "description": "One hook call: its name (`PreToolUse:Bash`), the event it hooked (`PreToolUse`), how it ended, its exit code and\nthe `decision` its output gave, when it gave one. The hook's `stdout` and `stderr` are untrusted text that may\nhold secrets, so the event has no place for them (0.3, The stream protocol).",
           "properties": {
+            "decision": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/HookDecision"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "event": {
               "type": "string"
             },
@@ -252,6 +262,36 @@
             "name",
             "event",
             "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool hook failed (`cause`) and the call it hooked, `tool_call_id`, ran anyway: a guard that did not guard\n(0.13). It is what a session can know about the detector; the finding, with its cost, is the metrics item's.",
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/HookFailure"
+            },
+            "event": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "tool_call_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "hook_failed_open",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "event",
+            "tool_call_id",
+            "cause"
           ],
           "type": "object"
         },
@@ -1126,6 +1166,16 @@
       ],
       "type": "string"
     },
+    "HookDecision": {
+      "description": "What a hook's own output decided, read from the `decision` it printed (0.3, The stream protocol). Only this word is\nkept: the output itself may hold secrets. `block` is a `PostToolUse` hook's, which leaves the tool's result as it was.",
+      "enum": [
+        "allow",
+        "deny",
+        "ask",
+        "block"
+      ],
+      "type": "string"
+    },
     "HookExperiment": {
       "additionalProperties": false,
       "description": "Inside an experiment: the experiment, the arm and the arm's directory, so a hook can skip a push (0.14).",
@@ -1146,6 +1196,21 @@
         "dir"
       ],
       "type": "object"
+    },
+    "HookFailure": {
+      "description": "How a hook that was meant to guard a tool call failed without stopping it (0.13, the failed-open detector).",
+      "oneOf": [
+        {
+          "const": "exit_error",
+          "description": "The hook exited with a code that is neither 0 nor the deliberate block, 2 (S9: exit 1).",
+          "type": "string"
+        },
+        {
+          "const": "no_verdict",
+          "description": "The hook timed out, so it gave no verdict.",
+          "type": "string"
+        }
+      ]
     },
     "HookOutcome": {
       "description": "How a hook call ended, as the agent reports it (S9: `success`, `error` for an exit other than 0, `cancelled` for a\ntimeout).",

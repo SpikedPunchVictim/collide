@@ -550,9 +550,11 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     An ACP session holds its handshake, request ids and pending permission requests.
   - **Normalized events:** message, tool call, permission request, `SessionBound`, `Usage`, `TurnEnd`,
     `FinalReport`, `Limited { reset_at_ms }` (a usage or rate limit, with its reset time when known),
-    `HookCall { name, event, outcome, exit_code }` (never the hook's `stdout` or `stderr`), `ToolRefused { id, cause }`
-    with `cause` one of `hook`, `host`, `rule`, `missing_tool` or `unknown`, and `Other` (revision 18 erratum, from
-    `ts-0060-mm`).
+    `HookCall { name, event, outcome, exit_code, decision }` (never the hook's `stdout` or `stderr`; `decision` is the
+    word the hook's output gave, when it gave one), `HookFailedOpen { name, event, tool_call_id, cause }` (a
+    `PreToolUse` or `PostToolUse` hook that timed out or exited with a code other than 0 or 2, and whose tool then
+    ran: the failed-open detector's observation, 0.13), `ToolRefused { id, cause }` with `cause` one of `hook`,
+    `host`, `rule`, `missing_tool` or `unknown`, and `Other` (revision 18 errata, from `ts-0060-mm` and `ts-0063-rw`).
   - **A session starts as `Assign(uuid)`, `AgentAssigned` or `Resume(id)`.** Claude supports the first and last; ACP
     the last two. The id is recorded on `SessionBound`: at once for Claude, on the `session/new` response for ACP. If
     the daemon dies between the spawn and `SessionBound`, the id is lost, and recovery lists sessions by working
@@ -2947,8 +2949,9 @@ Every run is a trace. The core needed for run state is always recorded; the reso
     - Oversized tool output shows in the tool result: `persistedOutputPath` when Bash output was cut and saved to a
       file, and the error `exceeds maximum allowed tokens` (with `is_error: null`) when an MCP result was dropped
       (measured S9). That error is Claude's own fixed text, not tool content.
-    - A hook that failed open is a `hook_response` with exit 1, or a `hook_no_verdict`, where the tool then ran: a
-      guard that did not guard. A call to a missing tool costs a turn and usually means the agent definition and
+    - A hook that failed open is a `HookFailedOpen` event: a `hook_response` that is `cancelled`, or `error` with an
+      exit code other than 2, or a `hook_no_verdict`, where the tool then ran: a guard that did not guard (Claude
+      treats exit 2 as a block and any other non-zero exit as a non-blocking error). A call to a missing tool costs a turn and usually means the agent definition and
       the prompt disagree (measured: S9's addendum, where the model called `Bash` after it was disallowed).
     - Hook denies and `PostToolUse` blocks are counts per hook and tool, not detectors: a guard doing its job is
       not a problem.

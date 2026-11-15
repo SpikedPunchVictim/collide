@@ -1,6 +1,7 @@
 //! The Claude session (0.3, Two core traits; The stream protocol): one per child, a sans-IO state machine. It holds what
-//! a Claude child needs remembered: the permission requests waiting for an answer, whether a cancel was sent, and how
-//! the last turn ended. `feed` is the stream parser measured by S1 and S9. The session reads no clock and opens no file;
+//! a Claude child needs remembered: the permission requests waiting for an answer, whether a cancel was sent, how
+//! the last turn ended, and, for the turn in flight, its calls without a result, its failed tool hooks and a blocked
+//! prompt. `feed` is the stream parser measured by S1 and S9. The session reads no clock and opens no file;
 //! the same input gives the same output, so a daemon restart rebuilds it from the shim's journal with `replay`.
 //!
 //! Every turn, the first included, is a `user` message on stdin, so `start` writes nothing: it reports the session id
@@ -10,11 +11,18 @@
 //!
 //! | the child writes | the session reads |
 //! |---|---|
-//! | `system/init` | nothing: the id was bound at `start`, and `init` comes again on every turn |
+//! | `system/init`, `system/hook_started` | nothing: the id was bound at `start` and `init` comes on every turn; `hook_response` has all that `hook_started` has |
 //! | `assistant` | a `Message` for each non-empty text block, a `ToolCall` for each `tool_use`; thinking is not an event |
-//! | `control_request` `can_use_tool` | a `PermissionRequest`, kept until `answer` |
-//! | `result` | a `FinalReport` from `result.result`, then a `TurnEnd` |
+//! | `control_request` `can_use_tool` | a `PermissionRequest`, kept until `answer`; a hook's `ask` carries the hook's text as its `reason` |
+//! | `system/hook_response` | a `HookCall`: name, event, outcome, exit code and the `decision` read from `stdout`; neither `stdout`, `stderr` nor `output` is kept |
+//! | `system/informational` with `hook_no_verdict` | nothing after a `cancelled` `hook_response`, which it names the call of; else the `HookCall` itself |
+//! | `system/informational` with `prompt_submit_outcome` | nothing: the turn's `result` ends `Blocked` with the hook's reason |
+//! | `user` with `tool_result` | a `ToolRefused` for a call that did not run, by the `tool_result_meta` entry with its id (never its text); a `HookFailedOpen` for a failed tool hook whose tool ran |
+//! | `result` | a `FinalReport` from `result.result`, then a `TurnEnd`; an error result gives no report, but its cost as a `RunningTotal` `Usage`, and a 429 a `Limited` |
 //! | anything else | an `Other` named by the line's `type`, and its `subtype` when it has one; no content is kept |
+//!
+//! `result.permission_denials` is never read: it lists hook, host, rule and auto denies alike, so it says nothing of
+//! who refused a call.
 //!
 //! What the session writes (stdin), for the calls that write:
 //!
@@ -31,8 +39,9 @@ use collide_core::adapter::{
     AgentSession, ExitInfo, Finished, PhaseFailure, PhaseOutcome, ReplayError, StampedEvent, Step,
 };
 use collide_core::agent::{
-    AgentEvent, FinalReportSource, PermissionReply, PermissionRequest, SessionStart, ToolKind,
-    TurnEndReason,
+    AgentEvent, FinalReportSource, HookDecision, HookFailure, HookOutcome, Money, PermissionReply,
+    PermissionRequest, RefusalCause, SessionStart, ToolKind, TurnEndReason, Usage, UsageQuality,
+    UsageScope,
 };
 use collide_core::journal::JournalRecord;
 use collide_core::replay::{Replayable, replay_records};
@@ -45,12 +54,36 @@ const DENY_WITHOUT_MESSAGE: &str = "The host denied this tool call.";
 /// `cancel()` is what interrupts it.
 const CANCELLED_REQUEST: &str = "The host cancelled this request.";
 
+/// The HTTP status of a usage limit (S1: a limit is an error result with 429).
+const USAGE_LIMIT_STATUS: u64 = 429;
+
+/// The exit code with which a hook blocks on purpose (S9).
+const HOOK_BLOCK_EXIT_CODE: i32 = 2;
+
 /// A permission request that has been asked and not answered. `input` is what an `allow` echoes back as
 /// `updatedInput`, and is `None` when the request carried none.
 #[derive(Debug, Clone, PartialEq)]
 struct Pending {
     id: String,
     input: Option<Value>,
+}
+
+/// A tool call that has been made and has no result yet. `tool` is what a hook's name is joined to.
+#[derive(Debug, Clone, PartialEq)]
+struct CallInFlight {
+    id: String,
+    tool: Option<String>,
+}
+
+/// A tool hook that failed without stopping its call, kept until the call's result says whether the tool ran.
+/// `call_id` is known only when the stream named the call (`hook_no_verdict` does); otherwise the hook is joined to a
+/// call by its tool's name.
+#[derive(Debug, Clone, PartialEq)]
+struct FailedHook {
+    name: String,
+    event: String,
+    cause: HookFailure,
+    call_id: Option<String>,
 }
 
 /// One Claude child's conversation.
@@ -64,6 +97,12 @@ pub struct ClaudeSession {
     gave_output: bool,
     /// How the last turn ended; `None` until one does, and again once a new turn is sent.
     last_turn: Option<TurnEndReason>,
+    /// The tool calls of the turn in flight that have no result yet.
+    calls: Vec<CallInFlight>,
+    /// The tool hooks of the turn in flight that failed, and whose call has no result yet.
+    failed_hooks: Vec<FailedHook>,
+    /// A hook blocked the prompt of the turn in flight: `Some(reason)`, the reason being the hook's own, if it gave one.
+    blocked: Option<Option<String>>,
 }
 
 impl ClaudeSession {
@@ -76,6 +115,9 @@ impl ClaudeSession {
             interrupts_written: 0,
             gave_output: false,
             last_turn: None,
+            calls: Vec::new(),
+            failed_hooks: Vec::new(),
+            blocked: None,
         }
     }
 
@@ -107,9 +149,10 @@ impl ClaudeSession {
                     _ => continue,
                 },
                 Some("tool_use") => match tool_call(block) {
-                    Some(call) => {
+                    Some((event, call)) => {
                         self.gave_output = true;
-                        call
+                        self.calls.push(call);
+                        event
                     }
                     None => other_event("assistant/tool_use"),
                 },
@@ -147,23 +190,241 @@ impl ClaudeSession {
         )]
     }
 
+    fn read_system(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+        match subtype(value) {
+            // The id was bound at `start`; `init` comes again on every turn.
+            Some("init") => Vec::new(),
+            // `hook_response` has the name, the outcome and the exit code that `hook_started` lacks.
+            Some("hook_started") => Vec::new(),
+            Some("hook_response") => self.read_hook_response(value, wall_ns),
+            Some("informational") => self.read_informational(value, wall_ns),
+            _ => vec![other(&type_name("system", value), wall_ns)],
+        }
+    }
+
+    fn read_hook_response(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+        let text = |key| value.get(key).and_then(Value::as_str);
+        let outcome = match text("outcome") {
+            Some("success") => Some(HookOutcome::Success),
+            Some("error") => Some(HookOutcome::Error),
+            Some("cancelled") => Some(HookOutcome::Cancelled),
+            _ => None,
+        };
+        let (Some(name), Some(event), Some(outcome)) =
+            (text("hook_name"), text("hook_event"), outcome)
+        else {
+            return vec![other("system/hook_response", wall_ns)];
+        };
+        let exit_code = value
+            .get("exit_code")
+            .and_then(Value::as_i64)
+            .and_then(|code| i32::try_from(code).ok());
+        if let Some(cause) = hook_failure(outcome, exit_code) {
+            self.note_failed_hook(name, event, cause, None);
+        }
+        // `stdout` is read for its decision and dropped; `stderr` and `output` are never read.
+        let decision = text("stdout").and_then(hook_decision);
+        vec![stamped(
+            Some(wall_ns),
+            AgentEvent::HookCall {
+                name: name.into(),
+                event: event.into(),
+                outcome,
+                exit_code,
+                decision,
+            },
+        )]
+    }
+
+    /// `system/informational` is a prompt a hook blocked, a hook that gave no verdict, or something else.
+    fn read_informational(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+        let blocked = value.get("prompt_submit_outcome");
+        let kind = blocked
+            .and_then(|outcome| outcome.get("kind"))
+            .and_then(Value::as_str);
+        if matches!(kind, Some("blocked_by_hook" | "stopped_by_hook")) {
+            self.blocked = Some(
+                blocked
+                    .and_then(|outcome| outcome.get("reason"))
+                    .and_then(Value::as_str)
+                    .map(String::from),
+            );
+            return Vec::new();
+        }
+        if value.get("tag").and_then(Value::as_str) == Some("hook_no_verdict") {
+            return self.read_no_verdict(value, wall_ns);
+        }
+        vec![other(&type_name("system", value), wall_ns)]
+    }
+
+    /// With `--include-hook-events` the timed-out hook has its own `hook_response` (`cancelled`) before this line, so
+    /// the line only says which call it was about. Without the flag it is all there is, and it names the event and the
+    /// call but not the hook.
+    fn read_no_verdict(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+        let info = value.get("hook_no_verdict");
+        let Some(event) = info
+            .and_then(|info| info.get("hook_event"))
+            .and_then(Value::as_str)
+        else {
+            return vec![other("system/informational", wall_ns)];
+        };
+        let call_id = info
+            .and_then(|info| info.get("tool_use_id"))
+            .and_then(Value::as_str);
+        let known = self.failed_hooks.iter_mut().find(|failed| {
+            failed.cause == HookFailure::NoVerdict
+                && failed.event == event
+                && failed.call_id.is_none()
+        });
+        if let Some(failed) = known {
+            failed.call_id = call_id.map(String::from);
+            return Vec::new();
+        }
+        self.note_failed_hook(event, event, HookFailure::NoVerdict, call_id);
+        vec![stamped(
+            Some(wall_ns),
+            AgentEvent::HookCall {
+                name: event.into(),
+                event: event.into(),
+                outcome: HookOutcome::Cancelled,
+                exit_code: None,
+                decision: None,
+            },
+        )]
+    }
+
+    /// Keeps a failed hook of a tool event until the call's result says whether the tool ran. Any other hook has no
+    /// call to have failed open on.
+    fn note_failed_hook(
+        &mut self,
+        name: &str,
+        event: &str,
+        cause: HookFailure,
+        call_id: Option<&str>,
+    ) {
+        if matches!(event, "PreToolUse" | "PostToolUse") {
+            self.failed_hooks.push(FailedHook {
+                name: name.into(),
+                event: event.into(),
+                cause,
+                call_id: call_id.map(String::from),
+            });
+        }
+    }
+
+    /// The `user` line that holds tool results: who refused a call that did not run, and whether a hook that failed
+    /// left the call to run.
+    fn read_user(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+        let results: Vec<&Value> = value
+            .pointer("/message/content")
+            .and_then(Value::as_array)
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|block| {
+                        block.get("type").and_then(Value::as_str) == Some("tool_result")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if results.is_empty() {
+            return vec![other("user", wall_ns)];
+        }
+        let metas = value.get("tool_result_meta").and_then(Value::as_array);
+        let mut events = Vec::new();
+        for result in results {
+            let Some(id) = result.get("tool_use_id").and_then(Value::as_str) else {
+                continue;
+            };
+            let is_error = result
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let meta = metas.and_then(|metas| {
+                metas
+                    .iter()
+                    .find(|meta| meta.get("id").and_then(Value::as_str) == Some(id))
+            });
+            let refusal = refusal_cause(meta, is_error);
+            if let Some(cause) = refusal {
+                events.push(AgentEvent::ToolRefused {
+                    id: id.into(),
+                    cause,
+                });
+            }
+            events.extend(self.settle_hooks(id, refusal.is_none()));
+        }
+        events
+            .into_iter()
+            .map(|event| stamped(Some(wall_ns), event))
+            .collect()
+    }
+
+    /// The call `id` has its result: each failed hook that belongs to it has failed open if the tool ran.
+    fn settle_hooks(&mut self, id: &str, ran: bool) -> Vec<AgentEvent> {
+        let tool = self
+            .calls
+            .iter()
+            .position(|call| call.id == id)
+            .and_then(|at| self.calls.remove(at).tool);
+        let (mine, rest): (Vec<FailedHook>, Vec<FailedHook>) =
+            std::mem::take(&mut self.failed_hooks)
+                .into_iter()
+                .partition(|failed| match &failed.call_id {
+                    Some(call_id) => call_id == id,
+                    None => tool.is_some() && tool.as_deref() == tool_of_hook(&failed.name),
+                });
+        self.failed_hooks = rest;
+        if !ran {
+            return Vec::new();
+        }
+        mine.into_iter()
+            .map(|failed| AgentEvent::HookFailedOpen {
+                name: failed.name,
+                event: failed.event,
+                tool_call_id: id.into(),
+                cause: failed.cause,
+            })
+            .collect()
+    }
+
+    /// What the turn in flight remembered about its calls, its hooks and a block.
+    fn forget_the_turn(&mut self) {
+        self.calls.clear();
+        self.failed_hooks.clear();
+        self.blocked = None;
+    }
+
     fn read_result(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
         let failed = is_failed_result(value);
+        let blocked = self.blocked.take();
         let reason = if self.cancel_requested {
             TurnEndReason::Cancelled {}
+        } else if let Some(reason) = &blocked {
+            TurnEndReason::Blocked {
+                reason: reason.clone(),
+            }
         } else {
             turn_end_reason(value, failed)
         };
         let mut events = Vec::new();
+        // An error result and a blocked prompt's result are never the phase's report: the first is an API failure and
+        // the second repeats the hook's message and the prompt (S1, S9).
         let report = value
             .get("result")
             .and_then(Value::as_str)
-            .filter(|text| !failed && !text.is_empty());
+            .filter(|text| !failed && blocked.is_none() && !text.is_empty());
         if let Some(text) = report {
             events.push(AgentEvent::FinalReport {
                 text: text.into(),
                 source: FinalReportSource::ResultField,
             });
+        }
+        if failed {
+            events.extend(session_cost(value));
+            if value.get("api_error_status").and_then(Value::as_u64) == Some(USAGE_LIMIT_STATUS) {
+                events.push(AgentEvent::Limited { reset_at_ms: None });
+            }
         }
         events.push(AgentEvent::TurnEnd {
             reason: reason.clone(),
@@ -172,6 +433,7 @@ impl ClaudeSession {
         });
         self.gave_output = false;
         self.last_turn = Some(reason);
+        self.forget_the_turn();
         events
             .into_iter()
             .map(|event| stamped(Some(wall_ns), event))
@@ -277,6 +539,7 @@ impl Replayable for ClaudeSession {
                 self.cancel_requested = false;
                 self.gave_output = false;
                 self.last_turn = None;
+                self.forget_the_turn();
             }
             Some("control_response") => {
                 let id = message
@@ -303,7 +566,8 @@ impl Replayable for ClaudeSession {
                 Some("assistant") => self.read_assistant(&value, wall_ns),
                 Some("control_request") => self.read_control_request(&value, wall_ns),
                 Some("result") => self.read_result(&value, wall_ns),
-                Some("system") if subtype(&value) == Some("init") => Vec::new(),
+                Some("system") => self.read_system(&value, wall_ns),
+                Some("user") => self.read_user(&value, wall_ns),
                 Some(kind) => vec![other(&type_name(kind, &value), wall_ns)],
                 None => vec![other("unparsed_line", wall_ns)],
             },
@@ -371,15 +635,21 @@ fn tool_kind(name: &str) -> ToolKind {
     }
 }
 
-fn tool_call(block: &Value) -> Option<AgentEvent> {
+/// The event for a `tool_use` block, and the call as the session keeps it until its result.
+fn tool_call(block: &Value) -> Option<(AgentEvent, CallInFlight)> {
     let id = block.get("id").and_then(Value::as_str)?;
     let tool = block.get("name").and_then(Value::as_str);
-    Some(AgentEvent::ToolCall {
+    let event = AgentEvent::ToolCall {
         id: id.into(),
         tool: tool.map(String::from),
         kind: tool.map_or(ToolKind::Other, tool_kind),
         input: block.get("input").filter(|input| !input.is_null()).cloned(),
-    })
+    };
+    let call = CallInFlight {
+        id: id.into(),
+        tool: tool.map(String::from),
+    };
+    Some((event, call))
 }
 
 /// The request as the host sees it. `input` is `None` when the request has none. `reason` is the hook's own text for
@@ -407,6 +677,98 @@ fn permission_request(id: &str, request: &Value) -> PermissionRequest {
     }
 }
 
+/// Who refused a tool call, from the `user` event's metadata for it (`meta`, the `tool_result_meta` entry with the
+/// call's id), never from the result's text (S9). `None` is a call that ran.
+/// - `non_execution_kind`, or a `reject` decision, says the call did not run, and `permission_decision.source` says who
+///   refused it: `hook`, `user_reject` (Collide's own deny) or `config` (a rule, or an auto-deny); any other source is
+///   `Unknown`;
+/// - an error with no metadata at all is a call to a tool the session does not have.
+fn refusal_cause(meta: Option<&Value>, is_error: bool) -> Option<RefusalCause> {
+    let Some(meta) = meta else {
+        return is_error.then_some(RefusalCause::MissingTool);
+    };
+    let decision = meta.get("permission_decision");
+    let rejected = decision
+        .and_then(|decision| decision.get("decision"))
+        .and_then(Value::as_str)
+        == Some("reject");
+    let did_not_run = meta
+        .get("non_execution_kind")
+        .is_some_and(|kind| !kind.is_null());
+    if !rejected && !did_not_run {
+        return None;
+    }
+    let source = decision
+        .and_then(|decision| decision.get("source"))
+        .and_then(Value::as_str);
+    Some(match source {
+        Some("hook") => RefusalCause::Hook,
+        Some("user_reject") => RefusalCause::Host,
+        Some("config") => RefusalCause::Rule,
+        _ => RefusalCause::Unknown,
+    })
+}
+
+/// How a hook that was meant to guard a call failed without stopping it, if it did (0.13). Exit 2 is the deliberate
+/// block, and 0 is a pass; a timeout is `cancelled`; any other exit code is a failure that lets the call go on (S9
+/// measured exit 1).
+fn hook_failure(outcome: HookOutcome, exit_code: Option<i32>) -> Option<HookFailure> {
+    match outcome {
+        HookOutcome::Success => None,
+        HookOutcome::Cancelled => Some(HookFailure::NoVerdict),
+        HookOutcome::Error if exit_code == Some(HOOK_BLOCK_EXIT_CODE) => None,
+        HookOutcome::Error => Some(HookFailure::ExitError),
+    }
+}
+
+/// The tool a hook is for, from its name: `PreToolUse:Bash` is for `Bash`.
+fn tool_of_hook(name: &str) -> Option<&str> {
+    name.split_once(':').map(|(_, tool)| tool)
+}
+
+/// The `decision` a hook printed on stdout, as Claude's two JSON forms write it: `hookSpecificOutput.permissionDecision`
+/// (`allow`, `deny`, `ask`) and the top-level `decision` (`approve`, `block`). Output that is not JSON, or says
+/// something else, has none.
+fn hook_decision(stdout: &str) -> Option<HookDecision> {
+    let output: Value = serde_json::from_str(stdout.trim()).ok()?;
+    let word = output
+        .pointer("/hookSpecificOutput/permissionDecision")
+        .or_else(|| output.get("decision"))?
+        .as_str()?;
+    match word {
+        "allow" | "approve" => Some(HookDecision::Allow),
+        "deny" => Some(HookDecision::Deny),
+        "ask" => Some(HookDecision::Ask),
+        "block" => Some(HookDecision::Block),
+        _ => None,
+    }
+}
+
+/// What an error result's `total_cost_usd` is: the session's running cost (S1), carried so the spend counts. Its
+/// tokens, and the cost of a turn that ended well, are the usage item's (`ts-0064-hw`).
+fn session_cost(result: &Value) -> Option<AgentEvent> {
+    let amount = result.get("total_cost_usd").and_then(Value::as_f64)?;
+    Some(AgentEvent::Usage {
+        usage: Usage {
+            scope: UsageScope::RunningTotal,
+            input: None,
+            output: None,
+            cache_read: None,
+            cache_write: None,
+            cache_write_1h: None,
+            cache_write_5m: None,
+            thought: None,
+            context_used: None,
+            context_size: None,
+            cost: Some(Money {
+                amount,
+                currency: "USD".into(),
+            }),
+            quality: UsageQuality::Exact,
+        },
+    })
+}
+
 /// A result that is an error: `is_error`, or a subtype other than `success`. Its `result` is never the phase's report
 /// (S1: a `result/success` with `is_error` is an API failure).
 fn is_failed_result(result: &Value) -> bool {
@@ -417,8 +779,8 @@ fn is_failed_result(result: &Value) -> bool {
     error || subtype(result).is_some_and(|subtype| subtype != "success")
 }
 
-/// The agent's own reason for the turn's end. A finer reading of an error result (a usage limit, a blocked prompt, a
-/// spent budget) is the parser's later work.
+/// The agent's own reason for the turn's end, from the result alone. A blocked prompt is known from the line before
+/// the result, and a usage limit from the status, so they are read in `read_result`.
 fn turn_end_reason(result: &Value, failed: bool) -> TurnEndReason {
     if failed {
         return match subtype(result) {

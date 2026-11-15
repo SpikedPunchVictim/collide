@@ -236,6 +236,27 @@ pub enum HookOutcome {
     Cancelled,
 }
 
+/// What a hook's own output decided, read from the `decision` it printed (0.3, The stream protocol). Only this word is
+/// kept: the output itself may hold secrets. `block` is a `PostToolUse` hook's, which leaves the tool's result as it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HookDecision {
+    Allow,
+    Deny,
+    Ask,
+    Block,
+}
+
+/// How a hook that was meant to guard a tool call failed without stopping it (0.13, the failed-open detector).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HookFailure {
+    /// The hook exited with a code that is neither 0 nor the deliberate block, 2 (S9: exit 1).
+    ExitError,
+    /// The hook timed out, so it gave no verdict.
+    NoVerdict,
+}
+
 /// Who refused a tool call, or why it did not run (0.3, The stream protocol). The adapter reads it from the tool's own
 /// metadata and never from the result's text. `unknown` is any other shape of refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -263,7 +284,7 @@ pub enum FinalReportSource {
 
 /// The `type` of every event but one that [`AgentEvent`] knows, as written in JSON. A test pins this list to the
 /// schema. A `type` outside it reads as [`AgentEvent::Other`].
-const KNOWN_EVENT_TYPES: [&str; 12] = [
+const KNOWN_EVENT_TYPES: [&str; 13] = [
     "message",
     "tool_call",
     "permission_request",
@@ -274,6 +295,7 @@ const KNOWN_EVENT_TYPES: [&str; 12] = [
     "final_report",
     "limited",
     "hook_call",
+    "hook_failed_open",
     "tool_refused",
     "other",
 ];
@@ -337,15 +359,25 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reset_at_ms: Option<u64>,
     },
-    /// One hook call: its name (`PreToolUse:Bash`), the event it hooked (`PreToolUse`), how it ended and its exit code.
-    /// The hook's `stdout` and `stderr` are untrusted text that may hold secrets, so the event has no place for them
-    /// (0.3, The stream protocol).
+    /// One hook call: its name (`PreToolUse:Bash`), the event it hooked (`PreToolUse`), how it ended, its exit code and
+    /// the `decision` its output gave, when it gave one. The hook's `stdout` and `stderr` are untrusted text that may
+    /// hold secrets, so the event has no place for them (0.3, The stream protocol).
     HookCall {
         name: String,
         event: String,
         outcome: HookOutcome,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         exit_code: Option<i32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decision: Option<HookDecision>,
+    },
+    /// A tool hook failed (`cause`) and the call it hooked, `tool_call_id`, ran anyway: a guard that did not guard
+    /// (0.13). It is what a session can know about the detector; the finding, with its cost, is the metrics item's.
+    HookFailedOpen {
+        name: String,
+        event: String,
+        tool_call_id: String,
+        cause: HookFailure,
     },
     /// A tool call that did not run, by the id of the [`AgentEvent::ToolCall`], and who refused it.
     ToolRefused {
