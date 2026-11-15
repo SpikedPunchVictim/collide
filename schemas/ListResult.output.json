@@ -284,16 +284,47 @@
         "fields"
       ],
       "type": "object"
+    },
+    "TaskInvalid": {
+      "additionalProperties": false,
+      "description": "`task.invalid`: something the source could not read as a task. Core turns it into a Queue item. `checkout` is\nnull for a source that is not ref-scoped.",
+      "properties": {
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "checkout",
+        "reason"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`list` result. `nextCursor` is set when there is another page.",
+  "description": "`list` result. `nextCursor` is set when there is another page. `invalid` holds each item the source could not\nread as a task, in the shape of `task.invalid` (owner, 2026-11-14).",
   "properties": {
     "collections": {
       "default": [],
       "items": {
         "$ref": "#/$defs/Collection"
+      },
+      "type": "array"
+    },
+    "invalid": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TaskInvalid"
       },
       "type": "array"
     },
@@ -312,7 +343,8 @@
   },
   "required": [
     "tasks",
-    "collections"
+    "collections",
+    "invalid"
   ],
   "title": "ListResult",
   "type": "object"

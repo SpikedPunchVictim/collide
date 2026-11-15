@@ -1929,7 +1929,8 @@ Why the plan adapter parses files itself:
 
 **Protocol** (JSON-RPC over stdio):
 
-- `initialize` receives the pack's settings (`config`, 0.7) and returns:
+- `initialize` receives the pack's settings (`config`, 0.7) and `root`, the main checkout's absolute path (owner,
+  2026-11-14; a provider never infers it from its working directory), and returns:
   - `scope`, `idPattern` and `shortIdPattern`
   - `templateFields`: the name and regex of each field templates may use (0.5)
   - `statuses`, each with a category, and for each category the status a category write produces (plan:
@@ -1941,7 +1942,9 @@ Why the plan adapter parses files itself:
     the category it moves to, if any) and optional role tags, which core treats as plain strings. A provider with
     one kind may omit `kinds`
   - `links`: the link types it holds, their direction, and whether they block
-- `list({ checkout?, cursor? })` returns tasks and collections. `get({ id, checkout? })`.
+- `list({ checkout?, cursor? })` returns tasks, collections and `invalid[]`, each item it could not read as
+  `{path, checkout, reason}`, the shape of `task.invalid` (owner, 2026-11-14). `get({ id, checkout? })` returns the
+  task, or no task when no item has that id: a missing id is an answer, not an error (owner, 2026-11-14).
 - `watch({ checkouts })` sends notifications: `task.collision`, `source.stale`, and (owner, 2026-11-13; S11):
   - `task.changed {key, version, from, to, diff, cause, actor?, automated?, checkout?}`, where `cause` is
     `head | worktree | remote | journal | startup`, `actor` is the source's own when it is known (GitHub events,

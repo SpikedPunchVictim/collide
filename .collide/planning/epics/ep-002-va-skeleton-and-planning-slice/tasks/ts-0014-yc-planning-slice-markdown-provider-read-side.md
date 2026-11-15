@@ -1,7 +1,7 @@
 ---
 id: ts-0014-yc
 kind: task
-status: ready
+status: done
 title: "Planning slice: markdown provider, read side"
 owners: []
 links:
@@ -34,3 +34,7 @@ Write first: provider contract tests over fixture items (run the provider over s
 - IMPLEMENTATION_PLAN.md, 0.10 (the markdown provider's layout, kinds and ids, frontmatter, Collide's own build tasks), 0.9 (YAML and frontmatter are untrusted input), Stage 2: Skeleton, Planning slice. Spike S5's record for the parser findings.
 - Area: `packs/plan` (the provider, TypeScript, run by `node`).
 - Done when the criteria hold, including `list` over this repository's own `epics/`.
+- Body cap: 256 KiB (262,144 bytes), five times the largest record in this repo (51 KB) and small enough that one `get` reply stays reasonable. The frontmatter cap is 64 KiB, as S5 suggests. Both are checked from the file's head and size, so a file over either cap is never read whole. `list` leaves `body` out (every item comes in one reply), and `get` returns it.
+- Choices the plan leaves open: a task's key is `plan:<id>`; scope is `ref`; an epic has the same five statuses as a task; frontmatter keys other than the seven named ones are kept in `fields` and must be a string, a boolean or a list of strings (a number is refused, so an unquoted hash is caught); of two files with one id the first in path order is the item; an epic folder must start with an epic id; symbolic links are not followed.
+- For `ts-0029-ea` (bundling): `yaml` 2.9.1 is a runtime dependency of the pack, and so is `@collide/pack-sdk`, which resolves through its built `dist/`. `packs/plan`'s `test` and `typecheck` scripts build the SDK first (`pnpm sdk`).
+- Owner decisions (owner, 2026-11-14): `initialize` receives `root`, the main checkout's absolute path, and the provider reads `<root>/.collide/planning` from it, never from its working directory (`list` and `get` fail until `initialize` has run); `list` returns `invalid[]` (`{path, checkout, reason}`, the `task.invalid` shape) beside tasks and collections; `get` returns no task for an unknown id, as an answer and not an error. Core: `InitializeParams.root` is required, `ListResult.invalid` defaults to empty like `collections`, `GetResult.task` is optional. The provider is `packs/plan/src/main.ts`, run by `node`; `checkout` is ignored for now and written back as null on `invalid`; unknown kinds and broken links are listed as they are and counted on stderr.

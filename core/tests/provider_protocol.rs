@@ -75,10 +75,16 @@ fn initialize_result() -> Value {
 // Provider messages, one round trip each.
 
 #[test]
-fn initialize_params_carry_the_packs_config() {
-    round_trip::<InitializeParams>(
-        json!({ "config": { "layout": { "root": ".collide/planning" } } }),
+fn initialize_params_carry_the_packs_config_and_the_root() {
+    let params: InitializeParams = round_trip(
+        json!({ "config": { "layout": { "root": ".collide/planning" } }, "root": "/work/repo" }),
     );
+    assert_eq!(params.root, "/work/repo");
+}
+
+#[test]
+fn initialize_params_require_the_root() {
+    refused::<InitializeParams>(json!({ "config": {} }));
 }
 
 #[test]
@@ -100,16 +106,44 @@ fn list_params_and_result_round_trip() {
             "title": "Skeleton",
             "groups": [{ "name": "contracts", "tasks": ["plan:0009", "plan:0010"] }]
         }],
+        "invalid": [],
         "nextCursor": "c-3"
     }));
     assert_eq!(result.tasks.len(), 1);
 }
 
 #[test]
+fn list_result_carries_invalid_items_in_the_task_invalid_shape() {
+    let result: ListResult = round_trip(json!({
+        "tasks": [],
+        "collections": [],
+        "invalid": [
+            { "path": ".collide/planning/epics/ep-002-va/tasks/x.md", "checkout": null, "reason": "id does not match" },
+            { "path": "a.md", "checkout": "main", "reason": "duplicate" }
+        ]
+    }));
+    assert_eq!(result.invalid.len(), 2);
+    assert_eq!(result.invalid[1].checkout.as_deref(), Some("main"));
+    let without: ListResult = serde_json::from_value(json!({ "tasks": [] })).unwrap();
+    assert!(without.invalid.is_empty());
+    refused::<ListResult>(
+        json!({ "tasks": [], "invalid": [{ "path": "a.md", "checkout": null }] }),
+    );
+}
+
+#[test]
 fn get_params_and_result_round_trip() {
     round_trip::<GetParams>(json!({ "id": "ts-0010-yb" }));
     round_trip::<GetParams>(json!({ "id": "ts-0010-yb", "checkout": "main" }));
-    round_trip::<GetResult>(json!({ "task": task() }));
+    let found: GetResult = round_trip(json!({ "task": task() }));
+    assert!(found.task.is_some());
+}
+
+#[test]
+fn get_result_without_a_task_round_trips() {
+    let missing: GetResult = round_trip(json!({}));
+    assert!(missing.task.is_none());
+    assert_eq!(serde_json::to_value(&missing).unwrap(), json!({}));
 }
 
 #[test]
@@ -472,7 +506,7 @@ fn an_unknown_key_in_initialize_is_refused() {
     let mut in_op = initialize_result();
     in_op["ops"][0]["extra"] = json!(1);
     refused::<InitializeResult>(in_op);
-    refused::<InitializeParams>(json!({ "config": {}, "extra": 1 }));
+    refused::<InitializeParams>(json!({ "config": {}, "root": "/work/repo", "extra": 1 }));
 }
 
 #[test]

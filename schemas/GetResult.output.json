@@ -243,14 +243,19 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "`get` result. `task` is absent when no item has the id: a missing id is an answer, not an error (owner,\n2026-11-14).",
   "properties": {
     "task": {
-      "$ref": "#/$defs/Task"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Task"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "required": [
-    "task"
-  ],
   "title": "GetResult",
   "type": "object"
 }

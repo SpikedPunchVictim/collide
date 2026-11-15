@@ -10,10 +10,12 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
 
 /**
- * `list` result. `nextCursor` is set when there is another page.
+ * `list` result. `nextCursor` is set when there is another page. `invalid` holds each item the source could not
+ * read as a task, in the shape of `task.invalid` (owner, 2026-11-14).
  */
 export interface ListResult {
   collections: Collection[]
+  invalid: TaskInvalid[]
   nextCursor?: string | null
   tasks: Task[]
 }
@@ -32,6 +34,15 @@ export interface Collection {
 export interface CollectionGroup {
   name: string
   tasks: string[]
+}
+/**
+ * `task.invalid`: something the source could not read as a task. Core turns it into a Queue item. `checkout` is
+ * null for a source that is not ref-scoped.
+ */
+export interface TaskInvalid {
+  checkout: string | null
+  path: string
+  reason: string
 }
 /**
  * One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`

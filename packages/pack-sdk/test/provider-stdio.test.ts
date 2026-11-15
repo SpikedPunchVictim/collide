@@ -13,7 +13,7 @@ test('a provider written with the SDK answers over real stdin and stdout and exi
   const exited = new Promise<number | null>((resolve) => child.on('close', resolve))
 
   const requests = [
-    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { config: { create: true } } },
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { config: { create: true }, root: '/work/repo' } },
     { jsonrpc: '2.0', id: 2, method: 'get', params: { id: '#7' } },
     { jsonrpc: '2.0', id: 3, method: 'apply', params: { op: 'setStatus', args: {} } },
     { jsonrpc: '2.0', id: 4, method: 'watch', params: { checkouts: [] } },

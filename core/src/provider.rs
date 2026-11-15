@@ -39,12 +39,15 @@ use std::fmt;
 /// Op names that a provider may not declare. `move` is Share's (0.10); plan's `move --epic` is declared `rehome`.
 const RESERVED_OPS: &[&str] = &["move"];
 
-/// `initialize` params: the pack's settings (`config`, 0.7), already checked against the pack's own schema.
+/// `initialize` params: the pack's settings (`config`, 0.7), already checked against the pack's own schema, and
+/// `root`, the main checkout's absolute path (owner, 2026-11-14). A provider never infers the root from its working
+/// directory.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InitializeParams {
     #[serde(default)]
     pub config: BTreeMap<String, Value>,
+    pub root: String,
 }
 
 /// Whether one task has one state (`global`) or one state per checkout (`ref`).
@@ -177,13 +180,16 @@ pub struct ListParams {
     pub cursor: Option<String>,
 }
 
-/// `list` result. `nextCursor` is set when there is another page.
+/// `list` result. `nextCursor` is set when there is another page. `invalid` holds each item the source could not
+/// read as a task, in the shape of `task.invalid` (owner, 2026-11-14).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListResult {
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub collections: Vec<Collection>,
+    #[serde(default)]
+    pub invalid: Vec<TaskInvalid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
@@ -196,10 +202,13 @@ pub struct GetParams {
     pub checkout: Option<String>,
 }
 
+/// `get` result. `task` is absent when no item has the id: a missing id is an answer, not an error (owner,
+/// 2026-11-14).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetResult {
-    pub task: Task,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<Task>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

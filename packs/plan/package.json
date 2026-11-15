@@ -1,0 +1,20 @@
+{
+  "name": "@collide/pack-plan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sdk": "pnpm --filter @collide/pack-sdk build",
+    "test": "pnpm sdk && vitest run",
+    "typecheck": "pnpm sdk && tsc --noEmit"
+  },
+  "dependencies": {
+    "@collide/pack-sdk": "workspace:*",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

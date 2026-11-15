@@ -1,14 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`initialize` params: the pack's settings (`config`, 0.7), already checked against the pack's own schema.",
+  "description": "`initialize` params: the pack's settings (`config`, 0.7), already checked against the pack's own schema, and\n`root`, the main checkout's absolute path (owner, 2026-11-14). A provider never infers the root from its working\ndirectory.",
   "properties": {
     "config": {
       "additionalProperties": true,
       "default": {},
       "type": "object"
+    },
+    "root": {
+      "type": "string"
     }
   },
+  "required": [
+    "root"
+  ],
   "title": "InitializeParams",
   "type": "object"
 }

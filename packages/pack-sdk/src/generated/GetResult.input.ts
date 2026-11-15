@@ -9,8 +9,12 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
  */
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
 
+/**
+ * `get` result. `task` is absent when no item has the id: a missing id is an answer, not an error (owner,
+ * 2026-11-14).
+ */
 export interface GetResult {
-  task: Task
+  task?: Task | null
 }
 /**
  * One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`
