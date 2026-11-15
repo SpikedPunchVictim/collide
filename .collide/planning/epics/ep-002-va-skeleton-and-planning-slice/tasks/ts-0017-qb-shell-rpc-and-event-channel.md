@@ -1,7 +1,7 @@
 ---
 id: ts-0017-qb
 kind: task
-status: ready
+status: active
 title: "Shell rpc and event channel"
 owners: []
 links:
