@@ -1,7 +1,7 @@
 ---
 id: ts-0041-xf
 kind: task
-status: active
+status: done
 title: "host outlines: adapter, executors, supervisor, CLI"
 owners: []
 links:
