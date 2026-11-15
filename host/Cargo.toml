@@ -1,0 +1,13 @@
+[package]
+name = "collide-host"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "collide"
+path = "src/bin/collide.rs"
+
+[[bin]]
+name = "collide-daemon"
+path = "src/bin/collide-daemon.rs"

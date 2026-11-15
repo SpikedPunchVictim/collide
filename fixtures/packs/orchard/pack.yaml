@@ -1,0 +1,122 @@
+apiVersion: collide/v0
+name: orchard
+version: 0.1.0
+requires:
+  sdk: ">=0.1 <0.2"
+  tools:
+    - { name: node, version: ">=22.18" }
+    - { name: pnpm }
+    - { name: rush }
+  agents: [claude]                             # Claude-bound: see 0.3
+  modelName: "^[a-z]+$"                        # iter labels end in [a-z]+ (0.3)
+
+launch:                                        # asked in the run preview; reaches prompts and hooks as `launch`
+  review_budget: { type: integer, minimum: 1 } # its stop rules: the build brief carries it, approved by the owner
+
+workspaces:                                    # named implementations (0.4); cwd = line root; tasks[] on stdin
+  worktree:                                    # every hook returns { path, gitDir } (0.1)
+    create:                                                             # `dev worktree new`; name includes run.slug
+      script: hooks/ws-create.ts
+      timeout: 120m
+      grace: 60s
+      outputs: { mapCommit: { type: string } } # workspace state (0.5): the fingerprint's cache state reads it
+    sandbox: { script: hooks/ws-sandbox.ts, timeout: 120m }             # detached, installed worktree for mutants
+    line:    { script: hooks/ws-line.ts,    timeout: 120m }             # a line root or an experiment root
+    resume:  { script: hooks/ws-resume.ts,  timeout: 90m }              # `doctor --fix`, then `iter map-build`
+    doctor:  { script: hooks/ws-doctor.ts,  timeout: 5m }               # checks workspace state and rewrites it
+    remove:  { script: hooks/ws-remove.ts,  timeout: 15m }              # task workspaces, once the task is done at base
+    discard: { script: hooks/ws-discard.ts, timeout: 15m }              # sandbox and experiment kinds: lanes down,
+                                                                        # `git worktree remove`, delete the branch
+    cleanup: { script: hooks/lanes-down.ts, timeout: 5m }               # after interrupted / timed_out
+
+integrations:
+  merge-local: { script: hooks/merge-local.ts }  # local merge into the base ref, as the lead does today
+
+record:                                        # commits at the line root, under its lock
+  paths: [arch/**, .agents/review-feedback/**] # an upper bound: only the files a write or a phase touched
+  script: hooks/record.ts                      # places phase outputs, runs `plan generate`, commits
+
+protectedPaths: [.agents/**, tools/dev/**, tools/plan/**]   # flagged in review
+
+metrics:
+  import: { script: metrics/iter-timings.ts }  # iter lines from this run's worktrees (or the arm's file) → spans
+  processes: { script: metrics/lanes.ts }      # a workspace's lane containers and host server pids (from its lane
+                                               # records); the clone label alone spans all worktrees
+
+experiment:                                    # per-arm isolation for state the clone shares (0.14)
+  prepare: { script: hooks/exp-prepare.ts }    # copies the current codemaps into arm.dir
+  branchPrefix: scratch/collide-exp/           # the prototype board still lights `doing` tasks on these checkouts
+                                               # (its live view); accepted: an experiment's task shows as lit
+  env:
+    ORCHARD_ITER_TIMINGS: "{{ arm.dir }}/iter-timings.jsonl"
+    ORCHARD_CODEMAPS_DIR: "{{ arm.dir }}/codemaps"
+  appendOnly:                                  # other work appends here during an experiment
+    - "{{ git.commonDir }}/orchard-dev/iter-timings.jsonl"
+    - "{{ git.commonDir }}/orchard-dev/iter-shadow.jsonl"
+    - "{{ git.commonDir }}/orchard-dev/agents.jsonl"
+  unchanged: ["{{ git.commonDir }}/orchard-dev/codemaps"]
+
+roles:
+  builder:
+    agent: claude
+    definition: repo:.claude/agents/builder.md # from the snapshot; passed as collide-orchard-builder
+    model: fast                                # alias, resolved per user
+    budget: { usd: 20 }
+    env: { ORCHARD_ITER_AGENT: "{{ task.labelId }}-{{ phase.label }}" }   # labelId: a plan-provider template field
+  reviewer:
+    agent: claude
+    definition: repo:.claude/agents/reviewer.md
+    model: strong
+    readOnly: true                             # Collide checks HEAD and status unchanged outside phase.dir
+    env:
+      ORCHARD_ITER_AGENT: "{{ task.labelId }}-{{ phase.label }}"
+      ORCHARD_ITER_TIMINGS: "{{ phase.dir }}/timings.jsonl"
+  orchestrator:
+    agent: claude
+    definition: agents/orchestrator.md         # pack file: writes briefs, adjudicates, writes the round record
+    model: strong
+    readOnly: true                             # writes only to phase.dir; `record` commits its outputs
+
+prompts:
+  build: briefs/build.md.j2                    # carries launch.review_budget; `iter timings --write` gets --run
+  review-brief: briefs/review-brief.md.j2      # instructs the orchestrator to write a fresh brief per round
+  adjudicate: briefs/adjudicate.md.j2
+
+gates:
+  iter-evidence:                               # checks the agent's own iter run; does not re-run it
+    script: gates/iter-evidence.ts             # label, stage, exit 0, HEAD == phase end HEAD
+
+workflows:
+  loop:
+    accepts: { sources: [plan], fields: [labelId] }
+    workspace: orchard/worktree
+    integrate: orchard/merge-local
+    on_start: [{ op: setStatus, args: { category: active } }]                      # plan writes `doing`; then record
+    on_end:   [{ op: setStatus, args: { category: review }, when: 'outcome == "closed"' }]   # `in_review`
+    start: build
+    phases:                                    # without `then:`, the next phase in this order follows
+      build:      { role: builder, prompt: build, label: build, gates: [iter-evidence] }
+      brief:                                   # its adversarial brief template §§2–4: ranked claims, completeness list,
+        role: orchestrator                     # its review-bundle script, archived copy
+        prompt: review-brief
+        outputs: [review-brief.md]
+        record: true
+      review:
+        role: reviewer
+        prompt: { artifact: brief/review-brief.md }
+        label: "r{{ round }}-{{ model.name }}"
+        sandbox: { models: [strong] }          # optional, per model: see below
+        fanout: { models: [strong, fast], when: "round == 1" }   # two reviewers, identical briefs
+      adjudicate:
+        role: orchestrator
+        prompt: adjudicate
+        outputs: [round-record.md, fix-brief.md]
+        record: true
+        then:                                  # a decision: reads the round record's **Next** line
+          script: workflow/next.ts
+          on: { fix: fix, close: close, stop: ask_human }
+      fix:   { role: builder, prompt: { artifact: adjudicate/fix-brief.md }, label: "fix{{ round }}", gates: [iter-evidence], then: brief }
+      close: { role: builder, prompt: { artifact: adjudicate/fix-brief.md }, label: close, gates: [iter-evidence], then: { end: closed } }
+
+providers:
+  plan: { script: providers/plan.ts }          # scope: ref; parses arch/ directly; writes via a line root's ./plan

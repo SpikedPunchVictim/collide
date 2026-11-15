@@ -22,3 +22,6 @@ dist/
 
 # Private notes: unredacted originals, the name key and the denylist (never public)
 private/
+
+# Tauri build output
+app/src-tauri/gen/

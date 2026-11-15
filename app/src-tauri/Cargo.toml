@@ -1,0 +1,11 @@
+[package]
+name = "collide-app"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+tauri = "2"
+
+[build-dependencies]
+tauri-build = "2"

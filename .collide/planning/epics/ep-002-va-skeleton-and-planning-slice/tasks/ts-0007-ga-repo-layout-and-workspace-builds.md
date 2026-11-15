@@ -1,7 +1,7 @@
 ---
 id: ts-0007-ga
 kind: task
-status: active
+status: done
 title: "Repo layout and workspace builds"
 owners: []
 links:
