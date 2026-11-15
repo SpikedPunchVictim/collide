@@ -2,7 +2,7 @@
 id: ts-0006-ze
 alias: R5
 kind: task
-status: review
+status: done
 title: "Adversarial review of revisions 10–12 (R5)"
 owners: []
 links:
@@ -22,6 +22,8 @@ Before the skeleton starts, independent reviewers (Fable and Opus, as in R1–R4
 ## Notes
 
 Owner, 2026-11-13. Reviewers are read-only and get the plan and records, not our conclusions.
+
+Owner, 2026-11-14: revision 13 accepted. Stage 2 may start.
 
 ## Ledger (revision 13)
 

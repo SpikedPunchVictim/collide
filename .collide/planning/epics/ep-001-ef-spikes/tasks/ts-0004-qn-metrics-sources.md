@@ -2,7 +2,7 @@
 id: ts-0004-qn
 alias: S8
 kind: task
-status: active
+status: done
 title: "S8: metrics sources"
 owners: []
 links: []
@@ -29,3 +29,6 @@ The record and its scripts go in a new spike folder under `.collide/planning/spi
 
 Results are in `sp-0010-bn` (2026-11-14), including three real runs measured part-way through (one with its lane
 containers). Still open: the sleep test (owner, `sleep-check.sh`) and a run measured from its start.
+
+Closed when the owner accepted revision 13 (2026-11-14). The sleep test moved to Stage 3b; a run measured
+from its start is in the plan's Deferred section.

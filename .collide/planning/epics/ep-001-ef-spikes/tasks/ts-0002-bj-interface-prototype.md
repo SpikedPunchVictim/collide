@@ -2,7 +2,7 @@
 id: ts-0002-bj
 alias: S6
 kind: task
-status: review
+status: done
 title: "S6: interface prototype"
 owners: []
 links: []

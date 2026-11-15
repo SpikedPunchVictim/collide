@@ -1,7 +1,7 @@
 ---
 id: ts-0005-st
 kind: task
-status: review
+status: done
 title: "Apply S5–S8 to the plan (revision 11)"
 owners: []
 links:

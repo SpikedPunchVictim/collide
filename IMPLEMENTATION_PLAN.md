@@ -9,7 +9,7 @@ Claims are labelled **measured** (observed, with the observation named), **infer
 
 **Status: revision 13.** R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
 `.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
-starts. Stage 2 may start once the owner accepts revision 13. Until then no product code is written.
+starts. The owner accepted revision 13 (2026-11-14); Stage 2 may start.
 
 Revision 13 (2026-11-14) applies R5, the adversarial review of revisions 10–12 by Fable and Opus (both verdicts:
 ready after fixes), and the owner's decisions on it:

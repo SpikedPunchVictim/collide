@@ -2,7 +2,7 @@
 id: ts-0001-cd
 alias: S5
 kind: task
-status: review
+status: done
 title: "S5: schema and expressions"
 owners: [claude-sonnet]
 links: []

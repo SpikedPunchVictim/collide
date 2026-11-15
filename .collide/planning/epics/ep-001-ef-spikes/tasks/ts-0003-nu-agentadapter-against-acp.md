@@ -2,7 +2,7 @@
 id: ts-0003-nu
 alias: S7
 kind: task
-status: review
+status: done
 title: "S7: AgentAdapter against ACP (paper check)"
 owners: [claude-sonnet]
 links: []
