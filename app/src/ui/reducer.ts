@@ -6,6 +6,9 @@
 // Every call that changes the screen takes a snapshot of the screen it replaced, and leaves a chip (0.11, Chips). Undo
 // puts that snapshot back and drops it, so it undoes the last change only, and a second Undo finds nothing. A call
 // that is valid but changes nothing leaves no chip and no snapshot, so it cannot hide the Undo of the call before it.
+// A person's own change to the screen drops the snapshot too, so Undo never discards a person's edit: the chip stops
+// offering it (`canUndo`). An action that leaves the screen equal, or does not touch it (selecting a task, loading the
+// corpus), keeps the Undo.
 import type { ActionError, ActionResult, AgentAction, UiAction, UserAction } from './actions.ts'
 import {
   type Chip,
@@ -41,6 +44,11 @@ const refused = (state: UiState, error: ActionError): ActionResult => ({ ok: fal
 const unchanged = (state: UiState): ActionResult => ({ ok: true, state, changed: false })
 const withState = (state: UiState, next: UiState): ActionResult =>
   next === state ? unchanged(state) : { ok: true, state: next, changed: true }
+
+/** Whether a chip may offer Undo: it is the change the snapshot belongs to, and a person's edit has not ended it. */
+export function canUndo(state: UiState, chipId: string): boolean {
+  return state.undo?.chip === chipId
+}
 
 /** The next state, and nothing else: the form a React `useReducer` takes. A refused action returns `state` itself. */
 export function reducer(state: UiState, action: UiAction): UiState {
@@ -111,9 +119,12 @@ function applyUser(state: UiState, action: UserAction): ActionResult {
   }
 }
 
-/** The state with `screen` in place, or the same state when the screen is equal, so a no-op is told by identity. */
+/**
+ * A person's change to the screen: the state with `screen` in place and the Undo ended, since Undo must never discard
+ * a person's edit. When the screen is equal it is the same state, so a no-op is told by identity and keeps the Undo.
+ */
 function setScreen(state: UiState, screen: ScreenState): UiState {
-  return sameScreen(state.screen, screen) ? state : { ...state, screen }
+  return sameScreen(state.screen, screen) ? state : { ...state, screen, undo: null }
 }
 
 function sameScreen(a: ScreenState, b: ScreenState): boolean {

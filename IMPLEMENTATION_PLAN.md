@@ -2629,7 +2629,9 @@ code files. It presents what it is told, and the agent does the analysis (0.3 fo
     the agent's words, are its title and its reasons. The chip also names the source (the agent and model, or
     "external client") and the time.
   - **Undo** restores exactly the view state that the change replaced, from a snapshot taken at that call, and undoes
-    the last change only. **Save as View** or **Save snapshot** is on the chip, as above.
+    the last change only. A person's own change to the view after it ends that Undo, and the chip stops offering it,
+    so Undo never discards a person's edit (owner, 2026-11-15). **Save as View** or **Save snapshot** is on the chip,
+    as above.
   - A lens made from task text alone carries the flag below.
 - **The ask box.**
   - It shows one line per tool call as it happens, written by Collide from the call (`query tasks: 12 rows`,
@@ -5874,6 +5876,8 @@ version."
   two chips and the published-version fetch); 0.11 (the run preview); Stage 3b (scope and a test); Stage 3c (the
   window); Stage 6b (the Agents page); Stage 9a (the Field's preview).
 - **Kept:** the tested range, the smoke check, the refusal when it fails, and the version in the fingerprint.
+- **Also (owner, 2026-11-15):** a person's change to the view ends the Undo of the agent's change before it (0.11),
+  the owner's answer to ts-0042's decision 3.
 - **Choices made in writing it** (the owner may change any): the published version is npm's `latest` dist-tag, with
   `stable` in the tooltip, because Claude Code's two update channels carry the same names (inferred); the fetch is daily and at start, carries
   no user data, and can be turned off per user; a version outside the range marks its chip rather than adding a

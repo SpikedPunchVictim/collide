@@ -6,6 +6,7 @@ import {
   type UiAction,
   type UiState,
   applyAction,
+  canUndo,
   initialState,
   reducer,
 } from '../src/ui/index.ts'
@@ -120,6 +121,89 @@ describe('Undo restores exactly the state a tool call replaced', () => {
     expect(again).toMatchObject({ ok: true, changed: false })
     expect(again.state).toBe(first)
     expect(applied(again.state, { type: 'user/undo' }).screen.field.filter).toEqual({})
+  })
+
+  describe("a person's own edit of the view ends the Undo of an agent change", () => {
+    const edits: Array<[string, UiAction]> = [
+      ['user/surface_shown', { type: 'user/surface_shown', surface: 'tracks' }],
+      ['user/filter_set', { type: 'user/filter_set', surface: 'tracks', filter: { status: ['failed'] } }],
+    ]
+
+    test.each(edits)('after %s, Undo leaves the edit in place and changes nothing', (_name, edit) => {
+      const changed = applied(loaded(), call('agent/set_view', setView))
+      const edited = applied(changed, edit)
+      expect(edited.screen).not.toEqual(changed.screen)
+      const result = applyAction(edited, { type: 'user/undo' })
+      expect(result).toMatchObject({ ok: true, changed: false })
+      expect(result.state).toBe(edited)
+    })
+
+    test('after user/lens_cleared, Undo leaves the edit in place and changes nothing', () => {
+      const changed = applied(loaded(), call('agent/show_groups', showGroups))
+      const edited = applied(changed, { type: 'user/lens_cleared', surface: 'field' })
+      expect(edited.screen.lens.field).toBeNull()
+      const result = applyAction(edited, { type: 'user/undo' })
+      expect(result).toMatchObject({ ok: true, changed: false })
+      expect(result.state).toBe(edited)
+      expect(result.state.screen.lens.field).toBeNull()
+    })
+
+    test('a screen edit drops the snapshot', () => {
+      const changed = applied(loaded(), call('agent/set_view', setView))
+      expect(applied(changed, { type: 'user/surface_shown', surface: 'tracks' }).undo).toBeNull()
+    })
+
+    test('the chip of the expired change is no longer undoable, and is not marked undone', () => {
+      const changed = applied(loaded(), call('agent/set_view', setView))
+      const chipId = changed.chips[0]?.id ?? ''
+      expect(canUndo(changed, chipId)).toBe(true)
+      const edited = applied(changed, { type: 'user/surface_shown', surface: 'tracks' })
+      expect(canUndo(edited, chipId)).toBe(false)
+      expect(edited.chips[0]?.undone).toBe(false)
+    })
+
+    test('a user action that leaves the screen equal keeps the Undo', () => {
+      const changed = applied(loaded(), call('agent/set_view', setView))
+      const noop = applyAction(changed, { type: 'user/surface_shown', surface: changed.screen.surface })
+      expect(noop).toMatchObject({ ok: true, changed: false })
+      expect(canUndo(noop.state, changed.chips[0]?.id ?? '')).toBe(true)
+      expect(applied(noop.state, { type: 'user/undo' }).screen.field.filter).toEqual({})
+    })
+
+    test('a no-op filter_set and lens_cleared keep the Undo', () => {
+      const changed = applied(loaded(), call('agent/set_view', setView))
+      const sameFilter = applyAction(changed, { type: 'user/filter_set', surface: 'field', filter: { status: ['open'] } })
+      expect(sameFilter).toMatchObject({ ok: true, changed: false })
+      const noLens = applyAction(sameFilter.state, { type: 'user/lens_cleared', surface: 'field' })
+      expect(noLens).toMatchObject({ ok: true, changed: false })
+      expect(applied(noLens.state, { type: 'user/undo' }).screen.field.filter).toEqual({})
+    })
+
+    test('selecting a task keeps the Undo', () => {
+      const changed = applied(loaded(), call('agent/set_view', setView))
+      const selected = applied(changed, { type: 'user/task_toggled', id: 'T-01' })
+      expect(canUndo(selected, changed.chips[0]?.id ?? '')).toBe(true)
+      expect(applied(selected, { type: 'user/undo' }).screen.field.filter).toEqual({})
+    })
+
+    test('loading the corpus keeps the Undo', () => {
+      const changed = applied(loaded(), call('agent/set_view', setView))
+      const reloaded = applied(changed, { type: 'user/corpus_loaded', corpus })
+      expect(canUndo(reloaded, changed.chips[0]?.id ?? '')).toBe(true)
+      expect(applied(reloaded, { type: 'user/undo' }).screen.field.filter).toEqual({})
+    })
+
+    test('a new agent change after the expiry is undoable again', () => {
+      const first = applied(loaded(), call('agent/set_view', setView))
+      const edited = applied(first, { type: 'user/surface_shown', surface: 'tracks' })
+      const second = applied(edited, call('agent/highlight', highlight))
+      const secondChip = second.chips[1]?.id ?? ''
+      expect(canUndo(second, secondChip)).toBe(true)
+      expect(canUndo(second, first.chips[0]?.id ?? '')).toBe(false)
+      const undone = applied(second, { type: 'user/undo' })
+      expect(undone.screen).toEqual(edited.screen)
+      expect(undone.chips[1]?.undone).toBe(true)
+    })
   })
 
   test('Undo does not reach the corpus or the tasks a person selected', () => {

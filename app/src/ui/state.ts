@@ -139,7 +139,10 @@ export interface Chip {
   readonly undone: boolean
 }
 
-/** The state a change replaced, taken at that call, for Undo (0.11). One deep: Undo undoes the last change only. */
+/**
+ * The state a change replaced, taken at that call, for Undo (0.11). One deep: Undo undoes the last change only, and a
+ * person's own change to the screen drops it.
+ */
 export interface UndoSnapshot {
   readonly chip: string
   readonly before: ScreenState
