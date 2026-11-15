@@ -1,7 +1,7 @@
 ---
 id: ts-0035-re
 kind: task
-status: active
+status: done
 title: "ui_tools methods, request event and manifest"
 owners: []
 links:
