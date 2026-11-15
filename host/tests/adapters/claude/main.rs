@@ -13,6 +13,8 @@ use serde_json::{Value, json};
 #[path = "../../common/mod.rs"]
 mod common;
 
+mod agent_setup;
+mod canary;
 mod capabilities;
 mod contract;
 mod fake;
@@ -23,13 +25,16 @@ mod launch;
 mod limits;
 mod metrics;
 mod pause;
+mod published;
 mod replay;
 mod results;
 mod session;
+mod settings_schema;
 mod snapshot;
 mod tool_results;
 mod usage;
 mod user_config;
+mod version;
 
 pub const ASSIGNED: &str = "7c1b0e52-9f3a-4d2e-8b61-0a5d3c9e4f17";
 

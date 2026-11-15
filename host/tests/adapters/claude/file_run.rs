@@ -4,7 +4,7 @@
 //! (so `models.yaml` is a fixture), git reads no configuration, and nothing here reads the owner's files. Every process
 //! the test starts is reaped by `Fixture`'s `Drop`.
 
-use super::fake::{fake_claude_script, recording, said};
+use super::fake::{BinarySpec, ClaudeBinary, recording, said};
 use super::{ASSIGNED, common};
 use collide_core::adapter::AgentSession;
 use collide_core::agent::{AgentEvent, SessionStart, Usage};
@@ -57,21 +57,30 @@ impl FreeSpace for FakeFree {
 }
 
 #[derive(Default)]
-struct Setup {
+pub(super) struct Setup {
     /// Shell lines run before the capture's command, as the owner's login shell would run its profile.
-    profile: String,
+    pub(super) profile: String,
     /// How long the capture takes.
-    capture_delay_secs: f32,
-    free: Option<Arc<FakeFree>>,
+    pub(super) capture_delay_secs: f32,
+    pub(super) free: Option<Arc<FakeFree>>,
+    /// What `claude --version` prints (2.1.325, in the tested range, when not set).
+    pub(super) version: Option<String>,
+    /// The recording the smoke check plays, for a version outside the range.
+    pub(super) smoke: Option<PathBuf>,
+    /// The fake `claude` does not pass its words on, so the settings it was given are never read.
+    pub(super) ignore_settings: bool,
+    /// What the daemon is given as its source of the published version.
+    pub(super) published: Option<collide_host::claude_versions::PublishedChoice>,
 }
 
-struct Fixture {
-    root: TempRoot,
-    daemon: Option<Daemon>,
-    phases: Phases,
-    client: OwnerClient,
-    repo: PathBuf,
-    task: PathBuf,
+pub(super) struct Fixture {
+    pub(super) claude: ClaudeBinary,
+    pub(super) root: TempRoot,
+    pub(super) daemon: Option<Daemon>,
+    pub(super) phases: Phases,
+    pub(super) client: OwnerClient,
+    pub(super) repo: PathBuf,
+    pub(super) task: PathBuf,
 }
 
 pub(super) fn git(dir: &Path, args: &[&str]) {
@@ -102,21 +111,21 @@ pub(super) fn git(dir: &Path, args: &[&str]) {
 
 impl Fixture {
     /// A daemon whose `claude` is fake Claude playing `recording_path`.
-    fn new(recording_path: &Path, setup: Setup) -> Fixture {
+    pub(super) fn new(recording_path: &Path, setup: Setup) -> Fixture {
         let root = TempRoot::new();
         let bin = root.join("bin");
         fs::create_dir(&bin).unwrap();
-        let wrapper = format!(
-            "#!/bin/sh\nexec {PYTHON} {} {}\n",
-            fake_claude_script().display(),
-            recording_path.display()
+        let claude = ClaudeBinary::write(
+            &bin,
+            &BinarySpec {
+                smoke: setup.smoke.as_deref(),
+                pass_words: !setup.ignore_settings,
+                ..BinarySpec::new(
+                    setup.version.as_deref().unwrap_or("2.1.325"),
+                    recording_path,
+                )
+            },
         );
-        let wrapper_path = bin.join("claude");
-        fs::write(&wrapper_path, wrapper).unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755)).unwrap();
-        }
         let shell = root.script(
             "fake-shell",
             &format!(
@@ -169,10 +178,15 @@ impl Fixture {
         if let Some(free) = setup.free {
             options.free_space = free;
         }
+        if let Some(published) = setup.published {
+            options.claude_published = published;
+            options.claude_refresh_every = Duration::from_secs(3600);
+        }
         let daemon = Daemon::start(options).expect("the daemon starts");
         let phases = daemon.phases();
         let client = OwnerClient::connect(daemon.paths(), "file-run-test").expect("connects");
         Fixture {
+            claude,
             root,
             daemon: Some(daemon),
             phases,
@@ -182,7 +196,7 @@ impl Fixture {
         }
     }
 
-    fn start_params(&self) -> RunStartFileParams {
+    pub(super) fn start_params(&self) -> RunStartFileParams {
         RunStartFileParams {
             repo: self.repo.to_str().unwrap().to_string(),
             task_file: self.task.to_str().unwrap().to_string(),
@@ -191,24 +205,24 @@ impl Fixture {
         }
     }
 
-    fn start(&mut self, params: &RunStartFileParams) -> RunStartResult {
+    pub(super) fn start(&mut self, params: &RunStartFileParams) -> RunStartResult {
         self.client
             .call("run.start_file", params, Some(Duration::from_secs(60)))
             .expect("the call is answered")
     }
 
-    fn started(&mut self) -> String {
+    pub(super) fn started(&mut self) -> String {
         match self.start(&self.start_params()) {
             RunStartResult::Started { run } => run,
             RunStartResult::Refused { problems } => panic!("refused: {problems:?}"),
         }
     }
 
-    fn key(run: &str) -> PhaseKey {
+    pub(super) fn key(run: &str) -> PhaseKey {
         PhaseKey::new(run, PHASE_NAME).unwrap()
     }
 
-    fn wait_final(&self, run: &str) -> PhaseState {
+    pub(super) fn wait_final(&self, run: &str) -> PhaseState {
         let key = Fixture::key(run);
         wait_until("the phase is final", Duration::from_secs(30), || {
             self.phases.state(&key).is_some_and(|state| {
@@ -224,27 +238,27 @@ impl Fixture {
         self.phases.state(&key).unwrap()
     }
 
-    fn wait_run(&self, run: &str, want: impl Fn(&RunState) -> bool) -> RunState {
+    pub(super) fn wait_run(&self, run: &str, want: impl Fn(&RunState) -> bool) -> RunState {
         wait_until("the run reaches its state", Duration::from_secs(30), || {
             self.phases.run_state(run).is_some_and(|state| want(&state))
         });
         self.phases.run_state(run).unwrap()
     }
 
-    fn paths(&self) -> DaemonPaths {
+    pub(super) fn paths(&self) -> DaemonPaths {
         DaemonPaths::under(self.root.path())
     }
 
-    fn workspace_dir(&self, run: &str) -> PathBuf {
+    pub(super) fn workspace_dir(&self, run: &str) -> PathBuf {
         self.root.join("data/workspaces").join(run)
     }
 
-    fn record(&self, run: &str) -> Option<PhaseRecord> {
+    pub(super) fn record(&self, run: &str) -> Option<PhaseRecord> {
         let store = collide_host::store::Store::open(&self.paths().store_dir).unwrap();
         store.phase_record(run, PHASE_NAME).unwrap()
     }
 
-    fn events(&self) -> Vec<EventBody> {
+    pub(super) fn events(&self) -> Vec<EventBody> {
         self.daemon
             .as_ref()
             .unwrap()
@@ -255,7 +269,23 @@ impl Fixture {
             .collect()
     }
 
-    fn queue(&mut self, run: &str) -> Vec<QueueItem> {
+    pub(super) fn queue_all(&mut self) -> Vec<QueueItem> {
+        let result: QueueListResult = self
+            .client
+            .call(
+                "queue.list",
+                &QueueListParams {
+                    board: None,
+                    run: None,
+                    kinds: vec![],
+                },
+                Some(Duration::from_secs(10)),
+            )
+            .unwrap();
+        result.items
+    }
+
+    pub(super) fn queue(&mut self, run: &str) -> Vec<QueueItem> {
         let result: QueueListResult = self
             .client
             .call(
@@ -337,7 +367,7 @@ fn last_usage_of(recording_path: &PathBuf) -> Usage {
     last.expect("the recording reports usage")
 }
 
-fn first_problem(result: RunStartResult) -> LaunchProblem {
+pub(super) fn first_problem(result: RunStartResult) -> LaunchProblem {
     match result {
         RunStartResult::Refused { mut problems } => problems.remove(0),
         other => panic!("expected a refusal, got {other:?}"),
@@ -494,9 +524,16 @@ fn a_phase_with_no_result_on_a_volume_over_the_floor_keeps_the_cause_no_result()
 /// A `claude` written in Python: it reads the first turn, writes the lines of the `report` recording, and then ends as
 /// `ending` says, so a test chooses whether its stdout ends before or after the process does.
 fn claude_ending(root: &TempRoot, ending: &str) -> PathBuf {
-    let lines: Vec<String> = said(&recording("report"))
-        .iter()
-        .map(|line| serde_json::to_string(line).unwrap())
+    // The canary a real `claude` writes for the snapshot's settings comes first, as the stream starts with it.
+    let canary = serde_json::json!({
+        "type": "system", "subtype": "hook_response", "hook_id": "h1", "hook_name": "SessionStart:startup",
+        "hook_event": "SessionStart", "output": "", "stdout": "",
+        "stderr": format!("{}\n", collide_host::adapters::claude::version::CANARY_MARKER),
+        "exit_code": 0, "outcome": "success",
+    });
+    let lines: Vec<String> = std::iter::once(canary)
+        .chain(said(&recording("report")))
+        .map(|line| serde_json::to_string(&line).unwrap())
         .collect();
     let script = root.join("claude.py");
     fs::write(
@@ -515,7 +552,10 @@ fn fixture_running(script: &Path) -> Fixture {
     let fx = Fixture::new(&recording("report"), Setup::default());
     fs::write(
         fx.root.join("bin/claude"),
-        format!("#!/bin/sh\nexec {PYTHON} {}\n", script.display()),
+        format!(
+            "#!/bin/sh\nif [ \"$*\" = \"--version\" ]; then echo \"2.1.325 (Claude Code)\"; exit 0; fi\nexec {PYTHON} {}\n",
+            script.display()
+        ),
     )
     .unwrap();
     fx

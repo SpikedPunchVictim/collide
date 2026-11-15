@@ -49,7 +49,8 @@
 //! [`collide_core::owner::MAX_MESSAGE_BYTES`]. The first request of a connection is `initialize`: the uid is checked
 //! first, then the token, then the protocol version, and a connection that fails any of them is answered once and
 //! closed, so an unauthenticated peer learns no version. A connection that says nothing for [`HANDSHAKE_WAIT`] is
-//! closed. Only `daemon.status`, `daemon.recapture_environment`, `run.stop`, `run.start_file` (a task file run with
+//! closed. Only `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions` (the `claude` version in use and
+//! the published one, [`crate::claude_versions`]), `run.stop`, `run.start_file` (a task file run with
 //! the built-in builder role, [`crate::file_run`]), `queue.list` and `queue.answer` (the stored Queue,
 //! [`crate::queue`]) are served here; the other
 //! methods are other items' and answer `method not found`.
@@ -89,6 +90,7 @@
 
 use crate::auth::{self, Admitted, Caller, Session, StdFs, SystemProcessTree, UnixPeer};
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
+use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
@@ -470,6 +472,11 @@ pub struct DaemonOptions {
     pub limit_min_pause: Duration,
     /// How often the sampler reads the clocks ([`crate::sampler::TICK`]). A test passes a short one.
     pub sampler_tick: Duration,
+    /// Where the published `claude` version comes from. `Off` (the default) never fetches: only the daemon's own binary
+    /// asks for the registry, and only when no root is overridden (ts-0068-wx).
+    pub claude_published: PublishedChoice,
+    /// How often the published version is fetched again ([`REFRESH_EVERY`]). A test passes a short one.
+    pub claude_refresh_every: Duration,
 }
 
 /// How often a limit's timer looks at the wall clock ([`DaemonOptions::limit_poll`]).
@@ -507,6 +514,8 @@ impl DaemonOptions {
             limit_poll: LIMIT_POLL,
             limit_min_pause: LIMIT_MIN_PAUSE,
             sampler_tick: TICK,
+            claude_published: PublishedChoice::Off,
+            claude_refresh_every: REFRESH_EVERY,
         }
     }
 }
@@ -536,6 +545,9 @@ struct Shared {
     previous_end: login::End,
     stop: AtomicBool,
     connections: AtomicUsize,
+    /// The version of `claude` and the published one; the thread that refreshes the second.
+    claude: Arc<ClaudeVersions>,
+    claude_refresher: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Shared {
@@ -610,6 +622,8 @@ impl Daemon {
             limit_poll,
             limit_min_pause,
             sampler_tick,
+            claude_published,
+            claude_refresh_every,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -681,6 +695,14 @@ impl Daemon {
         // File-task runs (ts-0065-kx). They wait for the first capture of the base environment, which is in `env`, and
         // they end their run and release their workspace in the phase-end hook, ahead of the hook the options carry.
         let env: Arc<Mutex<Option<BaseEnvironment>>> = Arc::new(Mutex::new(None));
+        let claude = ClaudeVersions::new(VersionsOptions {
+            refresh_every: claude_refresh_every,
+            home: home.clone(),
+            log: {
+                let log = log.clone();
+                Arc::new(move |text: &str| log.line(text))
+            },
+        });
         let file_runs = Arc::new(FileRuns::new(FileRunConfig {
             runs_dir: paths.runs_dir.clone(),
             workspaces_dir: workspaces_dir
@@ -705,6 +727,7 @@ impl Daemon {
             limit_poll,
             limit_min_pause,
             metrics: metrics.clone(),
+            claude: claude.clone(),
         }));
         let on_phase_pause: Option<PhasePauseHook> = {
             let runs = file_runs.clone();
@@ -787,11 +810,23 @@ impl Daemon {
             previous_end,
             stop: AtomicBool::new(false),
             connections: AtomicUsize::new(0),
+            claude,
+            claude_refresher: Mutex::new(None),
         });
 
         let capturing = shared.clone();
         spawn_named("collide-env-capture", move || {
-            capturing.capture_environment();
+            let captured = capturing.capture_environment();
+            // The version of `claude` is read at start, and the published one is fetched, once there is an
+            // environment to find the binary and the proxy in.
+            capturing.file_runs.read_claude_version(Duration::ZERO);
+            if let Some(source) = claude_published.source(captured.vars) {
+                let refresher = capturing.claude.start_refreshing(source);
+                *capturing
+                    .claude_refresher
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(refresher);
+            }
         })
         .map_err(|source| SocketError::Io {
             context: "could not start the environment capture's thread".to_string(),
@@ -887,6 +922,16 @@ impl Drop for Daemon {
         self.join();
         // The limit timers end first: one that is resuming a run needs the phases.
         self.shared.file_runs.shutdown();
+        self.shared.claude.stop();
+        let refresher = self
+            .shared
+            .claude_refresher
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(refresher) = refresher {
+            let _ = refresher.join();
+        }
         // The shims go on: they belong to no daemon. Only the daemon's watchers of them end.
         self.shared.phases.stop();
         // Whether the daemon ends because the login session does is the last thing it records.
@@ -1432,6 +1477,13 @@ fn call(
                 serde_json::to_value(DaemonRecaptureEnvironmentResult { capture })
                     .expect("a result is JSON"),
             )
+        }
+        Method::DaemonAgentVersions => {
+            // What is known now; a daemon whose capture has ended and that has read nothing yet reads the binary.
+            shared
+                .file_runs
+                .read_claude_version(shared.capture.timeout + CAPTURE_WAIT_MARGIN);
+            Ok(serde_json::to_value(shared.claude.status()).expect("a result is JSON"))
         }
         Method::RunStop => run_stop(shared, session, params),
         Method::RunStartFile => run_start_file(shared, session, params),

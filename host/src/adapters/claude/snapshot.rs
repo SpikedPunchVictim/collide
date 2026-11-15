@@ -5,7 +5,7 @@
 //!
 //! | file | what it holds |
 //! |---|---|
-//! | `settings.json` | `autoMemoryEnabled: false` (shared by every worktree of a repo, so one run's notes would reach another) and the canary: a no-op `SessionStart` hook whose absence from the first turn means `claude` ignored the file |
+//! | `settings.json` | `autoMemoryEnabled: false` (shared by every worktree of a repo, so one run's notes would reach another) and the canary: a `SessionStart` hook that writes a marker to stderr, whose absence from the first turn means `claude` ignored the file |
 //! | `agents.json` | the role's definition, under `collide-<pack>-<role>` |
 //! | `mcp.json` | the MCP servers the daemon passes, none by default |
 
@@ -57,14 +57,15 @@ fn render(value: &Value) -> String {
     text
 }
 
-/// Auto memory off, and the canary. `true` ignores its argument, so the command is a no-op that prints nothing: a
-/// `SessionStart` hook's output would otherwise become context.
+/// Auto memory off, and the canary: a `SessionStart` hook that writes its marker to stderr and nothing to stdout (a
+/// `SessionStart` hook's stdout becomes context; its stderr does not). The session reads the marker in the hook's
+/// `hook_response` ([`super::version::canary_started`]).
 fn settings() -> Value {
     json!({
         "autoMemoryEnabled": false,
         "hooks": {
             "SessionStart": [
-                { "hooks": [{ "type": "command", "command": format!("true {CANARY_MARKER}") }] }
+                { "hooks": [{ "type": "command", "command": format!("echo {CANARY_MARKER} >&2") }] }
             ]
         }
     })

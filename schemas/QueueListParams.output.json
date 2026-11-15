@@ -75,6 +75,11 @@
           "const": "question",
           "description": "An open question of the planning pack (`Decisions needed`, 0.11).",
           "type": "string"
+        },
+        {
+          "const": "agent_setup",
+          "description": "A phase the agent tool's setup stopped: a version outside the tested range whose smoke check failed, or settings\nthe tool ignored (0.3). The title says which, in Collide's words.",
+          "type": "string"
         }
       ]
     }

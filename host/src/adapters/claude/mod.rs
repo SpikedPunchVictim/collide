@@ -18,7 +18,7 @@
 //! | `claude: replay` | [`session::ClaudeSession`] `note_written` | what the session wrote, for `replay_records` |
 //! | `claude: version check` | [`version::read_version`], [`version::parse_version`] | `claude --version`, cached by path and modification time |
 //! | `claude: smoke check` | [`version::smoke_check`] | the one-turn check for a version outside the tested range |
-//! | `claude: settings canary` | [`version::canary_started`] | the no-op hook's `hook_started` event in the first turn |
+//! | `claude: settings canary` | [`version::canary_started`] | the canary hook's `hook_response` (it writes its marker to stderr) in the first turn |
 
 use collide_core::adapter::{
     AgentAdapter, AgentSession, CommandSpec, ConfigPath, ConfigRoot, EnvStrip, LaunchError,
@@ -129,7 +129,7 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn session(&self, request: &LaunchRequest) -> Box<dyn AgentSession + Send> {
-        Box::new(session::ClaudeSession::new(request.session.clone()))
+        Box::new(session::ClaudeSession::new(request.session.clone()).expecting_canary())
     }
 
     /// `.claude/**`, `CLAUDE.md` and `.mcp.json` below a checkout, and auto memory below the user's home (0.3). A

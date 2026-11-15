@@ -188,6 +188,8 @@ pub fn registry() -> Registry {
     registry.add::<owner::ConfigPackResult>();
     registry.add::<owner::ConfigSetParams>();
     registry.add::<owner::ConfigSetResult>();
+    registry.add::<owner::DaemonAgentVersionsParams>();
+    registry.add::<owner::DaemonAgentVersionsResult>();
     registry.add::<owner::DaemonRecaptureEnvironmentParams>();
     registry.add::<owner::DaemonRecaptureEnvironmentResult>();
     registry.add::<owner::DaemonStatusParams>();

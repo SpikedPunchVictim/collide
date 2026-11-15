@@ -1,9 +1,13 @@
 #!/usr/bin/python3
 """Fake Claude: replays a recorded stream-json script (ts-0062-rj).
 
-    fake_claude.py <recording.jsonl>
+    fake_claude.py [--emulate-hooks] <recording.jsonl> [the words of claude's own line]
 
-It ignores the rest of its command line, so it can stand in for `claude` under any launch line. The recording is a
+It ignores the words of claude's own line, so it can stand in for `claude` under any launch line. With `--emulate-hooks`
+it does what `claude` does at session start: it reads the file `--settings` names in those words and, for every
+`SessionStart` command hook in it, writes the `hook_started` and `hook_response` lines that `claude` writes, with the
+`stdout`, `stderr` and exit code of the command run by `/bin/sh -c`. A line with no `--settings` word, or whose file is
+unreadable, writes none: that is `claude` ignoring the settings (ts-0068-wx). The recording is a
 JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Every other line is one step, run in order:
 
     {"say": {...}}          write the object to stdout as one line of stream-json
@@ -76,8 +80,43 @@ def expect(number, want):
         stop(EXIT_MISMATCH, "step %d expects %s, got %s" % (number, json.dumps(want), json.dumps(got)))
 
 
+def session_start_commands(words):
+    """The commands of the `SessionStart` command hooks in the file `--settings` names in `words`."""
+    if "--settings" not in words or words.index("--settings") + 1 >= len(words):
+        return []
+    try:
+        with open(words[words.index("--settings") + 1]) as settings:
+            hooks = json.load(settings).get("hooks", {}).get("SessionStart", [])
+    except (OSError, ValueError):
+        return []
+    return [h["command"] for group in hooks for h in group.get("hooks", []) if h.get("type") == "command"]
+
+
+def emulate_session_start_hooks(words):
+    for number, command in enumerate(session_start_commands(words), 1):
+        base = {"hook_id": "hook-%d" % number, "hook_name": "SessionStart:startup", "hook_event": "SessionStart"}
+        write_line(sys.stdout, json.dumps(dict(base, type="system", subtype="hook_started"), separators=(",", ":")))
+        ran = subprocess.run(["/bin/sh", "-c", command], capture_output=True, text=True)
+        response = dict(
+            base,
+            type="system",
+            subtype="hook_response",
+            output=ran.stdout + ran.stderr,
+            stdout=ran.stdout,
+            stderr=ran.stderr,
+            exit_code=ran.returncode,
+            outcome="success" if ran.returncode == 0 else "error",
+        )
+        write_line(sys.stdout, json.dumps(response, separators=(",", ":")))
+
+
 def main():
-    for number, step in steps_of(sys.argv[1]):
+    words = sys.argv[1:]
+    emulate = bool(words) and words[0] == "--emulate-hooks"
+    if emulate:
+        words = words[1:]
+        emulate_session_start_hooks(words[1:])
+    for number, step in steps_of(words[0]):
         if "say" in step:
             write_line(sys.stdout, json.dumps(step["say"], separators=(",", ":")))
         elif "say_text" in step:

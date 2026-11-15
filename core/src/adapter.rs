@@ -77,6 +77,9 @@ pub enum PhaseFailure {
     Api { status: Option<u16> },
     /// The child exited and its stdout ended with no final result.
     NoResult,
+    /// A turn ended but the settings canary never appeared: Claude ignored Collide's settings, so its hooks and
+    /// permissions did not apply (0.3, Settings that fail validation are ignored silently under `-p`).
+    SettingsIgnored,
 }
 
 /// What a phase came to, which [`AgentSession::finish`] returns. A phase settles once the child has exited and its

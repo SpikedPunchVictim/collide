@@ -81,6 +81,10 @@ fn requests_of(step: &Step) -> Vec<PermissionRequest> {
         .collect()
 }
 
+/// The failure text of a phase that ran without Collide's settings ([`PhaseFailure::SettingsIgnored`]): the daemon reads
+/// it back from the phase's record to raise the Queue item.
+pub const SETTINGS_IGNORED_FAILURE: &str = "settings_ignored";
+
 /// The text of a failure as the store keeps it. An API error keeps its status (`api_500`), when the result had one.
 pub fn failure_text(cause: &PhaseFailure) -> String {
     if let PhaseFailure::Api {
@@ -98,6 +102,7 @@ pub fn failure_text(cause: &PhaseFailure) -> String {
         PhaseFailure::Blocked { .. } => "blocked",
         PhaseFailure::Api { .. } => "api",
         PhaseFailure::NoResult => "no_result",
+        PhaseFailure::SettingsIgnored => SETTINGS_IGNORED_FAILURE,
     };
     text.to_string()
 }
@@ -575,6 +580,10 @@ mod tests {
     #[test]
     fn a_failure_is_worded_for_the_store() {
         assert_eq!(failure_text(&PhaseFailure::NoResult), "no_result");
+        assert_eq!(
+            failure_text(&PhaseFailure::SettingsIgnored),
+            "settings_ignored"
+        );
         assert_eq!(
             failure_text(&PhaseFailure::Api { status: Some(529) }),
             "api_529"

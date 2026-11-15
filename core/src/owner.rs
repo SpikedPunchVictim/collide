@@ -41,7 +41,7 @@
 //!
 //! | family | module | methods |
 //! |---|---|---|
-//! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.subscribe` |
+//! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions`, `daemon.subscribe` |
 //! | board | [`board`] | `board.list`, `board.open`, `board.init`, `board.trust` |
 //! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.preview`, `task.views`, `task.save_view`, `task.sections` |
 //! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
@@ -534,6 +534,9 @@ methods! {
     DaemonRecaptureEnvironment, "daemon.recapture_environment", Daemon,
         "0.2, Recapture environment: the login-shell capture again, on request",
         DaemonRecaptureEnvironmentParams, DaemonRecaptureEnvironmentResult;
+    DaemonAgentVersions, "daemon.agent_versions", Daemon,
+        "0.3, Two version chips: the agent tool's version in use and the latest published, with the tested range",
+        DaemonAgentVersionsParams, DaemonAgentVersionsResult;
     DaemonSubscribe, "daemon.subscribe", Daemon,
         "0.2, the event channel: replay from a sequence number, then live `daemon.event` notices",
         DaemonSubscribeParams, DaemonSubscribeResult;

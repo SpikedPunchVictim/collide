@@ -202,3 +202,57 @@ fn a_dump_env_step_and_a_grandchild_dump_env_step_write_the_environment_each_pro
         assert!(env.get("HOME").is_some(), "{dumped:?}: {env}");
     }
 }
+
+// ---- session-start hooks (ts-0068-wx) ------------------------------------------------------------------------------
+
+fn settings_with_hook(root: &TempRoot, command: &str) -> String {
+    let path = root.join("settings.json");
+    let settings =
+        json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}});
+    fs::write(&path, settings.to_string()).unwrap();
+    path.to_str().unwrap().to_string()
+}
+
+#[test]
+fn with_emulate_hooks_it_runs_the_settings_session_start_hook_before_its_first_step() {
+    let root = TempRoot::new();
+    let settings = settings_with_hook(&root, "echo marker >&2");
+    let path = script(&root, &[r#"{"say": {"type": "after"}}"#]);
+    let mut fake =
+        FakeClaude::start_as_claude(&root, &path, true, &["-p", "--settings", &settings]);
+    fake.close_stdin();
+    let lines = all_lines(&mut fake);
+    assert_eq!(lines[0]["subtype"], "hook_started");
+    assert_eq!(lines[0]["hook_event"], "SessionStart");
+    assert_eq!(lines[1]["subtype"], "hook_response");
+    assert_eq!(lines[1]["stderr"], "marker\n");
+    assert_eq!(lines[1]["stdout"], "");
+    assert_eq!(lines[1]["outcome"], "success");
+    assert_eq!(lines[2], json!({"type": "after"}));
+    assert_eq!(fake.finish().code, Some(0));
+}
+
+#[test]
+fn a_hook_that_fails_is_reported_as_an_error_with_its_exit_code() {
+    let root = TempRoot::new();
+    let settings = settings_with_hook(&root, "exit 3");
+    let path = script(&root, &[]);
+    let mut fake = FakeClaude::start_as_claude(&root, &path, true, &["--settings", &settings]);
+    fake.close_stdin();
+    let lines = all_lines(&mut fake);
+    assert_eq!(lines[1]["outcome"], "error");
+    assert_eq!(lines[1]["exit_code"], 3);
+}
+
+#[test]
+fn without_a_settings_word_or_without_emulate_hooks_no_hook_runs() {
+    let root = TempRoot::new();
+    let settings = settings_with_hook(&root, "echo marker >&2");
+    let path = script(&root, &[r#"{"say": {"type": "after"}}"#]);
+    for (emulate, words) in [(true, vec!["-p"]), (false, vec!["--settings", &settings])] {
+        let mut fake = FakeClaude::start_as_claude(&root, &path, emulate, &words);
+        fake.close_stdin();
+        assert_eq!(all_lines(&mut fake), vec![json!({"type": "after"})]);
+        assert_eq!(fake.finish().code, Some(0));
+    }
+}

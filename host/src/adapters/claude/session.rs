@@ -285,6 +285,11 @@ pub struct ClaudeSession {
     /// leaves nothing for the next to be differenced from.
     cost_anchor: Option<f64>,
     time_anchor: Option<u64>,
+    /// The phase's settings carry the canary hook, so a turn that ends without its `hook_response` having been read is a
+    /// phase that ran without Collide's settings. Off for a session that is not a phase's (the smoke check).
+    expect_canary: bool,
+    /// The canary hook's `hook_response` has been read.
+    canary_seen: bool,
 }
 
 impl ClaudeSession {
@@ -309,7 +314,16 @@ impl ClaudeSession {
             limit: None,
             cost_anchor: fresh.then_some(0.0),
             time_anchor: fresh.then_some(0),
+            expect_canary: false,
+            canary_seen: false,
         }
+    }
+
+    /// A session of a phase whose snapshot settings carry the canary hook ([`super::version::CANARY_MARKER`]): a turn that
+    /// ends without the hook having answered is [`PhaseFailure::SettingsIgnored`].
+    pub fn expecting_canary(mut self) -> Self {
+        self.expect_canary = true;
+        self
     }
 
     /// How the session started.
@@ -511,6 +525,9 @@ impl ClaudeSession {
             .get("exit_code")
             .and_then(Value::as_i64)
             .and_then(|code| i32::try_from(code).ok());
+        if super::version::canary_in(value) {
+            self.canary_seen = true;
+        }
         if let Some(cause) = hook_failure(outcome, exit_code) {
             self.note_failed_hook(name, event, cause, None);
         }
@@ -960,6 +977,11 @@ impl AgentSession for ClaudeSession {
             (None, _) => PhaseOutcome::Lost,
             (Some(_), None) => PhaseOutcome::Failed {
                 cause: PhaseFailure::NoResult,
+            },
+            // The canary hook runs at session start, before the first turn: a turn that ended without it says the
+            // settings were not read. A child that never ended a turn is `NoResult`, whatever the cause.
+            (Some(_), Some(_)) if self.expect_canary && !self.canary_seen => PhaseOutcome::Failed {
+                cause: PhaseFailure::SettingsIgnored,
             },
             (Some(_), Some(reason)) => outcome_of_turn(reason),
         };

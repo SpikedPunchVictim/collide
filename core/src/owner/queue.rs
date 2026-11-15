@@ -44,6 +44,9 @@ pub enum QueueKind {
     DiskFull,
     /// An open question of the planning pack (`Decisions needed`, 0.11).
     Question,
+    /// A phase the agent tool's setup stopped: a version outside the tested range whose smoke check failed, or settings
+    /// the tool ignored (0.3). The title says which, in Collide's words.
+    AgentSetup,
 }
 
 /// What an answer is, as a tag. A Queue item lists the kinds it takes in `answers`.

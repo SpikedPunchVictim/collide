@@ -180,7 +180,7 @@ impl Rig {
         fs::create_dir(&bin).unwrap();
         let argv_log = root.join("argv.log");
         let wrapper = format!(
-            "#!/bin/sh\necho \"$*\" >> {log}\ncase \" $* \" in\n  *\" --resume \"*) rec={second} ;;\n  *) rec={first} ;;\nesac\nexec {PYTHON} {script} \"$rec\"\n",
+            "#!/bin/sh\nif [ \"$*\" = \"--version\" ]; then echo \"2.1.325 (Claude Code)\"; exit 0; fi\necho \"$*\" >> {log}\ncase \" $* \" in\n  *\" --resume \"*) rec={second} ;;\n  *) rec={first} ;;\nesac\nexec {PYTHON} {script} --emulate-hooks \"$rec\" \"$@\"\n",
             log = argv_log.display(),
             first = first.display(),
             second = second.display(),

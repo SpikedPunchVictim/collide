@@ -87,9 +87,22 @@ pub struct FakeClaude {
 impl FakeClaude {
     /// Starts fake Claude on the script file `path`, with `root` as its home and its working directory.
     pub fn start(root: &TempRoot, path: &PathBuf) -> FakeClaude {
+        FakeClaude::start_as_claude(root, path, false, &[])
+    }
+
+    /// Starts it as `claude` is started: `words` are claude's own line, and `emulate_hooks` has it run the
+    /// `SessionStart` hooks of the `--settings` file in them.
+    pub fn start_as_claude(
+        root: &TempRoot,
+        path: &PathBuf,
+        emulate_hooks: bool,
+        words: &[&str],
+    ) -> FakeClaude {
         let mut child = Command::new(PYTHON)
             .arg(fake_claude_script())
+            .args(emulate_hooks.then_some("--emulate-hooks"))
             .arg(path)
+            .args(words)
             .current_dir(root.path())
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
@@ -326,5 +339,98 @@ pub fn play(
 pub fn assigned() -> SessionStart {
     SessionStart::Assign {
         uuid: ASSIGNED.to_string(),
+    }
+}
+
+/// A file named `claude` that answers as the real binary does to what the daemon asks of it (ts-0068-wx): `--version`
+/// prints `<version> (Claude Code)`; a line holding `--no-session-persistence` is the smoke check's and plays `smoke`
+/// (when there is one); any other line is a phase's and plays `recording`. Every call appends its words to a log.
+pub struct ClaudeBinary {
+    pub path: PathBuf,
+    log: PathBuf,
+}
+
+/// What a [`ClaudeBinary`] plays.
+pub struct BinarySpec<'a> {
+    pub version: &'a str,
+    pub recording: &'a std::path::Path,
+    /// The recording the smoke check plays; `None` plays `recording`, whatever it is.
+    pub smoke: Option<&'a std::path::Path>,
+    /// Whether the phase's recording runs the `SessionStart` hooks of its `--settings` file, as `claude` does.
+    pub emulate_hooks: bool,
+    /// Whether the phase passes `claude`'s own words on to fake Claude (a wrapper that does not leaves the settings
+    /// unread: `claude` ignoring them).
+    pub pass_words: bool,
+}
+
+impl<'a> BinarySpec<'a> {
+    pub fn new(version: &'a str, recording: &'a std::path::Path) -> BinarySpec<'a> {
+        BinarySpec {
+            version,
+            recording,
+            smoke: None,
+            emulate_hooks: true,
+            pass_words: true,
+        }
+    }
+}
+
+impl ClaudeBinary {
+    /// Writes the file `claude` in `dir`, a folder the test owns.
+    pub fn write(dir: &std::path::Path, spec: &BinarySpec) -> ClaudeBinary {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("claude");
+        let log = dir.join("claude-calls.log");
+        let hooks = if spec.emulate_hooks {
+            "--emulate-hooks "
+        } else {
+            ""
+        };
+        let words = if spec.pass_words { " \"$@\"" } else { "" };
+        let play = |recording: &std::path::Path, hooks: &str, words: &str| {
+            format!(
+                "exec {PYTHON} {} {hooks}{}{words}",
+                fake_claude_script().display(),
+                recording.display()
+            )
+        };
+        let smoke = spec.smoke.map_or(String::new(), |smoke| {
+            format!(
+                "case \" $* \" in *\" --no-session-persistence \"*) {} ;; esac\n",
+                play(smoke, "", " \"$@\"")
+            )
+        });
+        let script = format!(
+            "#!/bin/sh\necho \"$*\" >> {log}\nif [ \"$*\" = \"--version\" ]; then echo \"{version} (Claude Code)\"; exit 0; fi\n{smoke}{phase}\n",
+            log = log.display(),
+            version = spec.version,
+            phase = play(spec.recording, hooks, words),
+        );
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        ClaudeBinary { path, log }
+    }
+
+    /// The words of every call so far, one string per call.
+    pub fn calls(&self) -> Vec<String> {
+        fs::read_to_string(&self.log)
+            .unwrap_or_default()
+            .lines()
+            .map(String::from)
+            .collect()
+    }
+
+    pub fn version_reads(&self) -> usize {
+        self.calls()
+            .iter()
+            .filter(|call| *call == "--version")
+            .count()
+    }
+
+    pub fn smoke_runs(&self) -> usize {
+        self.calls()
+            .iter()
+            .filter(|call| call.contains("--no-session-persistence"))
+            .count()
     }
 }

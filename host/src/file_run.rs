@@ -47,10 +47,14 @@ use crate::adapters::claude::session::ClaudeSession;
 use crate::adapters::claude::user_config::{
     endpoint_in_environment, read_user_config, user_config_fingerprint,
 };
-use crate::adapters::claude::{ClaudeAdapter, PROGRAM, capabilities, snapshot::snapshot_files};
-use crate::agent_feed::AgentFeed;
+use crate::adapters::claude::version::{CANARY_FAILURE, ClaudeVersion};
+use crate::adapters::claude::{
+    ClaudeAdapter, PROGRAM, capabilities, env_strip, snapshot::snapshot_files,
+};
+use crate::agent_feed::{AgentFeed, SETTINGS_IGNORED_FAILURE};
 use crate::base_env::BaseEnvironment;
 use crate::builtin_roles::{BUILDER_DEFINITION, BUILDER_ROLE_NAME, builder_role};
+use crate::claude_versions::{ClaudeVersions, Gate};
 use crate::clock::{Clock, Clocks};
 use crate::disk::{Before, DiskError, DiskGuard, DiskPause, Floor, FreeSpace};
 use crate::metrics::Metrics;
@@ -126,6 +130,8 @@ pub struct FileRunConfig {
     pub limit_min_pause: Duration,
     /// The always-recorded metrics: the run's span, its waits, its workspace's size and its fingerprint.
     pub metrics: Arc<Metrics>,
+    /// The version of `claude` and its smoke check: a phase starts only on a binary that passes it.
+    pub claude: Arc<ClaudeVersions>,
 }
 
 /// The text of the turn that goes first to a session that was resumed: the stream ended mid-work, and the tool waits for
@@ -239,6 +245,10 @@ fn budget_item_id(run: &str) -> String {
 
 fn disk_item_id(run: &str) -> String {
     format!("{run}-disk")
+}
+
+fn agent_setup_item_id(run: &str) -> String {
+    format!("{run}-agent-setup")
 }
 
 fn answer_kind(answer: &QueueAnswer) -> AnswerKind {
@@ -585,6 +595,16 @@ impl FileRuns {
         })?;
         let key = PhaseKey::new(run, PHASE_NAME)
             .map_err(|error| problem(format!("the phase's name: {error}")))?;
+        // The version is read before each phase (cached by the binary's path and time); one outside the tested range
+        // gets a smoke check, here and not in the phase, so a failed one refuses the phase before it starts.
+        let version = match self.config.claude.gate(&program, &run_dir, &env) {
+            Gate::Ready { version, .. } => version,
+            Gate::Refused { message, .. } | Gate::Unreadable { message } => {
+                self.push_agent_setup(run, None, &message);
+                return Err(problem(message).into());
+            }
+        };
+        self.record_agent_version(run, version);
         self.record_fingerprint(run, request.role.config, &env);
         let feed =
             AgentFeed::new(adapter.session(&request), &run_dir.join(PHASE_NAME)).close_after_turn();
@@ -607,6 +627,61 @@ impl FileRuns {
             return Err(problem(format!("sending the task to the phase: {error}")).into());
         }
         Ok(())
+    }
+
+    /// The `agent_version` part of the run's fingerprint (0.13): the version the phase runs on, whether it is in the tested
+    /// range, and whether a smoke check passed for it.
+    fn record_agent_version(&self, run: &str, version: ClaudeVersion) {
+        let status = self.config.claude.status().agents.remove(0);
+        let part = serde_json::json!({
+            "agent": status.agent,
+            "version": version.to_string(),
+            "in_tested_range": status.in_tested_range,
+            "smoke_passed": status.smoke.map(|smoke| smoke.passed),
+        });
+        self.config
+            .metrics
+            .fingerprint_part(run, "agent_version", &part.to_string());
+    }
+
+    /// A Queue item that says the agent tool was not ready (a version that failed its smoke check, or settings it
+    /// ignored). It waits to be dismissed.
+    fn push_agent_setup(&self, run: &str, phase: Option<&str>, title: &str) {
+        self.log(&format!("run {run}: {title}"));
+        self.config.queue.push(QueueItem {
+            id: agent_setup_item_id(run),
+            kind: QueueKind::AgentSetup,
+            run: Some(run.to_string()),
+            phase: phase.map(String::from),
+            task: None,
+            since_ms: self.now_ms(),
+            title: title.to_string(),
+            permission: None,
+            untrusted_input: false,
+            cache: None,
+            reset_ms: None,
+            show: Vec::new(),
+            answers: vec![AnswerKind::Dismiss],
+        });
+    }
+
+    /// Reads the version of the `claude` the base environment finds, for `daemon.agent_versions` and the daemon's start.
+    /// It starts nothing else, and waits for the first capture for up to `wait`: before it there is nothing to read.
+    pub fn read_claude_version(&self, wait: Duration) {
+        let Some(base) = (self.config.base_env)(wait) else {
+            return;
+        };
+        let env = base.for_child(&env_strip(), &BTreeMap::new());
+        match find_on_path(PROGRAM, env.get("PATH").map(String::as_str)) {
+            Some(program) => {
+                if let Err(error) = self.config.claude.read(&program, &env) {
+                    self.log(&error.to_string());
+                }
+            }
+            None => self.config.claude.note_no_binary(format!(
+                "`{PROGRAM}` is not on the PATH of the base environment"
+            )),
+        }
     }
 
     /// Writes the user-config part of the run's fingerprint (0.13): the user's hooks and flagged `env` by name and the
@@ -715,6 +790,13 @@ impl FileRuns {
         }
         self.cancel_timer(run);
         self.config.queue.clear_run(run, None);
+        // A phase that ended its turn without the canary ran without Collide's settings: the Queue says so, before the
+        // run shows as failed, so a client that sees the failure finds the item.
+        let record = self.config.store.phase_record(run, &end.key.phase);
+        if matches!(&record, Ok(Some(record)) if record.failure.as_deref() == Some(SETTINGS_IGNORED_FAILURE))
+        {
+            self.push_agent_setup(run, Some(&end.key.phase), CANARY_FAILURE);
+        }
         let to = match end.state {
             PhaseState::Ended {} => RunState::Ended {
                 outcome: NonEmpty::new("the phase ended").expect("the text is not empty"),
@@ -1101,6 +1183,10 @@ impl FileRuns {
                         .map_err(|error| error.to_string())
                 }
             }
+            QueueAnswer::Dismiss {} => match self.config.queue.take(item_id) {
+                Some(_) => Ok(()),
+                None => Err(format!("item {item_id:?} was answered already")),
+            },
             _ => Err(format!("an item of this kind does not take {kind:?} yet")),
         };
         match outcome {
@@ -1178,7 +1264,7 @@ impl FileRuns {
     pub fn rebuild_feed(&self, key: &PhaseKey, dir: &Path) -> Option<AgentFeed> {
         let live = self.live_of(&key.run)?;
         let start = locked(&live).ctx.session_start();
-        match AgentFeed::rebuild(Box::new(ClaudeSession::new(start)), dir) {
+        match AgentFeed::rebuild(Box::new(ClaudeSession::new(start).expecting_canary()), dir) {
             Ok(feed) => Some(feed.close_after_turn()),
             Err(error) => {
                 self.log(&format!(

@@ -31,7 +31,7 @@ fn settings_turn_auto_memory_off() {
 }
 
 #[test]
-fn settings_carry_a_no_op_session_start_hook_that_holds_the_canary_marker() {
+fn settings_carry_a_session_start_hook_that_writes_the_canary_marker_to_stderr() {
     let settings = parse(&files(DEFINITION).settings);
     let hooks = settings["hooks"]["SessionStart"][0]["hooks"]
         .as_array()
@@ -40,9 +40,10 @@ fn settings_carry_a_no_op_session_start_hook_that_holds_the_canary_marker() {
     assert_eq!(hooks[0]["type"], "command");
     let command = hooks[0]["command"].as_str().unwrap();
     assert!(command.contains(CANARY_MARKER), "{command}");
-    assert!(
-        command.starts_with("true "),
-        "a no-op that prints nothing: {command}"
+    assert_eq!(
+        command,
+        format!("echo {CANARY_MARKER} >&2"),
+        "stderr, so it is not added to the model's context"
     );
 }
 

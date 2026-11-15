@@ -20,6 +20,7 @@ const call = <Params, Result>(): Call<Params, Result> => null as never
 export const OWNER_METHODS = {
   'daemon.status': call<G.DaemonStatusParamsInput, G.DaemonStatusResultOutput>(),
   'daemon.recapture_environment': call<G.DaemonRecaptureEnvironmentParamsInput, G.DaemonRecaptureEnvironmentResultOutput>(),
+  'daemon.agent_versions': call<G.DaemonAgentVersionsParamsInput, G.DaemonAgentVersionsResultOutput>(),
   'daemon.subscribe': call<G.DaemonSubscribeParamsInput, G.DaemonSubscribeResultOutput>(),
   'board.list': call<G.BoardListParamsInput, G.BoardListResultOutput>(),
   'board.open': call<G.BoardOpenParamsInput, G.BoardOpenResultOutput>(),

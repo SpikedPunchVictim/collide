@@ -18,6 +18,7 @@ export type QueueKind =
   | 'outcome_unknown'
   | 'disk_full'
   | 'question'
+  | 'agent_setup'
 
 /**
  * `queue.list` params. With no `board` the items of every board, because a decision waits on the person and not on

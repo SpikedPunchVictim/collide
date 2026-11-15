@@ -1,0 +1,15 @@
+{
+  "autoMemoryEnabled": false,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "echo collide-settings-canary >&2",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

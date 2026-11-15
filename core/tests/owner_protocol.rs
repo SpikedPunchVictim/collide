@@ -174,6 +174,15 @@ fn samples() -> Vec<(Method, Value, Value)> {
             json!({ "capture": { "outcome": "captured", "shell": "/bin/zsh", "variables": 84 } }),
         ),
         (
+            Method::DaemonAgentVersions,
+            json!({}),
+            json!({ "agents": [{
+                "agent": "claude", "in_use": "2.1.325", "tested": { "from": "2.1.323", "through": "2.1.325" },
+                "in_tested_range": true,
+                "published": { "latest": "2.1.325", "stable": "2.1.311", "fetched_ms": 1_700_000_000_000u64 }
+            }] }),
+        ),
+        (
             Method::DaemonSubscribe,
             json!({ "since": 10 }),
             json!({ "head_seq": 12, "oldest_seq": 1, "replayed": 2 }),
@@ -632,6 +641,22 @@ fn an_environment_capture_that_fell_back_names_the_shell_and_the_reason() {
     });
     assert_eq!(
         Method::DaemonRecaptureEnvironment
+            .normalize_result(&result)
+            .unwrap(),
+        result
+    );
+}
+
+#[test]
+fn a_version_outside_the_range_carries_its_smoke_check_and_a_failed_fetch_keeps_its_error() {
+    let result = json!({ "agents": [{
+        "agent": "claude", "in_use": "2.2.0", "tested": { "from": "2.1.323", "through": "2.1.325" },
+        "in_tested_range": false,
+        "smoke": { "passed": false, "at_ms": 1_700_000_000_000u64, "reason": "no result line" },
+        "published": { "latest": "2.1.325", "fetched_ms": 1_699_999_000_000u64, "error": "timed out" }
+    }] });
+    assert_eq!(
+        Method::DaemonAgentVersions
             .normalize_result(&result)
             .unwrap(),
         result

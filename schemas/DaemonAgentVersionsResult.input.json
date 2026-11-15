@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "AgentVersions": {
+      "additionalProperties": false,
+      "description": "The two version chips of one agent tool (0.3). `in_use` is the version the daemon read from the binary a phase would\nstart, or `None` with `in_use_error` saying why. `in_tested_range` is `None` until there is a version. `published`\nis `None` when the fetch is turned off (`claude.check_published: false`), which hides the chip.",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "in_tested_range": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "in_use": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "in_use_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "published": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublishedVersions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "smoke": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SmokeCheckResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tested": {
+          "$ref": "#/$defs/TestedVersions"
+        }
+      },
+      "required": [
+        "agent",
+        "tested"
+      ],
+      "type": "object"
+    },
+    "PublishedVersions": {
+      "additionalProperties": false,
+      "description": "The newest published versions of an agent tool (0.3, Two version chips). A failed fetch keeps the last values, so\n`fetched_ms` is when they were read and `error` is why the latest try failed; with no `latest` the chip says\n\"unknown\".",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fetched_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "latest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stable": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SmokeCheckResult": {
+      "additionalProperties": false,
+      "description": "What the one-turn smoke check of a version outside the tested range found (0.3, A tested version range). It is run\nbefore the first phase on that binary, so a binary that has run no phase has none.",
+      "properties": {
+        "at_ms": {
+          "description": "When it ran, on the wall clock.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "What differed, for a check that failed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "passed",
+        "at_ms"
+      ],
+      "type": "object"
+    },
+    "TestedVersions": {
+      "additionalProperties": false,
+      "description": "The range of an agent tool's releases the adapter's contract test passed on, both ends included.",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "through": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "through"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`daemon.agent_versions` result: one entry for each agent tool the daemon knows (one, Claude, in v0). `collide run`\nprints both versions from it before it starts.",
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/AgentVersions"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "agents"
+  ],
+  "title": "DaemonAgentVersionsResult",
+  "type": "object"
+}

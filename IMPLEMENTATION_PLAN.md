@@ -662,12 +662,15 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     `@anthropic-ai/claude-code` on the npm registry, with `stable` in the tooltip (measured 2026-11-15: `latest`
     2.1.325, `stable` 2.1.311). The daemon fetches it at start and once a day, through the system proxy, with a 5 s
     timeout and a request that carries no user data. A failed fetch shows the last value and its age, or "unknown".
-    `claude.check_published: false`, a per-user key, turns the fetch off and hides the chip. Collide does not update
+    `claude.check_published: false`, a per-user key in `~/.config/collide/config.yaml` (default true), turns the
+    fetch off and hides the chip. Collide does not update
     `claude`; the chips only show the gap.
   - **Settings that fail validation are ignored silently under `-p`** (R5; read from 2.1.325's own text). The
     contract test validates the generated `settings.json` against the published settings schema. At run time a
-    **canary** covers the rest: the snapshot settings carry a no-op hook, and if no `hook_started` event for it
-    arrives in the first turn, the phase fails with `Claude ignored Collide's settings`, and the Queue says so. A
+    **canary** covers the rest: the snapshot's SessionStart hook writes `collide-settings-canary` to stderr, and the
+    adapter looks for it on that hook's `hook_response` line in the first turn (`hook_started` carries no command, so
+    a user's own SessionStart hook cannot be told from Collide's). A first turn that ends without it fails the phase
+    with `Claude ignored Collide's settings`, and the Queue says so. A
     phase with ignored settings would load the user's settings and hooks while the page promised it did not.
 - **The stream protocol** (measured S1):
   - user turns, permission answers (`control_response`, allow or deny) and interrupts (`control_request`
@@ -3665,7 +3668,7 @@ hook the test injects). The real launchd check runs only with `COLLIDE_REAL_LAUN
     and `collide run` prints both versions before it starts. The version is in the fingerprint, and an event the
     adapter does not know is counted as Other;
   - the generated settings are validated against Claude's published schema in the contract test, because a file that
-    fails validation is silently ignored under `-p`. A runtime canary (a `hook_started` event, else the phase fails
+    fails validation is silently ignored under `-p`. A runtime canary (the marker on the SessionStart hook's `hook_response`, else the phase fails
     with "Claude ignored Collide's settings") catches the rest.
 - Always-recorded metrics (0.13):
   - spans for runs, phases, turns and waits, with active time apart from waiting time. Usage-limit pauses and
