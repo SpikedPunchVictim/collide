@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod board;
 pub mod change;
 pub mod duration;

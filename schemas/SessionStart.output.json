@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "How a session starts (0.3). Claude supports `assign` and `resume`; ACP supports `agent_assigned` and `resume`.\nThe id is then recorded on [`AgentEvent::SessionBound`].",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "Collide picks the session id (a UUID) and passes it to the tool.",
+      "properties": {
+        "type": {
+          "const": "assign",
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "uuid"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The tool picks the id and reports it.",
+      "properties": {
+        "type": {
+          "const": "agent_assigned",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Continue the session with this id.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "const": "resume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "SessionStart"
+}

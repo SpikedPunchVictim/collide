@@ -10,6 +10,9 @@
 //!   `deny_unknown_fields` on a unit variant of an internally tagged enum;
 //! - to add a type, add one `registry.add::<T>()` line to [`registry`].
 
+use crate::agent::{
+    AgentEvent, Capabilities, PermissionReply, PermissionRequest, SessionStart, Usage,
+};
 use crate::board::{Board, CollidePointer};
 use crate::change::{Change, Rename, TaskPointPayload};
 use crate::events::Event;
@@ -90,9 +93,11 @@ fn schema_for<T: JsonSchema>(settings: SchemaSettings) -> Value {
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.add::<Adoption>();
+    registry.add::<AgentEvent>();
     registry.add::<ApplyParams>();
     registry.add::<ApplyResult>();
     registry.add::<Board>();
+    registry.add::<Capabilities>();
     registry.add::<Change>();
     registry.add::<CollidePointer>();
     registry.add::<ConfigFile>();
@@ -111,6 +116,8 @@ pub fn registry() -> Registry {
     registry.add::<ObserverEvent>();
     registry.add::<PackLock>();
     registry.add::<PackManifest>();
+    registry.add::<PermissionReply>();
+    registry.add::<PermissionRequest>();
     registry.add::<Point>();
     registry.add::<PlanningFields>();
     registry.add::<PreviewResult>();
@@ -119,6 +126,7 @@ pub fn registry() -> Registry {
     // `Rename` is also the body of the provider's `task.renamed` notification.
     registry.add::<Rename>();
     registry.add::<RunBudget>();
+    registry.add::<SessionStart>();
     registry.add::<SourceStale>();
     registry.add::<Stage>();
     registry.add::<Task>();
@@ -127,6 +135,7 @@ pub fn registry() -> Registry {
     registry.add::<TaskInvalid>();
     registry.add::<TaskPointPayload>();
     registry.add::<TaskRemoved>();
+    registry.add::<Usage>();
     registry.add::<UserPacks>();
     registry.add::<View>();
     registry.add::<WatchParams>();

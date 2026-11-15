@@ -1,0 +1,139 @@
+{
+  "$defs": {
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "UsageQuality": {
+      "description": "How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as \"at\nleast\" and never summed with `exact` ones (0.13).",
+      "enum": [
+        "exact",
+        "partial",
+        "unreported"
+      ],
+      "type": "string"
+    },
+    "UsageScope": {
+      "description": "What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).",
+      "enum": [
+        "turn",
+        "step",
+        "running_total"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never\n0, and is left out of the JSON. `cache_write_1h` and `cache_write_5m` split `cache_write` by tier, where the tool\nreports the tiers (capability `usage_report.cache_write_tiers`).",
+  "properties": {
+    "cache_read": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cache_write": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cache_write_1h": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cache_write_5m": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "context_size": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "context_used": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cost": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Money"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "input": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "output": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "quality": {
+      "$ref": "#/$defs/UsageQuality"
+    },
+    "scope": {
+      "$ref": "#/$defs/UsageScope"
+    },
+    "thought": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "scope",
+    "quality"
+  ],
+  "title": "Usage",
+  "type": "object"
+}

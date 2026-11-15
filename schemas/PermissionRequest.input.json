@@ -1,0 +1,91 @@
+{
+  "$defs": {
+    "PermissionOption": {
+      "additionalProperties": false,
+      "description": "One of the agent's own options in a permission request.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PermissionOptionKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PermissionOptionKind": {
+      "description": "The kind of one of the agent's own options in a permission request. Collide picks only the `*_once` kinds: the\nagent owns the scope and storage of an \"always\" choice, so no adapter selects one (0.3, Permissions).",
+      "enum": [
+        "allow_once",
+        "allow_always",
+        "reject_once",
+        "reject_always"
+      ],
+      "type": "string"
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title\n(S7, O12).",
+      "enum": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "other"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A request to run a tool (0.3, Permissions). `input` is `None` when the agent has not sent it yet (opencode sends\n`rawInput: {}` for a Bash call, so the command is unknown until the host answers; S7). Such a request shows in the\nQueue as \"input not available until approved\" and no pack rule that reads the input may auto-allow it.\n`reason` says why it was asked, when the agent says. `options` are the agent's own.",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "input": true,
+    "kind": {
+      "$ref": "#/$defs/ToolKind"
+    },
+    "options": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PermissionOption"
+      },
+      "type": "array"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool_call_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "tool_call_id",
+    "kind"
+  ],
+  "title": "PermissionRequest",
+  "type": "object"
+}

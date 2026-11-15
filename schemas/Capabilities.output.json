@@ -1,0 +1,334 @@
+{
+  "$defs": {
+    "ContextOptions": {
+      "additionalProperties": false,
+      "description": "Which context options the tool supports (0.3, Context and cache).",
+      "properties": {
+        "bash_output_max": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        },
+        "compact_at": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        },
+        "mcp_output_max": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        },
+        "support": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        }
+      },
+      "required": [
+        "support",
+        "compact_at",
+        "bash_output_max",
+        "mcp_output_max"
+      ],
+      "type": "object"
+    },
+    "McpServers": {
+      "additionalProperties": false,
+      "description": "Which MCP transports the tool takes.",
+      "properties": {
+        "http": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        },
+        "sse": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        },
+        "stdio": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        },
+        "support": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        }
+      },
+      "required": [
+        "support",
+        "stdio",
+        "http",
+        "sse"
+      ],
+      "type": "object"
+    },
+    "ModelSelect": {
+      "description": "Where the model is chosen: `launch` (on the command line), `session` (after the session is created) or `none`.",
+      "enum": [
+        "unknown",
+        "none",
+        "launch",
+        "session"
+      ],
+      "type": "string"
+    },
+    "PermissionHost": {
+      "additionalProperties": false,
+      "description": "The host answers permission requests, and what such an answer can carry.",
+      "properties": {
+        "deny_message": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown",
+          "description": "A `deny` can carry a message."
+        },
+        "input_at_request": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown",
+          "description": "The request carries the tool's input, not only a call id."
+        },
+        "request_reason": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown",
+          "description": "The request says why it was asked."
+        },
+        "support": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        }
+      },
+      "required": [
+        "support",
+        "deny_message",
+        "input_at_request",
+        "request_reason"
+      ],
+      "type": "object"
+    },
+    "SessionResume": {
+      "description": "How a session resumes: `none`, `replay` (the agent replays its history as updates) or `silent`.",
+      "enum": [
+        "unknown",
+        "none",
+        "replay",
+        "silent"
+      ],
+      "type": "string"
+    },
+    "Support": {
+      "description": "Whether an adapter can do something (0.3, Capabilities). A capability nobody has set is `unknown` (a profile for\nan ACP agent that has not been probed). Collide refuses to start a phase that requires a capability on a tool that\nsays `no` or `unknown`.",
+      "enum": [
+        "yes",
+        "no",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "SystemPrompt": {
+      "description": "How a role's system prompt reaches the tool: `none`, `append` or `override`.",
+      "enum": [
+        "unknown",
+        "none",
+        "append",
+        "override"
+      ],
+      "type": "string"
+    },
+    "UsageQuality": {
+      "description": "How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as \"at\nleast\" and never summed with `exact` ones (0.13).",
+      "enum": [
+        "exact",
+        "partial",
+        "unreported"
+      ],
+      "type": "string"
+    },
+    "UsageReport": {
+      "additionalProperties": false,
+      "description": "What the tool's usage reports give. `granularity` lists the scopes its [`Usage`] events come in (empty when not\ndeclared). `quality` is the quality its figures usually have (`None` when not declared).",
+      "properties": {
+        "cache_write_tiers": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        },
+        "context": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown",
+          "description": "`context_used` and `context_size`."
+        },
+        "cost": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown",
+          "description": "A cost with its currency. A host-enforced budget needs it (0.3)."
+        },
+        "granularity": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/UsageScope"
+          },
+          "type": "array"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UsageQuality"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "support": {
+          "$ref": "#/$defs/Support",
+          "default": "unknown"
+        }
+      },
+      "required": [
+        "support",
+        "granularity",
+        "cost",
+        "cache_write_tiers",
+        "context",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "UsageScope": {
+      "description": "What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).",
+      "enum": [
+        "turn",
+        "step",
+        "running_total"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The capability table of an adapter (0.3, Capabilities). `Capabilities::default()` is all `unknown`, and a key\nthat is left out reads as `unknown`. Every key is written.",
+  "properties": {
+    "background": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The tool can run detached. Claude has it; ACP does not."
+    },
+    "budget_native": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The tool enforces a budget itself (Claude). Any adapter with `usage_report.cost` can have the core enforce\none instead."
+    },
+    "compaction_events": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The tool reports compactions."
+    },
+    "context_options": {
+      "$ref": "#/$defs/ContextOptions",
+      "default": {
+        "bash_output_max": "unknown",
+        "compact_at": "unknown",
+        "mcp_output_max": "unknown",
+        "support": "unknown"
+      }
+    },
+    "headless_stream": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The host reads a stream the tool writes without a terminal."
+    },
+    "hook_events": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "Hook outcomes appear in the stream."
+    },
+    "limit_signal": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "A structured usage limit with its reset time."
+    },
+    "mcp_servers": {
+      "$ref": "#/$defs/McpServers",
+      "default": {
+        "http": "unknown",
+        "sse": "unknown",
+        "stdio": "unknown",
+        "support": "unknown"
+      }
+    },
+    "model_select": {
+      "$ref": "#/$defs/ModelSelect",
+      "default": "unknown"
+    },
+    "named_agent": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The tool takes a named agent definition (Claude's `--agents`)."
+    },
+    "permission_host": {
+      "$ref": "#/$defs/PermissionHost",
+      "default": {
+        "deny_message": "unknown",
+        "input_at_request": "unknown",
+        "request_reason": "unknown",
+        "support": "unknown"
+      }
+    },
+    "refusal_source": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "A refused call says who refused it."
+    },
+    "session_resume": {
+      "$ref": "#/$defs/SessionResume",
+      "default": "unknown"
+    },
+    "strict_config": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The tool can run with nothing from the worktree or the user's agent config."
+    },
+    "system_prompt": {
+      "$ref": "#/$defs/SystemPrompt",
+      "default": "unknown"
+    },
+    "take_over": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The tool can name an interactive command for a session."
+    },
+    "tool_allowlist": {
+      "$ref": "#/$defs/Support",
+      "default": "unknown",
+      "description": "The tool takes a list of the tools an agent may use."
+    },
+    "usage_report": {
+      "$ref": "#/$defs/UsageReport",
+      "default": {
+        "cache_write_tiers": "unknown",
+        "context": "unknown",
+        "cost": "unknown",
+        "granularity": [],
+        "quality": null,
+        "support": "unknown"
+      }
+    }
+  },
+  "required": [
+    "headless_stream",
+    "permission_host",
+    "session_resume",
+    "background",
+    "budget_native",
+    "system_prompt",
+    "tool_allowlist",
+    "named_agent",
+    "usage_report",
+    "limit_signal",
+    "compaction_events",
+    "hook_events",
+    "refusal_source",
+    "strict_config",
+    "context_options",
+    "model_select",
+    "take_over",
+    "mcp_servers"
+  ],
+  "title": "Capabilities",
+  "type": "object"
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The answer to a [`PermissionRequest`] (0.3, Permissions). Claude maps `allow` and `deny` to `behavior`, with the\nmessage. ACP maps them to the options of kind `allow_once` and `reject_once`, drops the message and, when no\n`allow_once` exists, answers `cancel` and reports [`AgentEvent::PermissionUnanswerable`].\n\nThe event log's `permission.answered` carries the shorter [`crate::events::PermissionAnswer`], which has no\nmessage.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "allow",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "const": "deny",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "cancel",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "PermissionReply"
+}
