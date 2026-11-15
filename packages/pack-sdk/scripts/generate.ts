@@ -25,7 +25,7 @@ export async function generate(schemaDir: string): Promise<Record<string, string
       style: { semi: false, singleQuote: true, printWidth: 100 },
     })
     const alias = name + (contract === 'input' ? 'Input' : 'Output')
-    exports.push(`export type { ${name} as ${alias} } from './${module}'`)
+    exports.push(`export type { ${name} as ${alias} } from './${module}.ts'`)
   }
   files['index.ts'] = [header, ...(exports.length > 0 ? exports : ['export {}'])].join('\n') + '\n'
   return files

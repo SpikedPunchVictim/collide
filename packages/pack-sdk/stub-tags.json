@@ -1,0 +1,8 @@
+{
+  "sdk: ctx": "Stage 4b: Providers, plan adapter, corpus and views",
+  "sdk: ctx.report": "Stage 7: Hooks, workspaces and record",
+  "sdk: ctx.result": "Stage 7: Hooks, workspaces and record",
+  "sdk: defineHook": "Stage 4b: Providers, plan adapter, corpus and views",
+  "sdk: defineObserver": "Stage 12: Second pack, composition, observers, grouped chains",
+  "sdk: defineProvider": "Stage 2: Skeleton"
+}
