@@ -1,7 +1,7 @@
 ---
 id: ts-0023-ch
 kind: task
-status: ready
+status: done
 title: "Hardened YAML loader"
 owners: []
 links:
@@ -28,3 +28,4 @@ Write first: one test per hazard above (`no`, `0.10`, `1e10`, duplicate key, ali
 - IMPLEMENTATION_PLAN.md, 0.7 (YAML is read with `serde-saphyr` 2.x and a hardened option set), 0.9 (YAML and frontmatter are untrusted input), 0.15 (Chosen crates), Stage 2: Skeleton, Contracts and Success Criteria. The S5 record: `.collide/planning/spikes/sp-0005-fv-schema-expressions/record.md`.
 - Area: `core` (`serde-saphyr` is pure Rust, so `core` may use it).
 - Done when the criteria hold.
+- Built (`core/src/yaml.rs`, tests in `core/tests/yaml_loader.rs`). Size cap: 256 KiB (`MAX_YAML_BYTES`), checked from the file's metadata before the file is read and again on the bytes; S5 suggested 64 KiB, and 256 KiB keeps room for a manifest while the cap and the 100,000-node budget bound the work together. `serde-saphyr` pinned at `=2.1.1` (the version S5 measured; it built, no move), with `default-features = false, features = ["deserialize"]`. `serde_path_to_error` 0.1 is added to `core` too, to give the key path of an unknown key (the library has no path of its own).

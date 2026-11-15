@@ -7,5 +7,6 @@ pub mod points;
 pub mod provider;
 pub mod report;
 pub mod schema;
+pub mod yaml;
 
 pub const NAME: &str = "collide-core";
