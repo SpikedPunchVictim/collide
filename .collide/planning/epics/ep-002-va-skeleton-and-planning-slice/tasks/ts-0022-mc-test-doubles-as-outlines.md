@@ -1,7 +1,7 @@
 ---
 id: ts-0022-mc
 kind: task
-status: ready
+status: active
 title: "Test doubles as outlines"
 owners: []
 links:
