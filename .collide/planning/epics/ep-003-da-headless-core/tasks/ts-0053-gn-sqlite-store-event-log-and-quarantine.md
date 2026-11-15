@@ -1,7 +1,7 @@
 ---
 id: ts-0053-gn
 kind: task
-status: active
+status: done
 title: "SQLite store, event log and quarantine"
 owners: []
 links:
