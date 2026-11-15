@@ -662,7 +662,10 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     phase, cached by the binary's path and modification time. Outside the range, the daemon runs a one-turn smoke
     check (a prompt that must come back as a `result` with the pinned stream shape), and refuses the phase, with the
     version and the range, when it fails. A pass raises no Queue item; it marks the version chip (next bullet). The
-    version goes in the fingerprint (0.13). An event the adapter does not know is an `Other`, counted per run, and a rising count is a finding
+    version goes in the fingerprint (0.13). Recorded against 2.1.325 (ts-0070-mk): a hook line carries no call id,
+    so a failing `PreToolUse` hook is joined to the latest call of its tool; a failing tool that `system/init` lists
+    is not `missing_tool`; SessionStart fires on `--resume`; `duration_api_ms` and cost run on across `--resume`; the
+    smoke check took 2.1 s. An event the adapter does not know is an `Other`, counted per run, and a rising count is a finding
     (0.13). Where a documented flag does what a variable read from the binary does, the adapter prefers the flag once
     a test shows they agree: `--autocompact` is in 2.1.325's `--help`, and the contract test compares it with
     `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (below).
@@ -3712,7 +3715,13 @@ hook the test injects). The real launchd check runs only with `COLLIDE_REAL_LAUN
   disallowed tool, a final report, an exit code) for the Claude adapter's tests.
   Engine tests use the normalized-event fake adapter instead (0.15).
 - **Contract test:** recorded from the real, pinned `claude` and re-run on upgrade, so format drift fails a test
-  (the fake alone cannot detect it).
+  (the fake alone cannot detect it). The live half is `host/tests/adapters/claude/real_claude.rs`
+  (`COLLIDE_REAL_CLAUDE=1`, haiku, `--max-budget-usd 0.05` a case, a spend ledger that refuses a run that could pass
+  the item's cap). It checks each live line against the shapes of the redacted recordings in
+  `fixtures/real-recordings/` (the paths every recorded line of a kind has, and their JSON types): a lost path or a
+  changed type fails. `COLLIDE_REAL_LAUNCHD=1` runs a fake-Claude phase through a SIGKILL of the launchd-started
+  daemon, and with `COLLIDE_REAL_CLAUDE=1` a real `claude -p` phase under it
+  (`host/tests/adapters/claude/launchd_run.rs`).
 - **Dogfood** (part L): `collide run` takes an item from `.collide/planning/` as its task file.
 - `collide run` on a file task: a new worktree, one Claude phase, the record. The run uses the built-in
   `collide/builder` role with the alias `fast` (a run may name another), and the three context variables are set

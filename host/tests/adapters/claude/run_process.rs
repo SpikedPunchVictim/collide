@@ -55,17 +55,17 @@ impl Drop for Guards {
 }
 
 /// A temp root with a repository, a task file, a models file, and a login shell whose PATH holds fake Claude.
-struct Proc {
+pub(super) struct Proc {
     // Dropped first: it ends the daemon while the root is still there.
     _guards: Guards,
-    root: TempRoot,
-    repo: PathBuf,
-    task: PathBuf,
-    shell: PathBuf,
+    pub(super) root: TempRoot,
+    pub(super) repo: PathBuf,
+    pub(super) task: PathBuf,
+    pub(super) shell: PathBuf,
 }
 
 impl Proc {
-    fn new(recording_path: &Path) -> Proc {
+    pub(super) fn new(recording_path: &Path) -> Proc {
         let root = TempRoot::new();
         let bin = root.join("bin");
         fs::create_dir(&bin).unwrap();
@@ -103,7 +103,7 @@ impl Proc {
         }
     }
 
-    fn command(&self, args: &[&str], cwd: &Path) -> Command {
+    pub(super) fn command(&self, args: &[&str], cwd: &Path) -> Command {
         let mut command = Command::new(COLLIDE);
         command
             .args(args)
@@ -118,7 +118,7 @@ impl Proc {
     }
 
     /// `collide <args>` in the repository, to its end.
-    fn collide(&self, args: &[&str]) -> Output {
+    pub(super) fn collide(&self, args: &[&str]) -> Output {
         self.command(args, &self.repo)
             .output()
             .expect("collide runs")
@@ -129,11 +129,11 @@ impl Proc {
     }
 }
 
-fn text(bytes: &[u8]) -> String {
+pub(super) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn task_of(proc: &Proc) -> String {
+pub(super) fn task_of(proc: &Proc) -> String {
     proc.task.to_str().unwrap().to_string()
 }
 
@@ -240,7 +240,7 @@ fn a_phase_that_fails_exits_7_and_prints_its_record() {
 }
 
 /// `report.jsonl` that waits `secs` after it has read the turn, so a test can act while the phase runs.
-fn slowed_report(root: &TempRoot, secs: u32) -> PathBuf {
+pub(super) fn slowed_report(root: &TempRoot, secs: u32) -> PathBuf {
     let text = fs::read_to_string(recording("report")).unwrap();
     let mut lines = Vec::new();
     let mut inserted = false;
@@ -257,7 +257,7 @@ fn slowed_report(root: &TempRoot, secs: u32) -> PathBuf {
 }
 
 /// A command's output lines, read as they come.
-fn lines_of(child: &mut Child) -> mpsc::Receiver<String> {
+pub(super) fn lines_of(child: &mut Child) -> mpsc::Receiver<String> {
     let stdout = child.stdout.take().unwrap();
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {

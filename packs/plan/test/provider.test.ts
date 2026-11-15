@@ -324,7 +324,9 @@ describe("Collide's own items", () => {
     expect(result?.tasks.length).toBe(expectedFiles().length)
     expect(result?.tasks.length).toBeGreaterThan(40)
     expect((result?.tasks as Array<{ path: string }>).filter((task) => task.path.includes('/spikes/'))).toEqual([])
-  })
+    // The first call over the real tree pays the cold start (about 1.5 s alone), which passed 5 s once under the
+    // parallel `pnpm -r test` of the full gates.
+  }, 30_000)
 
   test('every one of them is a task or an epic, and every blocked-by link has a target', async () => {
     const { result, logs } = await call(root, 'list')

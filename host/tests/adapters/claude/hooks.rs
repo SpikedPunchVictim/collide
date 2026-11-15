@@ -973,3 +973,62 @@ fn over_every_hook_recording_no_hook_text_reaches_an_event_or_a_write() {
         }
     }
 }
+
+// ---- what the real binary showed (ts-0070-mk) -----------------------------------------------------------------------------
+
+fn init_listing(tools: &[&str]) -> Vec<u8> {
+    line(json!({"type": "system", "subtype": "init", "tools": tools}))
+}
+
+#[test]
+fn an_error_with_no_metadata_is_a_missing_tool_only_when_init_did_not_list_the_tool() {
+    // Measured on 2.1.325: an `Edit` of a file that is not there is an error with no `tool_result_meta`, and `Edit` is
+    // in the init list.
+    let mut session = session();
+    let all = feed_all(
+        &mut session,
+        &[
+            init_listing(&["Edit", "Read"]),
+            tool_use("toolu_01", "Edit"),
+            tool_result("toolu_01", true, None),
+            tool_use("toolu_02", "Gone"),
+            tool_result("toolu_02", true, None),
+        ],
+    );
+    assert_eq!(all, [refused("toolu_02", RefusalCause::MissingTool)]);
+}
+
+#[test]
+fn two_parallel_calls_of_one_tool_each_get_their_own_failed_pre_hook() {
+    // Measured on 2.1.325: hook lines carry no call id, and each `PreToolUse` hook runs right after the line that holds
+    // its call. The results come in either order.
+    let mut session = session();
+    let accepted = || Some(decision("accept", "config"));
+    let all = feed_all(
+        &mut session,
+        &[
+            tool_use("toolu_01", "Bash"),
+            hook_response("PreToolUse:Bash", "PreToolUse", "error", Some(1)),
+            tool_use("toolu_02", "Bash"),
+            hook_response("PreToolUse:Bash", "PreToolUse", "error", Some(1)),
+            tool_result("toolu_02", false, accepted()),
+            tool_result("toolu_01", false, accepted()),
+        ],
+    );
+    let joined: Vec<(String, String)> = all
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::HookFailedOpen { tool_call_id, .. } => {
+                Some((tool_call_id.clone(), "failed open".to_string()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        joined,
+        [
+            ("toolu_02".to_string(), "failed open".to_string()),
+            ("toolu_01".to_string(), "failed open".to_string())
+        ]
+    );
+}

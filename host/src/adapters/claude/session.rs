@@ -285,6 +285,10 @@ pub struct ClaudeSession {
     /// leaves nothing for the next to be differenced from.
     cost_anchor: Option<f64>,
     time_anchor: Option<u64>,
+    /// The tools `system/init` listed, from the last `init` line. `None` before the first one. An error result with no
+    /// metadata is a call to a missing tool only when the tool is not in this list (measured on 2.1.325: an `Edit` of a
+    /// file that is not there is an error with no metadata too).
+    tools: Option<Vec<String>>,
     /// The phase's settings carry the canary hook, so a turn that ends without its `hook_response` having been read is a
     /// phase that ran without Collide's settings. Off for a session that is not a phase's (the smoke check).
     expect_canary: bool,
@@ -314,6 +318,7 @@ impl ClaudeSession {
             limit: None,
             cost_anchor: fresh.then_some(0.0),
             time_anchor: fresh.then_some(0),
+            tools: None,
             expect_canary: false,
             canary_seen: false,
         }
@@ -468,8 +473,17 @@ impl ClaudeSession {
 
     fn read_system(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
         match subtype(value) {
-            // The id was bound at `start`; `init` comes again on every turn.
-            Some("init") => Vec::new(),
+            // The id was bound at `start`; `init` comes again on every turn. Its tool list is kept: it tells a call to a
+            // tool the session does not have from a call that failed.
+            Some("init") => {
+                self.tools = value.get("tools").and_then(Value::as_array).map(|tools| {
+                    tools
+                        .iter()
+                        .filter_map(|tool| tool.as_str().map(String::from))
+                        .collect()
+                });
+                Vec::new()
+            }
             // `hook_response` has the name, the outcome and the exit code that `hook_started` lacks.
             Some("hook_started") => Vec::new(),
             Some("hook_response") => self.read_hook_response(value, wall_ns),
@@ -583,7 +597,7 @@ impl ClaudeSession {
         let known = self.failed_hooks.iter_mut().find(|failed| {
             failed.cause == HookFailure::NoVerdict
                 && failed.event == event
-                && failed.call_id.is_none()
+                && (failed.call_id.is_none() || failed.call_id.as_deref() == call_id)
         });
         if let Some(failed) = known {
             failed.call_id = call_id.map(String::from);
@@ -612,11 +626,25 @@ impl ClaudeSession {
         call_id: Option<&str>,
     ) {
         if matches!(event, "PreToolUse" | "PostToolUse") {
+            // Hook lines do not name their call (measured on 2.1.325), but a `PreToolUse` hook runs right after the
+            // `assistant` line that holds its call and before the next call's, so it is the latest call of its tool.
+            let call_id = call_id.map(String::from).or_else(|| {
+                let tool = tool_of_hook(name)?;
+                (event == "PreToolUse")
+                    .then(|| {
+                        self.calls
+                            .iter()
+                            .rev()
+                            .find(|call| call.tool.as_deref() == Some(tool))
+                            .map(|call| call.id.clone())
+                    })
+                    .flatten()
+            });
             self.failed_hooks.push(FailedHook {
                 name: name.into(),
                 event: event.into(),
                 cause,
-                call_id: call_id.map(String::from),
+                call_id,
             });
         }
     }
@@ -660,7 +688,14 @@ impl ClaudeSession {
                     bytes,
                 });
             }
-            let refusal = refusal_cause(meta, is_error);
+            let listed = self
+                .calls
+                .iter()
+                .find(|call| call.id == id)
+                .and_then(|call| call.tool.as_deref())
+                .zip(self.tools.as_ref())
+                .is_some_and(|(tool, tools)| tools.iter().any(|listed| listed == tool));
+            let refusal = refusal_cause(meta, is_error, listed);
             if let Some(cause) = refusal {
                 events.push(AgentEvent::ToolRefused {
                     id: id.into(),
@@ -1165,10 +1200,11 @@ fn permission_request(id: &str, request: &Value) -> PermissionRequest {
 /// - `non_execution_kind`, or a `reject` decision, says the call did not run, and `permission_decision.source` says who
 ///   refused it: `hook`, `user_reject` (Collide's own deny) or `config` (a rule, or an auto-deny); any other source is
 ///   `Unknown`;
-/// - an error with no metadata at all is a call to a tool the session does not have.
-fn refusal_cause(meta: Option<&Value>, is_error: bool) -> Option<RefusalCause> {
+/// - an error with no metadata at all is a call to a tool the session does not have, unless `listed`: the tool is in
+///   `system/init`'s list, so the call ran into an error of its own (a missing file, an input that did not validate).
+fn refusal_cause(meta: Option<&Value>, is_error: bool, listed: bool) -> Option<RefusalCause> {
     let Some(meta) = meta else {
-        return is_error.then_some(RefusalCause::MissingTool);
+        return (is_error && !listed).then_some(RefusalCause::MissingTool);
     };
     let decision = meta.get("permission_decision");
     let rejected = decision
