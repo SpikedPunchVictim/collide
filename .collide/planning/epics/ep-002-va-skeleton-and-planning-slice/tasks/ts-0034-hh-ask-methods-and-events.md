@@ -1,7 +1,7 @@
 ---
 id: ts-0034-hh
 kind: task
-status: active
+status: done
 title: "Ask methods and events"
 owners: []
 links:
