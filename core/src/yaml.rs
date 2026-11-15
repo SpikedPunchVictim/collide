@@ -2,7 +2,7 @@
 //! [`load_yaml_file`]; nothing else in the workspace calls `serde-saphyr` or reads YAML any other way.
 //!
 //! YAML is untrusted input (0.9), so the library is never used with its defaults. The options, in
-//! [`hardened_options`], are:
+//! `hardened_options`, are:
 //! - `strict_booleans`: only `true` and `false` (any case) are booleans. The defaults read the YAML 1.1 forms, so
 //!   `no` would become `false` in a bool field or an untyped value;
 //! - `no_schema`: an unquoted scalar that looks like a number or a boolean (`0.10`, `1e10`, `true`) is an error

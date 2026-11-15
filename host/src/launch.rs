@@ -233,7 +233,7 @@ fn lock(lock_file: &Path, wait: Duration) -> Result<fs::File, StartError> {
 
 /// Makes sure a daemon answers on the socket: takes the lock, probes the socket, starts the daemon when it does not
 /// answer, and waits for the answer. The start is a one-shot launchd job when [`StartRequest::launchctl`] is set
-/// ([`start_launchd_job`]), and `setsid` ([`start_with_setsid`]) when it is not or when launchd refuses: that start is
+/// (`start_launchd_job`), and `setsid` ([`start_with_setsid`]) when it is not or when launchd refuses: that start is
 /// [`StartKind::SetsidFallback`], with the warning and, when launchd refused, what it said. The temporary plist is
 /// gone when this returns, whatever the outcome.
 pub fn ensure_daemon(request: &StartRequest) -> Result<StartKind, StartError> {

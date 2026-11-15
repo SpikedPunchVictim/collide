@@ -26,7 +26,7 @@
 //! **At the end** it prints the record ([`record_text`]): the state, the report, one line for each model call with its
 //! wall time, model time, tokens and cost, and a total. A figure the agent did not give is "not reported", never zero.
 //!
-//! **Exit codes** ([`EXIT_CODES`]): 0 the phase ended; 1 the command could not do its work (no daemon, no repository,
+//! **Exit codes** (`EXIT_CODES`): 0 the phase ended; 1 the command could not do its work (no daemon, no repository,
 //! an error from the daemon); 2 a wrong command line; 3 the task file or the run does not exist; 5 the daemon refused
 //! to start the run; 7 the run failed; 8 the run was stopped; 9 the run is waiting for a person and the command left it.
 

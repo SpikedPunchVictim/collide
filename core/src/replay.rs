@@ -7,9 +7,9 @@
 //! journal bytes --read_journal--> whole records --replay_records--> a rebuilt session and its events
 //! ```
 //!
-//! - [`replay_records`] is the walk. A session's [`AgentSession::replay`](crate::adapter::AgentSession::replay) is
+//! - [`replay_records`] is the walk. A session's [`AgentSession::replay`] is
 //!   this call over the two things a session must say about itself, [`Replayable`]. The two doubles of
-//!   [`crate::testing`] do this, and so will the ACP session of Stage 3d.
+//!   `crate::testing` (under the `testing` feature) do this, and so will the ACP session of Stage 3d.
 //! - [`replay_journal_bytes`] is what the daemon calls: the journal file's bytes in, a rebuilt session out, with how
 //!   the bytes ended.
 //!

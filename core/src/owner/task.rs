@@ -1,7 +1,7 @@
 //! The `task.*` methods: the corpus through views, one item, and the source's ops. Everything a source's task
-//! carries is the provider protocol's own type ([`Task`], [`ApplyParams`], [`ApplyResult`], [`PreviewResult`]); these
-//! methods add the board they run against and what the owner knows beyond one source: the checkouts, the runs, the
-//! views.
+//! carries is the provider protocol's own type ([`Task`], [`ApplyParams`], [`ApplyResult`],
+//! [`PreviewResult`](crate::provider::PreviewResult)); these methods add the board they run against and what the owner
+//! knows beyond one source: the checkouts, the runs, the views.
 //!
 //! A `task.list` result never carries a body: `body` is left out of every [`Task`] in it, as the in-app agent's
 //! `query` does (0.11). `task.get` carries it.

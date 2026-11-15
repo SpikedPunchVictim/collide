@@ -36,3 +36,12 @@ None new: the change is to doc comments. The checks above are the test.
 
 - The dogfood task of Stage 3b (part L): `ts-0070-mk` runs it through `collide run` in a fresh worktree of Collide, with haiku and a $0.50 cap (owner's choice, 2026-11-15). The worktree and branch are left for the owner to review; nothing is merged or pushed by the run.
 - Small on purpose: a first real phase should be cheap to check by eye.
+
+### Built
+
+- By a Collide run (`ts-0070-mk`'s dogfood: `collide run`, haiku, a fresh worktree; 22 turns, $0.018): one commit with the six doc-comment fixes, cherry-picked onto main by the owner's choice. The review wrapped one comment line that ran past 120 columns.
+- `cargo doc --workspace --no-deps` prints no warning.
+
+### Not done, by design
+
+- No code, behavior or test change.
