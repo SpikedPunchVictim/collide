@@ -7,7 +7,8 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 18.** Revision 18 adds planning quality checks from the Field mockup: a Decision log, an
+**Status: revision 19.** Revision 19 keeps the tab names Field, Tracks, Queue and Planning, each with a plain
+subtitle (owner, 2026-11-15). Revision 18 adds planning quality checks from the Field mockup: a Decision log, an
 Assumption ledger, a coverage map, a kill criterion for spikes, a red-team pass and a session budget meter (owner,
 2026-11-15). Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as
 engineers (owner, 2026-11-15). Revision 16 shows Claude's versions as two chips in place of a Queue warning (owner,
@@ -2380,6 +2381,11 @@ product managers as well as engineers. It must not read as an IDE:
 - monospace is for code, commands and output, not for the interface around them.
 
 Three surfaces, one keystroke apart:
+
+**Tab names and subtitles** (owner, 2026-11-15; revision 19). Each tab shows its name with a plain subtitle beneath
+it, so a person who has not learned the names can still find their way: **Field**, "the whole board"; **Tracks**,
+"what's running now"; **Queue**, "what needs you"; and **Planning** (the Planning view below), "what to build next".
+The names stay; the subtitles are the audience rule above applied to navigation.
 
 - **Field:** the corpus through a view, laid out as a board or a run order.
   - Tasks are the primary objects. A task being worked on has a lit border (the prototype board's), in the state
@@ -6069,3 +6075,9 @@ for more description of the ideas, then: "For Mockup A's decision, I Agree with 
   confidence is the person's, never derived from the evidence; the red-team agent writes nothing and the session's
   agent records its findings, so no new op is needed; the panel's buttons type into the terminal; the meter's cap
   is the phase budget the take-over rule already warns at, and time is shown, not capped. Stage 2 is unchanged.
+
+**Revision 19, 2026-11-15 (owner).** Tab names. The owner compared the names on the Tracks mockup (C, version 9),
+which shows each tab with a subtitle, and kept them: "we can keep these with the subtitles".
+- **Changed:** the status line; 0.11 (the tab names and their subtitles).
+- **Choices made:** the subtitles are the mockup's words; Planning is the `collide/plan` pack's Planning view, so
+  its tab is there when that pack is enabled.
