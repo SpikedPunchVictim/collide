@@ -1,7 +1,7 @@
 ---
 id: ts-0048-pg
 kind: task
-status: active
+status: done
 title: "Feature links, the derived state and reid"
 owners: []
 links:
