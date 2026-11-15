@@ -1,0 +1,740 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "description": "Who made the write (0.5). `run` and `phase` are reserved now so that writes a run makes need no later schema\nchange. They are not tied to a kind: a workflow op inside a run may carry `run`, and an agent outside a run,\nsuch as one whose actor is read from the process tree, may have neither.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ActorKind": {
+      "enum": [
+        "person",
+        "workflow",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "Batch": {
+      "additionalProperties": false,
+      "description": "One call on several items fires per item; `index` counts from 0.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "index",
+        "size"
+      ],
+      "type": "object"
+    },
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "Change": {
+      "additionalProperties": false,
+      "description": "The `change` a task point carries. `op` is null for a write made by a run (`via: run`). `from` is null at\ncreate and `to` is null at delete. `diff` is predicted at `before_*` and actual at `after_*`. `effectOf` is the\nkey of the item whose op changed this one.",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "args": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "batch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Batch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categoryMoved": {
+          "type": "boolean"
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diff": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldDiff"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "effectOf": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effects": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Effect"
+          },
+          "type": "array"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "op": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "renamed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Rename"
+          },
+          "type": "array"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "via": {
+          "$ref": "#/$defs/Via"
+        }
+      },
+      "required": [
+        "op",
+        "args",
+        "from",
+        "to",
+        "diff",
+        "categoryMoved",
+        "via",
+        "actor",
+        "batch",
+        "effects",
+        "effectOf",
+        "renamed",
+        "checkout",
+        "files"
+      ],
+      "type": "object"
+    },
+    "Effect": {
+      "additionalProperties": false,
+      "description": "One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "FieldDiff": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "from": true,
+            "to": true
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "added": {
+              "items": true,
+              "type": "array"
+            },
+            "removed": {
+              "items": true,
+              "type": "array"
+            }
+          },
+          "required": [
+            "added",
+            "removed"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One changed field: `{from, to}`, or `{added, removed}` for a set. `from` is null at create and `to` is null\nat delete."
+    },
+    "HistoryEntry": {
+      "additionalProperties": false,
+      "description": "An earlier phase of the run (0.8): its kind, round, heads, artifact paths and verdict.",
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "endHead": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "round": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startHead": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "phase",
+        "kind",
+        "round",
+        "startHead",
+        "endHead",
+        "artifacts",
+        "verdict"
+      ],
+      "type": "object"
+    },
+    "HookExperiment": {
+      "additionalProperties": false,
+      "description": "Inside an experiment: the experiment, the arm and the arm's directory, so a hook can skip a push (0.14).",
+      "properties": {
+        "arm": {
+          "type": "string"
+        },
+        "dir": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "arm",
+        "dir"
+      ],
+      "type": "object"
+    },
+    "HookLink": {
+      "additionalProperties": false,
+      "description": "A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says\nthat the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "dir": {
+          "$ref": "#/$defs/LinkDir"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "dir",
+        "key",
+        "kind",
+        "status",
+        "category",
+        "stale"
+      ],
+      "type": "object"
+    },
+    "HookPhase": {
+      "additionalProperties": false,
+      "description": "The phase a hook runs in or for.",
+      "properties": {
+        "dir": {
+          "description": "The phase's scratch directory, outside the worktree.",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "round": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "round",
+        "dir"
+      ],
+      "type": "object"
+    },
+    "HookState": {
+      "additionalProperties": false,
+      "description": "`state` (0.5): the outputs kept so far. `point` holds the outputs of earlier chain handlers at the same point.",
+      "properties": {
+        "point": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "run": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "workspace": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "run",
+        "workspace",
+        "point"
+      ],
+      "type": "object"
+    },
+    "HookStatus": {
+      "description": "The verdict a hook writes. It is `ok`, `fail`, `unverified` (could not check here), `pending` (has not happened\nyet), `refused` or `error`. `unverified` and `pending` are valid only from some hooks: see [`effective_result`].",
+      "enum": [
+        "ok",
+        "fail",
+        "unverified",
+        "pending",
+        "refused",
+        "error"
+      ],
+      "type": "string"
+    },
+    "HookTask": {
+      "additionalProperties": false,
+      "description": "One entry of `tasks[]`: the fields and the path of a task, never its body, and its links. It is not the\nprovider's `Task`, which has a body, a version and every alias a hook has no use for, and which a hook must\nnot read: task text reaches a hook only through the fields a pack asks for.",
+      "properties": {
+        "fields": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HookLink"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        },
+        "shortId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ItemState"
+        },
+        "templateFields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "The provider's template fields: safe tokens (0.5).",
+          "type": "object"
+        }
+      },
+      "required": [
+        "key",
+        "shortId",
+        "kind",
+        "state",
+        "path",
+        "templateFields",
+        "fields",
+        "links"
+      ],
+      "type": "object"
+    },
+    "HookWorkspace": {
+      "additionalProperties": false,
+      "description": "A workspace: a git checkout (0.8).",
+      "properties": {
+        "gitDir": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/WorkspaceKind"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path",
+        "gitDir"
+      ],
+      "type": "object"
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
+    "LatestRun": {
+      "additionalProperties": false,
+      "description": "An item's latest finished run, frozen and read-only. A hook outside a run reads it, for example to find a\nverify verdict.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "state": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "workflow": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "workflow",
+        "outcome",
+        "state"
+      ],
+      "type": "object"
+    },
+    "LinkDir": {
+      "description": "Which end of a link the item that stores it holds: `out` for `blocked-by`, which points at the blocker.\nCollide derives the other direction (0.10).",
+      "enum": [
+        "out",
+        "in"
+      ],
+      "type": "string"
+    },
+    "Rename": {
+      "additionalProperties": false,
+      "description": "An id that changed, at Share or `renumber`. It is also the body of the provider's `task.renamed`\nnotification, which names the `checkout`; inside a `change`, the change's own `checkout` applies.",
+      "properties": {
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "Via": {
+      "description": "The route of a write.",
+      "enum": [
+        "ui",
+        "workflow",
+        "share",
+        "integrate",
+        "run"
+      ],
+      "type": "string"
+    },
+    "WorkspaceKind": {
+      "enum": [
+        "task",
+        "sandbox",
+        "line",
+        "experiment"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What a hook reads on stdin (0.5). Settings travel here, never in the environment. The task points add `change`,\nand `latestRun` when the task has a finished run; both are absent at every other hook. `workflow` is null\noutside a run, such as at a UI write: a chain handler uses it, with `pack`, to ignore other packs' runs (0.4).",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "change": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Change"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "config": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "experiment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HookExperiment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Null outside an experiment."
+    },
+    "history": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HistoryEntry"
+      },
+      "type": "array"
+    },
+    "hook": {
+      "type": "string"
+    },
+    "latestRun": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LatestRun"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "launch": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "line": {
+      "type": "string"
+    },
+    "pack": {
+      "type": "string"
+    },
+    "phase": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HookPhase"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "protocol": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "run": {
+      "description": "The run's id, or null outside a run.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "$ref": "#/$defs/HookState"
+    },
+    "tasks": {
+      "items": {
+        "$ref": "#/$defs/HookTask"
+      },
+      "type": "array"
+    },
+    "workflow": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workspace": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HookWorkspace"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "protocol",
+    "hook",
+    "pack",
+    "workflow",
+    "board",
+    "line",
+    "experiment",
+    "run",
+    "launch",
+    "config",
+    "tasks",
+    "phase",
+    "workspace",
+    "history",
+    "state"
+  ],
+  "title": "HookInput",
+  "type": "object"
+}

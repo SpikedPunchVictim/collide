@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One report line. Every line carries `v` and its timestamp `t`, because a time stamped at reading would be wrong\nby the tailing lag. Each variant repeats `v` and `t`: serde cannot flatten them out of a tagged enum that denies\nunknown keys. A key a reporter does not know is left out, and shows as \"not reported\" (0.13).",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "attrs": {
+          "additionalProperties": true,
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "span.start",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "t": {
+          "type": "string"
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "v",
+        "t",
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "attrs": {
+          "additionalProperties": true,
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "span.end",
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "t": {
+          "type": "string"
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "v",
+        "t",
+        "id",
+        "status"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "metric",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "t": {
+          "type": "string"
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "v",
+        "t",
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "done": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "progress",
+          "type": "string"
+        },
+        "t": {
+          "type": "string"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "v",
+        "t",
+        "done"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Keeps `cacheRead` and `cacheWrite` apart, and may split `cacheWrite` into `cacheWrite1h` and `cacheWrite5m`.\nA merged `cached` count is rejected: a write and a read are priced far apart.",
+      "properties": {
+        "cacheRead": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cacheWrite": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cacheWrite1h": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cacheWrite5m": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "const": "usage",
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "t": {
+          "type": "string"
+        },
+        "tokensIn": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokensOut": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "v",
+        "t",
+        "model"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "`resetsAt` is the reset time in epoch seconds.",
+      "properties": {
+        "kind": {
+          "const": "limited",
+          "type": "string"
+        },
+        "resetsAt": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "t": {
+          "type": "string"
+        },
+        "v": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "v",
+        "t",
+        "resetsAt"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ReportLine"
+}

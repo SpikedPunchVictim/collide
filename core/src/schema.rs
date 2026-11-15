@@ -11,6 +11,7 @@
 //! - to add a type, add one `registry.add::<T>()` line to [`registry`].
 
 use crate::change::{Change, Rename, TaskPointPayload};
+use crate::hook::{HookInput, HookResult};
 use crate::item::{KindDecl, LinkTypeDecl, PlanningFields};
 use crate::observer::{ObserverAck, ObserverEvent};
 use crate::pack::{PackManifest, RunBudget};
@@ -19,6 +20,7 @@ use crate::provider::{
     ListResult, PreviewResult, SourceStale, Task, TaskChanged, TaskCollision, TaskInvalid,
     TaskRemoved, WatchParams, WatchResult,
 };
+use crate::report::ReportLine;
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde_json::Value;
@@ -83,6 +85,8 @@ pub fn registry() -> Registry {
     registry.add::<Change>();
     registry.add::<GetParams>();
     registry.add::<GetResult>();
+    registry.add::<HookInput>();
+    registry.add::<HookResult>();
     registry.add::<InitializeParams>();
     registry.add::<InitializeResult>();
     registry.add::<KindDecl>();
@@ -94,6 +98,7 @@ pub fn registry() -> Registry {
     registry.add::<PackManifest>();
     registry.add::<PlanningFields>();
     registry.add::<PreviewResult>();
+    registry.add::<ReportLine>();
     // `Rename` is also the body of the provider's `task.renamed` notification.
     registry.add::<Rename>();
     registry.add::<RunBudget>();

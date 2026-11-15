@@ -1,0 +1,46 @@
+{
+  "$defs": {
+    "HookStatus": {
+      "description": "The verdict a hook writes. It is `ok`, `fail`, `unverified` (could not check here), `pending` (has not happened\nyet), `refused` or `error`. `unverified` and `pending` are valid only from some hooks: see [`effective_result`].",
+      "enum": [
+        "ok",
+        "fail",
+        "unverified",
+        "pending",
+        "refused",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The result file (0.5). Its status is the verdict. `retryAfter` is a hint in seconds for `pending`; the engine\nclamps it against the phase's `interval:` (`ts-0038-ng`).",
+  "properties": {
+    "message": {
+      "default": "",
+      "type": "string"
+    },
+    "outputs": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "retryAfter": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "status": {
+      "$ref": "#/$defs/HookStatus"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "title": "HookResult",
+  "type": "object"
+}

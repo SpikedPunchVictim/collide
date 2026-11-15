@@ -178,6 +178,80 @@ fn schema_lists_the_provider_and_observer_protocol_types() {
 }
 
 #[test]
+fn schema_lists_the_hook_input_result_and_report_line() {
+    let types = listed_types(&schema_stdout());
+    assert_eq!(
+        keys(&types, "HookInput"),
+        [
+            "board",
+            "change",
+            "config",
+            "experiment",
+            "history",
+            "hook",
+            "latestRun",
+            "launch",
+            "line",
+            "pack",
+            "phase",
+            "protocol",
+            "run",
+            "state",
+            "tasks",
+            "workflow",
+            "workspace"
+        ]
+    );
+    assert_eq!(
+        keys(&types, "HookResult"),
+        ["message", "outputs", "retryAfter", "status"]
+    );
+    assert_eq!(
+        keys(&types, "HookTask"),
+        [
+            "fields",
+            "key",
+            "kind",
+            "links",
+            "path",
+            "shortId",
+            "state",
+            "templateFields"
+        ]
+    );
+    assert_eq!(
+        keys(&types, "HookLink"),
+        ["category", "dir", "key", "kind", "stale", "status", "type"]
+    );
+    // `ReportLine` is one object per kind, so the listing shows the keys of all six together.
+    assert_eq!(
+        keys(&types, "ReportLine"),
+        [
+            "attrs",
+            "cacheRead",
+            "cacheWrite",
+            "cacheWrite1h",
+            "cacheWrite5m",
+            "done",
+            "id",
+            "kind",
+            "model",
+            "name",
+            "parent",
+            "resetsAt",
+            "status",
+            "t",
+            "tokensIn",
+            "tokensOut",
+            "total",
+            "unit",
+            "v",
+            "value"
+        ]
+    );
+}
+
+#[test]
 fn schema_output_is_the_same_on_every_run() {
     assert_eq!(schema_stdout(), schema_stdout());
 }
