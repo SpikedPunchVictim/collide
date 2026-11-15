@@ -1,7 +1,7 @@
 ---
 id: ts-0061-bg
 kind: task
-status: active
+status: done
 title: "Claude adapter: capabilities, launch line and phase snapshot"
 owners: []
 links:
