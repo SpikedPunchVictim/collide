@@ -76,7 +76,7 @@
 use crate::auth::{self, StdFs, UnixPeer};
 use crate::clock::{Clock, Clocks, SystemClocks};
 use crate::daemon::{DaemonPaths, ROOT_ENV};
-use crate::launch::{StartRequest, ensure_daemon};
+use crate::launch::{LAUNCHCTL_ENV, StartRequest, ensure_daemon, launchctl_from_env};
 use crate::shim_link::{FrameReader, Next, send};
 use crate::sysproc;
 use collide_core::journal::{Direction, JournalRecord, MAX_RECORD_BYTES, encode_record};
@@ -495,6 +495,10 @@ fn start_daemon(start: &DaemonStart) {
     };
     let mut request = StartRequest::new(start.exe.clone(), &paths);
     request.env = start.env.clone();
+    request.launchctl = launchctl_from_env(
+        start.env.get(ROOT_ENV).map(String::as_str),
+        start.env.get(LAUNCHCTL_ENV).map(String::as_str),
+    );
     match ensure_daemon(&request) {
         Ok(_) => {}
         Err(error) => eprintln!("collide shim: the daemon was not started: {error}"),

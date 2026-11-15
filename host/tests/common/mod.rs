@@ -287,3 +287,31 @@ impl Drop for ShimProc {
         kill_child_of(&self.dir);
     }
 }
+
+// ---- the daemon over its socket -----------------------------------------------------------------------------------
+
+/// The daemon's `daemon.status` over its real socket, with the token from its token file. `None` when nothing answers.
+pub fn daemon_status(paths: &collide_host::daemon::DaemonPaths) -> Option<serde_json::Value> {
+    use std::io::{BufRead, BufReader, Write};
+    let stream = std::os::unix::net::UnixStream::connect(&paths.socket).ok()?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .ok()?;
+    let token = fs::read_to_string(&paths.token_file).ok()?;
+    let mut writer = stream.try_clone().ok()?;
+    let mut reader = BufReader::new(stream);
+    let mut ask = |id: u64, method: &str, params: serde_json::Value| -> Option<serde_json::Value> {
+        let request =
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        writer.write_all(format!("{request}\n").as_bytes()).ok()?;
+        let mut line = String::new();
+        reader.read_line(&mut line).ok()?;
+        serde_json::from_str(&line).ok()
+    };
+    ask(
+        1,
+        "initialize",
+        serde_json::json!({"protocol": 1, "token": token.trim()}),
+    )?;
+    Some(ask(2, "daemon.status", serde_json::json!({}))?["result"].clone())
+}

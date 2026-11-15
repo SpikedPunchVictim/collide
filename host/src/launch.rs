@@ -7,7 +7,10 @@
 //!    app or Terminal that started it (measured S2). The start is a one-shot launchd job: `launchctl bootstrap
 //!    gui/<uid>` of a temporary plist, removed once the daemon runs ([`LaunchdJob`]). The plist's paths are absolute
 //!    and canonical, and it sets `USER`, `HOME` and `PATH`, because `claude` fails with `api_error` without `USER`
-//!    (measured S2). launchd starts the job in `/` with a bare environment.
+//!    (measured S2). launchd starts the job in `/` with a bare environment. The plist lives in the daemon's run
+//!    directory, never in `~/Library/LaunchAgents`. Every call on launchd goes through [`Launchctl`], so a test
+//!    can refuse a bootstrap, and a start loads a job only when its caller set [`StartRequest::launchctl`]
+//!    ([`launchctl_from_env`] is the rule the binary and the shim use).
 //! 3. **Over SSH, or with no GUI session, `launchctl bootstrap` can fail** (inferred). The daemon then starts with
 //!    `setsid`, outside the coalition, and the start returns a warning that it may end with its launcher
 //!    ([`StartKind::SetsidFallback`]). The run is not refused.
@@ -20,7 +23,7 @@
 //! | tag | function | what it does |
 //! |---|---|---|
 //! | `daemon: lock file start` | [`ensure_daemon`] | the lock, the wait, the socket probe and the choice between 2 and 3 |
-//! | `daemon: launchd job` | [`launchd_plist`], [`bootstrap_launchd_job`] | the plist and its bootstrap, removed once the daemon runs |
+//! | `daemon: launchd job` | [`launchd_plist`], [`launchd_job`], [`Launchctl`] | the plist, its inputs made canonical, and the bootstrap, removed once the daemon runs |
 //! | `daemon: setsid start` | [`start_with_setsid`] | the fallback start, with its warning |
 
 use crate::daemon::DaemonPaths;
@@ -33,6 +36,7 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// How long a start waits for the lock file and then for the socket to answer (0.2: 15 s).
@@ -134,7 +138,7 @@ impl std::fmt::Display for StartError {
 impl std::error::Error for StartError {}
 
 /// What a start needs to know.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct StartRequest {
     /// The `collide-daemon` binary, as an absolute canonical path.
     pub daemon_exe: PathBuf,
@@ -147,6 +151,11 @@ pub struct StartRequest {
     pub env: BTreeMap<String, String>,
     /// How long to wait for the lock file, and then for the socket to answer ([`LOCK_WAIT`]).
     pub wait: Duration,
+    /// The `launchctl` the start tries before `setsid`. `None` is a start with `setsid` only, which is what
+    /// [`StartRequest::new`] gives, so no start touches launchd unless its caller asked ([`launchctl_from_env`]).
+    pub launchctl: Option<Arc<dyn Launchctl>>,
+    /// The start of the job's label ([`DEFAULT_LABEL_PREFIX`]); the rest is made per start.
+    pub label_prefix: String,
 }
 
 impl StartRequest {
@@ -159,6 +168,8 @@ impl StartRequest {
             log_file: paths.log_file.clone(),
             env: BTreeMap::new(),
             wait: LOCK_WAIT,
+            launchctl: None,
+            label_prefix: DEFAULT_LABEL_PREFIX.to_string(),
         }
     }
 }
@@ -215,10 +226,10 @@ fn lock(lock_file: &Path, wait: Duration) -> Result<fs::File, StartError> {
 }
 
 /// Makes sure a daemon answers on the socket: takes the lock, probes the socket, starts the daemon when it does not
-/// answer ([`bootstrap_launchd_job`] on macOS, then [`start_with_setsid`] if that fails), and waits for the answer.
-///
-/// Today the start is `setsid` only, because the launchd job is `ts-0058-ad`'s: that item puts its attempt before the
-/// `setsid` one here, and the result of a `setsid` start is [`StartKind::SetsidFallback`] with its warning.
+/// answer, and waits for the answer. The start is a one-shot launchd job when [`StartRequest::launchctl`] is set
+/// ([`start_launchd_job`]), and `setsid` ([`start_with_setsid`]) when it is not or when launchd refuses: that start is
+/// [`StartKind::SetsidFallback`], with the warning and, when launchd refused, what it said. The temporary plist is
+/// gone when this returns, whatever the outcome.
 pub fn ensure_daemon(request: &StartRequest) -> Result<StartKind, StartError> {
     let lock_file = lock(&request.lock_file, request.wait)?;
     // The lock file holds the socket path, for whoever looks at what a start is holding.
@@ -234,18 +245,48 @@ pub fn ensure_daemon(request: &StartRequest) -> Result<StartKind, StartError> {
     if answers(&request.socket) {
         return Ok(StartKind::AlreadyRunning);
     }
+    let mut warning = SETSID_WARNING.to_string();
+    if let Some(launchctl) = &request.launchctl {
+        match start_launchd_job(request, launchctl.as_ref(), &|name| {
+            std::env::var(name).ok()
+        }) {
+            Ok(job) => {
+                let mut next_look = Instant::now() + JOB_SETTLE;
+                wait_for_answer(request, || {
+                    if Instant::now() < next_look {
+                        return None;
+                    }
+                    next_look = Instant::now() + JOB_LOOK;
+                    // An error is "cannot tell", which is not an end.
+                    match launchctl.process_of(&job.target) {
+                        Ok(None) => Some(format!("the launchd job {} has no process", job.label)),
+                        _ => None,
+                    }
+                })?;
+                return Ok(StartKind::Launchd);
+            }
+            Err(error) => warning = format!("{SETSID_WARNING} (launchd said: {error})"),
+        }
+    }
     let pid = start_with_setsid(request).map_err(|source| StartError::Io {
         context: format!("could not start {}", request.daemon_exe.display()),
         source,
     })?;
+    wait_for_answer(request, || reap_if_ended(pid))?;
+    Ok(StartKind::SetsidFallback { warning })
+}
+
+/// Waits up to [`StartRequest::wait`] for the socket to answer. `ended` says, when the daemon is gone, how it ended.
+fn wait_for_answer(
+    request: &StartRequest,
+    mut ended: impl FnMut() -> Option<String>,
+) -> Result<(), StartError> {
     let until = Instant::now() + request.wait;
     loop {
         if answers(&request.socket) {
-            return Ok(StartKind::SetsidFallback {
-                warning: SETSID_WARNING.to_string(),
-            });
+            return Ok(());
         }
-        if let Some(status) = reap_if_ended(pid) {
+        if let Some(status) = ended() {
             return Err(StartError::Exited {
                 status,
                 log_file: request.log_file.clone(),
@@ -295,29 +336,358 @@ fn log_tail(log_file: &Path) -> String {
     }
 }
 
-/// The one-shot launchd job: a label, the daemon and the three variables launchd's bare environment lacks.
+/// The label's start when [`StartRequest::label_prefix`] is not set: the product's reverse-DNS name, so a job of ours
+/// is told from anyone else's in `launchctl list`.
+pub const DEFAULT_LABEL_PREFIX: &str = "dev.collide.daemon";
+
+/// The variable that names the `launchctl` program to use, and that asks for launchd even under an overridden root.
+pub const LAUNCHCTL_ENV: &str = "COLLIDE_LAUNCHCTL";
+
+/// The `launchctl` a real start uses.
+pub const SYSTEM_LAUNCHCTL: &str = "/bin/launchctl";
+
+/// The file in the run directory that holds the label of the job the last start made, so the next start can end it.
+pub const LABEL_FILE: &str = "launchd.label";
+
+/// How long a launchd job may have no process, from the bootstrap, before the start calls it ended. launchd answered
+/// about 70 ms after a start in S2, and 500 ms the first time.
+const JOB_SETTLE: Duration = Duration::from_secs(3);
+
+/// How often the start asks launchd whether the job has a process, once [`JOB_SETTLE`] is over.
+const JOB_LOOK: Duration = Duration::from_millis(250);
+
+/// The path to use when the starter's own `PATH` is not set: the system's.
+const FALLBACK_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/// Variables the start passes on to the job when the starter has them, because launchd's environment is bare.
+pub const FORWARDED_ENV: [&str; 3] = ["COLLIDE_DAEMON_ROOT", "HOME", "SHELL"];
+
+/// The variables of the job whose value is a path. Each is made canonical when it exists (`/tmp` and `/var` are
+/// symlinks on macOS).
+const PATH_VARIABLES: [&str; 4] = ["HOME", "COLLIDE_DAEMON_ROOT", "SHELL", LAUNCHCTL_ENV];
+
+/// The calls a start makes on launchd. This is the seam: a start under test gets a double, so no test calls the real
+/// `launchctl` unless it is the opt-in one.
+pub trait Launchctl: std::fmt::Debug + Send + Sync {
+    /// `launchctl bootstrap <domain> <plist>`: loads the job, which then runs once ([`launchd_plist`]).
+    fn bootstrap(&self, domain: &str, plist: &Path) -> io::Result<()>;
+    /// `launchctl bootout <target>`: unloads a job and ends its process.
+    fn bootout(&self, target: &str) -> io::Result<()>;
+    /// The pid of the job's process: `Ok(None)` when the job is loaded and has none, and an error when launchd cannot
+    /// say (including a job that is not loaded).
+    fn process_of(&self, target: &str) -> io::Result<Option<u32>>;
+}
+
+/// The real `launchctl`, or a program that stands in for it (a script that records its arguments).
+#[derive(Debug, Clone)]
+pub struct SystemLaunchctl {
+    program: PathBuf,
+}
+
+impl SystemLaunchctl {
+    pub fn new(program: impl Into<PathBuf>) -> SystemLaunchctl {
+        SystemLaunchctl {
+            program: program.into(),
+        }
+    }
+
+    /// Runs the program with `args`. A failure names the command and carries what it printed on stderr.
+    fn run(&self, args: &[&std::ffi::OsStr]) -> io::Result<String> {
+        let output = Command::new(&self.program)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()?;
+        if !output.status.success() {
+            let shown: Vec<String> = args
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            return Err(io::Error::other(format!(
+                "`{} {}` ended with {}: {}",
+                self.program.display(),
+                shown.join(" "),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+}
+
+impl Launchctl for SystemLaunchctl {
+    fn bootstrap(&self, domain: &str, plist: &Path) -> io::Result<()> {
+        self.run(&["bootstrap".as_ref(), domain.as_ref(), plist.as_os_str()])
+            .map(|_| ())
+    }
+
+    fn bootout(&self, target: &str) -> io::Result<()> {
+        self.run(&["bootout".as_ref(), target.as_ref()]).map(|_| ())
+    }
+
+    fn process_of(&self, target: &str) -> io::Result<Option<u32>> {
+        let text = self.run(&["print".as_ref(), target.as_ref()])?;
+        Ok(pid_in_print(&text))
+    }
+}
+
+/// The `pid = N` line of `launchctl print <target>`, which a job with no process does not have.
+fn pid_in_print(text: &str) -> Option<u32> {
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix("pid = "))
+        .and_then(|pid| pid.trim().parse().ok())
+}
+
+/// The `launchctl` a start in this environment uses, if any: none off macOS. `root` is `COLLIDE_DAEMON_ROOT` and
+/// `launchctl` is [`LAUNCHCTL_ENV`], both as the starter has them.
+///
+/// - `launchctl` set: that program. This is how a test names a double, and how the opt-in test names the real one.
+/// - Else `root` set: none. A start under an overridden root is a test's or a developer's own, and it never loads a
+///   job into the user's launchd unless it says so.
+/// - Else [`SYSTEM_LAUNCHCTL`].
+pub fn launchctl_from_env(
+    root: Option<&str>,
+    launchctl: Option<&str>,
+) -> Option<Arc<dyn Launchctl>> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    match (launchctl.filter(|p| !p.is_empty()), root) {
+        (Some(program), _) => Some(Arc::new(SystemLaunchctl::new(program))),
+        (None, Some(_)) => None,
+        (None, None) => Some(Arc::new(SystemLaunchctl::new(SYSTEM_LAUNCHCTL))),
+    }
+}
+
+/// The one-shot launchd job: a label, the daemon, where its output goes and its whole environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchdJob {
     /// The job's label, unique per start so that two starts never name one job.
     pub label: String,
+    /// The `collide-daemon` binary, absolute and canonical.
     pub daemon_exe: PathBuf,
-    pub user: String,
-    pub home: PathBuf,
-    /// The `PATH` the daemon starts with, before it captures the login shell's.
-    pub path: String,
+    /// The daemon's log, absolute and canonical: launchd opens it for the job's output and error.
+    pub log_file: PathBuf,
+    /// Everything the daemon starts with. launchd gives a job nothing: this holds `USER`, `HOME` and `PATH`, and what
+    /// the start forwards ([`FORWARDED_ENV`]).
+    pub env: BTreeMap<String, String>,
 }
 
-/// The job's plist, as text. The daemon runs in `/` and its paths are all absolute.
+/// The job's plist, as text. The daemon runs in `/` and its paths are all absolute (the job's inputs are made
+/// canonical by [`launchd_job`]).
+///
+/// The keys, and why:
+/// - `RunAtLoad` true and no `KeepAlive`: `bootstrap` runs the daemon once, and launchd never starts it again. The
+///   job is not in a `LaunchAgents` folder, so it is not loaded at the next login either. Keeping the daemon alive is
+///   deferred (0.2).
+/// - `AbandonProcessGroup` true: the shims and the children must outlive the daemon, and launchd would otherwise
+///   end what is left in the job's process group when the daemon ends.
+/// - `ProcessType` `Interactive`: the daemon serves a person's session, so launchd does not run it as a background job.
+/// - `WorkingDirectory` `/`, the same as the `setsid` start.
 pub fn launchd_plist(job: &LaunchdJob) -> String {
-    let _ = job;
-    todo!("daemon: launchd job")
+    let string = |value: &str| format!("<string>{}</string>", xml_escape(value));
+    let log = string(&job.log_file.to_string_lossy());
+    let mut env = String::new();
+    for (name, value) in &job.env {
+        env.push_str(&format!(
+            "    <key>{}</key>\n    {}\n",
+            xml_escape(name),
+            string(value)
+        ));
+    }
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  {label}
+  <key>ProgramArguments</key>
+  <array>
+    {exe}
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+{env}  </dict>
+  <key>StandardOutPath</key>
+  {log}
+  <key>StandardErrorPath</key>
+  {log}
+  <key>RunAtLoad</key>
+  <true/>
+  <key>AbandonProcessGroup</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+</dict>
+</plist>
+"#,
+        label = string(&job.label),
+        exe = string(&job.daemon_exe.to_string_lossy()),
+    )
 }
 
-/// Writes the plist to a temporary file and runs `launchctl bootstrap gui/<uid>` on it. The caller removes the plist
-/// once the daemon runs. A failure here is what makes the start fall back to `setsid`.
-pub fn bootstrap_launchd_job(job: &LaunchdJob) -> io::Result<PathBuf> {
-    let _ = job;
-    todo!("daemon: launchd job")
+/// `text` with the five characters XML reads as markup replaced.
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+/// A job's plist on disk. The file is removed when this is dropped, so it is gone whether the start worked or not.
+#[derive(Debug)]
+struct PlistFile(PathBuf);
+
+impl Drop for PlistFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// A job that `launchctl bootstrap` loaded.
+#[derive(Debug)]
+struct LaunchedJob {
+    label: String,
+    /// `gui/<uid>/<label>`, which `bootout` and `print` take.
+    target: String,
+    _plist: PlistFile,
+}
+
+fn current_uid() -> u32 {
+    // SAFETY: `getuid` takes no arguments, cannot fail and touches no memory.
+    unsafe { libc::getuid() }
+}
+
+/// A label for one start: the prefix, this process's pid and the time in nanoseconds.
+fn new_label(prefix: &str) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!("{prefix}.{}-{nanos}", std::process::id())
+}
+
+fn invalid(message: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+/// `path` made canonical when it can be: an absolute path that exists. Anything else is returned as it is.
+fn canonical_if_exists(path: &str) -> String {
+    if !Path::new(path).is_absolute() {
+        return path.to_string();
+    }
+    fs::canonicalize(path).map_or_else(|_| path.to_string(), |p| p.display().to_string())
+}
+
+/// The job for a start: the daemon and the log made canonical, and the environment from the request, then the
+/// starter's own (`lookup`). `USER` is required, because `claude` fails with `api_error` without it (measured S2); an
+/// unset `HOME` is an error too, and an unset `PATH` is the system's. A start that cannot say these falls back to
+/// `setsid`, which passes the starter's environment on whole.
+pub fn launchd_job(
+    request: &StartRequest,
+    label: String,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> io::Result<LaunchdJob> {
+    let daemon_exe = fs::canonicalize(&request.daemon_exe).map_err(|e| {
+        io::Error::new(
+            e.kind(),
+            format!("cannot find {}: {e}", request.daemon_exe.display()),
+        )
+    })?;
+    let log_file = canonical_log_file(&request.log_file)?;
+    let value = |name: &str| request.env.get(name).cloned().or_else(|| lookup(name));
+    let user = value("USER")
+        .or_else(|| lookup("LOGNAME"))
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| invalid("neither USER nor LOGNAME is set".to_string()))?;
+    let home = value("HOME")
+        .filter(|h| Path::new(h).is_absolute())
+        .ok_or_else(|| invalid("HOME is not set to an absolute path".to_string()))?;
+    let path = value("PATH")
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| FALLBACK_PATH.to_string());
+    let mut env: BTreeMap<String, String> = request.env.clone();
+    env.insert("USER".to_string(), user);
+    env.insert("HOME".to_string(), home);
+    env.insert("PATH".to_string(), path);
+    for name in PATH_VARIABLES {
+        if let Some(value) = env.get_mut(name) {
+            *value = canonical_if_exists(value);
+        }
+    }
+    Ok(LaunchdJob {
+        label,
+        daemon_exe,
+        log_file,
+        env,
+    })
+}
+
+/// The log file's canonical path. The file is made first (mode `0600`, like the `setsid` start's), because launchd
+/// opens it for the job and cannot make its folder.
+fn canonical_log_file(log_file: &Path) -> io::Result<PathBuf> {
+    let (Some(dir), Some(name)) = (log_file.parent(), log_file.file_name()) else {
+        return Err(invalid(format!("{} has no folder", log_file.display())));
+    };
+    fs::create_dir_all(dir)?;
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(log_file)?;
+    Ok(fs::canonicalize(dir)?.join(name))
+}
+
+/// Starts the daemon as a one-shot launchd job and returns the loaded job; the caller waits for the daemon's answer.
+///
+/// 1. The job's inputs are made canonical ([`launchd_job`]).
+/// 2. A job that an earlier start of ours recorded in [`LABEL_FILE`] is booted out first. The lock is held and the
+///    socket does not answer, so that daemon is gone or stuck, and a loaded job of a gone daemon is only litter.
+/// 3. The plist is written next to the lock file, in the daemon's run directory and never in `~/Library/LaunchAgents`,
+///    and its label is recorded.
+/// 4. `launchctl bootstrap gui/<uid> <plist>`. When it fails the plist and the record are removed, and the error says
+///    what `launchctl` printed.
+fn start_launchd_job(
+    request: &StartRequest,
+    launchctl: &dyn Launchctl,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> io::Result<LaunchedJob> {
+    let job = launchd_job(request, new_label(&request.label_prefix), lookup)?;
+    let uid = current_uid();
+    let dir = request
+        .lock_file
+        .parent()
+        .ok_or_else(|| invalid(format!("{} has no folder", request.lock_file.display())))
+        .and_then(fs::canonicalize)?;
+    let label_file = dir.join(LABEL_FILE);
+    if let Ok(old) = fs::read_to_string(&label_file) {
+        let old = old.trim();
+        if !old.is_empty() {
+            // Not loaded any more is the usual answer, and not a failure.
+            let _ = launchctl.bootout(&format!("gui/{uid}/{old}"));
+        }
+        let _ = fs::remove_file(&label_file);
+    }
+    let plist_path = dir.join(format!("{}.plist", job.label));
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&plist_path)?
+        .write_all(launchd_plist(&job).as_bytes())?;
+    let plist = PlistFile(plist_path);
+    fs::write(&label_file, &job.label)?;
+    if let Err(error) = launchctl.bootstrap(&format!("gui/{uid}"), &plist.0) {
+        let _ = fs::remove_file(&label_file);
+        return Err(error);
+    }
+    Ok(LaunchedJob {
+        target: format!("gui/{uid}/{}", job.label),
+        label: job.label,
+        _plist: plist,
+    })
 }
 
 /// Starts the daemon detached with `setsid`, outside the launcher's coalition only in the sense that it has a session
@@ -386,5 +756,377 @@ mod tests {
             SETSID_WARNING.contains("may still end with"),
             "{SETSID_WARNING}"
         );
+    }
+
+    // ---- the launchd job ----------------------------------------------------------------------------------------
+
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static DIRS: AtomicU32 = AtomicU32::new(0);
+
+    /// A folder of the test's own under the system's temporary folder (a symlinked path on macOS), removed by its exact
+    /// path when the test ends.
+    struct Dir(PathBuf);
+
+    impl Dir {
+        fn new() -> Dir {
+            let n = DIRS.fetch_add(1, Ordering::SeqCst);
+            let dir =
+                std::env::temp_dir().join(format!("collide-launch-{}-{n}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            Dir(dir)
+        }
+    }
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A `launchctl` double: it records each call, and fails the ones it is told to.
+    #[derive(Debug, Default)]
+    struct Fake {
+        calls: Mutex<Vec<String>>,
+        /// The plist's text at the moment of each bootstrap.
+        plists: Mutex<Vec<String>>,
+        fail_bootstrap: bool,
+    }
+
+    impl Launchctl for Fake {
+        fn bootstrap(&self, domain: &str, plist: &Path) -> io::Result<()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("bootstrap {domain} {}", plist.display()));
+            self.plists.lock().unwrap().push(fs::read_to_string(plist)?);
+            if self.fail_bootstrap {
+                return Err(io::Error::other("Bootstrap failed: 5: Input/output error"));
+            }
+            Ok(())
+        }
+
+        fn bootout(&self, target: &str) -> io::Result<()> {
+            self.calls.lock().unwrap().push(format!("bootout {target}"));
+            Ok(())
+        }
+
+        fn process_of(&self, _target: &str) -> io::Result<Option<u32>> {
+            Ok(None)
+        }
+    }
+
+    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+        let map: BTreeMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |name| map.get(name).cloned()
+    }
+
+    fn pinned_job() -> LaunchdJob {
+        LaunchdJob {
+            label: "dev.collide.daemon.7-9".to_string(),
+            daemon_exe: PathBuf::from("/opt/collide/bin/collide-daemon"),
+            log_file: PathBuf::from("/Users/x/Library/Application Support/Collide/daemon.log"),
+            env: [
+                ("HOME", "/Users/x"),
+                ("PATH", "/usr/bin:/bin"),
+                ("USER", "x"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        }
+    }
+
+    const PINNED_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.collide.daemon.7-9</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/collide/bin/collide-daemon</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/x</string>
+    <key>PATH</key>
+    <string>/usr/bin:/bin</string>
+    <key>USER</key>
+    <string>x</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/x/Library/Application Support/Collide/daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/x/Library/Application Support/Collide/daemon.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>AbandonProcessGroup</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+</dict>
+</plist>
+"#;
+
+    #[test]
+    fn the_plist_text_is_pinned() {
+        assert_eq!(launchd_plist(&pinned_job()), PINNED_PLIST);
+    }
+
+    #[test]
+    fn the_plist_has_the_three_variables_and_only_absolute_paths() {
+        let plist = launchd_plist(&pinned_job());
+        for key in ["USER", "HOME", "PATH"] {
+            assert!(plist.contains(&format!("<key>{key}</key>")), "{key}");
+        }
+        let paths = [
+            "/opt/collide/bin/collide-daemon",
+            "/Users/x/Library/Application Support/Collide/daemon.log",
+            "<string>/</string>",
+        ];
+        for path in paths {
+            assert!(plist.contains(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn the_plist_is_a_one_shot_job() {
+        let plist = launchd_plist(&pinned_job());
+        assert!(!plist.contains("KeepAlive"));
+        assert!(!plist.contains("LaunchAgents"));
+        assert!(plist.contains("<key>RunAtLoad</key>\n  <true/>"));
+        assert!(plist.contains("<key>AbandonProcessGroup</key>\n  <true/>"));
+    }
+
+    #[test]
+    fn the_plist_escapes_what_xml_reads_as_markup() {
+        let mut job = pinned_job();
+        job.env
+            .insert("NOTE".to_string(), "a<b & \"c\"".to_string());
+        assert!(launchd_plist(&job).contains("<string>a&lt;b &amp; &quot;c&quot;</string>"));
+    }
+
+    #[test]
+    fn a_job_makes_its_paths_canonical_and_carries_the_three_variables() {
+        let dir = Dir::new();
+        let canonical = fs::canonicalize(&dir.0).unwrap();
+        // A symlink to the folder: the job names the folder, not the link.
+        let link = dir.0.join("link");
+        std::os::unix::fs::symlink(&canonical, &link).unwrap();
+        let exe = canonical.join("collide-daemon");
+        fs::write(&exe, "").unwrap();
+        let mut request =
+            StartRequest::new(link.join("collide-daemon"), &DaemonPaths::under(&link));
+        request.env.insert(
+            "COLLIDE_DAEMON_ROOT".to_string(),
+            link.display().to_string(),
+        );
+        let lookup = env_of(&[
+            ("USER", "x"),
+            ("HOME", &canonical.display().to_string()),
+            ("PATH", "/usr/bin:/bin"),
+        ]);
+        let job = launchd_job(&request, "l".to_string(), &lookup).unwrap();
+        assert_eq!(job.daemon_exe, exe);
+        assert_eq!(job.log_file, canonical.join("data").join("daemon.log"));
+        assert_eq!(
+            job.env["COLLIDE_DAEMON_ROOT"],
+            canonical.display().to_string()
+        );
+        assert_eq!(job.env["HOME"], canonical.display().to_string());
+        assert_eq!(job.env["USER"], "x");
+        assert_eq!(job.env["PATH"], "/usr/bin:/bin");
+        // The log exists, so launchd can open it.
+        assert!(job.log_file.is_file());
+    }
+
+    #[test]
+    fn a_job_takes_the_request_s_variables_before_the_starter_s_own() {
+        let dir = Dir::new();
+        let exe = dir.0.join("collide-daemon");
+        fs::write(&exe, "").unwrap();
+        let mut request = StartRequest::new(exe, &DaemonPaths::under(&dir.0));
+        request.env.insert("HOME".to_string(), "/tmp".to_string());
+        let lookup = env_of(&[("USER", "x"), ("HOME", "/Users/real")]);
+        let job = launchd_job(&request, "l".to_string(), &lookup).unwrap();
+        assert_eq!(job.env["HOME"], canonical_if_exists("/tmp"));
+        assert_eq!(job.env["PATH"], FALLBACK_PATH);
+    }
+
+    #[test]
+    fn a_job_without_a_user_or_a_home_is_refused() {
+        let dir = Dir::new();
+        let exe = dir.0.join("collide-daemon");
+        fs::write(&exe, "").unwrap();
+        let request = StartRequest::new(exe, &DaemonPaths::under(&dir.0));
+        let no_user = launchd_job(&request, "l".into(), &env_of(&[("HOME", "/h")])).unwrap_err();
+        assert!(no_user.to_string().contains("USER"), "{no_user}");
+        let no_home = launchd_job(&request, "l".into(), &env_of(&[("USER", "x")])).unwrap_err();
+        assert!(no_home.to_string().contains("HOME"), "{no_home}");
+        let logname = launchd_job(
+            &request,
+            "l".into(),
+            &env_of(&[("LOGNAME", "y"), ("HOME", "/h")]),
+        )
+        .unwrap();
+        assert_eq!(logname.env["USER"], "y");
+    }
+
+    #[test]
+    fn a_job_for_a_daemon_that_is_not_there_says_which() {
+        let dir = Dir::new();
+        let request = StartRequest::new(dir.0.join("missing"), &DaemonPaths::under(&dir.0));
+        let error = launchd_job(
+            &request,
+            "l".into(),
+            &env_of(&[("USER", "x"), ("HOME", "/h")]),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("missing"), "{error}");
+    }
+
+    fn request_in(dir: &Dir) -> StartRequest {
+        let exe = dir.0.join("collide-daemon");
+        fs::write(&exe, "").unwrap();
+        let mut request = StartRequest::new(exe, &DaemonPaths::under(&dir.0));
+        request.label_prefix = "dev.collide.test.unit".to_string();
+        fs::create_dir_all(request.lock_file.parent().unwrap()).unwrap();
+        request
+    }
+
+    #[test]
+    fn a_bootstrap_names_the_gui_domain_and_a_plist_in_the_run_directory() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let fake = Fake::default();
+        let lookup = env_of(&[("USER", "x"), ("HOME", "/h")]);
+        let job = start_launchd_job(&request, &fake, &lookup).unwrap();
+
+        let run = fs::canonicalize(request.lock_file.parent().unwrap()).unwrap();
+        let calls = fake.calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        let uid = current_uid();
+        let expected_start = format!(
+            "bootstrap gui/{uid} {}/dev.collide.test.unit.",
+            run.display()
+        );
+        assert!(calls[0].starts_with(&expected_start), "{calls:?}");
+        assert!(calls[0].ends_with(".plist"), "{calls:?}");
+        assert!(!calls[0].contains("LaunchAgents"));
+        // The plist was on disk when launchctl was called, and it is the job's.
+        let plists = fake.plists.lock().unwrap();
+        assert!(plists[0].contains(&job.label));
+        // The label is recorded for the next start, and the job's target is the one `bootout` takes.
+        assert_eq!(fs::read_to_string(run.join(LABEL_FILE)).unwrap(), job.label);
+        assert_eq!(job.target, format!("gui/{uid}/{}", job.label));
+        assert!(job.label.starts_with("dev.collide.test.unit."));
+    }
+
+    #[test]
+    fn the_plist_is_removed_when_the_job_is_dropped() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let lookup = env_of(&[("USER", "x"), ("HOME", "/h")]);
+        let job = start_launchd_job(&request, &Fake::default(), &lookup).unwrap();
+        let plist = job._plist.0.clone();
+        assert!(plist.is_file());
+        drop(job);
+        assert!(!plist.exists());
+    }
+
+    #[test]
+    fn a_failed_bootstrap_leaves_no_plist_and_no_label_and_returns_what_launchctl_said() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let fake = Fake {
+            fail_bootstrap: true,
+            ..Fake::default()
+        };
+        let lookup = env_of(&[("USER", "x"), ("HOME", "/h")]);
+        let error = start_launchd_job(&request, &fake, &lookup).unwrap_err();
+        assert!(error.to_string().contains("Input/output error"), "{error}");
+        let run = request.lock_file.parent().unwrap();
+        let left: Vec<_> = fs::read_dir(run)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(
+            left.iter()
+                .all(|n| !n.to_string_lossy().ends_with(".plist")
+                    && n.to_string_lossy() != LABEL_FILE),
+            "{left:?}"
+        );
+    }
+
+    #[test]
+    fn a_job_an_earlier_start_left_loaded_is_booted_out_before_the_new_one_is_loaded() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let run = request.lock_file.parent().unwrap();
+        fs::write(run.join(LABEL_FILE), "dev.collide.test.unit.old-1\n").unwrap();
+        let fake = Fake::default();
+        let lookup = env_of(&[("USER", "x"), ("HOME", "/h")]);
+        let job = start_launchd_job(&request, &fake, &lookup).unwrap();
+        let calls = fake.calls.lock().unwrap().clone();
+        let uid = current_uid();
+        assert_eq!(calls.len(), 2, "{calls:?}");
+        assert_eq!(
+            calls[0],
+            format!("bootout gui/{uid}/dev.collide.test.unit.old-1")
+        );
+        assert!(
+            calls[1].starts_with(&format!("bootstrap gui/{uid} ")),
+            "{calls:?}"
+        );
+        // The record now names the new job only.
+        assert_eq!(fs::read_to_string(run.join(LABEL_FILE)).unwrap(), job.label);
+    }
+
+    #[test]
+    fn each_start_has_a_label_of_its_own() {
+        let first = new_label("dev.collide.daemon");
+        std::thread::sleep(Duration::from_millis(2));
+        assert_ne!(first, new_label("dev.collide.daemon"));
+        assert!(first.starts_with("dev.collide.daemon."));
+    }
+
+    #[test]
+    fn the_pid_is_read_from_the_print_line_and_a_job_without_one_has_none() {
+        assert_eq!(
+            pid_in_print("x = {\n\tstate = running\n\tpid = 4242\n}\n"),
+            Some(4242)
+        );
+        assert_eq!(
+            pid_in_print("x = {\n\tstate = not running\n\tlast exit code = 0\n}\n"),
+            None
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn launchd_is_used_only_when_asked_or_when_the_root_is_not_overridden() {
+        assert!(launchctl_from_env(None, None).is_some());
+        assert!(launchctl_from_env(Some("/tmp/root"), None).is_none());
+        assert!(launchctl_from_env(Some("/tmp/root"), Some("/bin/launchctl")).is_some());
+        assert!(launchctl_from_env(None, Some("/x/fake")).is_some());
+        assert!(launchctl_from_env(Some("/tmp/root"), Some("")).is_none());
+    }
+
+    #[test]
+    fn a_request_made_by_new_starts_with_setsid_only() {
+        let request = StartRequest::new(
+            PathBuf::from("/x/collide-daemon"),
+            &DaemonPaths::under(Path::new("/tmp/x")),
+        );
+        assert!(request.launchctl.is_none());
+        assert_eq!(request.label_prefix, DEFAULT_LABEL_PREFIX);
     }
 }

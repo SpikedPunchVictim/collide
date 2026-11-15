@@ -1,16 +1,19 @@
 //! `collide-daemon` (0.2; Stage 3a).
 //!
-//! - `collide-daemon` runs the daemon in the foreground until `SIGTERM` or `SIGINT`. The start (`setsid`, and later the
-//!   launchd job) runs this, with its output going to the daemon's log file.
+//! - `collide-daemon` runs the daemon in the foreground until `SIGTERM` or `SIGINT`. The start (a one-shot launchd job
+//!   on macOS, `setsid` otherwise or when launchd refuses) runs this, with its output going to the daemon's log file.
 //! - `collide-daemon start` makes sure a daemon answers: it takes the lock file, starts a daemon when the socket does
 //!   not answer, and waits for it. It prints `already running` or `started`, and a warning when the start may not
 //!   outlive its launcher.
 //!
 //! Every path comes from `COLLIDE_DAEMON_ROOT` when it is set, and from the user's home otherwise
-//! (`collide_host::daemon::DaemonPaths`).
+//! (`collide_host::daemon::DaemonPaths`). A start under `COLLIDE_DAEMON_ROOT` never loads a launchd job unless
+//! `COLLIDE_LAUNCHCTL` names the program to load it with (`collide_host::launch::launchctl_from_env`).
 
 use collide_host::daemon::{DaemonOptions, DaemonPaths, ROOT_ENV, run};
-use collide_host::launch::{StartKind, StartRequest, ensure_daemon};
+use collide_host::launch::{
+    FORWARDED_ENV, LAUNCHCTL_ENV, StartKind, StartRequest, ensure_daemon, launchctl_from_env,
+};
 use collide_host::shim::DaemonStart;
 use std::process::ExitCode;
 
@@ -44,8 +47,9 @@ fn main() -> ExitCode {
             // with the same root and home, so it finds the same files.
             if let Ok(exe) = exe {
                 options.shim_exe = exe.parent().map(|dir| dir.join("collide"));
-                let env = ["COLLIDE_DAEMON_ROOT", "HOME", "SHELL"]
+                let env = FORWARDED_ENV
                     .into_iter()
+                    .chain([LAUNCHCTL_ENV])
                     .filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?)))
                     .collect();
                 options.daemon_start = Some(DaemonStart { exe, env });
@@ -64,7 +68,18 @@ fn start(paths: &DaemonPaths) -> ExitCode {
         Ok(exe) => exe,
         Err(error) => return fail(&format!("cannot find its own executable: {error}")),
     };
-    match ensure_daemon(&StartRequest::new(exe, paths)) {
+    let mut request = StartRequest::new(exe, paths);
+    // launchd's environment is bare, so what the daemon needs of this one goes in the job's plist.
+    request.env = FORWARDED_ENV
+        .into_iter()
+        .chain([LAUNCHCTL_ENV])
+        .filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?)))
+        .collect();
+    request.launchctl = launchctl_from_env(
+        std::env::var(ROOT_ENV).ok().as_deref(),
+        std::env::var(LAUNCHCTL_ENV).ok().as_deref(),
+    );
+    match ensure_daemon(&request) {
         Ok(StartKind::AlreadyRunning) => {
             println!("already running");
             ExitCode::SUCCESS
