@@ -1,7 +1,7 @@
 ---
 id: ts-0021-yg
 kind: task
-status: ready
+status: active
 title: "Planning slice: Collide's own items through the CLI"
 owners: []
 links:
