@@ -3606,8 +3606,9 @@ and a full disk, with no agent involved. The children are python3 fixtures.
 SIGSTOP of the shim, children that ignore HUP and TERM, python3 fixtures, a recorded `/bin/sleep` orphan); the
 `ENOSPC` writer; store quarantine; the journal's order and its cut-short replay; the framed message cut in half; the
 socket checks; sleep accounting with fake clocks.
-**Status**: Not Started. Items from revision 13, not yet split into items: they are split when Stage 2 nears done
-(0.10). Epic `ep-003-da`, items lettered `3a` (part L).
+**Status**: Not Started. Items from revision 13, split on 2026-11-15: `ts-0050-xc` to `ts-0059-xs` in epic
+`ep-003-da`, built one at a time in id order (state machines, clocks, peer credentials, store, shim, workspace and
+disk floor, daemon, daemon and shim link, launchd job, stop). Each Stage 3a criterion is named in one item.
 
 ### Stage 3b: Claude adapter and the first run
 
