@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["core", "host", "app/src-tauri", "checks"]
+# The vendored third-party crates are path dependencies, not members: `cargo clippy --workspace`, `cargo test
+# --workspace` and `cargo fmt --all` leave them alone. Without this line cargo makes every path dependency below the
+# workspace root a member. See vendor/cel/VENDORED.md.
+exclude = ["vendor/cel"]
 
 [workspace.package]
 edition = "2024"

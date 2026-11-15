@@ -5,8 +5,8 @@
 //! with the tag as one string literal: `todo!("engine: fan-out join")`, `unimplemented('sdk: ctx')`. The registry is
 //! `stub-tags.json` at the repository root, an object from tag to stage id (`"4b"`, `"12"`).
 //!
-//! Test code is not skeleton: `tests/`, `test/` and `fixtures/` directories, declaration files, comments and the
-//! declaration of the TypeScript `unimplemented` function itself are not counted.
+//! Test code and third-party code are not skeleton: `tests/`, `test/`, `fixtures/` and `vendor/` directories,
+//! declaration files, comments and the declaration of the TypeScript `unimplemented` function itself are not counted.
 
 use crate::walk;
 use collide_core::stage::Stage;
@@ -18,7 +18,7 @@ use std::path::Path;
 /// The registry's path below the repository root.
 pub const REGISTRY: &str = "stub-tags.json";
 
-const NOT_SKELETON: [&str; 3] = ["tests", "test", "fixtures"];
+const NOT_SKELETON: [&str; 4] = ["tests", "test", "fixtures", "vendor"];
 
 /// A stub call as found in a file: its 1-based line and its tag, or `None` when the tag is not one string literal.
 struct Found {

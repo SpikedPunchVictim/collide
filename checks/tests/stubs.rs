@@ -153,7 +153,7 @@ fn a_missing_or_malformed_registry_fails() {
 }
 
 #[test]
-fn tests_fixtures_comments_and_the_declaration_of_unimplemented_are_not_stubs() {
+fn tests_fixtures_vendored_code_comments_and_the_declaration_of_unimplemented_are_not_stubs() {
     let tree = tree(&registry(&[]));
     tree.write("core/tests/a.rs", &rust_stub("not: counted"));
     tree.write("core/tests/fixtures/b.rs", &rust_stub("not: counted"));
@@ -173,6 +173,7 @@ fn tests_fixtures_comments_and_the_declaration_of_unimplemented_are_not_stubs() 
     );
     tree.write("packages/sdk/dist/h.ts", &ts_stub("not: counted"));
     tree.write("packages/sdk/src/i.d.ts", &ts_stub("not: counted"));
+    tree.write("vendor/cel/src/j.rs", &rust_stub("not: counted"));
     let report = stubs::check(tree.root()).unwrap();
     assert_eq!(report.problems, Vec::<String>::new());
     assert!(report.counts.is_empty());

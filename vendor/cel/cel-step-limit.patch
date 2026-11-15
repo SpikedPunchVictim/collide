@@ -1,0 +1,63 @@
+diff -ruN a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -31,6 +31,7 @@
+ mod env;
+ pub mod extensions;
+ pub mod parser;
++pub mod steps;
+ 
+ pub use common::ast::IdedExpr;
+ use common::ast::SelectExpr;
+diff -ruN a/src/objects.rs b/src/objects.rs
+--- a/src/objects.rs
++++ b/src/objects.rs
+@@ -1023,6 +1023,7 @@
+         expr: &'e Expression,
+         ctx: &'e Context<'p, 'v>,
+     ) -> Result<CowVal<'e, 'v>, ExecutionError> {
++        crate::steps::tick()?;
+         match &expr.expr {
+             Expr::Literal(literal) => Ok(literal.to_val()),
+             Expr::Call(call) => {
+diff -ruN a/src/steps.rs b/src/steps.rs
+--- a/src/steps.rs
++++ b/src/steps.rs
+@@ -0,0 +1,37 @@
++//! A cooperative step counter. Every call of `Value::resolve_val` (one per AST node evaluation,
++//! macros included) counts one step against a thread-local limit.
++use crate::ExecutionError;
++use std::cell::Cell;
++
++thread_local! {
++    static USED: Cell<u64> = const { Cell::new(0) };
++    static LIMIT: Cell<u64> = const { Cell::new(u64::MAX) };
++}
++
++/// Resets the counter and sets the limit for the current thread.
++pub fn set_limit(limit: u64) {
++    USED.with(|u| u.set(0));
++    LIMIT.with(|l| l.set(limit));
++}
++
++/// Steps used on the current thread since the last `set_limit`.
++pub fn used() -> u64 {
++    USED.with(|u| u.get())
++}
++
++#[inline(always)]
++pub(crate) fn tick() -> Result<(), ExecutionError> {
++    let n = USED.with(|u| {
++        let n = u.get() + 1;
++        u.set(n);
++        n
++    });
++    if n > LIMIT.with(|l| l.get()) {
++        Err(ExecutionError::function_error(
++            "cost",
++            "step limit exceeded",
++        ))
++    } else {
++        Ok(())
++    }
++}
