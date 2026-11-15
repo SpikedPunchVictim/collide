@@ -1,0 +1,117 @@
+{
+  "$defs": {
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "ChecklistTemplate": {
+      "additionalProperties": false,
+      "description": "A checklist template. `gates` is the category whose status write the pack's gate blocks. The template's name\nis its key in `checklists:`.",
+      "properties": {
+        "gates": {
+          "$ref": "#/$defs/Category"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChecklistTemplateItem"
+          },
+          "type": "array"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "gates",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChecklistTemplateItem": {
+      "additionalProperties": false,
+      "description": "One line of a checklist template. `when:` is CEL over the item.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "type": "object"
+    },
+    "DerivedPoint": {
+      "additionalProperties": false,
+      "description": "A derived point (0.4): a name in the pack's namespace over one core point, with what it matches and a `when:`.",
+      "properties": {
+        "match": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "on": {
+          "type": "string"
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "on"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checklists": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ChecklistTemplate"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "points": {
+      "additionalProperties": {
+        "$ref": "#/$defs/DerivedPoint"
+      },
+      "default": {},
+      "type": "object"
+    }
+  },
+  "title": "PackManifest",
+  "type": "object"
+}

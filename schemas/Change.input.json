@@ -1,0 +1,293 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "description": "Who made the write (0.5). `run` and `phase` are reserved now so that writes a run makes need no later schema\nchange. They are not tied to a kind: a workflow op inside a run may carry `run`, and an agent outside a run,\nsuch as one whose actor is read from the process tree, may have neither.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ActorKind": {
+      "enum": [
+        "person",
+        "workflow",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "Batch": {
+      "additionalProperties": false,
+      "description": "One call on several items fires per item; `index` counts from 0.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "index",
+        "size"
+      ],
+      "type": "object"
+    },
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "Effect": {
+      "additionalProperties": false,
+      "description": "Another item that an op changed, from `apply`'s `items[]`.",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version"
+      ],
+      "type": "object"
+    },
+    "FieldDiff": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "from": true,
+            "to": true
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "added": {
+              "items": true,
+              "type": "array"
+            },
+            "removed": {
+              "items": true,
+              "type": "array"
+            }
+          },
+          "required": [
+            "added",
+            "removed"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One changed field: `{from, to}`, or `{added, removed}` for a set. `from` is null at create and `to` is null\nat delete."
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
+    "Rename": {
+      "additionalProperties": false,
+      "description": "An id that changed, at Share or `renumber`.",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "Via": {
+      "description": "The route of a write.",
+      "enum": [
+        "ui",
+        "workflow",
+        "share",
+        "integrate",
+        "run"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The `change` a task point carries. `op` is null for a write made by a run (`via: run`). `from` is null at\ncreate and `to` is null at delete. `diff` is predicted at `before_*` and actual at `after_*`. `effectOf` is the\nkey of the item whose op changed this one.",
+  "properties": {
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "args": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "batch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Batch"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "categoryMoved": {
+      "type": "boolean"
+    },
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diff": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FieldDiff"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "effectOf": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effects": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Effect"
+      },
+      "type": "array"
+    },
+    "files": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "from": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "op": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "renamed": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Rename"
+      },
+      "type": "array"
+    },
+    "to": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "via": {
+      "$ref": "#/$defs/Via"
+    }
+  },
+  "required": [
+    "categoryMoved",
+    "via",
+    "actor"
+  ],
+  "title": "Change",
+  "type": "object"
+}

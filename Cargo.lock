@@ -357,6 +357,10 @@ dependencies = [
 [[package]]
 name = "collide-host"
 version = "0.0.0"
+dependencies = [
+ "collide-core",
+ "serde_json",
+]
 
 [[package]]
 name = "combine"

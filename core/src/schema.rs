@@ -10,6 +10,9 @@
 //!   `deny_unknown_fields` on a unit variant of an internally tagged enum;
 //! - to add a type, add one `registry.add::<T>()` line to [`registry`].
 
+use crate::change::{Change, TaskPointPayload};
+use crate::item::{KindDecl, LinkTypeDecl, PlanningFields};
+use crate::pack::{PackManifest, RunBudget};
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde_json::Value;
@@ -68,5 +71,13 @@ fn schema_for<T: JsonSchema>(settings: SchemaSettings) -> Value {
 
 /// Every contract type, which `pnpm gen` writes to `schemas/`. Later items add their types here.
 pub fn registry() -> Registry {
-    Registry::new()
+    let mut registry = Registry::new();
+    registry.add::<Change>();
+    registry.add::<KindDecl>();
+    registry.add::<LinkTypeDecl>();
+    registry.add::<PackManifest>();
+    registry.add::<PlanningFields>();
+    registry.add::<RunBudget>();
+    registry.add::<TaskPointPayload>();
+    registry
 }

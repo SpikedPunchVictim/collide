@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "Checklist": {
+      "additionalProperties": false,
+      "description": "The checklist field type: the state of one template's items, pinned as `name@n`.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChecklistItem"
+          },
+          "type": "array"
+        },
+        "template": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "template",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChecklistItem": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ChecklistState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ChecklistState": {
+      "description": "The state of one checklist item. Only a person marks `done` or `n/a`; the gate is a pack's (ts-0012).",
+      "enum": [
+        "open",
+        "suggested",
+        "done",
+        "n/a"
+      ],
+      "type": "string"
+    },
+    "Link": {
+      "additionalProperties": false,
+      "description": "A typed link on an item (0.8).",
+      "properties": {
+        "blocking": {
+          "description": "Absent means the link type's `blocking` applies.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "to"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The fields core adds to an item for planning (0.8): `kind`, typed `links`, `owners` (the people or agents who\nclaimed it) and a checklist.",
+  "properties": {
+    "checklist": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Checklist"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "kind": {
+      "type": "string"
+    },
+    "links": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Link"
+      },
+      "type": "array"
+    },
+    "owners": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "kind",
+    "links",
+    "owners"
+  ],
+  "title": "PlanningFields",
+  "type": "object"
+}

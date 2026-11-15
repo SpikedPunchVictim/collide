@@ -1,0 +1,33 @@
+{
+  "$defs": {
+    "LinkDir": {
+      "description": "Which end of a link the item that stores it holds: `out` for `blocked-by`, which points at the blocker.\nCollide derives the other direction (0.10).",
+      "enum": [
+        "out",
+        "in"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A link type a provider holds: its direction and whether it blocks.",
+  "properties": {
+    "blocking": {
+      "type": "boolean"
+    },
+    "dir": {
+      "$ref": "#/$defs/LinkDir"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "dir",
+    "blocking"
+  ],
+  "title": "LinkTypeDecl",
+  "type": "object"
+}

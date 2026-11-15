@@ -1,0 +1,114 @@
+{
+  "$defs": {
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "OpDecl": {
+      "additionalProperties": false,
+      "description": "An op of a kind. Its effect is the category it moves the item to, if any, so that `task.before_status` can\nfire before the op runs (0.4).",
+      "properties": {
+        "movesTo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Category"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "StatusDecl": {
+      "additionalProperties": false,
+      "description": "One status of a kind and the category it maps to.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "category"
+      ],
+      "type": "object"
+    },
+    "TransitionDecl": {
+      "additionalProperties": false,
+      "description": "A status change the provider allows.",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One item kind, as a provider declares it (0.10, Protocol). `roles` are plain tags that core never reads.",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "ops": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OpDecl"
+      },
+      "type": "array"
+    },
+    "roles": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "statuses": {
+      "items": {
+        "$ref": "#/$defs/StatusDecl"
+      },
+      "type": "array"
+    },
+    "transitions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TransitionDecl"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "statuses"
+  ],
+  "title": "KindDecl",
+  "type": "object"
+}

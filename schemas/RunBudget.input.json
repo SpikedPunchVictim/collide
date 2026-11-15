@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A run's total budget. At the total, the run goes to `ask_human` with cause budget.",
+  "properties": {
+    "usd": {
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "usd"
+  ],
+  "title": "RunBudget",
+  "type": "object"
+}
