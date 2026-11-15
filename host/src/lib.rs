@@ -7,6 +7,7 @@ pub mod clock;
 pub mod commands;
 pub mod commit;
 pub mod daemon;
+pub mod disk;
 pub mod hooks;
 pub mod launch;
 pub mod otlp;
@@ -24,5 +25,6 @@ pub mod task_args;
 pub mod task_cli;
 pub mod task_view;
 pub mod ui_tools;
+pub mod workspace;
 
 pub const NAME: &str = "collide-host";
