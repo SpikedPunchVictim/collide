@@ -1,7 +1,7 @@
 ---
 id: ts-0070-mk
 kind: task
-status: active
+status: done
 title: "Real claude: contract test, launchd run and dogfood"
 owners: []
 links:
