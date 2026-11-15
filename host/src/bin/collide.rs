@@ -19,8 +19,9 @@ fn main() -> ExitCode {
         }
         Some("tasks") => task_cli::parse_tasks(rest),
         Some("task") => task_cli::parse_task(rest),
+        Some("sections") => task_cli::parse_sections(rest),
         Some(_) => {
-            eprintln!("usage: collide [schema | tasks | task | help]");
+            eprintln!("usage: collide [schema | tasks | task | sections | help]");
             return ExitCode::from(exit::USAGE);
         }
     };

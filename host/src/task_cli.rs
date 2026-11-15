@@ -1,4 +1,4 @@
-//! `collide tasks`, `collide task <id>` and `collide task <id> <op> ...` (ts-0020). Until the daemon exists the CLI
+//! `collide tasks`, `collide task <id>`, `collide task <id> <op> ...` (ts-0020) and `collide sections` (ts-0049). Until the daemon exists the CLI
 //! starts the built-in `collide/plan` provider itself (through the loader of ts-0029), asks it for the items, and
 //! applies the ready rule and short-id lookup of `core` to what it lists. The corpus stage moves this behind the
 //! provider supervisor.
@@ -8,13 +8,15 @@ use crate::checkout::{CheckoutError, main_checkout, resolve_checkout};
 use crate::commit::commit_files;
 use crate::pack_location::{self, locate_bundle};
 use crate::provider_client::ProviderClient;
+use crate::section_view::sections_text;
 use crate::task_args::{describe, map_args};
 use crate::task_view::View;
-use collide_core::item::OpDecl;
+use collide_core::item::{Category, OpDecl};
 use collide_core::provider::{
     ApplyParams, ApplyResult, InitializeParams, InitializeResult, Task, TaskInvalid,
 };
 use collide_core::ready::readiness;
+use collide_core::section::{ProposalFeatures, section_uses};
 use collide_core::short_id::{Lookup, resolve};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -43,7 +45,8 @@ usage:
   collide task <id> [--json]
   collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
   collide task create <title> [epic=<epic>] [kind=task|epic|proposal] [seed=<number>] [--checkout <path>] [--commit] [--json]
-  collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]";
+  collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]
+  collide sections [--json]";
 
 /// What `collide help` prints.
 pub const HELP: &str = "\
@@ -52,6 +55,10 @@ collide tasks: list the items (epics, tasks and proposals) under .collide/planni
 collide task <id>: show one item (a proposal also lists its features by section, each with its state and the tasks
   that implement it, then the problems of its Features part)
 collide task <id> <op> ...: change one item with an op the provider declares (an unknown op lists them)
+collide sections: list the sections in use in the features of the proposals that are not dropped (not rejected or
+  superseded), each with its feature count and its proposal count, most features first, then by name, the features
+  with no section last as Unsorted, then the near-duplicate groups (--json: machine-readable, with the ids of the
+  proposals under each section)
 
 <id> is the full id (ts-0012-ua) or a short form: 12, 0012, 12-ua, ts-12. A short form must match exactly one item;
 if it matches several they are listed with their epics, and you add the suffix.
@@ -75,6 +82,13 @@ the removed paths too), with a message naming the item and the op, such as: task
 modified, staged or untracked file is not touched, and what you have staged stays staged. Hooks run (there is no
 --no-verify). An op that changes nothing, and a conflict or a refusal, commit nothing. If the commit fails (a hook,
 git's own refusal) git's message is printed, the files stay written and uncommitted, and the exit code is 1.
+
+Sections are the `###` headings of a proposal's Features part, matched by name across proposals, with no registry.
+Two names are one section when they match after trimming, in any case: Packs and packs.
+Two names are near-duplicates when they match once
+  spaces, hyphens and underscores are taken out and one final s is dropped: Pack and packs, Task view and task-view.
+The rule is plain and has false matches (Bus and Bu are grouped); s alone keeps its s. A group is a suggestion for a
+person: collide sections never merges anything.
 
 A task links to the feature it builds with: collide task <task> link pr-0003-km#F2 type=implements. The target is a
 proposal and a feature it has (F<n>), or the link is refused and the message names the features the proposal has.
@@ -124,6 +138,11 @@ pub struct TasksOptions {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct SectionsOptions {
+    pub json: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct TaskOptions {
     pub id: String,
     pub op: Option<String>,
@@ -159,6 +178,7 @@ pub struct ReidOptions {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Tasks(TasksOptions),
+    Sections(SectionsOptions),
     Task(TaskOptions),
     Create(CreateOptions),
     Reid(ReidOptions),
@@ -194,6 +214,25 @@ pub fn parse_tasks(args: &[String]) -> Result<Command, CliError> {
         }
     }
     Ok(Command::Tasks(options))
+}
+
+/// Reads the words after `collide sections`.
+pub fn parse_sections(args: &[String]) -> Result<Command, CliError> {
+    let mut options = SectionsOptions { json: false };
+    for word in args {
+        match word.as_str() {
+            "--json" => options.json = true,
+            other if other.starts_with("--") => {
+                return Err(CliError::usage(format!("unknown option `{other}`")));
+            }
+            other => {
+                return Err(CliError::usage(format!(
+                    "`collide sections` takes no argument; got `{other}`"
+                )));
+            }
+        }
+    }
+    Ok(Command::Sections(options))
 }
 
 /// Reads the words after `collide task`: an id, then an op and its words.
@@ -371,6 +410,7 @@ fn emit(out: &mut dyn Write, text: &str) -> Result<(), CliError> {
 pub fn run(command: &Command, cwd: &Path, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let result = match command {
         Command::Tasks(options) => run_tasks(options, cwd, out, err),
+        Command::Sections(options) => run_sections(options, cwd, out, err),
         Command::Task(options) => run_task(options, cwd, out, err),
         Command::Create(options) => run_create(options, cwd, out, err),
         Command::Reid(options) => run_reid(options, cwd, out, err),
@@ -444,6 +484,38 @@ fn run_tasks(
         emit(out, &format!("{document}\n"))?;
     } else {
         emit(out, &view.list_text(&shown))?;
+    }
+    Ok(exit::OK)
+}
+
+/// `collide sections`: the sections in use over the features of every proposal that is not dropped. A proposal is
+/// dropped by its category, which the provider reports from the status (`rejected` and `superseded`).
+fn run_sections(
+    options: &SectionsOptions,
+    cwd: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<u8, CliError> {
+    let mut session = open(cwd, None)?;
+    let (tasks, invalid) = session.list()?;
+    for item in &invalid {
+        let _ = writeln!(err, "collide: skipped {}: {}", item.path, item.reason);
+    }
+    let proposals: Vec<ProposalFeatures> = tasks
+        .iter()
+        .filter(|task| task.kind.as_deref() == Some("proposal"))
+        .filter(|task| task.state.category != Category::Dropped)
+        .map(|task| ProposalFeatures {
+            proposal: &task.id,
+            features: &task.features,
+        })
+        .collect();
+    let sections = section_uses(&proposals);
+    if options.json {
+        let document = serde_json::to_string(&sections).expect("sections are JSON");
+        emit(out, &format!("{document}\n"))?;
+    } else {
+        emit(out, &sections_text(&sections))?;
     }
     Ok(exit::OK)
 }

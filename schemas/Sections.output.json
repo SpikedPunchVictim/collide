@@ -1,0 +1,76 @@
+{
+  "$defs": {
+    "NearDuplicateGroup": {
+      "additionalProperties": false,
+      "description": "Sections that are near-duplicates of one another, as they are shown, in the order of `Sections.sections`.",
+      "properties": {
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "names"
+      ],
+      "type": "object"
+    },
+    "SectionUse": {
+      "additionalProperties": false,
+      "description": "One section in use: its name as it is shown, how many features are in it and in how many proposals. The empty\n`name` is the section of the features that are unsorted.",
+      "properties": {
+        "featureCount": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "proposalCount": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "proposals": {
+          "description": "The ids of the proposals that have a feature in the section, in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "featureCount",
+        "proposalCount",
+        "proposals"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The sections in use and the near-duplicate groups among them: the content of `collide sections --json`.\n`sections` is sorted by feature count, highest first, then by name (in any case); the empty section is last.\n`near_duplicates` lists groups of two or more sections, in the order of their first section.",
+  "properties": {
+    "nearDuplicates": {
+      "items": {
+        "$ref": "#/$defs/NearDuplicateGroup"
+      },
+      "type": "array"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/SectionUse"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "sections",
+    "nearDuplicates"
+  ],
+  "title": "Sections",
+  "type": "object"
+}

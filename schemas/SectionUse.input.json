@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One section in use: its name as it is shown, how many features are in it and in how many proposals. The empty\n`name` is the section of the features that are unsorted.",
+  "properties": {
+    "featureCount": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "type": "string"
+    },
+    "proposalCount": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "proposals": {
+      "description": "The ids of the proposals that have a feature in the section, in order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "featureCount",
+    "proposalCount",
+    "proposals"
+  ],
+  "title": "SectionUse",
+  "type": "object"
+}

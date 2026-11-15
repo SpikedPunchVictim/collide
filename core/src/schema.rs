@@ -30,6 +30,7 @@ use crate::provider::{
     TaskRemoved, WatchParams, WatchResult,
 };
 use crate::report::ReportLine;
+use crate::section::{NearDuplicateGroup, SectionUse, Sections};
 use crate::settings::ConfigFile;
 use crate::span::Span;
 use crate::stage::Stage;
@@ -118,6 +119,7 @@ pub fn registry() -> Registry {
     registry.add::<LinkTypeDecl>();
     registry.add::<ListParams>();
     registry.add::<ListResult>();
+    registry.add::<NearDuplicateGroup>();
     registry.add::<ObserverAck>();
     registry.add::<ObserverEvent>();
     registry.add::<PackLock>();
@@ -134,6 +136,8 @@ pub fn registry() -> Registry {
     registry.add::<Rename>();
     registry.add::<RunBudget>();
     registry.add::<RunState>();
+    registry.add::<SectionUse>();
+    registry.add::<Sections>();
     registry.add::<SessionStart>();
     registry.add::<SourceStale>();
     registry.add::<Span>();

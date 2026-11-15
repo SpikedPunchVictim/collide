@@ -18,6 +18,7 @@ pub mod provider;
 pub mod ready;
 pub mod report;
 pub mod schema;
+pub mod section;
 pub mod settings;
 pub mod short_id;
 pub mod span;

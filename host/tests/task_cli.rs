@@ -2219,3 +2219,212 @@ fn reid_of_a_proposal_keeps_the_feature_in_the_links_it_rewrites() {
         shown.stdout
     );
 }
+
+// `collide sections` (ts-0049).
+
+/// A proposal in the alpha epic's `proposals/` folder, committed: its id, its status and the text of its Features part.
+struct Proposed<'a> {
+    id: &'a str,
+    status: &'a str,
+    features: &'a str,
+}
+
+fn add_proposals(repo: &Repo, proposals: &[Proposed]) {
+    let folder = repo.dir.join(ALPHA_PROPOSALS);
+    fs::create_dir_all(&folder).unwrap();
+    for proposal in proposals {
+        let text = proposal_text(proposal.status, proposal.features)
+            .replace("id: pr-0003-km", &format!("id: {}", proposal.id));
+        fs::write(folder.join(format!("{}-made-up.md", proposal.id)), text).unwrap();
+    }
+    git(&repo.dir, &["add", "-A"]);
+    git(&repo.dir, &["commit", "-q", "-m", "proposals"]);
+}
+
+/// Three live proposals over four sections, with `Pack` and `packs` near each other and `Task view` and `task-view`.
+fn repo_with_sections(name: &str) -> Repo {
+    let repo = Repo::new(name);
+    add_proposals(
+        &repo,
+        &[
+            Proposed {
+                id: "pr-0001-aa",
+                status: "accepted",
+                features: "### Packs\n- **F1 One**: a\n- **F2 Two**: b\n### Task view\n- **F3 Three**: c\n### Daemon\n- **F4 Four**: d\n",
+            },
+            Proposed {
+                id: "pr-0002-bb",
+                status: "draft",
+                features: "### packs\n- **F1 One**: a\n### Pack\n- **F2 Two**: b\n### task-view\n- **F3 Three**: c\n### Unsorted\n- **F4 Four**: d\n",
+            },
+            Proposed {
+                id: "pr-0004-dd",
+                status: "deferred",
+                features: "- **F1 One**: a above any heading\n### Packs\n- **F2 Two**: b\n",
+            },
+        ],
+    );
+    repo
+}
+
+#[test]
+fn sections_lists_each_with_its_counts_unsorted_last_then_the_near_duplicate_groups() {
+    let (bundle, repo) = (bundle(), repo_with_sections("sections-text"));
+    let run = collide(&repo, &bundle, &["sections"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        "\
+Packs      4 features  3 proposals
+Daemon     1 feature   1 proposal
+Pack       1 feature   1 proposal
+Task view  1 feature   1 proposal
+task-view  1 feature   1 proposal
+Unsorted   2 features  2 proposals
+
+near-duplicates (a suggestion; nothing is merged)
+  Packs, Pack
+  Task view, task-view
+"
+    );
+}
+
+#[test]
+fn sections_json_gives_the_same_content_in_one_shape() {
+    let (bundle, repo) = (bundle(), repo_with_sections("sections-json"));
+    let run = collide(&repo, &bundle, &["sections", "--json"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let document = json(&run);
+    assert_eq!(
+        document["sections"][0],
+        serde_json::json!({
+            "name": "Packs",
+            "featureCount": 4,
+            "proposalCount": 3,
+            "proposals": ["pr-0001-aa", "pr-0002-bb", "pr-0004-dd"],
+        })
+    );
+    let names: Vec<&str> = document["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|section| section["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["Packs", "Daemon", "Pack", "Task view", "task-view", ""]
+    );
+    assert_eq!(
+        document["nearDuplicates"],
+        serde_json::json!([
+            { "names": ["Packs", "Pack"] },
+            { "names": ["Task view", "task-view"] },
+        ])
+    );
+}
+
+#[test]
+fn sections_do_not_count_the_features_of_rejected_and_superseded_proposals() {
+    let (bundle, repo) = (bundle(), repo_with_sections("sections-dropped"));
+    add_proposals(
+        &repo,
+        &[
+            Proposed {
+                id: "pr-0005-ee",
+                status: "rejected",
+                features: "### Packs\n- **F1 One**: a\n### Rejected only\n- **F2 Two**: b\n",
+            },
+            Proposed {
+                id: "pr-0006-ff",
+                status: "superseded",
+                features: "### Packs\n- **F1 One**: a\n### Superseded only\n- **F2 Two**: b\n",
+            },
+        ],
+    );
+    let document = json(&collide(&repo, &bundle, &["sections", "--json"]));
+    assert_eq!(document["sections"][0]["featureCount"], 4);
+    assert_eq!(document["sections"][0]["proposalCount"], 3);
+    let names: Vec<&str> = document["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|section| section["name"].as_str().unwrap())
+        .collect();
+    assert!(!names.contains(&"Rejected only"), "{names:?}");
+    assert!(!names.contains(&"Superseded only"), "{names:?}");
+}
+
+#[test]
+fn sections_do_not_count_items_that_are_not_proposals() {
+    let (bundle, repo) = (bundle(), Repo::new("sections-no-proposals"));
+    let run = collide(&repo, &bundle, &["sections"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        "no sections: no proposal that is not dropped has a feature\n"
+    );
+    let document = json(&collide(&repo, &bundle, &["sections", "--json"]));
+    assert_eq!(
+        document,
+        serde_json::json!({ "sections": [], "nearDuplicates": [] })
+    );
+}
+
+#[test]
+fn sections_count_a_drafts_features_that_parsed_and_leave_its_problems_to_task() {
+    let (bundle, repo) = (bundle(), Repo::new("sections-draft-problem"));
+    add_proposals(
+        &repo,
+        &[Proposed {
+            id: "pr-0001-aa",
+            status: "draft",
+            features: "### Packs\n- **F1 Fine**: ok\nstray text\n",
+        }],
+    );
+    let run = collide(&repo, &bundle, &["sections"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(run.stdout, "Packs  1 feature  1 proposal\n");
+}
+
+#[test]
+fn sections_take_no_argument_and_no_other_option() {
+    let (bundle, repo) = (bundle(), Repo::new("sections-usage"));
+    for (args, wanted) in [
+        (&["sections", "packs"][..], "takes no argument"),
+        (&["sections", "--ready"][..], "unknown option `--ready`"),
+        (&["sections", "--commit"][..], "unknown option `--commit`"),
+    ] {
+        let run = collide(&repo, &bundle, args);
+        assert_eq!(run.code, 2, "{args:?}: {}", run.stderr);
+        assert!(run.stderr.contains(wanted), "{args:?}: {}", run.stderr);
+        assert!(run.stderr.contains("usage:"), "{args:?}: {}", run.stderr);
+    }
+}
+
+#[test]
+fn help_states_the_matching_and_the_near_duplicate_rules() {
+    let (bundle, repo) = (bundle(), Repo::new("sections-help"));
+    let run = collide(&repo, &bundle, &["help"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    for wanted in [
+        "collide sections [--json]",
+        "match after trimming, in any case",
+        "spaces, hyphens and underscores are taken out and one final s is dropped",
+        "Pack and packs",
+        "Task view and task-view",
+        "never merges",
+    ] {
+        assert!(run.stdout.contains(wanted), "{wanted}: {}", run.stdout);
+    }
+}
+
+#[test]
+fn sections_report_an_invalid_item_on_stderr_as_tasks_does() {
+    let (bundle, repo) = (bundle(), repo_with_sections("sections-invalid"));
+    let folder = repo.dir.join(ALPHA_PROPOSALS);
+    fs::write(folder.join("broken.md"), "---\nid: [\n---\n").unwrap();
+    let run = collide(&repo, &bundle, &["sections"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(run.stderr.contains("collide: skipped"), "{}", run.stderr);
+    assert!(run.stdout.starts_with("Packs "), "{}", run.stdout);
+}
