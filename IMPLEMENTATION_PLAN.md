@@ -7,9 +7,24 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 13.** R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
+**Status: revision 14.** Revision 14 puts features in proposals, from the owner's decisions of 2026-11-14 (Review
+log). R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
 `.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
-starts. The owner accepted revision 13 (2026-11-14); Stage 2 may start.
+starts. The owner accepted revision 13 (2026-11-14); Stage 2 is in progress.
+
+Revision 14 (2026-11-14) puts features in proposals. The owner's request: planning is about features, and the
+Planning view should group them into sections that the agent names.
+- A proposal's body has a fixed `## Features` part that Collide reads. `###` headings are sections, and each entry
+  is `- **F<n> Title**: summary`. An entry under `### Unsorted`, or under no heading, has an empty section. The move
+  to `proposed` is refused while the part has a problem (0.10).
+- A task links to the feature it builds with `implements`, whose target carries the feature: `pr-0003-km#F2`. A
+  feature's state is derived, from its proposal's status and then from its tasks (0.8, 0.10).
+- Sections are matched by heading name across proposals, with no registry and no feature kind. `collide sections`
+  lists the names in use. The Plan… prompt reuses them first. The Planning view flags near-duplicates and offers to
+  merge them, and its Sort button has the ask agent suggest sections as chips the person applies (0.10, 0.11).
+- Stage 2 gains the contracts and the slice's part: the `proposal` kind in the slice, the Features part and its
+  check, the feature link and the derived state, and `collide sections`. The ops that write features are Stage 4c's,
+  the read-only Features view is Stage 6a's, and Sort, merging and Plan…'s naming are Stage 9d's.
 
 Revision 13 (2026-11-14) applies R5, the adversarial review of revisions 10–12 by Fable and Opus (both verdicts:
 ready after fixes), and the owner's decisions on it:
@@ -1750,6 +1765,9 @@ Collide plays the lead, so it does all four, through the pack.
   - `kind`, typed `links` (`type`, `to`, `blocking`), `owners` (the people or agents who claimed the item; 0.10 says
     how a claim works; R5 aligned this with 0.10, which already said `owners`), and checklist fields (owner,
     2026-11-13, for planning);
+  - on a proposal, `features` (revision 14): each feature's `F<n>` id, title, section (empty when unsorted) and
+    summary, read from the body's Features part, and `featureProblems`: each line of that part that did not parse,
+    with its reason (0.10). A link's `to` may name a feature, as `pr-0003-km#F2`;
   - `version`, required.
 
   See 0.10.
@@ -1941,7 +1959,8 @@ Why the plan adapter parses files itself:
   - `kinds` (owner, 2026-11-13), each with its statuses and their categories, its transitions, its ops (each with
     the category it moves to, if any) and optional role tags, which core treats as plain strings. A provider with
     one kind may omit `kinds`
-  - `links`: the link types it holds, their direction, and whether they block
+  - `links`: the link types it holds, their direction, whether they block, and whether their target is an item or a
+    feature (revision 14)
 - `list({ checkout?, cursor? })` returns tasks, collections and `invalid[]`, each item it could not read as
   `{path, checkout, reason}`, the shape of `task.invalid` (owner, 2026-11-14). `get({ id, checkout? })` returns the
   task, or no task when no item has that id: a missing id is an answer, not an error (owner, 2026-11-14).
@@ -2112,6 +2131,49 @@ layout: { default: board, groupBy: category }
       session and decision roles: `draft` (`active`) while it is written; `proposed` (`review`) while it waits for
       the owner; `accepted` (`done`), with `by: human:<date>`; `deferred` (`backlog`), with its trigger, until a
       person returns it to `proposed`; `rejected` and `superseded` (`dropped`).
+    - **A proposal's features** (owner, 2026-11-14; revision 14). Planning is mostly features before there are
+      tasks, so a proposal holds its feature set in a fixed `## Features` part of its body, which Collide reads:
+
+      ```markdown
+      ## Features
+
+      ### Packs
+      - **F1 Trust prompt for repo packs**: a repo pack asks before its first run.
+        A continuation line is indented by two spaces.
+      - **F2 Pack lock**: `packs.lock` pins each pack to a tree.
+
+      ### Unsorted
+      - **F3 Menu bar badge**: the Queue count in the menu bar.
+      ```
+
+      - only the part from `## Features` to the next `##` heading is read. In it are blank lines, `### <section>`
+        headings and entries. An entry is `- **F<n> <title>**: <summary>`, and its continuation lines are indented by
+        at least two spaces. Anything else in the part is a problem;
+      - the `###` heading is the section: 1 to 40 characters once trimmed, with no `#`. An entry under `### Unsorted`
+        (in any case), or above the first heading, has an empty section;
+      - `F<n>` is unique in the proposal and counts from 1. A removed feature's number is not reused, so a link never
+        comes to mean another feature. A link to a number the proposal does not have is a broken link;
+      - a proposal needs no Features part. A problem in a `draft` is reported on the item (`featureProblems`, 0.8),
+        never as a `task.invalid`, because a draft is still being written. **The move to `proposed` is refused while
+        the part has a problem**, with every problem and its line in one message, so the agent that wrote it can fix
+        it. A problem that appears after that is reported the same way;
+      - a task links to the feature it builds with **`implements`**, which does not block. Its target carries the
+        feature, `pr-0003-km#F2`, and names a proposal that has that feature: `link` refuses any other target and
+        names the features the proposal has. `reid` keeps the feature when it rewrites a link;
+      - **a feature's state is derived**, never written: `planned` while its proposal is `draft` or `proposed`;
+        `deferred` with the proposal; `dropped` when the proposal is `rejected` or `superseded`; and once the proposal
+        is `accepted`, `accepted` until a task implements it, then "n of m done" over its tasks that are not dropped,
+        and `done` when all of them are;
+      - **sections are matched by name across proposals**: two proposals with `### Packs` share the section. There is
+        no section registry and no feature kind, so nothing has to be kept in step. Names match after trimming, in
+        any case. **Near-duplicates** are names that match once spaces, hyphens and underscores are taken out and a
+        final `s` is dropped (`Pack` and `packs`, `Task view` and `task-view`). Core holds that rule, so the CLI and
+        the view agree. `collide sections [--json]` lists the names in use, with the features and proposals under
+        each, and the near-duplicate groups;
+      - a team system's provider reports features in the same shape. On GitHub, the Features part of a proposal
+        issue's body reads as a file's does. Where a team keeps a feature as an issue of its own, its section is an
+        `area:<name>` label (Stage 5) or a Projects v2 single-select field that `board.yaml` names (Stage 6c). That
+        board key is optional and is added in Stage 6c, so no existing file changes.
     - A question holds its own decision once it is resolved (`resolved_by: human:<date>`).
     - Only a person accepts, defers, rejects or resolves. `collide/plan` refuses those ops from a run
       (`actor.kind: agent`), and refuses `accepted` while a question the proposal includes is open. An agent phase
@@ -2392,6 +2454,10 @@ Details:
   - a choice to make away from the terminal, or one of several at once, becomes a question item. It appears in
     "Decisions needed" and is answered in the Queue, whether or not the run is live. The agent reads the answer
     with `collide task <id>`;
+  - features go in the proposal's Features part (0.10), written with the `addFeature` op (Stage 4c), whose
+    `section` argument is required and may be empty (owner, 2026-11-14). The prompt has the agent run
+    `collide sections` first and reuse a name in use. A new name is a product noun of one to three words, a board
+    aims for about 5 to 12 sections, and a feature with no clear section goes in empty, to be sorted later;
   - the agent moves the proposal to `proposed` when it is ready. Ending the session leaves the proposal as it is.
     Plan… on a draft proposal starts a new session that reads the proposal and its items, not the old
     conversation;
@@ -2570,7 +2636,18 @@ code files. It presents what it is told, and the agent does the analysis (0.3 fo
 - A Queue lane can be fed by a view (`queue: true` on the view). Its items are answered through the source's ops.
   `collide/plan` ships "Decisions needed": open questions and `proposed` proposals. Several decisions at once are
   question items answered there, with a `wait` phase holding a headless run.
-- **Planning view:** decisions made, spikes outstanding, results with their summary tables, and decisions needed.
+- **Planning view:** features, decisions made, spikes outstanding, results with their summary tables, and decisions
+  needed.
+  - **Features** (owner, 2026-11-14; revision 14) come first, because planning is mostly features before there are
+    tasks: every feature of every proposal that is not dropped, grouped by section name across proposals, each with
+    its proposal, derived state and tasks. Features with an empty section come last, as Unsorted. Near-duplicate
+    sections (0.10) are flagged, and the view offers to merge them: the person picks the name, and the app writes it
+    with `renameSection`.
+  - **Sort** asks the ask agent to sort the features into sections. It answers with `show_groups` over the features,
+    one group per section it suggests, each with its reason, so the five tools stay five. The view turns the
+    difference from the current sections into chips (a move, a rename, a merge). The person applies a chip, the app
+    writes it through the provider's ops, and Undo writes the reverse. The agent writes nothing, as for every in-app
+    agent tool in v0.
 - **Checklists:** core renders the checklist field in the drawer. Agents suggest an item with its evidence, and only
   a person marks it.
 - **Share preview:** every file that will leave, the branch it commits to, the handoff note to review, and the
@@ -3249,6 +3326,9 @@ part L).
     the `watch` notification shapes and `task.invalid`; the run-diff points at accept.
   - The skeleton fixes the contracts only. The workflow-engine stage builds the run-diff points, and the
     second-pack stage builds attribution for global sources.
+  - From revision 14 (owner, 2026-11-14): a proposal's `features` and `featureProblems` on the task; `target` (item
+    or feature) on a declared link type; and in `core`, the parse of a feature target (`pr-0003-km#F2`), the derived
+    feature state and the near-duplicate rule (0.10).
 - **Planning slice** (owner, 2026-11-13; part L), built for real as soon as the planning contracts, the provider
   protocol and the pack SDK's outline exist, ahead of the rest of this stage:
   - `collide/plan` loads as a built-in pack, compiled into the app bundle with its own copy of the SDK, so it needs
@@ -3271,6 +3351,11 @@ part L).
     item a new id and rewrites the links that name it (0.10; R5). Until
     the headless-core stage's daemon exists, the CLI starts the provider itself; the corpus stage moves it behind
     the provider supervisor;
+  - **features** (revision 14): the slice reads `proposals/` as kind `proposal`, with 0.10's statuses, `create` (as
+    `draft`, with `pr-` ids) and `setStatus` among them. The transitions, the person-only rule and `by:` wait for
+    Stage 4c, which has the actor. The provider parses each proposal's Features part and refuses the move to
+    `proposed` while it has a problem. `link` takes `implements` to a feature. `collide task <proposal>` prints the
+    features by section with their derived state and tasks, and `collide sections [--json]` lists the sections;
   - left to the corpus stage: the private root, the layout setting, views and CEL, `watch`, trust and the
     persisted cache.
 
@@ -3312,6 +3397,13 @@ part L).
   - concurrent `setStatus` calls on one file all report what is on disk (the lock test), a lock left by a dead
     writer is taken over, and a kill between the temp write and the rename leaves the old file whole;
   - a claim on an item that shows an owner is refused;
+  - features (revision 14): over proposal fixtures, `collide task <id> --json` lists each feature with its section,
+    and an Unsorted entry's section is empty. `setStatus proposed` on a proposal whose part has problems is refused,
+    with every problem and its line, while the same part in a `draft` lists with its `featureProblems`. `link
+    implements` to a feature the proposal lacks is refused, naming the features it has. Each feature's derived state
+    is right for every proposal status, and for no tasks, some done and all done. `reid` of a proposal keeps the
+    feature in every link it rewrites. `collide sections --json` gives the fixtures' names and counts, and groups
+    `Pack` with `packs`;
   - from here on, Collide's own build tasks are read and updated through the CLI.
 
 **Tests**: Schema generation; manifest validation (all five packs, plus invalid fixtures); serde round-trips;
@@ -3326,8 +3418,12 @@ reid` rewriting the links that name the item); epic membership from the folder; 
 broken link is counted, not dropped; a frontmatter block over its cap is invalid while a long body is not.
 Contracts: the journal and its replay; the `pending` poll; the `integrating` state; the intent and outcome events;
 the manifest; the actor from peer credentials.
-**Status**: Not Started. Items from revision 13: epic `ep-002-va` in `.collide/planning/epics/` (part L), `ts-0007`
-to `ts-0044`, each sized for one Sonnet agent (0.15). The planning slice's items are built first.
+Features (revision 14): the part's parser over good and malformed fixtures; the check at `proposed`; a feature link
+refused and taken; the derived state; the near-duplicate rule.
+**Status**: In progress; each item holds its own status. Items from revision 13: epic `ep-002-va` in
+`.collide/planning/epics/` (part L), `ts-0007` to `ts-0044`, each sized for one Sonnet agent (0.15). The planning
+slice's items are built first. Revision 14 adds `ts-0047-fb`, `ts-0048-pg` and `ts-0049-kn` (features), built after
+`ts-0037-vg`. It changes no other item.
 
 ## Stage 3: Headless core (CLI, no UI), and the thin loop
 
@@ -3726,6 +3822,12 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   root and the layout setting; kinds, op effects and links in the corpus; `collide/plan`'s record parser (claim
   blocks) and `roles` mapping; pack views, with the slice's `--ready` as a built-in view. The slice's CLI moves
   behind the provider supervisor. The Orchard pack's plan provider reads ADRs, spikes and questions.
+- **Feature ops** (revision 14): `addFeature {section, title, summary}` on a proposal, whose `section` is required
+  and may be empty (owner, 2026-11-14), takes the next `F<n>` and writes under that section's heading, or under
+  `### Unsorted`, made at the end of the part when it is missing; `moveFeature {feature, section}`; and
+  `renameSection {from, to}` over every proposal that uses `from`, which merges when `to` is in use and reports every
+  file it changed in `apply`'s `items[]`. Each leaves the part without problems. The `proposal` kind gets its
+  transitions, the person-only rule and `by:` (0.10), with the actor.
 
 **Success Criteria**:
 - Planning:
@@ -3740,7 +3842,10 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   - a private-root item never appears in `git status`;
   - `collide task reid` on a colliding item rewrites the links that name it, and a repeated suffix draw is redrawn
     (0.10; R5);
-  - a layout path outside the repo or under `.git/` is refused with the reason.
+  - a layout path outside the repo or under `.git/` is refused with the reason;
+  - features (revision 14): `addFeature` with an empty section writes under `### Unsorted` with the next number;
+    `renameSection` of `Pack` to `packs` over three proposals changes the three files, returns them in `items[]`,
+    and leaves each part without problems.
 
 **Tests**:
 - Planning: parser fixtures, with strict plan CLI frontmatter left untouched, and S5's hazards (an unquoted
@@ -3807,7 +3912,8 @@ shell and window; this finishes them.
 - **Empty board:** a prompt box that creates a scratch task (built in 3c; launching from the board arrives in 9a), New
   session (9b), the detected sources, and Add a pack.
 - **Planning** (owner, 2026-11-13): a read-only planning view; links both ways in the drawer; checklists shown
-  read-only; the branch-only chip.
+  read-only; the branch-only chip; and the view's Features (0.11; revision 14): features by section across
+  proposals, with their derived state and tasks, and near-duplicate sections flagged.
 - **Markdown in the webview** (0.9; R5): task, issue and agent text is rendered with raw HTML off, no `javascript:` or
   `file:` links, and external links opened by the OS after a confirmation.
 
@@ -3824,7 +3930,7 @@ shell and window; this finishes them.
 - A key set in both settings files shows the repo's value, labelled as coming from the repo.
 - The UI's tests run in a browser against a fake owner, with no Tauri.
 - A proposal shared on a branch and checked out as a worktree shows its items with the branch-only chip. The
-  planning view's counts match the CLI's.
+  planning view's counts match the CLI's, and its sections and their feature counts match `collide sections --json`.
 - A recorded GitHub issue whose body holds raw HTML, a `javascript:` link, a `file:` link and an image that fetches a
   remote URL is shown in the drawer as text: nothing runs, nothing is fetched, and the CSP blocks the image. An
   external link asks before it opens (R5).
@@ -4340,7 +4446,10 @@ surfaces together.
   - Plan… (0.11): a New session on a new private proposal, from the Planning view, an epic or a task, with the
     planning workflow's prompt; proposal statuses and the person-only ops (0.10);
   - task points fired from UI writes; the Queue lane from a view; checklist marking in the drawer, with agent
-    suggestions shown with their evidence.
+    suggestions shown with their evidence;
+  - features (0.11; revision 14): Sort, with `query` and `show_groups` learning the features surface; its chips,
+    applied through the feature ops (Stage 4c) with Undo; merging near-duplicate sections; and the naming rule in
+    Plan…'s prompt.
 
 **Success Criteria**:
 - **The in-app agent on Tracks** (owner, 2026-11-14):
@@ -4372,11 +4481,16 @@ surfaces together.
   - a suggested checklist item does not satisfy the gate until a person marks it;
   - a gate that times out on a drawer write leaves the write unapplied, with the hook's name in the message;
   - an `after_status` hook that fails after a drawer write leaves the write in place and adds a Queue item.
+- Features (revision 14): over a fixture of twelve features in four sections with one near-duplicate pair, the
+  reducer and tool tests (no model) show a Sort answer's groups and chips. Applying a move chip writes through
+  `moveFeature`, and Undo restores the file byte for byte. Merging the pair leaves one section in
+  `collide sections`. Plan…'s prompt names `collide sections` and the naming rule.
 
 **Tests**: The in-app agent's Tracks tools over the nine-run fixture and the real-agent contract test (opt-in).
 Planning: the spike workflow end to end with the fake adapter; Plan… with the fake adapter scripting the CLI
 calls; the person-only ops refused from a run; the Queue lane reducer; `protectedPaths` on checklist state and
-on a planning file's `status` and `by:` lines; point timeouts and failures outside a run.
+on a planning file's `status` and `by:` lines; point timeouts and failures outside a run. Features: Sort's reducer
+cases, chips and Undo over the twelve-feature fixture; the merge.
 **Status**: Not Started. Items from revision 13, not yet split into items.
 
 ## Stage 10: Orchard loop end-to-end
@@ -5649,3 +5763,34 @@ disposition, where it landed and, for each rejection or deferral, the reason or 
 - **For the next review to check:** the replay journal's byte-order guarantee under a daemon crash; the shell-side MCP
   manifest against a client that sends `tools/list_changed`; that 3c's hard-coded sequence is replaced and not
   extended in 9a; and the id-collision redraw against a fetched remote.
+
+**Revision 14, 2026-11-14 (owner).** Features in proposals. The owner's request: planning is about features, and
+Collide had none until the tasks existed. The Planning view should group the feature set into sections (packs, task
+view, planning view, daemon, …) that the agent names, and a planning tool should take a section name, which may be
+empty at first. Asked whether features could go into a proposal ("in Orchard we put feature sets in proposals"), the
+plan puts them there.
+- **Changed:** the status line and the revision summary; 0.8 (a proposal's `features` and `featureProblems`, a link
+  to a feature); 0.10 (the provider's `links` capability, a proposal's features, sections, `implements`, the derived
+  state, GitHub's mapping); 0.11 (Plan…'s naming, the Planning view's Features and Sort); Stage 2 (planning contracts,
+  the slice, criteria, tests, Status); Stages 4c, 6a and 9d.
+- **Owner's decisions** (applied; "1-4 all your recs"):
+  1. **A fixed Features part that Collide reads,** not free markdown that the view only renders: `###` sections,
+     entries `- **F<n> Title**: …`, `### Unsorted` or no heading for an empty section, and the move to `proposed`
+     refused while the part has a problem. The op that adds a feature takes `section` as required and possibly
+     empty.
+  2. **Tasks link to features** with a target that carries the feature, `pr-0003-km#F2`, and the view shows each
+     feature's derived state.
+  3. **Sections match by heading name across proposals,** with no registry and no feature kind. `collide sections`
+     lists the names, the Plan… prompt reuses them first, the view offers to merge near-duplicates, and Sort has the
+     ask agent suggest sections as chips with Undo. On GitHub a section is an `area:` label or a Projects v2
+     single-select field.
+  4. **Stage 2 now** for the contracts and the slice's part. The ops are Stage 4c's, and the view's parts are Stages
+     6a's and 9d's.
+- **Considered and not taken:** free markdown (no per-feature state, and nothing to link to); a feature kind with a
+  file per feature (a feature set reads best whole, in its proposal, and it would add more files than there are
+  items); a section registry file (one more thing to keep in step, when a heading already names the section).
+- **Choices made in writing it** (the owner may change any): the link type `implements`; the derived states' names;
+  the near-duplicate rule; the 40-character section name limit; `featureProblems` on the item for a draft rather
+  than a `task.invalid`; the op names `addFeature`, `moveFeature` and `renameSection`; Sort answering through
+  `show_groups`, so the five tools stay five; the slice reading the `proposal` kind now, with its transitions, the
+  person-only rule and `by:` in Stage 4c; and the GitHub board key added in Stage 6c as an optional key.
