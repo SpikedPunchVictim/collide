@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { countStubs } from '../scripts/stubs.ts'
-import { defineHook, defineObserver, defineProvider } from '../src/index.ts'
+import { defineHook, defineObserver } from '../src/index.ts'
 import { unimplemented } from '../src/unimplemented.ts'
 
 const pkgDir = join(import.meta.dirname, '..')
@@ -15,7 +15,6 @@ test('unimplemented throws an error that names the tag', () => {
 
 test.each([
   ['sdk: defineHook', () => defineHook(async () => {})],
-  ['sdk: defineProvider', () => defineProvider({} as Parameters<typeof defineProvider>[0])],
   ['sdk: defineObserver', () => defineObserver(async () => {})],
 ])('%s is a stub that throws its own tag', (tag, call) => {
   expect(call).toThrow(`unimplemented: ${tag}`)
@@ -38,8 +37,9 @@ test('every registered tag names the stage that fills it', () => {
   }
 })
 
-test('defineProvider is counted once, so ts-0028-hq can show it gone', () => {
-  expect(countStubs(join(pkgDir, 'src'))['sdk: defineProvider']).toBe(1)
+test('defineProvider is no longer a stub: its tag is gone from the source and the registry', () => {
+  expect(countStubs(join(pkgDir, 'src'))['sdk: defineProvider']).toBeUndefined()
+  expect(registry['sdk: defineProvider']).toBeUndefined()
 })
 
 test('the counter sees an unregistered tag and refuses a tag that is not a string literal', () => {

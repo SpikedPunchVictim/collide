@@ -1,7 +1,7 @@
 ---
 id: ts-0028-hq
 kind: task
-status: ready
+status: done
 title: "pack-sdk: working defineProvider"
 owners: []
 links:
