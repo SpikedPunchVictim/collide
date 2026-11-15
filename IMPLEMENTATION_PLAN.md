@@ -3606,9 +3606,15 @@ and a full disk, with no agent involved. The children are python3 fixtures.
 SIGSTOP of the shim, children that ignore HUP and TERM, python3 fixtures, a recorded `/bin/sleep` orphan); the
 `ENOSPC` writer; store quarantine; the journal's order and its cut-short replay; the framed message cut in half; the
 socket checks; sleep accounting with fake clocks.
-**Status**: Not Started. Items from revision 13, split on 2026-11-15: `ts-0050-xc` to `ts-0059-xs` in epic
-`ep-003-da`, built one at a time in id order (state machines, clocks, peer credentials, store, shim, workspace and
-disk floor, daemon, daemon and shim link, launchd job, stop). Each Stage 3a criterion is named in one item.
+**Status**: Complete (2026-11-15) except four parts, each recorded in its item and carried on. Items `ts-0050-xc` to
+`ts-0059-xs` of epic `ep-003-da` are done; the epic stays open for 3b to 3d. Each success criterion and Tests entry
+was checked against a named test. Carried to 3b: the free-space check wired into phase start, so a live run shows
+`paused: disk` and its Queue item (`ts-0055-cr`; only the decision and the state are tested now); sleep time taken
+out of active time by the sampler (`ts-0051-wh`; the fake-clock gap and the uptime timeout are tested); the next
+phase started by an engine after a phase ends with the daemon down (`ts-0057-ck`; shown through a test hook).
+Carried to Stage 7: the cleanup-hook executor (`ts-0059-xs`; the recorded `/bin/sleep` orphan is stopped through a
+hook the test injects). The real launchd check runs only with `COLLIDE_REAL_LAUNCHD=1` and was run on macOS for
+`ts-0058-ad`. The foreign-uid refusal uses a fake peer, because a real one needs root.
 
 ### Stage 3b: Claude adapter and the first run
 
