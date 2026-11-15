@@ -1,7 +1,7 @@
 ---
 id: ts-0073-ac
 kind: task
-status: ready
+status: active
 title: "Move the daemon's runtime files into Application Support"
 owners: []
 links:
