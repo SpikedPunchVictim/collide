@@ -1,7 +1,7 @@
 ---
 id: ts-0054-cy
 kind: task
-status: active
+status: done
 title: "The shim: child, reap, journal, exit record and logs"
 owners: []
 links:
