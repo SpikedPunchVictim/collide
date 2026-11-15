@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.detach` params: close the terminal's view. The session goes on in its shim (0.11).",
+  "properties": {
+    "terminal": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "terminal"
+  ],
+  "title": "RunDetachParams",
+  "type": "object"
+}

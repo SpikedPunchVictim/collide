@@ -1,0 +1,504 @@
+{
+  "$defs": {
+    "FailCause": {
+      "description": "Why a phase failed when the cause is known. A phase that ends with no `result` on a full volume fails with cause\n`disk`, not `lost` (0.2).",
+      "enum": [
+        "disk"
+      ],
+      "type": "string"
+    },
+    "HookStatus": {
+      "description": "The verdict a hook writes. It is `ok`, `fail`, `unverified` (could not check here), `pending` (has not happened\nyet), `refused` or `error`. `unverified` and `pending` are valid only from some hooks: see [`effective_result`].",
+      "enum": [
+        "ok",
+        "fail",
+        "unverified",
+        "pending",
+        "refused",
+        "error"
+      ],
+      "type": "string"
+    },
+    "InstanceSummary": {
+      "additionalProperties": false,
+      "description": "One instance of a phase: the only one of an `agent` phase, one for each model or instance of a `fanout`.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "description": "The agent session's id, once bound.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/PhaseState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "PauseCause": {
+      "description": "Why a run or a phase is paused (0.2, 0.3, 0.8). `ask_human` waits in the Queue, `usage_limit` waits for the\naccount's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).",
+      "enum": [
+        "ask_human",
+        "usage_limit",
+        "disk"
+      ],
+      "type": "string"
+    },
+    "PhaseKindWire": {
+      "description": "A phase's kind: the five names of [`PhaseKind`]. That enum is written to JSON but not read from it, so this is the\nwire form, and a test pins the names to it.",
+      "enum": [
+        "agent",
+        "fanout",
+        "script",
+        "wait",
+        "human"
+      ],
+      "type": "string"
+    },
+    "PhaseState": {
+      "description": "Where a phase is (0.8, Phase). A shim that dies without an `exit.json` makes its phase `lost`, whatever the agent's\nstream said (0.2).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FailCause"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "lost",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PhaseSummary": {
+      "additionalProperties": false,
+      "description": "One phase of a run, for a track's segment: its instances' states, its real times and its gate verdicts.",
+      "properties": {
+        "ended_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gate_results": {
+          "additionalProperties": {
+            "$ref": "#/$defs/HookStatus"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "instances": {
+          "items": {
+            "$ref": "#/$defs/InstanceSummary"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/PhaseKindWire"
+        },
+        "name": {
+          "type": "string"
+        },
+        "round": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "started_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "take_over": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TakeOverState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "round",
+        "instances",
+        "gate_results"
+      ],
+      "type": "object"
+    },
+    "RunState": {
+      "description": "Where a run is (0.8, Run). It ends `ended(<outcome>)`, `failed` or `stopped`; `outcome` is the `end` token the run\nreached (0.7, Outcomes and terminal states). `integrating` is a run whose `integrate` answered `pending`, so the\npull request is not merged yet (0.4).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "integrating",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RunSummary": {
+      "additionalProperties": false,
+      "description": "A run for a track and for a list: the domain record's wire form (the record is plain Rust). Times are on the wall\nclock; the spans and metrics of a run are Stage 9c's.",
+      "properties": {
+        "ended_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/PhaseSummary"
+          },
+          "type": "array"
+        },
+        "started_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/RunState"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/RunTaskRef"
+          },
+          "type": "array"
+        },
+        "workflow": {
+          "description": "`pack/workflow`.",
+          "type": "string"
+        },
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "tasks",
+        "line",
+        "workflow",
+        "state",
+        "started_ms",
+        "phases"
+      ],
+      "type": "object"
+    },
+    "RunTaskRef": {
+      "additionalProperties": false,
+      "description": "One task of a run, with its status when the run started.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "status"
+      ],
+      "type": "object"
+    },
+    "TakeOverState": {
+      "description": "Whether a take-over's terminal is open (0.11, Talking to an agent): closing the view detaches, and the session\ngoes on in its shim.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "attached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "detached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.get` result: the summary and what the run pinned at launch (0.8, Run). `implementations` maps `workspace` and\n`integrate` to `builtin` or `pack/name`. `rounds` counts how often each phase was entered.",
+  "properties": {
+    "annotations": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "fingerprint": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "implementations": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "launch": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "rounds": {
+      "additionalProperties": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "snapshot_commit": {
+      "type": "string"
+    },
+    "summary": {
+      "$ref": "#/$defs/RunSummary"
+    }
+  },
+  "required": [
+    "summary",
+    "snapshot_commit",
+    "launch",
+    "implementations",
+    "rounds",
+    "fingerprint",
+    "annotations"
+  ],
+  "title": "RunGetResult",
+  "type": "object"
+}

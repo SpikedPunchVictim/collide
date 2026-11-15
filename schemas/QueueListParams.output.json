@@ -1,0 +1,106 @@
+{
+  "$defs": {
+    "QueueKind": {
+      "description": "What a Queue item waits for: the list of 0.11, Queue.",
+      "oneOf": [
+        {
+          "enum": [
+            "budget_exceeded",
+            "failed_gate",
+            "observer_disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "permission",
+          "description": "A permission request: a command, an edit or any other tool call.",
+          "type": "string"
+        },
+        {
+          "const": "ask_human",
+          "description": "An `ask_human` of a run: its cause is in the title.",
+          "type": "string"
+        },
+        {
+          "const": "human_phase",
+          "description": "A `human` phase with its `show:` list.",
+          "type": "string"
+        },
+        {
+          "const": "usage_limit",
+          "description": "A usage limit, with its reset time.",
+          "type": "string"
+        },
+        {
+          "const": "blocked_prompt",
+          "description": "A prompt blocked by a user hook, with the hook's message.",
+          "type": "string"
+        },
+        {
+          "const": "budget_warning",
+          "description": "A take-over or New session past its phase budget: a warning, and nothing is stopped.",
+          "type": "string"
+        },
+        {
+          "const": "unverified",
+          "description": "An `unverified` gate or `wait` result: retry, proceed or stop.",
+          "type": "string"
+        },
+        {
+          "const": "conflict",
+          "description": "A write conflict, a merge conflict found before `integrate`, a queued write, a busy line root or unrecorded\nedits.",
+          "type": "string"
+        },
+        {
+          "const": "acknowledge",
+          "description": "An integrate or take-over waiting because its range edits the agent tool's config, or a run waiting because an\nintegrate changed a working-copy pack it loads.",
+          "type": "string"
+        },
+        {
+          "const": "review",
+          "description": "A finished run to review.",
+          "type": "string"
+        },
+        {
+          "const": "outcome_unknown",
+          "description": "A step whose outcome is unknown after a restart (0.2): a person says.",
+          "type": "string"
+        },
+        {
+          "const": "question",
+          "description": "An open question of the planning pack (`Decisions needed`, 0.11).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`queue.list` params. With no `board` the items of every board, because a decision waits on the person and not on\na board. `kinds` keeps the listed kinds, or all of them when empty.",
+  "properties": {
+    "board": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kinds": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/QueueKind"
+      },
+      "type": "array"
+    },
+    "run": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kinds"
+  ],
+  "title": "QueueListParams",
+  "type": "object"
+}

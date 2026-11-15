@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.get` params (`collide task <id>`). `id` may be the short form (`12` or `12-ua`).",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board",
+    "id"
+  ],
+  "title": "TaskGetParams",
+  "type": "object"
+}

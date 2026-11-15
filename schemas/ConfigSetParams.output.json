@@ -1,0 +1,42 @@
+{
+  "$defs": {
+    "ConfigWriteLayer": {
+      "description": "The layers a write can reach: the user's file and the repo's. The defaults are the schema's, and a profile is a\nfile of its own.",
+      "enum": [
+        "user",
+        "repo"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.set` params (`collide config set <key> <value> [--secret]`). With `secret` true the value goes to the OS\nkeychain, `layer` is ignored, and the daemon never logs, journals or echoes the request's `value`. The key is\nchecked against the setting's schema, and a secret in either settings file is refused (0.7).",
+  "properties": {
+    "board": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key": {
+      "type": "string"
+    },
+    "layer": {
+      "$ref": "#/$defs/ConfigWriteLayer"
+    },
+    "secret": {
+      "default": false,
+      "type": "boolean"
+    },
+    "value": true
+  },
+  "required": [
+    "key",
+    "value",
+    "layer",
+    "secret"
+  ],
+  "title": "ConfigSetParams",
+  "type": "object"
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`daemon.recapture_environment` params: none. The app asks for it when it starts (0.2, The base environment).",
+  "title": "DaemonRecaptureEnvironmentParams",
+  "type": "object"
+}

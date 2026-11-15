@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "ConfigEntry": {
+      "additionalProperties": false,
+      "description": "One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS\nkeychain, and no method returns it (0.7, Secrets).",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "layer": {
+          "$ref": "#/$defs/SettingLayer"
+        },
+        "secret": {
+          "type": "boolean"
+        },
+        "value": true
+      },
+      "required": [
+        "key",
+        "layer",
+        "secret"
+      ],
+      "type": "object"
+    },
+    "SettingLayer": {
+      "description": "The layer a setting's value came from, lowest first (0.7, Values come from four layers).",
+      "oneOf": [
+        {
+          "const": "default",
+          "description": "The schema's defaults, and the built-in agent entry.",
+          "type": "string"
+        },
+        {
+          "const": "user",
+          "description": "`~/.config/collide/config.yaml`.",
+          "type": "string"
+        },
+        {
+          "const": "repo",
+          "description": "The line snapshot's `.collide/config.yaml`.",
+          "type": "string"
+        },
+        {
+          "const": "profile",
+          "description": "The run's profile, the top layer.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.get` result.",
+  "properties": {
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/ConfigEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "entries"
+  ],
+  "title": "ConfigGetResult",
+  "type": "object"
+}

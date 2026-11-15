@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.sections` params (`collide sections`). The result is [`crate::section::Sections`], as the CLI prints it.",
+  "properties": {
+    "board": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board"
+  ],
+  "title": "TaskSectionsParams",
+  "type": "object"
+}

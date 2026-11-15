@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`queue.context` params: Why is this asked? (`i`, 0.11). Its result is [`crate::context::ContextRecord`], built\nfrom what the owner holds with no model call.",
+  "properties": {
+    "item": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "item"
+  ],
+  "title": "QueueContextParams",
+  "type": "object"
+}

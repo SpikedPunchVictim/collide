@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.intervene` params: send a note to a running phase (0.11, Talking to an agent is the exception). The note is\nthe person's words and goes to the agent as a message.",
+  "properties": {
+    "note": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "run": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run",
+    "phase",
+    "note"
+  ],
+  "title": "RunIntervenParams",
+  "type": "object"
+}

@@ -1,0 +1,60 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "description": "Who made the write (0.5). `run` and `phase` are reserved now so that writes a run makes need no later schema\nchange. They are not tied to a kind: a workflow op inside a run may carry `run`, and an agent outside a run,\nsuch as one whose actor is read from the process tree, may have neither.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ActorKind": {
+      "enum": [
+        "person",
+        "workflow",
+        "agent"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`initialize` result: the daemon's version and protocol, and the actor it recorded for this connection.",
+  "properties": {
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "daemon_version": {
+      "type": "string"
+    },
+    "protocol": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "protocol",
+    "daemon_version",
+    "actor"
+  ],
+  "title": "OwnerInitializeResult",
+  "type": "object"
+}

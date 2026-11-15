@@ -1,0 +1,63 @@
+{
+  "$defs": {
+    "ApplyParams": {
+      "additionalProperties": false,
+      "description": "`apply` params, and `preview`'s. `id` is left out for an op that makes a task, and `version` is the version the\ncaller last read: the source answers `conflict` when it has moved on. Only `args` is op-specific; its schema is\nthe op's `args` in `initialize`.",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "op": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.preview` params: what `task.apply` with the same call would do, with nothing written (0.10, `preview`).",
+  "properties": {
+    "apply": {
+      "$ref": "#/$defs/ApplyParams"
+    },
+    "board": {
+      "type": "string"
+    },
+    "source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "board",
+    "apply"
+  ],
+  "title": "TaskPreviewParams",
+  "type": "object"
+}

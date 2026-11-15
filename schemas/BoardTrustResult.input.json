@@ -1,0 +1,57 @@
+{
+  "$defs": {
+    "TrustState": {
+      "description": "Whether a line's packs and gate code are trusted (0.9, Trust). `hash` is what trust covers now: the packs, the\nlock, the pointer file, `board.yaml`, `config.yaml`, the views and the tree hashes of `protectedPaths`. It is the\nhash an `Untrusted` line would be trusted at, so the person is shown what they trust. (The domain record is plain\nRust, so the wire form is this type.)",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Nothing is trusted yet, or the hash changed since.",
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "untrusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "trusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.trust` result: the line's trust after the call.",
+  "properties": {
+    "trust": {
+      "$ref": "#/$defs/TrustState"
+    }
+  },
+  "required": [
+    "trust"
+  ],
+  "title": "BoardTrustResult",
+  "type": "object"
+}

@@ -1,0 +1,66 @@
+{
+  "$defs": {
+    "PackEntry": {
+      "additionalProperties": false,
+      "description": "One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7).",
+      "properties": {
+        "dev": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/PackOrigin"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "origin",
+        "enabled",
+        "dev"
+      ],
+      "type": "object"
+    },
+    "PackOrigin": {
+      "description": "Where a pack comes from (0.7, Repo packs and user packs).",
+      "oneOf": [
+        {
+          "const": "builtin",
+          "description": "Compiled into the bundle, so it needs no trust prompt (0.4).",
+          "type": "string"
+        },
+        {
+          "const": "repo",
+          "description": "Listed in the board's `board.yaml`, shared with the team.",
+          "type": "string"
+        },
+        {
+          "const": "user",
+          "description": "Added with `collide pack add`, switched on per board.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The result of `config.pack_add`, `config.pack_link` and `config.pack_enable`: the pack after the change.",
+  "properties": {
+    "pack": {
+      "$ref": "#/$defs/PackEntry"
+    }
+  },
+  "required": [
+    "pack"
+  ],
+  "title": "ConfigPackResult",
+  "type": "object"
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`workspace.resume` params: resume a `failed` workspace through its implementation's `resume` hook (0.4).",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "WorkspaceResumeParams",
+  "type": "object"
+}

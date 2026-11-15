@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.init` result: every file written, or with `dry_run` every file that would be, relative to the board root.",
+  "properties": {
+    "files": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "files",
+    "written"
+  ],
+  "title": "BoardInitResult",
+  "type": "object"
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.take_over` params: open the phase's session in a terminal through the owner's PTY, or attach again to one\nthat was detached. `cols` and `rows` are the terminal's size.",
+  "properties": {
+    "cols": {
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "rows": {
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "run": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run",
+    "phase",
+    "cols",
+    "rows"
+  ],
+  "title": "RunTakeOverParams",
+  "type": "object"
+}

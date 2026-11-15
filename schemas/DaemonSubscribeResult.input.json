@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`daemon.subscribe` result. `oldest_seq` is the oldest event the log still holds: a `since` below `oldest_seq - 1`\nhas a gap, and the client reloads its state instead of trusting the replay. `replayed` counts the notifications\nsent before this answer. The daemon answers first and sends the replay after it, so a client reads the answer\nbefore any `daemon.event` of it.",
+  "properties": {
+    "head_seq": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "oldest_seq": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "replayed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "head_seq",
+    "oldest_seq",
+    "replayed"
+  ],
+  "title": "DaemonSubscribeResult",
+  "type": "object"
+}

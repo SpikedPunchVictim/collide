@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.output` params: one page of a phase's normalized stream, for the Output pane (0.11, Agent output). `from` is\nthe first `index`, or the start. `instance` picks one of a fan-out's instances, and is left out for a phase with\none.",
+  "properties": {
+    "from": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "instance": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "phase": {
+      "type": "string"
+    },
+    "run": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run",
+    "phase"
+  ],
+  "title": "RunOutputParams",
+  "type": "object"
+}

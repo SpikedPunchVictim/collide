@@ -1,0 +1,268 @@
+{
+  "$defs": {
+    "PhaseKindWire": {
+      "description": "A phase's kind: the five names of [`PhaseKind`]. That enum is written to JSON but not read from it, so this is the\nwire form, and a test pins the names to it.",
+      "enum": [
+        "agent",
+        "fanout",
+        "script",
+        "wait",
+        "human"
+      ],
+      "type": "string"
+    },
+    "PreviewBadge": {
+      "description": "A badge of the preview (0.11).",
+      "oneOf": [
+        {
+          "const": "dev_pack",
+          "description": "A pack loaded from a `dev:` folder.",
+          "type": "string"
+        },
+        {
+          "const": "agent_work",
+          "description": "A phase with `agentWork`.",
+          "type": "string"
+        }
+      ]
+    },
+    "PreviewHook": {
+      "additionalProperties": false,
+      "description": "A user hook or plugin a phase will load, with the flags on those that change behaviour (0.3).",
+      "properties": {
+        "flags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "name",
+        "flags"
+      ],
+      "type": "object"
+    },
+    "PreviewPhase": {
+      "additionalProperties": false,
+      "description": "One phase of the workflow, as the preview lists it.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PhaseKindWire"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PreviewProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/ProfileReason"
+        }
+      },
+      "required": [
+        "name",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PreviewSetting": {
+      "additionalProperties": false,
+      "description": "One resolved setting of the preview with its layer (0.7).",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "layer": {
+          "$ref": "#/$defs/SettingLayer"
+        },
+        "value": true
+      },
+      "required": [
+        "key",
+        "value",
+        "layer"
+      ],
+      "type": "object"
+    },
+    "PreviewTask": {
+      "additionalProperties": false,
+      "description": "One task of the preview: its status at the line's ref, and whether the workflow accepts it. `lacks` names the\nfield or operation a refused task lacks.",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "lacks": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "status",
+        "accepted"
+      ],
+      "type": "object"
+    },
+    "ProfileReason": {
+      "description": "Why a profile applies (0.11, Launch shows a run preview).",
+      "enum": [
+        "picked",
+        "view",
+        "rule",
+        "board_default"
+      ],
+      "type": "string"
+    },
+    "SettingLayer": {
+      "description": "The layer a setting's value came from, lowest first (0.7, Values come from four layers).",
+      "oneOf": [
+        {
+          "const": "default",
+          "description": "The schema's defaults, and the built-in agent entry.",
+          "type": "string"
+        },
+        {
+          "const": "user",
+          "description": "`~/.config/collide/config.yaml`.",
+          "type": "string"
+        },
+        {
+          "const": "repo",
+          "description": "The line snapshot's `.collide/config.yaml`.",
+          "type": "string"
+        },
+        {
+          "const": "profile",
+          "description": "The run's profile, the top layer.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.preview` result: what 0.11 lists before anything starts. `implementations` maps `workspace` and `integrate`\nto `builtin` or `pack/name`; a workflow with no `integrate` has no such key, so it cannot be accepted. The\nexpected duration is absent until three earlier runs of the workflow have timings, and the UI says \"unknown\".\n`model_endpoint_host` is the host of a redirected model endpoint, and never a path, a query or a key (0.3).",
+  "properties": {
+    "badges": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PreviewBadge"
+      },
+      "type": "array"
+    },
+    "budget_usd": {
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "expected_duration_secs": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "implementations": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "launch": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "line": {
+      "type": "string"
+    },
+    "model_endpoint_host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "phases": {
+      "items": {
+        "$ref": "#/$defs/PreviewPhase"
+      },
+      "type": "array"
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PreviewProfile"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "settings": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PreviewSetting"
+      },
+      "type": "array"
+    },
+    "tasks": {
+      "items": {
+        "$ref": "#/$defs/PreviewTask"
+      },
+      "type": "array"
+    },
+    "user_hooks": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PreviewHook"
+      },
+      "type": "array"
+    },
+    "workflow": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "line",
+    "workflow",
+    "phases",
+    "implementations",
+    "launch",
+    "tasks",
+    "settings",
+    "user_hooks",
+    "badges"
+  ],
+  "title": "RunPreviewResult",
+  "type": "object"
+}

@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "StoreHealth": {
+      "description": "Whether the store opened. An unreadable store is moved aside and reported, never overwritten (0.2, Durability).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "ok",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The store could not be read. It was moved to `moved_to` and a new one was made.",
+          "properties": {
+            "moved_to": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "state": {
+              "const": "quarantined",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "moved_to",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`daemon.status` result. `uptime_secs` is on the uptime clock, which stops in sleep (0.2, Clocks). `warnings` are\nthe daemon's own words, such as the `setsid` start's warning that it may end with its launcher (0.2). `head_seq`\nis the `seq` of the newest event in the log.",
+  "properties": {
+    "daemon_version": {
+      "type": "string"
+    },
+    "head_seq": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "live_runs": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pid": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "protocol": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "started_ms": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "store": {
+      "$ref": "#/$defs/StoreHealth"
+    },
+    "uptime_secs": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "warnings": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "daemon_version",
+    "protocol",
+    "pid",
+    "started_ms",
+    "uptime_secs",
+    "head_seq",
+    "live_runs",
+    "store"
+  ],
+  "title": "DaemonStatusResult",
+  "type": "object"
+}

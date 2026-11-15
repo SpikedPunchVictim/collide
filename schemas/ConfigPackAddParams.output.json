@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.pack_add` params (`collide pack add <source>`): a `git:` or `dev:` source, added to the user's packs.",
+  "properties": {
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "source"
+  ],
+  "title": "ConfigPackAddParams",
+  "type": "object"
+}

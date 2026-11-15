@@ -1,0 +1,2265 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "description": "Who made the write (0.5). `run` and `phase` are reserved now so that writes a run makes need no later schema\nchange. They are not tied to a kind: a workflow op inside a run may carry `run`, and an agent outside a run,\nsuch as one whose actor is read from the process tree, may have neither.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ActorKind": {
+      "enum": [
+        "person",
+        "workflow",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "AgentEvent": {
+      "description": "One normalized event of an agent session (0.3, Normalized events).\n\nEvery known event is a closed object: an unknown key is an error. An event whose `type` this version does not\nknow (a tool's newer stream, an event of a later Collide) reads as [`AgentEvent::Other`] with that name in\n`raw_type` and the rest of the object in `raw`, because a log line must stay readable. `Other` is also what an\nadapter emits for a stream event it does not map. It is written back as `{\"type\":\"other\",\"raw_type\":...}`, so a\nread-write-read is stable. The schema lists the known events only.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A message of the agent, or one chunk of it.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool call. `input` is `None` while the agent has not sent it.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "input": true,
+            "kind": {
+              "$ref": "#/$defs/ToolKind"
+            },
+            "tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "tool_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/PermissionRequest"
+            },
+            "type": {
+              "const": "permission_request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The request had no option Collide may pick, so the session answered `cancel` (0.3, Permissions).",
+          "properties": {
+            "request_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "permission_unanswerable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The session id is known: at once for Claude, on the `session/new` response for ACP.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_bound",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "usage",
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/$defs/Usage"
+            }
+          },
+          "required": [
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`empty` is true when the turn gave no message, no tool call and zero or unreported usage.",
+          "properties": {
+            "cancel_requested": {
+              "type": "boolean"
+            },
+            "empty": {
+              "type": "boolean"
+            },
+            "reason": {
+              "$ref": "#/$defs/TurnEndReason"
+            },
+            "type": {
+              "const": "turn_end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason",
+            "cancel_requested",
+            "empty"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/FinalReportSource"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "final_report",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An event this version has no type for. `raw_type` is its own type name.",
+          "properties": {
+            "raw": true,
+            "raw_type": {
+              "type": "string"
+            },
+            "type": {
+              "const": "other",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "raw_type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Batch": {
+      "additionalProperties": false,
+      "description": "One call on several items fires per item; `index` counts from 0.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "index",
+        "size"
+      ],
+      "type": "object"
+    },
+    "BudgetScope": {
+      "description": "The budget that stopped a run: the run's total, a phase's, or a role's (0.7, Budgets).",
+      "enum": [
+        "run",
+        "phase",
+        "role"
+      ],
+      "type": "string"
+    },
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "Change": {
+      "additionalProperties": false,
+      "description": "The `change` a task point carries. `op` is null for a write made by a run (`via: run`). `from` is null at\ncreate and `to` is null at delete. `diff` is predicted at `before_*` and actual at `after_*`. `effectOf` is the\nkey of the item whose op changed this one.",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "args": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "batch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Batch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categoryMoved": {
+          "type": "boolean"
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diff": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldDiff"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "effectOf": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effects": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Effect"
+          },
+          "type": "array"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "op": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "renamed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Rename"
+          },
+          "type": "array"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "via": {
+          "$ref": "#/$defs/Via"
+        }
+      },
+      "required": [
+        "categoryMoved",
+        "via",
+        "actor"
+      ],
+      "type": "object"
+    },
+    "ChangeCause": {
+      "description": "What made a `task.changed` notification.",
+      "enum": [
+        "head",
+        "worktree",
+        "remote",
+        "journal",
+        "startup"
+      ],
+      "type": "string"
+    },
+    "Effect": {
+      "additionalProperties": false,
+      "description": "One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version"
+      ],
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "description": "One line of the event log. `wall_ms` is the wall clock in milliseconds since the Unix epoch. `experiment` is null\noutside an experiment (0.4).",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "body": {
+          "$ref": "#/$defs/EventBody"
+        },
+        "experiment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookExperiment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "wall_ms",
+        "actor",
+        "body"
+      ],
+      "type": "object"
+    },
+    "EventBody": {
+      "description": "What happened. Each variant is one event name, and `event` is the tag. Unknown keys are refused.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "`from` is null for the first state.",
+          "properties": {
+            "event": {
+              "const": "run.transition",
+              "type": "string"
+            },
+            "from": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RunState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run": {
+              "type": "string"
+            },
+            "to": {
+              "$ref": "#/$defs/RunState"
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The phase's log and transcript paths are carried, because a registry needs them (0.4). A `human` phase has no\nlog, only agent phases have a transcript, and a phase entering its first state has neither yet, so both are\nnull until they exist. `round` counts the phase's repeats, as `HookPhase.round` does.",
+          "properties": {
+            "event": {
+              "const": "phase.transition",
+              "type": "string"
+            },
+            "from": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PhaseState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "log": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "phase": {
+              "type": "string"
+            },
+            "round": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "run": {
+              "type": "string"
+            },
+            "to": {
+              "$ref": "#/$defs/PhaseState"
+            },
+            "transcript": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "phase",
+            "round",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`run` is null for a gate on a named point that no run is running. A gate sits on a phase (`phase`) or on a\nnamed point (`point`, 0.4 Gates). `message` is the hook's own message, as in `HookResult.message`.",
+          "properties": {
+            "event": {
+              "const": "gate.verdict",
+              "type": "string"
+            },
+            "gate": {
+              "type": "string"
+            },
+            "message": {
+              "default": "",
+              "type": "string"
+            },
+            "pack": {
+              "type": "string"
+            },
+            "phase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "point": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "$ref": "#/$defs/HookStatus"
+            }
+          },
+          "required": [
+            "event",
+            "pack",
+            "gate",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "permission.requested",
+              "type": "string"
+            },
+            "phase": {
+              "type": "string"
+            },
+            "request": {
+              "type": "string"
+            },
+            "run": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "phase",
+            "request",
+            "tool"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "answer": {
+              "$ref": "#/$defs/PermissionAnswer"
+            },
+            "event": {
+              "const": "permission.answered",
+              "type": "string"
+            },
+            "phase": {
+              "type": "string"
+            },
+            "request": {
+              "type": "string"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "phase",
+            "request",
+            "answer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`cause` names the decision token, the budget, or the agent's stop-and-report that led to the question.\n`queue_item` is the Queue item the run waits on (0.13), so an answer matches its question.",
+          "properties": {
+            "cause": {
+              "type": "string"
+            },
+            "event": {
+              "const": "ask_human.asked",
+              "type": "string"
+            },
+            "queue_item": {
+              "type": "string"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "cause",
+            "queue_item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "answer": {
+              "type": "string"
+            },
+            "event": {
+              "const": "ask_human.answered",
+              "type": "string"
+            },
+            "queue_item": {
+              "type": "string"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "answer",
+            "queue_item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "budget.exceeded",
+              "type": "string"
+            },
+            "run": {
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/BudgetScope"
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "task.changed",
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "task": {
+              "$ref": "#/$defs/TaskChanged"
+            }
+          },
+          "required": [
+            "event",
+            "source",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "task.renamed",
+              "type": "string"
+            },
+            "rename": {
+              "$ref": "#/$defs/Rename"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "source",
+            "rename"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "task.removed",
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "task": {
+              "$ref": "#/$defs/TaskRemoved"
+            }
+          },
+          "required": [
+            "event",
+            "source",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "task.invalid",
+              "type": "string"
+            },
+            "invalid": {
+              "$ref": "#/$defs/TaskInvalid"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "source",
+            "invalid"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A write Collide made. `key` names the item; the change says what it did.",
+          "properties": {
+            "change": {
+              "$ref": "#/$defs/Change"
+            },
+            "event": {
+              "const": "task.written",
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "source",
+            "key",
+            "change"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "workspace.transition",
+              "type": "string"
+            },
+            "from": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "to": {
+              "$ref": "#/$defs/WorkspaceState"
+            },
+            "workspace": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "workspace",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "metric.reported",
+              "type": "string"
+            },
+            "line": {
+              "$ref": "#/$defs/ReportLine"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "run",
+            "line"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "const": "experiment.transition",
+              "type": "string"
+            },
+            "from": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "id",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Written before the step. `action` says what the step will do. After a restart, an intent with no outcome is\nchecked against the world, never repeated blind (0.2).",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "event": {
+              "const": "step.intent",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/StepKind"
+            },
+            "step": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "step",
+            "kind",
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Written after the step, with the same `step` and `kind`. `result` says how it ended; `detail` says more, such as\nthe merge commit or the PR url.",
+          "properties": {
+            "detail": {
+              "default": "",
+              "type": "string"
+            },
+            "event": {
+              "const": "step.outcome",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/StepKind"
+            },
+            "result": {
+              "$ref": "#/$defs/StepResult"
+            },
+            "step": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "step",
+            "kind",
+            "result"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FailCause": {
+      "description": "Why a phase failed when the cause is known. A phase that ends with no `result` on a full volume fails with cause\n`disk`, not `lost` (0.2).",
+      "enum": [
+        "disk"
+      ],
+      "type": "string"
+    },
+    "FieldDiff": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "from": true,
+            "to": true
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "added": {
+              "items": true,
+              "type": "array"
+            },
+            "removed": {
+              "items": true,
+              "type": "array"
+            }
+          },
+          "required": [
+            "added",
+            "removed"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One changed field: `{from, to}`, or `{added, removed}` for a set. `from` is null at create and `to` is null\nat delete."
+    },
+    "FinalReportSource": {
+      "description": "Where a [`AgentEvent::FinalReport`] came from: Claude's `result` field, or, for ACP, the message chunks after the\nlast tool call.",
+      "enum": [
+        "result_field",
+        "reconstructed"
+      ],
+      "type": "string"
+    },
+    "HookExperiment": {
+      "additionalProperties": false,
+      "description": "Inside an experiment: the experiment, the arm and the arm's directory, so a hook can skip a push (0.14).",
+      "properties": {
+        "arm": {
+          "type": "string"
+        },
+        "dir": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "arm",
+        "dir"
+      ],
+      "type": "object"
+    },
+    "HookStatus": {
+      "description": "The verdict a hook writes. It is `ok`, `fail`, `unverified` (could not check here), `pending` (has not happened\nyet), `refused` or `error`. `unverified` and `pending` are valid only from some hooks: see [`effective_result`].",
+      "enum": [
+        "ok",
+        "fail",
+        "unverified",
+        "pending",
+        "refused",
+        "error"
+      ],
+      "type": "string"
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "OutputEntry": {
+      "additionalProperties": false,
+      "description": "One normalized event of an agent's stream, with its place in the phase's log and the time the shim saw it (from\nthe journal's `wall_ns`, so a replayed log gives the same time). `index` counts from 0 in the phase instance's log.",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/AgentEvent"
+        },
+        "index": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "wall_ms",
+        "event"
+      ],
+      "type": "object"
+    },
+    "PauseCause": {
+      "description": "Why a run or a phase is paused (0.2, 0.3, 0.8). `ask_human` waits in the Queue, `usage_limit` waits for the\naccount's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).",
+      "enum": [
+        "ask_human",
+        "usage_limit",
+        "disk"
+      ],
+      "type": "string"
+    },
+    "PermissionAnswer": {
+      "description": "The answer to a permission request (0.3, S7).",
+      "enum": [
+        "allow",
+        "deny",
+        "cancel"
+      ],
+      "type": "string"
+    },
+    "PermissionOption": {
+      "additionalProperties": false,
+      "description": "One of the agent's own options in a permission request.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PermissionOptionKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PermissionOptionKind": {
+      "description": "The kind of one of the agent's own options in a permission request. Collide picks only the `*_once` kinds: the\nagent owns the scope and storage of an \"always\" choice, so no adapter selects one (0.3, Permissions).",
+      "enum": [
+        "allow_once",
+        "allow_always",
+        "reject_once",
+        "reject_always"
+      ],
+      "type": "string"
+    },
+    "PermissionRequest": {
+      "additionalProperties": false,
+      "description": "A request to run a tool (0.3, Permissions). `input` is `None` when the agent has not sent it yet (opencode sends\n`rawInput: {}` for a Bash call, so the command is unknown until the host answers; S7). Such a request shows in the\nQueue as \"input not available until approved\" and no pack rule that reads the input may auto-allow it.\n`reason` says why it was asked, when the agent says. `options` are the agent's own.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "input": true,
+        "kind": {
+          "$ref": "#/$defs/ToolKind"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PermissionOption"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tool_call_id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PhaseState": {
+      "description": "Where a phase is (0.8, Phase). A shim that dies without an `exit.json` makes its phase `lost`, whatever the agent's\nstream said (0.2).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FailCause"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "lost",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Point": {
+      "description": "The point catalogue (0.4, Named points), in the table's order. Serialized as its dotted name. Adding a point is\na schema change: `Point.input.json` lists the names.",
+      "enum": [
+        "run.before_start",
+        "run.after_end",
+        "run.before_integrate",
+        "run.after_integrate",
+        "workspace.after_create",
+        "workspace.before_remove",
+        "phase.before_start",
+        "phase.after_end",
+        "task.before_status",
+        "task.after_status",
+        "task.before_op",
+        "task.after_op",
+        "task.before_move",
+        "task.after_move",
+        "experiment.before_arm",
+        "experiment.after_arm"
+      ],
+      "type": "string"
+    },
+    "QueueChanged": {
+      "additionalProperties": false,
+      "description": "The params of the `queue.changed` notification: the Queue's size after a change and the items that came and went,\nso a badge or a menu needs no other message. A client lists the Queue with `queue.list` for the rest.",
+      "properties": {
+        "added": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "type": "object"
+    },
+    "RemovedCause": {
+      "description": "Why a task is gone.",
+      "enum": [
+        "deleted",
+        "transferred",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "Rename": {
+      "additionalProperties": false,
+      "description": "An id that changed, at Share or `renumber`. It is also the body of the provider's `task.renamed`\nnotification, which names the `checkout`; inside a `change`, the change's own `checkout` applies.",
+      "properties": {
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "ReportLine": {
+      "description": "One report line. Every line carries `v` and its timestamp `t`, because a time stamped at reading would be wrong\nby the tailing lag. Each variant repeats `v` and `t`: serde cannot flatten them out of a tagged enum that denies\nunknown keys. A key a reporter does not know is left out, and shows as \"not reported\" (0.13).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attrs": {
+              "additionalProperties": true,
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "span.start",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "t": {
+              "type": "string"
+            },
+            "v": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "t",
+            "id",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attrs": {
+              "additionalProperties": true,
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "span.end",
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "t": {
+              "type": "string"
+            },
+            "v": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "t",
+            "id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "metric",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "t": {
+              "type": "string"
+            },
+            "unit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "v": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "t",
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "done": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "progress",
+              "type": "string"
+            },
+            "t": {
+              "type": "string"
+            },
+            "total": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "v": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "t",
+            "done"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Keeps `cacheRead` and `cacheWrite` apart, and may split `cacheWrite` into `cacheWrite1h` and `cacheWrite5m`.\nA merged `cached` count is rejected: a write and a read are priced far apart.",
+          "properties": {
+            "cacheRead": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cacheWrite": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cacheWrite1h": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cacheWrite5m": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "usage",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "t": {
+              "type": "string"
+            },
+            "tokensIn": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "tokensOut": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "v": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "t",
+            "model"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`resetsAt` is the reset time in epoch seconds.",
+          "properties": {
+            "kind": {
+              "const": "limited",
+              "type": "string"
+            },
+            "resetsAt": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "t": {
+              "type": "string"
+            },
+            "v": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "t",
+            "resetsAt"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RunOutputNotice": {
+      "additionalProperties": false,
+      "description": "The params of the `run.output` notification: one new entry of a phase's stream, sent to a connection that has\nsubscribed to events (`daemon.subscribe`).",
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/OutputEntry"
+        },
+        "instance": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": "string"
+        },
+        "run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run",
+        "phase",
+        "entry"
+      ],
+      "type": "object"
+    },
+    "RunState": {
+      "description": "Where a run is (0.8, Run). It ends `ended(<outcome>)`, `failed` or `stopped`; `outcome` is the `end` token the run\nreached (0.7, Outcomes and terminal states). `integrating` is a run whose `integrate` answered `pending`, so the\npull request is not merged yet (0.4).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "integrating",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RunTerminalOutput": {
+      "additionalProperties": false,
+      "description": "The params of the `run.terminal_output` notification: bytes the take-over's terminal wrote, as base64.",
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "terminal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal",
+        "data"
+      ],
+      "type": "object"
+    },
+    "StepKind": {
+      "description": "The side-effect steps that write an intent before and an outcome after (0.2): an integrate, a source op, an\n`after_integrate` hook and a remote write.",
+      "enum": [
+        "integrate",
+        "source_op",
+        "after_integrate_hook",
+        "remote_write"
+      ],
+      "type": "string"
+    },
+    "StepResult": {
+      "description": "How a side-effect step ended. A merge that finds its change already at the target is `succeeded` (0.2).",
+      "enum": [
+        "succeeded",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "TaskChanged": {
+      "additionalProperties": false,
+      "description": "`task.changed`. `from` is null at create and `to` is null at delete, as in `change`. `actor` is the source's\nown, when it knows it (GitHub events, the beads journal); `automated` is GitHub's `wasAutomated`.",
+      "properties": {
+        "actor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "automated": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cause": {
+          "$ref": "#/$defs/ChangeCause"
+        },
+        "checkout": {
+          "description": "The checkout whose copy changed, for a ref-scoped source; absent for a global source (such as GitHub).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diff": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldDiff"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version",
+        "cause"
+      ],
+      "type": "object"
+    },
+    "TaskInvalid": {
+      "additionalProperties": false,
+      "description": "`task.invalid`: something the source could not read as a task. Core turns it into a Queue item. `checkout` is\nnull for a source that is not ref-scoped.",
+      "properties": {
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "TaskRemoved": {
+      "additionalProperties": false,
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/RemovedCause"
+        },
+        "checkout": {
+          "description": "The checkout whose copy was removed, for a ref-scoped source; absent for a global source (such as GitHub).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "cause"
+      ],
+      "type": "object"
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title\n(S7, O12).",
+      "enum": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "other"
+      ],
+      "type": "string"
+    },
+    "TurnEndReason": {
+      "description": "Why a turn ended (0.3, A turn ends with). `error` carries the HTTP status of an API failure when there is one\n(S1 measured a 429).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "end_turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "max_tokens",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "max_turns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "refusal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "description": "What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never\n0, and is left out of the JSON. `cache_write_1h` and `cache_write_5m` split `cache_write` by tier, where the tool\nreports the tiers (capability `usage_report.cache_write_tiers`).",
+      "properties": {
+        "cache_read": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write_1h": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write_5m": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "context_size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "context_used": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quality": {
+          "$ref": "#/$defs/UsageQuality"
+        },
+        "scope": {
+          "$ref": "#/$defs/UsageScope"
+        },
+        "thought": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "UsageQuality": {
+      "description": "How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as \"at\nleast\" and never summed with `exact` ones (0.13).",
+      "enum": [
+        "exact",
+        "partial",
+        "unreported"
+      ],
+      "type": "string"
+    },
+    "UsageScope": {
+      "description": "What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).",
+      "enum": [
+        "turn",
+        "step",
+        "running_total"
+      ],
+      "type": "string"
+    },
+    "Via": {
+      "description": "The route of a write.",
+      "enum": [
+        "ui",
+        "workflow",
+        "share",
+        "integrate",
+        "run"
+      ],
+      "type": "string"
+    },
+    "WorkspaceState": {
+      "description": "Where a workspace is (0.8, Workspace): `provisioning → ready → in_use → idle → removable → removed`, plus\n`failed`, which resumes through the `resume` hook.",
+      "enum": [
+        "provisioning",
+        "ready",
+        "in_use",
+        "idle",
+        "removable",
+        "removed",
+        "failed"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What the daemon sends without being asked, after `daemon.subscribe`. On the wire a notice is a [`Notification`]\nwhose `method` is the name below and whose `params` is the payload.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "An event of the store, with its `seq` and the actor the daemon recorded.",
+      "properties": {
+        "method": {
+          "const": "daemon.event",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/Event"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "One new entry of a phase's normalized stream.",
+      "properties": {
+        "method": {
+          "const": "run.output",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunOutputNotice"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Bytes a take-over's terminal wrote.",
+      "properties": {
+        "method": {
+          "const": "run.terminal_output",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunTerminalOutput"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The Queue changed.",
+      "properties": {
+        "method": {
+          "const": "queue.changed",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/QueueChanged"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "OwnerNotice"
+}

@@ -1,0 +1,26 @@
+{
+  "$defs": {
+    "JsonRpc2": {
+      "const": "2.0",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A message from the daemon that expects no answer.",
+  "properties": {
+    "jsonrpc": {
+      "$ref": "#/$defs/JsonRpc2"
+    },
+    "method": {
+      "type": "string"
+    },
+    "params": true
+  },
+  "required": [
+    "jsonrpc",
+    "method"
+  ],
+  "title": "OwnerNotification",
+  "type": "object"
+}

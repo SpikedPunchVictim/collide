@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "JsonRpc2": {
+      "const": "2.0",
+      "type": "string"
+    },
+    "RequestId": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "A request's id: a number or a text, as JSON-RPC allows."
+    },
+    "RpcError": {
+      "additionalProperties": false,
+      "description": "A failure: a code from [`CODES`], a message in Collide's words, and optional data for a program.",
+      "properties": {
+        "code": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "data": true,
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "$ref": "#/$defs/JsonRpc2"
+        },
+        "result": true
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/RpcError"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jsonrpc": {
+          "$ref": "#/$defs/JsonRpc2"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "An answer: the result, or the error. A failure's id is null when the request's id could not be read.",
+  "title": "OwnerResponse"
+}

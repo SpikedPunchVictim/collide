@@ -1,0 +1,440 @@
+{
+  "$defs": {
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "Checklist": {
+      "additionalProperties": false,
+      "description": "The checklist field type: the state of one template's items, pinned as `name@n`.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChecklistItem"
+          },
+          "type": "array"
+        },
+        "template": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "template",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChecklistItem": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ChecklistState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ChecklistState": {
+      "description": "The state of one checklist item. Only a person marks `done` or `n/a`; the gate is a pack's (ts-0012).",
+      "enum": [
+        "open",
+        "suggested",
+        "done",
+        "n/a"
+      ],
+      "type": "string"
+    },
+    "Feature": {
+      "additionalProperties": false,
+      "description": "One feature of a proposal, read from the `## Features` part of its body (0.8, 0.10, \"A proposal's features\").\n`id` is `F<n>`, `section` is empty for an entry that is unsorted, and `summary` joins an entry's continuation lines.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "section": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "section",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "FeatureProblem": {
+      "additionalProperties": false,
+      "description": "A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.",
+      "properties": {
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
+    "LatestRun": {
+      "additionalProperties": false,
+      "description": "An item's latest finished run, frozen and read-only. A hook outside a run reads it, for example to find a\nverify verdict.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "state": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "workflow": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "workflow",
+        "outcome",
+        "state"
+      ],
+      "type": "object"
+    },
+    "Link": {
+      "additionalProperties": false,
+      "description": "A typed link on an item (0.8).",
+      "properties": {
+        "blocking": {
+          "description": "Absent means the link type's `blocking` applies.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "to"
+      ],
+      "type": "object"
+    },
+    "Location": {
+      "additionalProperties": false,
+      "description": "Where one copy of a task is.",
+      "properties": {
+        "checkout": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkout",
+        "path"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "description": "One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`\ntake. `checkout` and `path` are set by a ref-scoped source. `kind` may be left out when the provider has one.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checklist": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checklist"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "collections": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "featureProblems": {
+          "description": "The lines of that part that did not parse. Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/FeatureProblem"
+          },
+          "type": "array"
+        },
+        "features": {
+          "description": "A proposal's features, read from its Features part (0.8). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Feature"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "type": "array"
+        },
+        "owners": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ItemState"
+        },
+        "templateFields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "id",
+        "title",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    },
+    "TaskCollision": {
+      "additionalProperties": false,
+      "description": "`task.collision`: one short id at different paths in several checkouts. It is a collision, never a divergence.",
+      "properties": {
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/Location"
+          },
+          "type": "array"
+        },
+        "shortId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "shortId",
+        "locations"
+      ],
+      "type": "object"
+    },
+    "TaskCopy": {
+      "additionalProperties": false,
+      "description": "One copy of a task in one checkout, for the drawer's per-checkout state and divergence (0.11, Task drawer).",
+      "properties": {
+        "checkout": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ItemState"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkout",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.get` result. `task` is absent when nothing matches, which is an answer and not an error (as the provider's\n`get`). When a short id matches several items (two tasks numbered 12) `task` is absent and `ambiguous` lists their\nkeys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first.",
+  "properties": {
+    "ambiguous": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "collisions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TaskCollision"
+      },
+      "type": "array"
+    },
+    "copies": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TaskCopy"
+      },
+      "type": "array"
+    },
+    "latest_run": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LatestRun"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "task": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Task"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "title": "TaskGetResult",
+  "type": "object"
+}

@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "RunMode": {
+      "description": "Whether a run's agent is driven by Collide or sat in by a person in a terminal (0.11, New session).",
+      "oneOf": [
+        {
+          "enum": [
+            "headless"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "interactive",
+          "description": "A New session or a Plan… session: interactive Claude in a fresh worktree, taken over from the first moment. The\ncaller makes the scratch task or the draft proposal first, with `task.apply`, and names it in `tasks`.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.start` params (`collide run`, Launch, the prompt box): one workflow over one or more tasks. Every field the\ncaller leaves out has the default of 0.11's run preview: the board's default workflow, its default line, the\nview's or the board's profile. `launch` is the pack's `launch` parameters. There is no actor field: the connection\nis who started it.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "launch": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "line": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mode": {
+      "$ref": "#/$defs/RunMode",
+      "default": "headless"
+    },
+    "profile": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tasks": {
+      "description": "Task keys, `source:shortId`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "workflow": {
+      "description": "`pack/workflow`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "board",
+    "tasks",
+    "launch",
+    "mode"
+  ],
+  "title": "RunStartParams",
+  "type": "object"
+}

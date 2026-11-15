@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.take_over` result. `replay` is the last 1 MiB of the terminal's output as base64, and the daemon sends it\natomically with the attach (0.2): `run.terminal_output` notifications for `terminal` follow it with no gap and no\nrepeat. Terminal bytes are not always UTF-8, so every byte string of this protocol is base64.",
+  "properties": {
+    "replay": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "terminal": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "terminal",
+    "session_id",
+    "replay"
+  ],
+  "title": "RunTakeOverResult",
+  "type": "object"
+}

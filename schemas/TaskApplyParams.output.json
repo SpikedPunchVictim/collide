@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "ApplyParams": {
+      "additionalProperties": false,
+      "description": "`apply` params, and `preview`'s. `id` is left out for an op that makes a task, and `version` is the version the\ncaller last read: the source answers `conflict` when it has moved on. Only `args` is op-specific; its schema is\nthe op's `args` in `initialize`.",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "op": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.apply` params (`collide task <id> <op>`, `collide task new`, `collide task reid`, and the drawer's forms):\nthe provider's `apply` call, on one source. `source` is left out when the id names it (`plan:ts-0001`); an op\nthat makes a task has no id, so it names the source. `commit` makes a one-file commit of what the write touched\n(`--commit`). Who made the write is the connection's actor, never a field here.",
+  "properties": {
+    "apply": {
+      "$ref": "#/$defs/ApplyParams"
+    },
+    "board": {
+      "type": "string"
+    },
+    "commit": {
+      "default": false,
+      "type": "boolean"
+    },
+    "source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "board",
+    "apply",
+    "commit"
+  ],
+  "title": "TaskApplyParams",
+  "type": "object"
+}

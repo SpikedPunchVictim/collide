@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A failure: a code from [`CODES`], a message in Collide's words, and optional data for a program.",
+  "properties": {
+    "code": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "data": true,
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "message"
+  ],
+  "title": "RpcError",
+  "type": "object"
+}

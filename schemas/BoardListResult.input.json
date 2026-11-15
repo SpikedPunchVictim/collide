@@ -1,0 +1,111 @@
+{
+  "$defs": {
+    "BoardSummary": {
+      "additionalProperties": false,
+      "description": "A board: the repo root and its lines, the default line first. Until lines are built (Stage 14) there is one.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/LineSummary"
+          },
+          "type": "array"
+        },
+        "root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "root",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "LineSummary": {
+      "additionalProperties": false,
+      "description": "One line of a board (0.12): a ref the user opened. `snapshot` is the commit its packs are read at.",
+      "properties": {
+        "ref_name": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "$ref": "#/$defs/TrustState"
+        }
+      },
+      "required": [
+        "ref_name",
+        "root",
+        "trust"
+      ],
+      "type": "object"
+    },
+    "TrustState": {
+      "description": "Whether a line's packs and gate code are trusted (0.9, Trust). `hash` is what trust covers now: the packs, the\nlock, the pointer file, `board.yaml`, `config.yaml`, the views and the tree hashes of `protectedPaths`. It is the\nhash an `Untrusted` line would be trusted at, so the person is shown what they trust. (The domain record is plain\nRust, so the wire form is this type.)",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Nothing is trusted yet, or the hash changed since.",
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "untrusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "trusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.list` result: the boards the daemon knows, for the board switcher.",
+  "properties": {
+    "boards": {
+      "items": {
+        "$ref": "#/$defs/BoardSummary"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "boards"
+  ],
+  "title": "BoardListResult",
+  "type": "object"
+}

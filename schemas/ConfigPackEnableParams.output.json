@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.pack_enable` params: `collide pack enable <name>` is `enabled: true` and `disable` is `false`. A user\npack switches per board; a repo pack switches through `board.yaml`, so this refuses it.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board",
+    "name",
+    "enabled"
+  ],
+  "title": "ConfigPackEnableParams",
+  "type": "object"
+}

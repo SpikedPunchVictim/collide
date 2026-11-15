@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.trust` params: trust a line's packs at `hash`. The daemon computes the hash again and refuses when it\ndiffers from this one, so a person trusts what they were shown. Trust is stored outside the repo (0.9).",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "hash": {
+      "type": "string"
+    },
+    "line": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board",
+    "line",
+    "hash"
+  ],
+  "title": "BoardTrustParams",
+  "type": "object"
+}

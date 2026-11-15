@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.end_take_over` params: End take-over. The phase's gates then run as usual (0.11).",
+  "properties": {
+    "phase": {
+      "type": "string"
+    },
+    "run": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run",
+    "phase"
+  ],
+  "title": "RunEndTakeOverParams",
+  "type": "object"
+}

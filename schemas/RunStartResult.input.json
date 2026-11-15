@@ -1,0 +1,65 @@
+{
+  "$defs": {
+    "LaunchProblem": {
+      "additionalProperties": false,
+      "description": "A reason a run was not started: one task's, or the launch's own when `task` is absent.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "task": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`run.start` result: started, or refused with every problem (a task the workflow does not accept, a live run on\nthe task, an alias with no mapping).",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "const": "started",
+          "type": "string"
+        },
+        "run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "run"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "const": "refused",
+          "type": "string"
+        },
+        "problems": {
+          "items": {
+            "$ref": "#/$defs/LaunchProblem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcome",
+        "problems"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "RunStartResult"
+}

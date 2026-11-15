@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.get` params (`collide config get <key> [--profile <name>]`). With no `key`, every setting. `board` picks\nthe board whose repo layer applies, and is left out for the user's own layers. `profile` is applied as the top\nlayer.",
+  "properties": {
+    "board": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "profile": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "ConfigGetParams",
+  "type": "object"
+}

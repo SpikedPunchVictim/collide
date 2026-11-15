@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "Closure": {
+      "additionalProperties": false,
+      "description": "`closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal.",
+      "properties": {
+        "follow": {
+          "$ref": "#/$defs/Follow"
+        },
+        "goal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal",
+        "follow"
+      ],
+      "type": "object"
+    },
+    "Follow": {
+      "description": "`closure:` follows one kind of edge, from a goal task: the prototype board's run order.",
+      "enum": [
+        "depends_on"
+      ],
+      "type": "string"
+    },
+    "Layout": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LayoutKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "groupBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LayoutKind": {
+      "description": "How the Field lays a view out.",
+      "enum": [
+        "board",
+        "run-order"
+      ],
+      "type": "string"
+    },
+    "Sort": {
+      "additionalProperties": false,
+      "description": "`layout.sort` (0.11): a sort key and a direction. `by` is a field the surface can sort on (the Field's `id`,\n`title`, `epic`, `labels` and `status`; Tracks adds more), which the surface checks.",
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "dir": {
+          "$ref": "#/$defs/SortDir"
+        }
+      },
+      "required": [
+        "by",
+        "dir"
+      ],
+      "type": "object"
+    },
+    "SortDir": {
+      "enum": [
+        "asc",
+        "desc"
+      ],
+      "type": "string"
+    },
+    "View": {
+      "additionalProperties": false,
+      "properties": {
+        "closure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Closure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exclude": {
+          "description": "Task keys taken out of the view, after the other three are joined.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "include": {
+          "description": "Task keys such as `plan:T-01-042`, hand-picked into the view.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Layout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "profile": {
+          "description": "The profile runs launched from this view get (0.7, Profiles).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queue": {
+          "description": "Feeds a Queue lane (0.10, Planning sources).",
+          "type": "boolean"
+        },
+        "where": {
+          "description": "CEL over one task, as text (0.10). Its length is capped at [`MAX_CEL_SOURCE_BYTES`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow": {
+          "description": "The default workflow for runs launched from this view, as `pack/workflow`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "ViewEntry": {
+      "additionalProperties": false,
+      "description": "One view of the board, with its counts. `error_count` is the items that failed to read on this view, and `error`\nis why the view itself did not load, when it did not (one view's error never hides the others).",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/ViewSource"
+        },
+        "task_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "view": {
+          "$ref": "#/$defs/View"
+        }
+      },
+      "required": [
+        "view",
+        "source",
+        "task_count",
+        "error_count"
+      ],
+      "type": "object"
+    },
+    "ViewSource": {
+      "description": "Where a view is kept (0.10, Views).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "`.collide/views/`, committed.",
+          "properties": {
+            "type": {
+              "const": "repo",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The user's board settings.",
+          "properties": {
+            "type": {
+              "const": "personal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pack": {
+              "type": "string"
+            },
+            "type": {
+              "const": "pack",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pack"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.views` result: the board's views, for the Field's view menu.",
+  "properties": {
+    "views": {
+      "items": {
+        "$ref": "#/$defs/ViewEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "views"
+  ],
+  "title": "TaskViewsResult",
+  "type": "object"
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`initialize` params. `token` is the per-client token (0.2) and is optional on the wire only so that a missing one\ngets [`code::TOKEN_REFUSED`] and not a params error. `client` names the program, for the daemon's log.",
+  "properties": {
+    "client": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "protocol": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "token": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "protocol"
+  ],
+  "title": "OwnerInitializeParams",
+  "type": "object"
+}

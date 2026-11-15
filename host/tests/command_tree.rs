@@ -124,3 +124,25 @@ fn the_tags_and_stages_the_binary_prints_are_the_ones_the_registry_holds() {
         );
     }
 }
+
+/// The commands the owner's JSON-RPC does not carry: `schema` reads the compiled contract and `report` is the
+/// hook's own channel to its run.
+const NOT_OWNER_METHODS: [&str; 2] = ["schema", "report"];
+
+#[test]
+fn every_command_the_daemon_does_work_for_is_served_by_an_owner_method() {
+    use collide_core::owner::Method;
+    for command in TREE {
+        if NOT_OWNER_METHODS.contains(&command) {
+            continue;
+        }
+        let prefix = format!("collide {command}");
+        assert!(
+            Method::ALL.iter().any(|method| {
+                let serves = method.serves();
+                serves == prefix || serves.starts_with(&format!("{prefix},"))
+            }),
+            "no owner method serves `{prefix}`"
+        );
+    }
+}

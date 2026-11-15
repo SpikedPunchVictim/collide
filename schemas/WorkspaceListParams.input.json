@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "WorkspaceKind": {
+      "enum": [
+        "task",
+        "sandbox",
+        "line",
+        "experiment"
+      ],
+      "type": "string"
+    },
+    "WorkspaceState": {
+      "description": "Where a workspace is (0.8, Workspace): `provisioning → ready → in_use → idle → removable → removed`, plus\n`failed`, which resumes through the `resume` hook.",
+      "enum": [
+        "provisioning",
+        "ready",
+        "in_use",
+        "idle",
+        "removable",
+        "removed",
+        "failed"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`workspace.list` params.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceKind"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "board"
+  ],
+  "title": "WorkspaceListParams",
+  "type": "object"
+}

@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "WorkspaceKind": {
+      "enum": [
+        "task",
+        "sandbox",
+        "line",
+        "experiment"
+      ],
+      "type": "string"
+    },
+    "WorkspaceState": {
+      "description": "Where a workspace is (0.8, Workspace): `provisioning → ready → in_use → idle → removable → removed`, plus\n`failed`, which resumes through the `resume` hook.",
+      "enum": [
+        "provisioning",
+        "ready",
+        "in_use",
+        "idle",
+        "removable",
+        "removed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "WorkspaceSummary": {
+      "additionalProperties": false,
+      "description": "A workspace: a git checkout that lives longer than a run (0.8). The domain record is plain Rust, so this is its\nwire form, without the state a hook kept in it.",
+      "properties": {
+        "git_dir": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/WorkspaceKind"
+        },
+        "path": {
+          "type": "string"
+        },
+        "run": {
+          "description": "The live run that uses it, when one does.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/WorkspaceState"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "path",
+        "git_dir",
+        "state"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`workspace.list` result.",
+  "properties": {
+    "workspaces": {
+      "items": {
+        "$ref": "#/$defs/WorkspaceSummary"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "workspaces"
+  ],
+  "title": "WorkspaceListResult",
+  "type": "object"
+}

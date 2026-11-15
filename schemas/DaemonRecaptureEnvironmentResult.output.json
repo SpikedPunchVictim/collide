@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "EnvCapture": {
+      "description": "What a capture of the login-shell environment did. No value of the environment is ever returned.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "const": "captured",
+              "type": "string"
+            },
+            "shell": {
+              "type": "string"
+            },
+            "variables": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "outcome",
+            "shell",
+            "variables"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The capture failed and the daemon uses the minimal environment (0.2).",
+          "properties": {
+            "outcome": {
+              "const": "fell_back",
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "shell": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "shell",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`daemon.recapture_environment` result. A phase already running keeps the environment it started with.",
+  "properties": {
+    "capture": {
+      "$ref": "#/$defs/EnvCapture"
+    }
+  },
+  "required": [
+    "capture"
+  ],
+  "title": "DaemonRecaptureEnvironmentResult",
+  "type": "object"
+}

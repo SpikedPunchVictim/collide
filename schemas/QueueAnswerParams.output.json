@@ -1,0 +1,271 @@
+{
+  "$defs": {
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "PermissionReply": {
+      "description": "The answer to a [`PermissionRequest`] (0.3, Permissions). Claude maps `allow` and `deny` to `behavior`, with the\nmessage. ACP maps them to the options of kind `allow_once` and `reject_once`, drops the message and, when no\n`allow_once` exists, answers `cancel` and reports [`AgentEvent::PermissionUnanswerable`].\n\nThe event log's `permission.answered` carries the shorter [`crate::events::PermissionAnswer`], which has no\nmessage.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "allow",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "deny",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "cancel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "QueueAnswer": {
+      "description": "An answer to a Queue item. The keys `a`, `d` and `r` of 0.11's triage table are `permission` (allow or deny),\n`proceed`, `stop`, `retry`, `raise_cap`, `accept`, `discard` and `reprompt`. `a` is never \"always allow\": the\npermission replies are [`PermissionReply`], which has no such variant (0.3).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reply": {
+              "$ref": "#/$defs/PermissionReply"
+            },
+            "type": {
+              "const": "permission",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reply"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The words that answer an `ask_human`, a `human` phase or a question.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "proceed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "retry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Raise the budget that was exceeded by `amount`.",
+          "properties": {
+            "amount": {
+              "$ref": "#/$defs/Money"
+            },
+            "type": {
+              "const": "raise_cap",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "amount"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Accept a finished run: the integrate of 0.4 runs.",
+          "properties": {
+            "type": {
+              "const": "accept",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "discard",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reprompt",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "prompt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "acknowledge",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Resume a paused phase now, instead of at the limit's reset time.",
+          "properties": {
+            "type": {
+              "const": "resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Clear a warning.",
+          "properties": {
+            "type": {
+              "const": "dismiss",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`queue.answer` params. The item takes the kinds its `answers` lists, and an answer of another kind is refused with\ninvalid params.",
+  "properties": {
+    "answer": {
+      "$ref": "#/$defs/QueueAnswer"
+    },
+    "item": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "item",
+    "answer"
+  ],
+  "title": "QueueAnswerParams",
+  "type": "object"
+}

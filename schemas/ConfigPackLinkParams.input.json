@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.pack_link` params (`collide pack link <name> [<folder>]`). With no `folder` the pack's folder in the\nuser's own checkout is used (0.7, Working copies).",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "folder": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board",
+    "name"
+  ],
+  "title": "ConfigPackLinkParams",
+  "type": "object"
+}

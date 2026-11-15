@@ -1,0 +1,336 @@
+{
+  "$defs": {
+    "AnswerKind": {
+      "description": "What an answer is, as a tag. A Queue item lists the kinds it takes in `answers`.",
+      "enum": [
+        "permission",
+        "text",
+        "proceed",
+        "stop",
+        "retry",
+        "raise_cap",
+        "accept",
+        "discard",
+        "reprompt",
+        "acknowledge",
+        "resume",
+        "dismiss"
+      ],
+      "type": "string"
+    },
+    "CacheWindow": {
+      "additionalProperties": false,
+      "description": "How long a live phase's prompt cache stays warm and what answering later costs (0.3, 0.11): \"warm for 12 min,\nthen $1.30 to resume\". It is a duration at the time of the answer, from the continuous clock (0.2).",
+      "properties": {
+        "resume_cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warm_secs_left": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "warm_secs_left"
+      ],
+      "type": "object"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "PermissionOption": {
+      "additionalProperties": false,
+      "description": "One of the agent's own options in a permission request.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PermissionOptionKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PermissionOptionKind": {
+      "description": "The kind of one of the agent's own options in a permission request. Collide picks only the `*_once` kinds: the\nagent owns the scope and storage of an \"always\" choice, so no adapter selects one (0.3, Permissions).",
+      "enum": [
+        "allow_once",
+        "allow_always",
+        "reject_once",
+        "reject_always"
+      ],
+      "type": "string"
+    },
+    "PermissionRequest": {
+      "additionalProperties": false,
+      "description": "A request to run a tool (0.3, Permissions). `input` is `None` when the agent has not sent it yet (opencode sends\n`rawInput: {}` for a Bash call, so the command is unknown until the host answers; S7). Such a request shows in the\nQueue as \"input not available until approved\" and no pack rule that reads the input may auto-allow it.\n`reason` says why it was asked, when the agent says. `options` are the agent's own.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "input": true,
+        "kind": {
+          "$ref": "#/$defs/ToolKind"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PermissionOption"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tool_call_id",
+        "kind",
+        "options"
+      ],
+      "type": "object"
+    },
+    "QueueItem": {
+      "additionalProperties": false,
+      "description": "One decision waiting on the user. `title` is Collide's own words: task titles are not in it unless the setting\nallows (0.9, 0.11). `since_ms` is the wall clock when it began blocking work, and the list is ordered by it,\noldest first. `permission` is set for a [`QueueKind::Permission`] item and carries the agent's request as it came;\n`untrusted_input` says its arguments came from text Collide does not trust, and the UI flags them (0.9).\n`reset_ms` is a usage limit's reset time on the wall clock. `show` is the phase's `show:` list. `answers` are the\nkinds of answer the item takes.",
+      "properties": {
+        "answers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AnswerKind"
+          },
+          "type": "array"
+        },
+        "cache": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CacheWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/QueueKind"
+        },
+        "permission": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PermissionRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reset_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "show": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "since_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "task": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "untrusted_input": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "since_ms",
+        "title",
+        "untrusted_input",
+        "show",
+        "answers"
+      ],
+      "type": "object"
+    },
+    "QueueKind": {
+      "description": "What a Queue item waits for: the list of 0.11, Queue.",
+      "oneOf": [
+        {
+          "enum": [
+            "budget_exceeded",
+            "failed_gate",
+            "observer_disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "permission",
+          "description": "A permission request: a command, an edit or any other tool call.",
+          "type": "string"
+        },
+        {
+          "const": "ask_human",
+          "description": "An `ask_human` of a run: its cause is in the title.",
+          "type": "string"
+        },
+        {
+          "const": "human_phase",
+          "description": "A `human` phase with its `show:` list.",
+          "type": "string"
+        },
+        {
+          "const": "usage_limit",
+          "description": "A usage limit, with its reset time.",
+          "type": "string"
+        },
+        {
+          "const": "blocked_prompt",
+          "description": "A prompt blocked by a user hook, with the hook's message.",
+          "type": "string"
+        },
+        {
+          "const": "budget_warning",
+          "description": "A take-over or New session past its phase budget: a warning, and nothing is stopped.",
+          "type": "string"
+        },
+        {
+          "const": "unverified",
+          "description": "An `unverified` gate or `wait` result: retry, proceed or stop.",
+          "type": "string"
+        },
+        {
+          "const": "conflict",
+          "description": "A write conflict, a merge conflict found before `integrate`, a queued write, a busy line root or unrecorded\nedits.",
+          "type": "string"
+        },
+        {
+          "const": "acknowledge",
+          "description": "An integrate or take-over waiting because its range edits the agent tool's config, or a run waiting because an\nintegrate changed a working-copy pack it loads.",
+          "type": "string"
+        },
+        {
+          "const": "review",
+          "description": "A finished run to review.",
+          "type": "string"
+        },
+        {
+          "const": "outcome_unknown",
+          "description": "A step whose outcome is unknown after a restart (0.2): a person says.",
+          "type": "string"
+        },
+        {
+          "const": "question",
+          "description": "An open question of the planning pack (`Decisions needed`, 0.11).",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title\n(S7, O12).",
+      "enum": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "other"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`queue.list` result.",
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/$defs/QueueItem"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "title": "QueueListResult",
+  "type": "object"
+}

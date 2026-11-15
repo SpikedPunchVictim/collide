@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.stop` params (`collide stop`): the stop of 0.5. `grace_secs` is the time between SIGTERM and SIGKILL; the\ndefault is the daemon's.",
+  "properties": {
+    "grace_secs": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "run": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run"
+  ],
+  "title": "RunStopParams",
+  "type": "object"
+}

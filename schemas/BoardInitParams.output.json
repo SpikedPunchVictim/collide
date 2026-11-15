@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.init` params: Share with team, `collide init` (0.11). `dry_run` lists the files without writing them,\nwhich is the Share preview's list.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "dry_run": {
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "board",
+    "dry_run"
+  ],
+  "title": "BoardInitParams",
+  "type": "object"
+}

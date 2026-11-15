@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What the answer did. An accept that cannot merge answers `queued` with the new item (a conflict goes to the Queue\nand no checkout changes, 9a), `integrating` is a pull request that is not merged yet (0.4), and `refused` is an\nanswer the owner declined, in Collide's words.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "const": "done",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "outcome": {
+          "const": "merged",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "commit"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "type": "string"
+        },
+        "outcome": {
+          "const": "integrating",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "url",
+        "head"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "outcome": {
+          "const": "queued",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "item"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "outcome": {
+          "const": "refused",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "message"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "QueueAnswerResult"
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.diff` params: a run's diff for Review (0.11, Drill-down). With `path`, that file's patch is in the result.",
+  "properties": {
+    "path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run"
+  ],
+  "title": "RunDiffParams",
+  "type": "object"
+}

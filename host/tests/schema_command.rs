@@ -449,3 +449,37 @@ fn schema_with_an_argument_it_does_not_take_is_a_usage_error() {
         assert!(output.stdout.is_empty(), "schema {extra}");
     }
 }
+
+#[test]
+fn schema_lists_the_owner_protocol_envelope_and_every_method_type() {
+    use collide_core::owner::Method;
+    let types = listed_types(&schema_stdout());
+    assert_eq!(keys(&types, "RpcError"), ["code", "data", "message"]);
+    assert_eq!(
+        keys(&types, "OwnerRequest"),
+        ["id", "jsonrpc", "method", "params"]
+    );
+    assert_eq!(
+        keys(&types, "OwnerInitializeParams"),
+        ["client", "protocol", "token"]
+    );
+    let registry = collide_core::schema::registry().render();
+    for method in Method::ALL {
+        for root in [method.params_schema(), method.result_schema()] {
+            let text = &registry[&format!("{root}.input.json")];
+            let schema: serde_json::Value = serde_json::from_str(text).unwrap();
+            let has_keys = schema["properties"]
+                .as_object()
+                .is_some_and(|properties| !properties.is_empty())
+                || schema["oneOf"].is_array()
+                || schema["anyOf"].is_array();
+            if has_keys {
+                assert!(
+                    types.contains_key(&root),
+                    "{}: `collide schema` does not list {root}",
+                    method.name()
+                );
+            }
+        }
+    }
+}

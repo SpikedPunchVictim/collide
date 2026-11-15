@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`daemon.subscribe` params. `since` is the `seq` of the last event the client has. The daemon sends one\n`daemon.event` notification for each later event, in order and with none missing, then the live ones, on this\nconnection only. With no `since` it sends only the live ones. Subscribing again replaces the earlier\nsubscription, and a closed connection ends it.",
+  "properties": {
+    "since": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "title": "DaemonSubscribeParams",
+  "type": "object"
+}

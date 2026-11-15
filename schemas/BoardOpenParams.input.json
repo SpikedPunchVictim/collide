@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.open` params. `root` is any folder in the repo or its root. `init_git` says yes to `git init` when the\nfolder is not a repo (0.11 offers it).",
+  "properties": {
+    "init_git": {
+      "default": false,
+      "type": "boolean"
+    },
+    "root": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "root"
+  ],
+  "title": "BoardOpenParams",
+  "type": "object"
+}

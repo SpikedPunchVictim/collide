@@ -1,0 +1,63 @@
+{
+  "$defs": {
+    "RemoveRefusal": {
+      "description": "Why a workspace was not removed.",
+      "oneOf": [
+        {
+          "const": "dirty",
+          "description": "It has changes that are not committed.",
+          "type": "string"
+        },
+        {
+          "const": "unmerged",
+          "description": "Its branch has commits that are not merged.",
+          "type": "string"
+        },
+        {
+          "const": "in_use",
+          "description": "A live run is using it.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`workspace.remove` result: removed, or refused with the reason and Collide's words for it.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "const": "removed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "outcome": {
+          "const": "refused",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/RemoveRefusal"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason",
+        "message"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "WorkspaceRemoveResult"
+}

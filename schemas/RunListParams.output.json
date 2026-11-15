@@ -1,0 +1,53 @@
+{
+  "$defs": {
+    "RunScope": {
+      "description": "Which runs `run.list` returns.",
+      "enum": [
+        "live",
+        "finished",
+        "all"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.list` params: the runs for Tracks, and for an app that reattaches to the daemon's runs after it restarts.",
+  "properties": {
+    "board": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "scope": {
+      "$ref": "#/$defs/RunScope",
+      "default": "all"
+    },
+    "task": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "scope"
+  ],
+  "title": "RunListParams",
+  "type": "object"
+}

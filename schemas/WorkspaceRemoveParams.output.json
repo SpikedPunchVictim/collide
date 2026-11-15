@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`workspace.remove` params: remove a workspace nobody uses. There is no force: the built-in workspace refuses a\ndirty or unmerged one (Stage 3a), and the way past is to deal with the work.",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "WorkspaceRemoveParams",
+  "type": "object"
+}

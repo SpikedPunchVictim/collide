@@ -15,6 +15,7 @@ pub mod journal;
 pub mod lock;
 pub mod non_empty;
 pub mod observer;
+pub mod owner;
 pub mod pack;
 pub mod pack_check;
 pub mod points;
