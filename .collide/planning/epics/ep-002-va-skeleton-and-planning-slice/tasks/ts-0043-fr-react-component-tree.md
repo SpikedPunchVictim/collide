@@ -1,7 +1,7 @@
 ---
 id: ts-0043-fr
 kind: task
-status: ready
+status: active
 title: "React component tree"
 owners: []
 links:
