@@ -1,7 +1,7 @@
 ---
 id: ts-0051-wh
 kind: task
-status: active
+status: done
 title: "Clocks: system readings, timers and the sleep gap"
 owners: []
 links: []
