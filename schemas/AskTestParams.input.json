@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ask.test` params as the window sends them: an id for the test's ask, and the agent entry to test (0.7).",
+  "properties": {
+    "agent": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "ask": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask",
+    "agent"
+  ],
+  "title": "AskTestParams",
+  "type": "object"
+}

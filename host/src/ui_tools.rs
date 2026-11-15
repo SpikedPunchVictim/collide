@@ -61,6 +61,8 @@
 //! | `ui_tools: endpoint token store` | [`KeychainTokens`] | the endpoint token in the OS keychain: made at first use, read, and rotated |
 
 use crate::clock::{Clock, Clocks, Reading};
+use collide_core::ask::AskCancelParams;
+use collide_core::non_empty::NonEmpty;
 use collide_core::owner::{Request, RequestId, Response, RpcError, code, tokens_match};
 use collide_core::ui_tools::{
     EXTERNAL_CALLER, MAX_SCREEN_CHANGING_CALLS, ManifestProblem, NO_WINDOW_TEXT,
@@ -139,18 +141,11 @@ pub struct Completed {
     pub response: HttpResponse,
 }
 
-/// An ask for the shell to cancel with `ask.cancel`: its window is gone. The params of that method are
-/// `ts-0034-hh`'s type in core; this is the ask's id.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AskCancel {
-    pub ask: String,
-}
-
 /// What [`UiToolsEndpoint::window_gone`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowGone {
-    /// The live asks, in id order, to cancel.
-    pub cancel: Vec<AskCancel>,
+    /// The live asks, in id order, to cancel: the params of `ask.cancel` (ts-0034-hh).
+    pub cancel: Vec<AskCancelParams>,
     /// The calls that were waiting on the window, answered with [`NO_WINDOW_TEXT`].
     pub completed: Vec<Completed>,
 }
@@ -350,7 +345,9 @@ impl UiToolsEndpoint {
         for (ask, state) in &mut self.asks {
             if !state.cancelled {
                 state.cancelled = true;
-                cancel.push(AskCancel { ask: ask.clone() });
+                cancel.push(AskCancelParams {
+                    ask: NonEmpty::new(ask.as_str()).expect("register_ask refuses an empty id"),
+                });
             }
         }
         let completed = self

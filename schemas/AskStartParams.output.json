@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ask.start` params as the window sends them: the ask's id, the agent entry's id (0.7) and the request as typed.\nNo token and no endpoint: the shell adds them ([`AskStartDaemonParams`]).",
+  "properties": {
+    "agent": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "ask": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "request": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask",
+    "agent",
+    "request"
+  ],
+  "title": "AskStartParams",
+  "type": "object"
+}

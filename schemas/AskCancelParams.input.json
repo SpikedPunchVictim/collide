@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ask.cancel` params: the ask to stop. The shell sends it for each live ask when the window closes or reloads\n(0.2); the ask box sends it for Cancel.",
+  "properties": {
+    "ask": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask"
+  ],
+  "title": "AskCancelParams",
+  "type": "object"
+}

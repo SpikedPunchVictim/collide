@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ask.test` params as the shell forwards them: the test is an ask like any other, so the daemon needs the endpoint\nand the ask's token to start the child. The same rules as [`AskStartDaemonParams`] hold, and `Debug` leaves the\ntoken out.",
+  "properties": {
+    "agent": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "ask": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "endpoint": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "token": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask",
+    "agent",
+    "endpoint",
+    "token"
+  ],
+  "title": "AskTestDaemonParams",
+  "type": "object"
+}

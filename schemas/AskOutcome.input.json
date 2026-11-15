@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "AskCost": {
+      "description": "What an ask cost. A cost that the agent did not report is [`AskCost::NotReported`], never 0: an ACP agent reports\nno cost (0.3, measured S6), and 0 would read as free.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cost": {
+              "$ref": "#/$defs/Money"
+            },
+            "type": {
+              "const": "reported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "cost"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "not_reported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AskEnd": {
+      "description": "How an ask ended (0.11, The ask box). The ask box writes the plain text of each from these: `timed out after N\ns`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`. A refusal before launch is `failed` with its\ntext.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The agent's turn ended. Whether it changed the screen is the window's to say: it ran the calls.",
+          "properties": {
+            "type": {
+              "const": "finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Stopped on request, or because the connection that started the ask dropped.",
+          "properties": {
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Collide's timeout stopped the child (0.3, Budget and timeout). `after_s` is the timeout that applied.",
+          "properties": {
+            "after_s": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "timed_out",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "after_s"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Claude Code's `--max-budget-usd` stopped it. Only Claude Code enforces a budget (0.3).",
+          "properties": {
+            "budget": {
+              "$ref": "#/$defs/Money"
+            },
+            "type": {
+              "const": "stopped_at_budget",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "budget"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ask did not run or did not finish. `text` is plain text for the ask box.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "UsageQuality": {
+      "description": "How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as \"at\nleast\" and never summed with `exact` ones (0.13).",
+      "enum": [
+        "exact",
+        "partial",
+        "unreported"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The outcome of an ask: how it ended, what it cost, and how far the figures of the usage can be trusted\n([`UsageQuality`], 0.3). The ask's spend is shown on the Agents page and is never added to a run (0.3).",
+  "properties": {
+    "cost": {
+      "$ref": "#/$defs/AskCost"
+    },
+    "end": {
+      "$ref": "#/$defs/AskEnd"
+    },
+    "quality": {
+      "$ref": "#/$defs/UsageQuality"
+    }
+  },
+  "required": [
+    "end",
+    "cost",
+    "quality"
+  ],
+  "title": "AskOutcome",
+  "type": "object"
+}

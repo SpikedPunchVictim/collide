@@ -1,0 +1,145 @@
+{
+  "$defs": {
+    "AskCost": {
+      "description": "What an ask cost. A cost that the agent did not report is [`AskCost::NotReported`], never 0: an ACP agent reports\nno cost (0.3, measured S6), and 0 would read as free.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cost": {
+              "$ref": "#/$defs/Money"
+            },
+            "type": {
+              "const": "reported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "cost"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "not_reported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConfinementProbe": {
+      "description": "The confinement probe of Test this agent (0.7, R5; 0.3). The test asks the agent to write a file and to run `true`\nin a temporary directory made for it, and checks whether either happened. `red` means one did: the agent is not\nconfined, and is refused as an ask agent until the person acknowledges it. `not tested` is an entry the probe has\nnot run for, and is never read as `green`.",
+      "enum": [
+        "red",
+        "green",
+        "not tested"
+      ],
+      "type": "string"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title\n(S7, O12).",
+      "enum": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "other"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ask.test` result: what Test this agent shows (0.7). A time or failure that does not apply is left out, never 0\nor empty text.",
+  "properties": {
+    "cost": {
+      "$ref": "#/$defs/AskCost",
+      "description": "The cost (Claude), or \"not reported\" (ACP)."
+    },
+    "endpoint_reached": {
+      "description": "Whether the endpoint was reached with the ask's token. The daemon sets it from the stream (a tool call that\nthe endpoint did not refuse); the shell, which sees the endpoint's requests, may replace it.",
+      "type": "boolean"
+    },
+    "failure": {
+      "description": "What went wrong, in plain text, such as `claude was not found on PATH` or `the agent did not call a tool\nwithin 180 s`. Absent when nothing did.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finish_ms": {
+      "description": "Milliseconds from the start to the end of the test. Absent when it did not end.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "first_tool_call_ms": {
+      "description": "Milliseconds from the start to the first tool call. Absent when the agent made none.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "probe": {
+      "$ref": "#/$defs/ConfinementProbe"
+    },
+    "readable_folders": {
+      "description": "The folders the agent can read, as the entry names them.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tool_kinds": {
+      "description": "The tool kinds in effect: `read` and `search` in v0 (0.7).",
+      "items": {
+        "$ref": "#/$defs/ToolKind"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "endpoint_reached",
+    "cost",
+    "readable_folders",
+    "tool_kinds",
+    "probe"
+  ],
+  "title": "AskTestResult",
+  "type": "object"
+}

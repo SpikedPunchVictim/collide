@@ -13,6 +13,7 @@
 use crate::agent::{
     AgentEvent, Capabilities, PermissionReply, PermissionRequest, SessionStart, Usage,
 };
+use crate::ask;
 use crate::board::{Board, CollidePointer};
 use crate::change::{Change, Rename, TaskPointPayload};
 use crate::context::ContextRecord;
@@ -237,6 +238,15 @@ pub fn registry() -> Registry {
     registry.add::<owner::WorkspaceRemoveResult>();
     registry.add::<owner::WorkspaceResumeParams>();
     registry.add::<owner::WorkspaceResumeResult>();
+    // The ask contract (ts-0034-hh): the window's and the daemon's shape of each method, the events and the outcome.
+    registry.add::<ask::AskStartParams>();
+    registry.add::<ask::AskStartDaemonParams>();
+    registry.add::<ask::AskCancelParams>();
+    registry.add::<ask::AskTestParams>();
+    registry.add::<ask::AskTestDaemonParams>();
+    registry.add::<ask::AskTestResult>();
+    registry.add::<ask::AskOutcome>();
+    registry.add::<ask::AskNotice>();
     // The shell's `ui_tools.*` contract (ts-0035-re): the window's three methods, the request event and the manifest.
     registry.add::<ui_tools::UiToolsReplyParams>();
     registry.add::<ui_tools::UiToolsTokenParams>();

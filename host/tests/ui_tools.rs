@@ -926,7 +926,7 @@ fn closing_the_window_cancels_every_live_ask_and_a_new_window_starts_with_none()
     assert_eq!(rig.endpoint.live_asks(), ["ask-3"]);
     let again = rig.endpoint.window_gone();
     assert_eq!(again.cancel.len(), 1);
-    assert_eq!(again.cancel[0].ask, "ask-3");
+    assert_eq!(again.cancel[0].ask.as_str(), "ask-3");
 }
 
 #[test]

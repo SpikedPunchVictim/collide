@@ -1,0 +1,736 @@
+{
+  "$defs": {
+    "AgentEvent": {
+      "description": "One normalized event of an agent session (0.3, Normalized events).\n\nEvery known event is a closed object: an unknown key is an error. An event whose `type` this version does not\nknow (a tool's newer stream, an event of a later Collide) reads as [`AgentEvent::Other`] with that name in\n`raw_type` and the rest of the object in `raw`, because a log line must stay readable. `Other` is also what an\nadapter emits for a stream event it does not map. It is written back as `{\"type\":\"other\",\"raw_type\":...}`, so a\nread-write-read is stable. The schema lists the known events only.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A message of the agent, or one chunk of it.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool call. `input` is `None` while the agent has not sent it.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "input": true,
+            "kind": {
+              "$ref": "#/$defs/ToolKind"
+            },
+            "tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "tool_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/PermissionRequest"
+            },
+            "type": {
+              "const": "permission_request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The request had no option Collide may pick, so the session answered `cancel` (0.3, Permissions).",
+          "properties": {
+            "request_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "permission_unanswerable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The session id is known: at once for Claude, on the `session/new` response for ACP.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "session_bound",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "usage",
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/$defs/Usage"
+            }
+          },
+          "required": [
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`empty` is true when the turn gave no message, no tool call and zero or unreported usage.",
+          "properties": {
+            "cancel_requested": {
+              "type": "boolean"
+            },
+            "empty": {
+              "type": "boolean"
+            },
+            "reason": {
+              "$ref": "#/$defs/TurnEndReason"
+            },
+            "type": {
+              "const": "turn_end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason",
+            "cancel_requested",
+            "empty"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/FinalReportSource"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "final_report",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An event this version has no type for. `raw_type` is its own type name.",
+          "properties": {
+            "raw": true,
+            "raw_type": {
+              "type": "string"
+            },
+            "type": {
+              "const": "other",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "raw_type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AskCost": {
+      "description": "What an ask cost. A cost that the agent did not report is [`AskCost::NotReported`], never 0: an ACP agent reports\nno cost (0.3, measured S6), and 0 would read as free.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cost": {
+              "$ref": "#/$defs/Money"
+            },
+            "type": {
+              "const": "reported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "cost"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "not_reported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AskEnd": {
+      "description": "How an ask ended (0.11, The ask box). The ask box writes the plain text of each from these: `timed out after N\ns`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`. A refusal before launch is `failed` with its\ntext.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The agent's turn ended. Whether it changed the screen is the window's to say: it ran the calls.",
+          "properties": {
+            "type": {
+              "const": "finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Stopped on request, or because the connection that started the ask dropped.",
+          "properties": {
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Collide's timeout stopped the child (0.3, Budget and timeout). `after_s` is the timeout that applied.",
+          "properties": {
+            "after_s": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "timed_out",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "after_s"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Claude Code's `--max-budget-usd` stopped it. Only Claude Code enforces a budget (0.3).",
+          "properties": {
+            "budget": {
+              "$ref": "#/$defs/Money"
+            },
+            "type": {
+              "const": "stopped_at_budget",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "budget"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ask did not run or did not finish. `text` is plain text for the ask box.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AskEventNotice": {
+      "additionalProperties": false,
+      "description": "The body of `ask.event`: one normalized event of the ask's stream. It has no field for a token.",
+      "properties": {
+        "ask": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "event": {
+          "$ref": "#/$defs/AgentEvent"
+        }
+      },
+      "required": [
+        "ask",
+        "event"
+      ],
+      "type": "object"
+    },
+    "AskOutcome": {
+      "additionalProperties": false,
+      "description": "The outcome of an ask: how it ended, what it cost, and how far the figures of the usage can be trusted\n([`UsageQuality`], 0.3). The ask's spend is shown on the Agents page and is never added to a run (0.3).",
+      "properties": {
+        "cost": {
+          "$ref": "#/$defs/AskCost"
+        },
+        "end": {
+          "$ref": "#/$defs/AskEnd"
+        },
+        "quality": {
+          "$ref": "#/$defs/UsageQuality"
+        }
+      },
+      "required": [
+        "end",
+        "cost",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "AskOutcomeNotice": {
+      "additionalProperties": false,
+      "description": "The body of `ask.outcome`: the last message of an ask.",
+      "properties": {
+        "ask": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/AskOutcome"
+        }
+      },
+      "required": [
+        "ask",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "FinalReportSource": {
+      "description": "Where a [`AgentEvent::FinalReport`] came from: Claude's `result` field, or, for ACP, the message chunks after the\nlast tool call.",
+      "enum": [
+        "result_field",
+        "reconstructed"
+      ],
+      "type": "string"
+    },
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "PermissionOption": {
+      "additionalProperties": false,
+      "description": "One of the agent's own options in a permission request.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PermissionOptionKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PermissionOptionKind": {
+      "description": "The kind of one of the agent's own options in a permission request. Collide picks only the `*_once` kinds: the\nagent owns the scope and storage of an \"always\" choice, so no adapter selects one (0.3, Permissions).",
+      "enum": [
+        "allow_once",
+        "allow_always",
+        "reject_once",
+        "reject_always"
+      ],
+      "type": "string"
+    },
+    "PermissionRequest": {
+      "additionalProperties": false,
+      "description": "A request to run a tool (0.3, Permissions). `input` is `None` when the agent has not sent it yet (opencode sends\n`rawInput: {}` for a Bash call, so the command is unknown until the host answers; S7). Such a request shows in the\nQueue as \"input not available until approved\" and no pack rule that reads the input may auto-allow it.\n`reason` says why it was asked, when the agent says. `options` are the agent's own.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "input": true,
+        "kind": {
+          "$ref": "#/$defs/ToolKind"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PermissionOption"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tool_call_id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ToolKind": {
+      "description": "What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title\n(S7, O12).",
+      "enum": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "other"
+      ],
+      "type": "string"
+    },
+    "TurnEndReason": {
+      "description": "Why a turn ended (0.3, A turn ends with). `error` carries the HTTP status of an API failure when there is one\n(S1 measured a 429).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "end_turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "max_tokens",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "max_turns",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "refusal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "description": "What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never\n0, and is left out of the JSON. `cache_write_1h` and `cache_write_5m` split `cache_write` by tier, where the tool\nreports the tiers (capability `usage_report.cache_write_tiers`).",
+      "properties": {
+        "cache_read": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write_1h": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write_5m": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "context_size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "context_used": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quality": {
+          "$ref": "#/$defs/UsageQuality"
+        },
+        "scope": {
+          "$ref": "#/$defs/UsageScope"
+        },
+        "thought": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "UsageQuality": {
+      "description": "How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as \"at\nleast\" and never summed with `exact` ones (0.13).",
+      "enum": [
+        "exact",
+        "partial",
+        "unreported"
+      ],
+      "type": "string"
+    },
+    "UsageScope": {
+      "description": "What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).",
+      "enum": [
+        "turn",
+        "step",
+        "running_total"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What the daemon sends for a running ask, to the connection that started it. On the wire a notice is a\n[`Notification`] whose `method` is the name below and whose `params` is the payload.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "One normalized event of the ask's stream.",
+      "properties": {
+        "method": {
+          "const": "ask.event",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/AskEventNotice"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The ask ended. Nothing follows it for that ask.",
+      "properties": {
+        "method": {
+          "const": "ask.outcome",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/AskOutcomeNotice"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "AskNotice"
+}

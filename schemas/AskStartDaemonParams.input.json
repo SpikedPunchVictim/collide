@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ask.start` params as the shell forwards them to the daemon: the window's three fields, the endpoint URL and the\nask's token (0.2). The token works for this ask only and is dead when the ask ends. The daemon puts it in the\nchild's MCP configuration file of mode 0600 (Claude) or in `session/new` (ACP), never in argv or the environment.\n\nThe ask is tied to the connection that carried this request: when the connection drops, the daemon cancels the\nask (Stage 6b). `Debug` leaves the token out.",
+  "properties": {
+    "agent": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "ask": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "endpoint": {
+      "description": "The URL of the shell's UI-tools endpoint.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "request": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "token": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "ask",
+    "agent",
+    "request",
+    "endpoint",
+    "token"
+  ],
+  "title": "AskStartDaemonParams",
+  "type": "object"
+}
