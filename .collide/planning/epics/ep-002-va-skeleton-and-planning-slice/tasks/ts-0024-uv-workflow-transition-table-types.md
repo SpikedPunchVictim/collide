@@ -1,7 +1,7 @@
 ---
 id: ts-0024-uv
 kind: task
-status: ready
+status: active
 title: "Workflow transition-table types"
 owners: []
 links:
