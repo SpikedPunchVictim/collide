@@ -17,7 +17,6 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "gen": "node scripts/gen.ts",
-    "stubs": "node scripts/stubs.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

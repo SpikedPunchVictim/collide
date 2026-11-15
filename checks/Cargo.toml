@@ -1,0 +1,13 @@
+[package]
+name = "collide-checks"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+collide-core = { path = "../core" }
+serde_json = "1"
+
+[[bin]]
+name = "collide-checks"
+path = "src/main.rs"

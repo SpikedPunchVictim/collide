@@ -1,0 +1,7 @@
+{
+  "sdk: ctx": "4b",
+  "sdk: ctx.report": "7",
+  "sdk: ctx.result": "7",
+  "sdk: defineHook": "4b",
+  "sdk: defineObserver": "12"
+}

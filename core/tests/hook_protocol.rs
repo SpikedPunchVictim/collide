@@ -79,9 +79,9 @@ fn change() -> Value {
 fn workspace_input() -> Value {
     json!({
         "protocol": 1,
-        "hook": "orchard/ws-create",
-        "pack": "orchard",
-        "workflow": "orchard/loop",
+        "hook": "demo/ws-create",
+        "pack": "demo",
+        "workflow": "demo/loop",
         "board": "main",
         "line": "main",
         "experiment": null,
@@ -99,7 +99,7 @@ fn workspace_input() -> Value {
 /// A hook input inside an experiment, in a phase, with a workspace and a history.
 fn phase_input() -> Value {
     let mut doc = workspace_input();
-    doc["hook"] = json!("orchard/gate-tests");
+    doc["hook"] = json!("demo/gate-tests");
     doc["experiment"] = json!({ "id": "x-3", "arm": "b", "dir": "/data/x-3/b" });
     doc["phase"] =
         json!({ "name": "build", "kind": "script", "round": 2, "dir": "/data/r-77/build" });
@@ -115,7 +115,7 @@ fn phase_input() -> Value {
         "verdict": "ok"
     }]);
     doc["state"] = json!({
-        "run": { "orchard/gate-tests": { "passed": 412 } },
+        "run": { "demo/gate-tests": { "passed": 412 } },
         "workspace": { "lane": "l-1" },
         "point": {}
     });
@@ -125,11 +125,11 @@ fn phase_input() -> Value {
 /// A task point's input: the 0.5 fields plus `change` and `latestRun`.
 fn task_point_input() -> Value {
     let mut doc = workspace_input();
-    doc["hook"] = json!("orchard/gate-review");
+    doc["hook"] = json!("demo/gate-review");
     doc["change"] = change();
     doc["latestRun"] = json!({
         "id": "r-70",
-        "workflow": "orchard/loop",
+        "workflow": "demo/loop",
         "outcome": "done",
         "state": {}
     });

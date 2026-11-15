@@ -1,0 +1,104 @@
+# Every command below is one that runs locally from the repository root (pnpm and cargo); nothing here is CI-only
+# except the toolchain setup. The commands are the Stage 2 gates of IMPLEMENTATION_PLAN.md, in the order the item
+# ts-0013-nz was verified locally.
+#
+# One job on macOS: Collide ships for macOS first (launchd, the macOS process tools; Linux and Windows are in the
+# plan's Deferred section), and `app/src-tauri` is a workspace member, so `cargo build --workspace` builds Tauri.
+# macOS needs no system packages for that; Ubuntu would need Tauri's Linux packages (webkit2gtk 4.1 and others) and
+# would test a platform nothing ships on yet.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The toolchain local builds use. Change it here and on the machines together.
+  RUST_VERSION: 1.98.0
+
+jobs:
+  ci:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The pnpm version is `packageManager` in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install the Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
+          rustup default "$RUST_VERSION"
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generated files are stable (pnpm gen changes nothing)
+        run: |
+          snapshot() { find schemas packages/pack-sdk/src/generated -type f | LC_ALL=C sort | xargs shasum; }
+          snapshot > "$RUNNER_TEMP/gen-before.txt"
+          pnpm gen
+          snapshot > "$RUNNER_TEMP/gen-after.txt"
+          diff "$RUNNER_TEMP/gen-before.txt" "$RUNNER_TEMP/gen-after.txt"
+
+      - name: pnpm test
+        run: pnpm test
+
+      - name: pnpm typecheck
+        run: pnpm typecheck
+
+      - name: App build
+        run: pnpm --filter @collide/app build
+
+      - name: cargo build
+        run: cargo build --workspace
+
+      # The whole workspace, so the `collide schema` catalogue listing test runs and prints.
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: Built-in packs, staged for the bundle
+        run: pnpm build:packs
+
+      # build.rs of the shell reads the staged bundle, so touch it to build against the bundle.
+      - name: cargo build with the bundle staged
+        run: |
+          touch app/src-tauri/build.rs
+          cargo build
+
+      - name: cargo test with the bundle staged
+        run: cargo test --workspace
+
+      - name: Check no-names
+        run: pnpm check:names
+
+      - name: Check dependency direction
+        run: pnpm check:deps
+
+      - name: Check stubs (prints the count per tag)
+        run: pnpm check:stubs

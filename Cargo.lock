@@ -369,6 +369,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "collide-checks"
+version = "0.0.0"
+dependencies = [
+ "collide-core",
+ "serde_json",
+]
+
+[[package]]
 name = "collide-core"
 version = "0.0.0"
 dependencies = [

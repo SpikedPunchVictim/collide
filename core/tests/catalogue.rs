@@ -609,7 +609,7 @@ fn a_gate_verdict_names_its_pack_and_its_point_or_phase() {
     assert_eq!(serde_json::to_value(&parsed).unwrap()["body"], on_point);
 
     let on_phase = json!({
-        "event": "gate.verdict", "pack": "orchard", "gate": "review", "status": "ok", "run": "r-77",
+        "event": "gate.verdict", "pack": "demo", "gate": "review", "status": "ok", "run": "r-77",
         "phase": "review", "point": null, "message": ""
     });
     assert_eq!(
