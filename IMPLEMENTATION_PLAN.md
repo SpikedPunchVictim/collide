@@ -7,10 +7,16 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 15.** Revision 15 takes two findings from the tokensafe research, and revision 14 puts features
+**Status: revision 16.** Revision 16 shows Claude's versions as two chips in place of a Queue warning (owner,
+2026-11-15). Revision 15 takes two findings from the tokensafe research, and revision 14 puts features
 in proposals, both from the owner's decisions of 2026-11-14 (Review log). R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
 `.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
 starts. The owner accepted revision 13 (2026-11-14); Stage 2 is in progress.
+
+Revision 16 (2026-11-15) shows Claude's versions as two chips, the `claude` in use and the latest published, on the
+Agents page, in the run preview and in the thin loop's window. A version outside the tested range that passes the
+smoke check marks its chip and raises no Queue item; a failed smoke check still refuses the phase (0.3, Stages 3b,
+3c, 6b and 9a).
 
 Revision 15 (2026-11-14) takes two findings from the tokensafe research (`docs/research/tokensafe.md`):
 - The run preview flags a redirected model endpoint (`ANTHROPIC_BASE_URL`, from the captured environment or a
@@ -614,12 +620,21 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
   - **A tested version range** (R5). The adapter names the range of `claude` versions its contract test passed on,
     starting at 2.1.323 (S1) and 2.1.325 (S9's addendum). The daemon reads `claude --version` at start and before a
     phase, cached by the binary's path and modification time. Outside the range, the daemon runs a one-turn smoke
-    check (a prompt that must come back as a `result` with the pinned stream shape), then warns in the Queue when it
-    passes and refuses the phase, with the version and the range, when it fails. The version goes in the fingerprint
-    (0.13). An event the adapter does not know is an `Other`, counted per run, and a rising count is a finding
+    check (a prompt that must come back as a `result` with the pinned stream shape), and refuses the phase, with the
+    version and the range, when it fails. A pass raises no Queue item; it marks the version chip (next bullet). The
+    version goes in the fingerprint (0.13). An event the adapter does not know is an `Other`, counted per run, and a rising count is a finding
     (0.13). Where a documented flag does what a variable read from the binary does, the adapter prefers the flag once
     a test shows they agree: `--autocompact` is in 2.1.325's `--help`, and the contract test compares it with
     `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (below).
+  - **Two version chips** (owner, 2026-11-15; revision 16). Collide shows the `claude` version in use and the latest
+    published version side by side: on the Agents page's Claude entry (0.7), in the run preview (0.11) and in the
+    thin loop's window (Stage 3c). A version outside the tested range marks the in-use chip, whose tooltip names the
+    range and when the smoke check passed. The published version is the `latest` dist-tag of
+    `@anthropic-ai/claude-code` on the npm registry, with `stable` in the tooltip (measured 2026-11-15: `latest`
+    2.1.325, `stable` 2.1.311). The daemon fetches it at start and once a day, through the system proxy, with a 5 s
+    timeout and a request that carries no user data. A failed fetch shows the last value and its age, or "unknown".
+    `claude.check_published: false`, a per-user key, turns the fetch off and hides the chip. Collide does not update
+    `claude`; the chips only show the gap.
   - **Settings that fail validation are ignored silently under `-p`** (R5; read from 2.1.325's own text). The
     contract test validates the generated `settings.json` against the published settings schema. At run time a
     **canary** covers the rest: the snapshot settings carry a no-op hook, and if no `hook_started` event for it
@@ -2502,6 +2517,7 @@ Details:
     lacks;
   - the user hooks and plugins each phase will load, with flags on those that change behaviour, and a redirected
     model endpoint (0.3).
+  - the two `claude` version chips, in use and latest published (0.3).
   - the profile, why it applies (picked here, the view's, a rule, the board default), and each resolved setting
     with its layer (0.7);
   - a badge on packs loaded from a `dev:` folder and on `agentWork` phases (0.3).
@@ -3528,8 +3544,10 @@ socket checks; sleep accounting with fake clocks.
     session id at the reset time, or when the user resumes it.
 - **Claude's version and settings (0.3; R5):**
   - the adapter's tested version range, read when the daemon starts and before each phase (cached by path and
-    modification time). A version outside it gets a one-turn smoke check, then a warning or a refusal through the
-    Queue. The version is in the fingerprint, and an event the adapter does not know is counted as Other;
+    modification time). A version outside it gets a one-turn smoke check: a failure refuses the phase through the
+    Queue, and a pass marks the version chip (0.3). The daemon fetches the published version for the second chip,
+    and `collide run` prints both versions before it starts. The version is in the fingerprint, and an event the
+    adapter does not know is counted as Other;
   - the generated settings are validated against Claude's published schema in the contract test, because a file that
     fails validation is silently ignored under `-p`. A runtime canary (a `hook_started` event, else the phase fails
     with "Claude ignored Collide's settings") catches the rest.
@@ -3585,7 +3603,9 @@ socket checks; sleep accounting with fake clocks.
   "always" option.
 - Over the same recorded session, the Claude `AgentSession` replayed from the journal reaches the same state as the
   live one.
-- A `claude` outside the tested range gets the smoke check and a Queue warning. A generated settings file that fails
+- A `claude` outside the tested range gets the smoke check: a pass marks the in-use version and raises no Queue item,
+  and a failure refuses the phase. The published-version fetch runs against a recorded registry response, with
+  offline, timeout and `claude.check_published: false` cases (no network in CI). A generated settings file that fails
   Claude's schema fails the contract test, and a phase whose canary never appears fails with the message that names it
   (R5).
 - The owner's sleep test (`sleep-check.sh`, 0.13) runs on a real run that sleeps: the table in 0.2 holds, and the sleep
@@ -3621,6 +3641,8 @@ smallest form and finished there:
   discard, are included. The context view, take-over, tracks and metrics views wait.
 - The built-in `collide` pack's `collide/quick` is compiled into the bundle (0.4, 0.6), so there is nothing to
   trust.
+- The window shows the two `claude` version chips (0.3; revision 16), so a version outside the tested range is
+  visible before the Agents page exists.
 
 What it costs (owner, 2026-11-14): the launch path and the accept path are written twice. When task sources land,
 Stage 9a launches from a task in the Queue through the engine of Stage 8, and accept runs the pack's `integrate`
@@ -3990,7 +4012,7 @@ Planning: planning-view counts against the CLI; the branch-only chip.
     spec and the ACP engine's ask profile for opencode are built here, on Stage 3's traits, with no new trait (0.3).
   - **The Agents page** in Settings (0.7): the entries with each field's source, the words for folders and tool kinds
     and for budget and timeout, **Test this agent**, the endpoint card with Rotate, per-agent last use and spend this
-    week, the snippets for external clients, and the choice of the ask agent.
+    week, the snippets for external clients, the choice of the ask agent, and Claude's two version chips (0.3).
   - **The token cost of the strict line is measured here.** The two example asks run under `config: none` and under
     `config: user`, and the input tokens of each go in the record. S6 measured 28K to 107K under a line that was not
     strict (0.11).
@@ -4314,7 +4336,7 @@ is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path
 
 - **Field:** Launch with a run preview (implementations, accepted tasks, the reason for each refused one; the
   profile, its reason and each setting's layer; dev and `agentWork` badges; the flagged user hooks and a redirected
-  model endpoint, 0.3). Profiles picked in the preview or
+  model endpoint, 0.3; the two `claude` version chips, 0.3). Profiles picked in the preview or
   taken from the view's `profile:`. **Use working copy** on a repo pack whose folder in the user's checkout
   differs from the ref (0.7). The
   drawer's operation forms, create, and Record.
@@ -5844,3 +5866,15 @@ Sonnet agent read it without running it, and the note is `docs/research/tokensaf
   user chose keeps working; hooks are flagged by the event they hook, because their output is unknown before they
   run; only the host is recorded, never the path, query or a key; a claimed saving needs no new report field, and is
   told apart by docs and labels.
+
+**Revision 16, 2026-11-15 (owner).** Claude's versions as chips. The owner's proposal: "instead of a queue warning
+you could have a chip/label that is the version that is being used, and a chip/label that is the published Claude
+version."
+- **Changed:** the status line and the revision summary; 0.3 (a pass of the smoke check raises no Queue item; the
+  two chips and the published-version fetch); 0.11 (the run preview); Stage 3b (scope and a test); Stage 3c (the
+  window); Stage 6b (the Agents page); Stage 9a (the Field's preview).
+- **Kept:** the tested range, the smoke check, the refusal when it fails, and the version in the fingerprint.
+- **Choices made in writing it** (the owner may change any): the published version is npm's `latest` dist-tag, with
+  `stable` in the tooltip, because Claude Code's two update channels carry the same names (inferred); the fetch is daily and at start, carries
+  no user data, and can be turned off per user; a version outside the range marks its chip rather than adding a
+  third chip; an installed version behind `latest` gets no mark, since the two chips side by side show it.

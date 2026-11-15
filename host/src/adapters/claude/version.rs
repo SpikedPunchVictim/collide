@@ -1,8 +1,8 @@
 //! The tested version range, the smoke check and the settings canary (0.3, A tested version range; Settings that fail
 //! validation are ignored silently under `-p`). The daemon reads `claude --version` at start and before each phase,
 //! cached by the binary's path and modification time ([`BinaryKey`]). Outside [`TESTED`], it runs a one-turn smoke
-//! check, then warns in the Queue when the check passes and refuses the phase, with the version and the range, when it
-//! fails. The version goes in the fingerprint (0.13).
+//! check and refuses the phase, with the version and the range, when it fails. A pass raises no Queue item: it marks
+//! the in-use version chip (0.3, Two version chips). The version goes in the fingerprint (0.13).
 //!
 //! Settings that fail validation are ignored silently under `-p`, so the snapshot's settings carry a no-op hook, and a
 //! phase whose first turn shows no `hook_started` event for it fails with [`CANARY_FAILURE`].
@@ -113,7 +113,7 @@ pub fn read_version(binary: &Path) -> Result<ClaudeVersion, VersionError> {
 /// What the one-turn smoke check found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SmokeOutcome {
-    /// The prompt came back as a `result` with the pinned stream shape: the daemon warns in the Queue.
+    /// The prompt came back as a `result` with the pinned stream shape: the in-use version chip is marked.
     Passed,
     /// It did not. `reason` is what differed: the daemon refuses the phase, naming the version and [`TESTED`].
     Failed { reason: String },
