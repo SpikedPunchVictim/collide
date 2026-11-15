@@ -69,9 +69,9 @@ fn every_core_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 }
 
 /// The tags of the `host` outlines (ts-0040-kd, with the real peer lookups of ts-0033-zj) and the stage that fills each
-/// one: the daemon, the peer and process lookups, the shim, the store and the clocks are Stage 3a, the OTLP receiver
-/// is Stage 9b. Each must count at least one stub today.
-const HOST_OUTLINE_TAGS: [(&str, &str); 26] = [
+/// one: the daemon, the peer and process lookups, the shim and the store are Stage 3a, the OTLP receiver is Stage 9b.
+/// Each must count at least one stub today. A tag whose item has replaced its last stub moves to [`FILLED_TAGS`].
+const HOST_OUTLINE_TAGS: [(&str, &str); 23] = [
     ("daemon: entry", "3a"),
     ("daemon: lock file start", "3a"),
     ("daemon: launchd job", "3a"),
@@ -91,9 +91,6 @@ const HOST_OUTLINE_TAGS: [(&str, &str); 26] = [
     ("store: open and migrate", "3a"),
     ("store: event log", "3a"),
     ("store: quarantine", "3a"),
-    ("clock: system readings", "3a"),
-    ("clock: timer", "3a"),
-    ("clock: sleep gap", "3a"),
     ("otlp: receiver", "9b"),
     ("otlp: run token", "9b"),
     ("otlp: request check", "9b"),
@@ -112,6 +109,32 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
         assert!(
             report.counts[tag] >= 1,
             "tag \"{tag}\" is registered but no stub carries it"
+        );
+    }
+}
+
+/// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
+/// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
+/// under a filled tag fails here.
+const FILLED_TAGS: [(&str, &str, &str); 3] = [
+    ("clock: system readings", "3a", "ts-0051-wh"),
+    ("clock: timer", "3a", "ts-0051-wh"),
+    ("clock: sleep gap", "3a", "ts-0051-wh"),
+];
+
+#[test]
+fn every_filled_tag_stays_registered_under_its_stage_and_counts_no_stub() {
+    let report = stubs::check(&repo()).unwrap();
+    for (tag, stage, item) in FILLED_TAGS {
+        assert_eq!(
+            report.stages.get(tag).map(String::as_str),
+            Some(stage),
+            "tag \"{tag}\" (filled by {item}) is not registered under stage {stage}"
+        );
+        assert_eq!(
+            report.counts.get(tag).copied().unwrap_or(0),
+            0,
+            "tag \"{tag}\" was filled by {item}, but a stub carries it again"
         );
     }
 }

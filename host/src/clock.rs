@@ -20,13 +20,15 @@
 //!
 //! | tag | function | what it does |
 //! |---|---|---|
-//! | `clock: system readings` | [`SystemClocks`] | the real readings, through `clock_gettime` and `mach_absolute_time` |
+//! | `clock: system readings` | [`SystemClocks`] | the real readings, through `clock_gettime` and `SystemTime` |
 //! | `clock: timer` | [`Timer`] | a start, a length and the clock they are on; when it ends and what is left |
 //! | `clock: sleep gap` | [`sleep_gap`] | how long the machine slept between two moments |
 
 use collide_core::run_rules::Uptime;
 use std::fmt;
-use std::time::Duration;
+#[cfg(not(target_os = "macos"))]
+use std::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// A clock of the table above. The doc comment of each variant is the use that clock is for, and the table is the
 /// same list in one place.
@@ -111,14 +113,76 @@ pub trait Clocks {
     fn read(&self, clock: Clock) -> Reading;
 }
 
-/// The real clocks.
+/// The real clocks. On macOS the uptime clock is `CLOCK_UPTIME_RAW` (the one `mach_absolute_time` counts, without the
+/// timebase to convert), the continuous clock is `CLOCK_MONOTONIC_RAW`, and the wall clock is `SystemTime`.
+///
+/// Other systems are not a target (the plan ships macOS first). They compile, and give the uptime and the
+/// continuous clock from the same monotonic counter, which cannot tell sleep apart, so [`sleep_gap`] is always zero
+/// there. A real second implementation is its own item when a second platform is.
 pub struct SystemClocks;
 
 impl Clocks for SystemClocks {
     fn read(&self, clock: Clock) -> Reading {
-        let _ = clock;
-        todo!("clock: system readings")
+        let nanos = match clock {
+            Clock::Uptime => uptime_nanos(),
+            Clock::Continuous => continuous_nanos(),
+            Clock::Wall => wall_nanos(),
+        };
+        Reading { clock, nanos }
     }
+}
+
+/// The wall clock in nanoseconds since the Unix epoch. A machine set to a time before 1970 reads 0, and one past
+/// the year 2554 reads the most a `u64` holds: a reading must never panic.
+fn wall_nanos() -> u64 {
+    let since_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO);
+    u64::try_from(since_epoch.as_nanos()).unwrap_or(u64::MAX)
+}
+
+#[cfg(target_os = "macos")]
+fn uptime_nanos() -> u64 {
+    monotonic_nanos(libc::CLOCK_UPTIME_RAW)
+}
+
+#[cfg(target_os = "macos")]
+fn continuous_nanos() -> u64 {
+    monotonic_nanos(libc::CLOCK_MONOTONIC_RAW)
+}
+
+/// One `clock_gettime` reading of `clock_id`, in nanoseconds.
+#[cfg(target_os = "macos")]
+fn monotonic_nanos(clock_id: libc::clockid_t) -> u64 {
+    let mut spec = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `spec` is a live, writable `timespec` for the whole call, and `clock_id` is one of the two constants
+    // macOS defines for `clock_gettime`.
+    let status = unsafe { libc::clock_gettime(clock_id, &mut spec) };
+    // Neither clock can fail for a valid id and a valid pointer. A failure would mean a reading of zero that a
+    // timeout would trust, so it stops here.
+    assert_eq!(status, 0, "clock_gettime({clock_id}) failed");
+    spec.tv_sec as u64 * 1_000_000_000 + spec.tv_nsec as u64
+}
+
+#[cfg(not(target_os = "macos"))]
+fn uptime_nanos() -> u64 {
+    fallback_monotonic_nanos()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn continuous_nanos() -> u64 {
+    fallback_monotonic_nanos()
+}
+
+/// Nanoseconds since the first reading in this process, from `Instant`.
+#[cfg(not(target_os = "macos"))]
+fn fallback_monotonic_nanos() -> u64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let nanos = START.get_or_init(Instant::now).elapsed().as_nanos();
+    u64::try_from(nanos).unwrap_or(u64::MAX)
 }
 
 /// A span of time on one clock, started at a reading. A work timeout is a `Timer` on [`Clock::Uptime`], the cache
@@ -134,8 +198,17 @@ impl Timer {
     /// Starts a timer of `length` on `clock` at `now`. The clock is named by the caller, and `now` must be a reading
     /// of it ([`ClockMismatch`] otherwise).
     pub fn start(clock: Clock, length: Duration, now: Reading) -> Result<Timer, ClockMismatch> {
-        let _ = (clock, length, now);
-        todo!("clock: timer")
+        if now.clock != clock {
+            return Err(ClockMismatch {
+                expected: clock,
+                got: now.clock,
+            });
+        }
+        Ok(Timer {
+            clock,
+            started: now,
+            length,
+        })
     }
 
     /// The clock the timer runs on.
@@ -143,16 +216,29 @@ impl Timer {
         self.clock
     }
 
-    /// Whether the timer has ended at `now`.
+    /// Whether the timer has ended at `now`: its whole length has passed. A timer of no length is over at once.
     pub fn is_over(&self, now: Reading) -> Result<bool, ClockMismatch> {
-        let _ = now;
-        todo!("clock: timer")
+        Ok(self.elapsed(now)? >= self.length)
     }
 
     /// What is left at `now`, zero once it is over.
     pub fn remaining(&self, now: Reading) -> Result<Duration, ClockMismatch> {
-        let _ = now;
-        todo!("clock: timer")
+        Ok(self.length.saturating_sub(self.elapsed(now)?))
+    }
+
+    /// How long has passed on the timer's clock. A reading from before the start (the wall clock was set back) is no
+    /// time at all, so a timer never ends early or panics on it. It is compared as a span rather than added to the
+    /// start, so a very long timer cannot overflow.
+    fn elapsed(&self, now: Reading) -> Result<Duration, ClockMismatch> {
+        if now.clock != self.clock {
+            return Err(ClockMismatch {
+                expected: self.clock,
+                got: now.clock,
+            });
+        }
+        Ok(Duration::from_nanos(
+            now.nanos.saturating_sub(self.started.nanos),
+        ))
     }
 }
 
@@ -176,8 +262,14 @@ impl ClockPair {
 /// How long the machine slept between `earlier` and `later`: the time the continuous clock counted and the uptime
 /// clock did not (0.2, Clocks; 0.13). A phase counts the gap as waiting, not as active time.
 pub fn sleep_gap(earlier: &ClockPair, later: &ClockPair) -> Duration {
-    let _ = (earlier, later);
-    todo!("clock: sleep gap")
+    let uptime = later.uptime.nanos.saturating_sub(earlier.uptime.nanos);
+    let continuous = later
+        .continuous
+        .nanos
+        .saturating_sub(earlier.continuous.nanos);
+    // The two readings of a pair are a moment apart, so an awake machine can show the uptime span a few ns ahead.
+    // That, and pairs given in the wrong order, are no gap.
+    Duration::from_nanos(continuous.saturating_sub(uptime))
 }
 
 #[cfg(test)]
@@ -308,11 +400,5 @@ mod tests {
             message.contains("wall") && message.contains("uptime"),
             "{message}"
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "clock: system readings")]
-    fn the_system_clocks_are_a_stub_tagged_for_stage_3a() {
-        SystemClocks.read(Clock::Wall);
     }
 }
