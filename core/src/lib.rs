@@ -38,6 +38,7 @@ pub mod stage;
 pub mod state;
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod transition;
 pub mod ui_tools;
 pub mod view;
 pub mod workflow;

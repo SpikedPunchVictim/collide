@@ -327,9 +327,13 @@ fn pr_pending() -> IntegrateAnswer {
     }
 }
 
+fn run_outcome() -> NonEmpty {
+    non_empty("done")
+}
+
 fn ended() -> RunState {
     RunState::Ended {
-        outcome: non_empty("done"),
+        outcome: run_outcome(),
     }
 }
 
@@ -337,33 +341,34 @@ const BOTH: [AfterIntegrate; 2] = [AfterIntegrate::RunAfterIntegrate, AfterInteg
 
 #[test]
 fn an_integrate_of_pending_leaves_the_run_integrating_and_holds_the_ops_back() {
-    let step = apply_integrate_answer(&ended(), &pr_pending()).unwrap();
-    assert_eq!(step.run, Some(RunState::Integrating {}));
+    let step = apply_integrate_answer(&ended(), &pr_pending(), &run_outcome()).unwrap();
+    assert_eq!(step.run, RunState::Integrating {});
     assert!(step.release.is_empty());
     assert_eq!(step.held, BOTH);
 }
 
 #[test]
 fn a_later_merged_releases_what_pending_held_back() {
-    let held = apply_integrate_answer(&ended(), &pr_pending()).unwrap();
-    let run = held.run.unwrap();
-    let released = apply_integrate_answer(&run, &merged("abc123")).unwrap();
+    let held = apply_integrate_answer(&ended(), &pr_pending(), &run_outcome()).unwrap();
+    let run = held.run;
+    let released = apply_integrate_answer(&run, &merged("abc123"), &run_outcome()).unwrap();
     assert_eq!(released.release, BOTH);
     assert!(released.held.is_empty());
-    assert_eq!(released.run, None, "the run leaves `integrating`");
+    assert_eq!(released.run, ended(), "the run leaves `integrating`");
 }
 
 #[test]
 fn a_pending_answered_again_keeps_the_run_integrating_and_the_hold() {
-    let step = apply_integrate_answer(&RunState::Integrating {}, &pr_pending()).unwrap();
-    assert_eq!(step.run, Some(RunState::Integrating {}));
+    let step =
+        apply_integrate_answer(&RunState::Integrating {}, &pr_pending(), &run_outcome()).unwrap();
+    assert_eq!(step.run, RunState::Integrating {});
     assert_eq!(step.held, BOTH);
 }
 
 #[test]
 fn a_merged_answer_straight_away_runs_after_integrate_before_the_source_ops() {
-    let step = apply_integrate_answer(&ended(), &merged("abc123")).unwrap();
-    assert_eq!(step.run, None);
+    let step = apply_integrate_answer(&ended(), &merged("abc123"), &run_outcome()).unwrap();
+    assert_eq!(step.run, ended());
     assert_eq!(
         step.release,
         [AfterIntegrate::RunAfterIntegrate, AfterIntegrate::SourceOps]
@@ -382,8 +387,8 @@ fn an_integrate_answer_for_a_run_that_is_not_finished_is_refused_naming_the_stat
         RunState::Stopped {},
     ];
     for state in unfinished {
-        let error = apply_integrate_answer(&state, &merged("abc123")).unwrap_err();
-        assert!(matches!(error, IntegrateError::RunNotFinished { .. }));
+        let error = apply_integrate_answer(&state, &merged("abc123"), &run_outcome()).unwrap_err();
+        assert!(matches!(error, IntegrateError::RunRefused(_)));
         let text = error.to_string();
         assert!(text.contains("integrate"), "{text}");
         assert!(

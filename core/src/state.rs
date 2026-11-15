@@ -1,6 +1,6 @@
 //! The state of a run, a phase and a workspace (0.8, Run, Phase, Workspace). These are the types only. The
-//! transitions between them are the state machines of Stage 3a, and `integrating` is entered by `ts-0038-ng`'s
-//! `integrate` answer `pending {url, head}` (0.4).
+//! transitions between them are [`crate::transition`]'s, and `integrating` is entered by the `integrate` answer
+//! `pending {url, head}` (0.4, [`crate::run_rules::apply_integrate_answer`]).
 //!
 //! A state that carries data is a tagged object with a `state` key in `snake_case`, such as
 //! `{"state":"paused","cause":"disk"}`. A workspace state carries none, so it is a plain string. A state with no

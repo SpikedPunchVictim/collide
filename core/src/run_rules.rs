@@ -1,6 +1,6 @@
 //! The run-state rules the engine will follow (0.2, 0.4, 0.5, 0.7), as three pure functions that read no clock and
-//! touch nothing. The state machines are Stage 3a's and the engine is Stage 8's; these are the rules their tests
-//! and code will use, with fixtures now.
+//! touch nothing. The state machines are [`crate::transition`]'s (Stage 3a) and the engine is Stage 8's; these are the
+//! rules their tests and code will use, with fixtures now.
 //!
 //! | rule | function |
 //! |---|---|
@@ -19,6 +19,7 @@ use crate::events::{Event, EventBody, StepKind, StepResult};
 use crate::hook::{HookKind, HookResult, HookStatus, misplaced_pending_message};
 use crate::non_empty::NonEmpty;
 use crate::state::RunState;
+use crate::transition::{RunVia, TransitionError, run_transition};
 use crate::workflow::MIN_WAIT_INTERVAL;
 use std::fmt;
 
@@ -203,8 +204,9 @@ pub enum IntegrateError {
     NotAnAnswer { status: HookStatus },
     /// An output the answer needs is missing, is not a string, or is empty.
     BadOutput { status: HookStatus, name: String },
-    /// Only a finished (`ended`) run is accepted, and an `integrating` one keeps waiting for its merge.
-    RunNotFinished { state: &'static str },
+    /// The run's state machine refused the move: only an `ended` run is accepted, and an `integrating` one keeps
+    /// waiting for its merge ([`crate::transition::run_transition`]).
+    RunRefused(TransitionError),
 }
 
 impl fmt::Display for IntegrateError {
@@ -220,10 +222,9 @@ impl fmt::Display for IntegrateError {
                 "an integrate result `{}` needs a non-empty string output `{name}`",
                 status_name(*status)
             ),
-            IntegrateError::RunNotFinished { state } => write!(
-                f,
-                "an integrate answered for a run that is {state}; only an ended or integrating run can integrate"
-            ),
+            IntegrateError::RunRefused(error) => {
+                write!(f, "an integrate answer was refused: {error}")
+            }
         }
     }
 }
@@ -285,53 +286,46 @@ const AFTER_MERGE: [AfterIntegrate; 2] =
 /// What an `integrate` answer did to the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntegrateStep {
-    /// `Some(Integrating)` when the run is `integrating` after this answer. `None` when it is not: `merged` takes it
-    /// out of `integrating`, and `Integrating {}` holds no outcome to return to, so the state machine (Stage 3a)
-    /// puts the run back where the accept found it.
-    pub run: Option<RunState>,
+    /// The run's state after this answer, reached through the state machine ([`run_transition`]): `integrating` after
+    /// `pending`, and `ended` with its outcome after `merged`.
+    pub run: RunState,
     /// What may run now, in order.
     pub release: Vec<AfterIntegrate>,
     /// What waits for `merged`.
     pub held: Vec<AfterIntegrate>,
 }
 
-fn run_state_name(state: &RunState) -> &'static str {
-    match state {
-        RunState::Running {} => "running",
-        RunState::Paused { .. } => "paused",
-        RunState::Integrating {} => "integrating",
-        RunState::Ended { .. } => "ended",
-        RunState::Failed {} => "failed",
-        RunState::Stopped {} => "stopped",
-    }
-}
-
 /// Applies an `integrate` answer to a run (0.4, `integrating` and `pending`):
-/// - `merged {commit}` releases [`AfterIntegrate`]'s steps, `run.after_integrate` first;
+/// - `merged {commit}` releases [`AfterIntegrate`]'s steps, `run.after_integrate` first, and takes the run out of
+///   `integrating` back to `ended`;
 /// - `pending {url, head}` puts the run in `integrating` and holds those steps back until `merged`. Answering
 ///   `pending` again keeps it so.
 ///
-/// The run must be `ended` (accepting is an action on a finished run) or already `integrating`.
+/// The run must be `ended` (accepting is an action on a finished run) or already `integrating`; the state machine
+/// refuses any other state, and the error names it. `outcome` is what the run ended with. `integrating` does not keep
+/// it, so the run record gives it again for the move back to `ended`.
 pub fn apply_integrate_answer(
     run: &RunState,
     answer: &IntegrateAnswer,
+    outcome: &NonEmpty,
 ) -> Result<IntegrateStep, IntegrateError> {
-    if !matches!(run, RunState::Ended { .. } | RunState::Integrating {}) {
-        return Err(IntegrateError::RunNotFinished {
-            state: run_state_name(run),
-        });
-    }
-    Ok(match answer {
-        IntegrateAnswer::Merged { .. } => IntegrateStep {
-            run: None,
-            release: AFTER_MERGE.to_vec(),
-            held: Vec::new(),
-        },
-        IntegrateAnswer::Pending { .. } => IntegrateStep {
-            run: Some(RunState::Integrating {}),
-            release: Vec::new(),
-            held: AFTER_MERGE.to_vec(),
-        },
+    let (after, release, held) = match answer {
+        IntegrateAnswer::Merged { .. } => (
+            RunState::Ended {
+                outcome: outcome.clone(),
+            },
+            AFTER_MERGE.to_vec(),
+            Vec::new(),
+        ),
+        IntegrateAnswer::Pending { .. } => {
+            (RunState::Integrating {}, Vec::new(), AFTER_MERGE.to_vec())
+        }
+    };
+    run_transition(run, &after, RunVia::IntegrateAnswer).map_err(IntegrateError::RunRefused)?;
+    Ok(IntegrateStep {
+        run: after,
+        release,
+        held,
     })
 }
 
