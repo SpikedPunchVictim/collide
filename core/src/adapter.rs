@@ -156,7 +156,9 @@ pub trait AgentSession {
     /// record is bytes the session wrote, which rebuilds its request ids and pending requests; an `out` record goes
     /// through [`AgentSession::feed`] with its stored `wall_ns`. A replay writes nothing to the child, so the
     /// returned step's `writes` is empty. Records out of `seq` order are [`ReplayError::OutOfOrder`]; a cut-short last
-    /// record was dropped by [`crate::journal::read_journal`] before it got here.
+    /// record was dropped by [`crate::journal::read_journal`] before it got here. The walk is [`crate::replay::replay_records`],
+    /// which a session calls over its [`crate::replay::Replayable`]; [`crate::replay::replay_journal_bytes`] is the path from
+    /// the journal's bytes.
     fn replay(&mut self, records: &[JournalRecord]) -> Result<Step, ReplayError>;
 }
 

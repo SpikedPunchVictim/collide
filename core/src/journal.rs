@@ -1,8 +1,8 @@
 //! The shim's journal (0.2, the shim; 0.3, `AgentSession`). For one child the shim keeps one ordered file of the
 //! bytes that went to the child's stdin (`in`) and the bytes read from its stdout (`out`). An ACP session is rebuilt
 //! by replaying both directions, and one file with one counter gives replay a single order that two logs cannot.
-//! This module is the record type and the pure codec. The shim's file writer is Stage 3a, and replaying a session
-//! over the journal is `ts-0039-ps`.
+//! This module is the record type and the pure codec. The shim's file writer is Stage 3a; replaying a session over
+//! the journal is [`crate::replay`].
 //!
 //! ## The contract
 //!

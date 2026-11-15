@@ -30,7 +30,7 @@
 //! data path (S7, proposal 9). It does not resume a session (`session/load`) or write `session/set_model`.
 
 use super::contract::ChildDialect;
-use super::{Replayable, json_line, outcome_of_turn, replay_journal, stamped, unparsed_line};
+use super::{json_line, outcome_of_turn, stamped, unparsed_line};
 use crate::adapter::{
     AgentSession, ExitInfo, Finished, PhaseOutcome, ReplayError, StampedEvent, Step,
 };
@@ -39,6 +39,7 @@ use crate::agent::{
     PermissionRequest, ToolKind, TurnEndReason, Usage, UsageQuality, UsageScope,
 };
 use crate::journal::JournalRecord;
+use crate::replay::{Replayable, replay_records};
 use serde_json::{Value, json};
 
 /// What a request the session wrote is waiting to be answered as.
@@ -476,7 +477,7 @@ impl AgentSession for AcpSession {
     }
 
     fn replay(&mut self, records: &[JournalRecord]) -> Result<Step, ReplayError> {
-        replay_journal(self, records)
+        replay_records(self, records)
     }
 }
 

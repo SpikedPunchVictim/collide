@@ -22,6 +22,7 @@ pub mod ports;
 pub mod profile;
 pub mod provider;
 pub mod ready;
+pub mod replay;
 pub mod report;
 pub mod resolve;
 pub mod run_rules;

@@ -10,7 +10,8 @@
 //! | [`FakeProvider`] | `TaskProvider` | a task source held in memory |
 //! | [`FakeHookRunner`] | `HookRunner` | the hook executor, scripted by hook name |
 //!
-//! [`contract`] is the one suite that every `AgentSession` must pass, run against both session doubles.
+//! [`contract`] is the one suite that every `AgentSession` must pass, run against both session doubles. Both doubles
+//! replay a journal through [`crate::replay::replay_records`], the one walk, which is `core` code and not a double.
 //!
 //! Every double is deterministic and sans-IO: it reads no clock, opens no file, starts no process and draws no
 //! random number, so the same script and inputs give the same output. A test in `core/tests` scans this directory to
@@ -27,9 +28,8 @@ pub use adapter::{FakeAdapter, NormalizedDialect, NormalizedSession, sample_laun
 pub use hooks::{FakeHookRunner, hook_request, hook_result};
 pub use provider::{FakeProvider, default_initialize, fake_task};
 
-use crate::adapter::{ReplayError, StampedEvent, Step};
+use crate::adapter::StampedEvent;
 use crate::agent::AgentEvent;
-use crate::journal::{Direction, JournalRecord};
 use serde_json::Value;
 
 /// One JSON value as the line a child or a session writes: compact, ended by a newline.
@@ -55,53 +55,6 @@ pub(crate) fn unparsed_line(line: &[u8], wall_ns: u64) -> StampedEvent {
             raw: Some(Value::String(text)),
         },
     )
-}
-
-/// What the two session doubles share to rebuild from a journal: what they wrote is read back (`in`) and what the
-/// child wrote is fed again (`out`).
-pub(crate) trait Replayable {
-    /// Learns what the session wrote: the ids it used, the turns it sent, the requests it answered. Live writes go
-    /// through here too, so a replayed session and a live one reach the same state. `Err` is why the bytes are not
-    /// something this session writes.
-    fn note_written(&mut self, bytes: &[u8]) -> Result<(), String>;
-
-    /// The child's line, as `AgentSession::feed` reads it.
-    fn read_line(&mut self, line: &[u8], wall_ns: u64) -> Step;
-}
-
-/// The walk of `AgentSession::replay`: records in `seq` order from 0, `in` records through `note_written`, `out`
-/// records through `read_line` with the stored time. The events come back and nothing is written.
-pub(crate) fn replay_journal<S: Replayable>(
-    session: &mut S,
-    records: &[JournalRecord],
-) -> Result<Step, ReplayError> {
-    let mut events = Vec::new();
-    for (index, record) in records.iter().enumerate() {
-        let expected = index as u64;
-        if record.seq != expected {
-            return Err(ReplayError::OutOfOrder {
-                expected,
-                found: record.seq,
-            });
-        }
-        match record.direction {
-            Direction::In => {
-                session
-                    .note_written(&record.bytes)
-                    .map_err(|message| ReplayError::Rejected {
-                        seq: record.seq,
-                        message,
-                    })?;
-            }
-            Direction::Out => {
-                events.extend(session.read_line(&record.bytes, record.wall_ns).events)
-            }
-        }
-    }
-    Ok(Step {
-        events,
-        writes: Vec::new(),
-    })
 }
 
 /// What a phase came to, from how its last turn ended. A cancelled turn is `Stopped`, whatever the agent's own

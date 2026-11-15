@@ -17,7 +17,7 @@
 //! Like a Claude session, it writes nothing at `start`: the launch line carries the first turn.
 
 use super::contract::ChildDialect;
-use super::{Replayable, json_line, outcome_of_turn, replay_journal, stamped, unparsed_line};
+use super::{json_line, outcome_of_turn, stamped, unparsed_line};
 use crate::adapter::{
     AgentAdapter, AgentSession, CommandSpec, ConfigPath, ConfigRoot, EnvStrip, ExitInfo, Finished,
     LaunchError, LaunchRequest, LaunchSpec, PhaseFailure, PhaseOutcome, ReplayError, SessionRef,
@@ -29,6 +29,7 @@ use crate::agent::{
 };
 use crate::journal::JournalRecord;
 use crate::pack::Role;
+use crate::replay::{Replayable, replay_records};
 use crate::workflow::{AgentPhase, OnCold, Prompt};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -290,7 +291,7 @@ impl AgentSession for NormalizedSession {
     }
 
     fn replay(&mut self, records: &[JournalRecord]) -> Result<Step, ReplayError> {
-        replay_journal(self, records)
+        replay_records(self, records)
     }
 }
 
