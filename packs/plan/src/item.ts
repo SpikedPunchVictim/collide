@@ -1,11 +1,36 @@
 export const ID_PATTERN = '^[a-z]{2}-[0-9]{3,}-[a-z]{2}$'
 const idRegex = new RegExp(ID_PATTERN)
 
-/** A task's statuses are the five categories themselves (0.10); an epic uses the same five. */
+/** A task's statuses are five of the categories themselves (0.10); an epic uses the same five. */
 export const CATEGORIES = ['ready', 'active', 'review', 'done', 'dropped'] as const
-export type Category = (typeof CATEGORIES)[number]
 
-export const KNOWN_KINDS = ['task', 'epic'] as const
+/** The category a status maps to. Only a proposal's `deferred` is `backlog`. */
+export type Category = 'backlog' | (typeof CATEGORIES)[number]
+
+/** A proposal's six statuses, each with its category (0.10, kinds). The same list is the kind's declaration. */
+export const PROPOSAL_STATUSES: ReadonlyArray<{ name: string; category: Category }> = [
+  { name: 'draft', category: 'active' },
+  { name: 'proposed', category: 'review' },
+  { name: 'accepted', category: 'done' },
+  { name: 'deferred', category: 'backlog' },
+  { name: 'rejected', category: 'dropped' },
+  { name: 'superseded', category: 'dropped' },
+]
+
+export const PROPOSAL = 'proposal'
+
+export const KNOWN_KINDS = ['task', 'epic', PROPOSAL] as const
+
+/** The statuses an item of `kind` may have: a proposal's six, and the five categories for any other kind. */
+export const statusesOf = (kind: string): ReadonlyArray<{ name: string; category: Category }> =>
+  kind === PROPOSAL ? PROPOSAL_STATUSES : CATEGORIES.map((name) => ({ name, category: name }))
+
+/** The state an item of `kind` is in when its status is `status`: the status word and its category. */
+export const stateOf = (kind: string, status: string): { status: string; category: Category } => {
+  const found = statusesOf(kind).find((candidate) => candidate.name === status)
+  if (found === undefined) throw new Error(`"${status}" is not a status of kind ${kind}`)
+  return { status, category: found.category }
+}
 
 /** An extra frontmatter field: text, a flag or a list of text. Numbers and null are refused, see `checkField`. */
 export type FieldValue = string | boolean | string[]
@@ -20,7 +45,8 @@ export interface Item {
   id: string
   alias: string | null
   kind: string
-  status: Category
+  /** The status word as written: one of the kind's statuses (a proposal's own six, any other kind's five categories). */
+  status: string
   title: string
   owners: string[]
   links: ItemLink[]
@@ -77,8 +103,9 @@ export function readItem(frontmatter: Record<string, unknown>): ItemResult {
   if (!idRegex.test(id)) return bad(`id "${id}" does not match ${ID_PATTERN}`)
   if (alias !== undefined && !isString(alias)) return bad(`alias must be a string, not ${describe(alias)}; ${QUOTE_HINT}`)
   if (!isString(kind) || kind === '') return bad(`kind must be a non-empty string, not ${describe(kind)}`)
-  if (!isString(status) || !(CATEGORIES as readonly string[]).includes(status)) {
-    return bad(`status must be one of ${CATEGORIES.join(', ')}, not ${isString(status) ? `"${status}"` : describe(status)}`)
+  const allowed = statusesOf(kind).map((candidate) => candidate.name)
+  if (!isString(status) || !allowed.includes(status)) {
+    return bad(`status must be one of ${allowed.join(', ')}${kind === PROPOSAL ? ' for a proposal' : ''}, not ${isString(status) ? `"${status}"` : describe(status)}`)
   }
   if (!isString(title) || title.trim() === '') return bad(`title must be a non-empty string, not ${describe(title)}; ${QUOTE_HINT}`)
   if (owners !== undefined && !(Array.isArray(owners) && owners.every(isString))) return bad(`owners must be a list of strings, not ${describe(owners)}`)
@@ -95,6 +122,6 @@ export function readItem(frontmatter: Record<string, unknown>): ItemResult {
 
   return {
     ok: true,
-    item: { id, alias: alias ?? null, kind, status: status as Category, title, owners: owners ?? [], links: checkedLinks, fields },
+    item: { id, alias: alias ?? null, kind, status, title, owners: owners ?? [], links: checkedLinks, fields },
   }
 }

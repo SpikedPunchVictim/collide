@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One feature of a proposal, read from the `## Features` part of its body (0.8, 0.10, \"A proposal's features\").\n`id` is `F<n>`, `section` is empty for an entry that is unsorted, and `summary` joins an entry's continuation lines.",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "section": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "section",
+    "summary"
+  ],
+  "title": "Feature",
+  "type": "object"
+}

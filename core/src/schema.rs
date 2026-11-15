@@ -18,7 +18,7 @@ use crate::change::{Change, Rename, TaskPointPayload};
 use crate::context::ContextRecord;
 use crate::events::Event;
 use crate::hook::{HookInput, HookResult};
-use crate::item::{KindDecl, LinkTypeDecl, PlanningFields};
+use crate::item::{Feature, FeatureProblem, KindDecl, LinkTypeDecl, PlanningFields};
 use crate::lock::{PackLock, UserPacks};
 use crate::observer::{ObserverAck, ObserverEvent};
 use crate::pack::{PackManifest, RunBudget};
@@ -106,6 +106,8 @@ pub fn registry() -> Registry {
     registry.add::<ConfigFile>();
     registry.add::<ContextRecord>();
     registry.add::<Event>();
+    registry.add::<Feature>();
+    registry.add::<FeatureProblem>();
     registry.add::<GetParams>();
     registry.add::<GetResult>();
     registry.add::<HookInput>();

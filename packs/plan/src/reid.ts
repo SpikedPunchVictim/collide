@@ -8,6 +8,7 @@ import type { Edit } from './frontmatter-edit.ts'
 import { checkSeed, generatorFor } from './create.ts'
 import { drawFreeId, IdSourceError, takenIds } from './ids.ts'
 import type { IdHooks } from './ids.ts'
+import { stateOf } from './item.ts'
 import { onlyKeys, refused } from './op-util.ts'
 import { findFence, parseFrontmatter, versionOf } from './read-file.ts'
 import { readEpicFiles, toTask } from './scan.ts'
@@ -142,8 +143,8 @@ export async function reidLocked(root: string, id: string, args: Record<string, 
     items: changed.map((found) => ({
       key: `plan:${found.item.id}`,
       version: found.version,
-      from: { category: found.item.status, status: found.item.status },
-      to: { category: found.item.status, status: found.item.status },
+      from: stateOf(found.item.kind, found.item.status),
+      to: stateOf(found.item.kind, found.item.status),
     })),
   }
 }

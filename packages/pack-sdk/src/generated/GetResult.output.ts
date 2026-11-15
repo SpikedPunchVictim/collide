@@ -26,6 +26,14 @@ export interface Task {
   checklist?: Checklist | null
   checkout?: string | null
   collections: string[]
+  /**
+   * The lines of that part that did not parse. Left out when there are none.
+   */
+  featureProblems?: FeatureProblem[]
+  /**
+   * A proposal's features, read from its Features part (0.8). Left out when there are none.
+   */
+  features?: Feature[]
   fields: {
     [k: string]: unknown
   }
@@ -57,6 +65,23 @@ export interface ChecklistItem {
   id: string
   reason?: string | null
   state: ChecklistState
+}
+/**
+ * A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.
+ */
+export interface FeatureProblem {
+  line: number
+  reason: string
+}
+/**
+ * One feature of a proposal, read from the `## Features` part of its body (0.8, 0.10, "A proposal's features").
+ * `id` is `F<n>`, `section` is empty for an entry that is unsorted, and `summary` joins an entry's continuation lines.
+ */
+export interface Feature {
+  id: string
+  section: string
+  summary: string
+  title: string
 }
 /**
  * A typed link on an item (0.8).

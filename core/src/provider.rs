@@ -29,7 +29,9 @@
 //! | `task.invalid` | [`TaskInvalid`] |
 
 use crate::change::{Effect, FieldDiff, ItemState};
-use crate::item::{Category, Checklist, KindDecl, Link, LinkTypeDecl, OpDecl, StatusDecl};
+use crate::item::{
+    Category, Checklist, Feature, FeatureProblem, KindDecl, Link, LinkTypeDecl, OpDecl, StatusDecl,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -150,6 +152,12 @@ pub struct Task {
     pub template_fields: BTreeMap<String, String>,
     #[serde(default)]
     pub fields: BTreeMap<String, Value>,
+    /// A proposal's features, read from its Features part (0.8). Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<Feature>,
+    /// The lines of that part that did not parse. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feature_problems: Vec<FeatureProblem>,
 }
 
 impl Task {

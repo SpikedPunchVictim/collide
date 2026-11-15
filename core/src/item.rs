@@ -146,6 +146,25 @@ pub struct PlanningFields {
     pub checklist: Option<Checklist>,
 }
 
+/// One feature of a proposal, read from the `## Features` part of its body (0.8, 0.10, "A proposal's features").
+/// `id` is `F<n>`, `section` is empty for an entry that is unsorted, and `summary` joins an entry's continuation lines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Feature {
+    pub id: String,
+    pub title: String,
+    pub section: String,
+    pub summary: String,
+}
+
+/// A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureProblem {
+    pub line: u32,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KindError {
     UnknownKind(String),
@@ -198,11 +217,11 @@ fn kind(name: &str, statuses: &[(&str, Category)]) -> KindDecl {
 }
 
 /// The kinds of Collide's own planning items (0.10): `epic` and `task`, whose statuses are five of the categories
-/// themselves, and `spike`. The markdown provider declares the same kinds in `initialize`, with its ops and
-/// transitions (left empty here, because they are the provider's). `proposal` and `question` come with the
-/// planning pack.
+/// themselves, `spike`, and `proposal` with its six statuses. The markdown provider declares the same kinds in
+/// `initialize`, with its ops and transitions (left empty here, because they are the provider's). `question` comes
+/// with the planning pack.
 pub fn planning_kinds() -> Vec<KindDecl> {
-    use Category::{Active, Done, Dropped, Ready, Review};
+    use Category::{Active, Backlog, Done, Dropped, Ready, Review};
     let own_categories = [
         ("ready", Ready),
         ("active", Active),
@@ -221,6 +240,17 @@ pub fn planning_kinds() -> Vec<KindDecl> {
                 ("results", Review),
                 ("concluded", Done),
                 ("dropped", Dropped),
+            ],
+        ),
+        kind(
+            "proposal",
+            &[
+                ("draft", Active),
+                ("proposed", Review),
+                ("accepted", Done),
+                ("deferred", Backlog),
+                ("rejected", Dropped),
+                ("superseded", Dropped),
             ],
         ),
     ]

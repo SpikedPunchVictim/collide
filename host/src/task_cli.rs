@@ -42,21 +42,22 @@ usage:
   collide tasks [--ready] [--kind <kind>] [--json]
   collide task <id> [--json]
   collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
-  collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--checkout <path>] [--commit] [--json]
+  collide task create <title> [epic=<epic>] [kind=task|epic|proposal] [seed=<number>] [--checkout <path>] [--commit] [--json]
   collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]";
 
 /// What `collide help` prints.
 pub const HELP: &str = "\
-collide tasks: list the items under .collide/planning/epics/ (--ready: only the items that can be started now;
+collide tasks: list the items (epics, tasks and proposals) under .collide/planning/epics/ (--ready: only the items that can be started now;
   --kind: only items of that kind; --json: machine-readable)
-collide task <id>: show one item
+collide task <id>: show one item (a proposal also lists its features by section, then the problems of its Features
+  part)
 collide task <id> <op> ...: change one item with an op the provider declares (an unknown op lists them)
 
 <id> is the full id (ts-0012-ua) or a short form: 12, 0012, 12-ua, ts-12. A short form must match exactly one item;
 if it matches several they are listed with their epics, and you add the suffix.
 
 collide task create <title>: make an item in an epic (epic=ep-002-va, or a short form such as ep-2; kind=epic makes an
-  epic, which takes no epic=). The id is the next free number for the kind across every local branch, every fetched
+  epic, which takes no epic=; kind=proposal makes a draft proposal in the epic's proposals/ folder). The id is the next free number for the kind across every local branch, every fetched
   remote branch and the working tree, with a two-letter suffix drawn from a seeded generator (seed=, random when left
   out). The new file is written; without --commit nothing is committed.
 collide task reid <id>: give an item a new suffix and rewrite every link that names the old id, in every item file.

@@ -294,6 +294,7 @@ fn the_bundled_provider_answers_initialize_and_list_over_a_fixture_root() {
         [
             "ep-001-aa",
             "ep-002-bb",
+            "pr-0001-aa",
             "ts-0001-aa",
             "ts-0002-bb",
             "ts-0003-cc",

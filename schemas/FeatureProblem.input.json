@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.",
+  "properties": {
+    "line": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "line",
+    "reason"
+  ],
+  "title": "FeatureProblem",
+  "type": "object"
+}

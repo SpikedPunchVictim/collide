@@ -159,6 +159,50 @@ fn a_task_with_only_its_required_keys_is_valid() {
     assert!(task.links.is_empty() && task.collections.is_empty());
 }
 
+fn proposal() -> Value {
+    let mut doc = task();
+    doc["kind"] = json!("proposal");
+    doc["state"] = state("draft", "active");
+    doc["features"] = json!([
+        { "id": "F1", "title": "Trust prompt", "section": "Packs", "summary": "Asks first." },
+        { "id": "F3", "title": "Badge", "section": "", "summary": "The Queue count." }
+    ]);
+    doc["featureProblems"] = json!([{ "line": 14, "reason": "F1 is used twice" }]);
+    doc
+}
+
+#[test]
+fn a_task_carries_features_and_feature_problems_and_they_round_trip() {
+    let parsed: Task = round_trip(proposal());
+    assert_eq!(parsed.features.len(), 2);
+    assert_eq!(parsed.features[1].section, "");
+    assert_eq!(parsed.feature_problems[0].line, 14);
+}
+
+#[test]
+fn a_task_with_neither_validates_unchanged_and_serializes_neither() {
+    let parsed: Task = round_trip(task());
+    assert!(parsed.features.is_empty() && parsed.feature_problems.is_empty());
+    let value = serde_json::to_value(&parsed).unwrap();
+    assert!(value.get("features").is_none() && value.get("featureProblems").is_none());
+}
+
+#[test]
+fn a_feature_or_a_problem_with_a_missing_or_extra_key_is_refused() {
+    let mut no_title = proposal();
+    no_title["features"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("title");
+    refused::<Task>(no_title);
+    let mut extra = proposal();
+    extra["featureProblems"][0]["extra"] = json!(1);
+    refused::<Task>(extra);
+    let mut snake = proposal();
+    snake["feature_problems"] = json!([]);
+    refused::<Task>(snake);
+}
+
 #[test]
 fn watch_params_and_result_round_trip() {
     round_trip::<WatchParams>(json!({ "checkouts": ["main", "wt-1"] }));
@@ -730,6 +774,7 @@ fn the_registry_holds_every_protocol_root() {
 
 #[test]
 fn the_protocol_keys_are_in_the_schema() {
+    assert!(keys_of("Task").contains("features") && keys_of("Task").contains("featureProblems"));
     assert_eq!(
         keys_of("InitializeResult"),
         set(&[

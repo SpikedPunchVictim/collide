@@ -3,11 +3,35 @@
 //! its epic in short form (`blocked-by ts-0009-cu (ep-002)`). The JSON form is the provider's task plus `epic` and
 //! `ready` fields.
 
+use collide_core::item::Feature;
 use collide_core::provider::Task;
 use collide_core::ready::Readiness;
 use collide_core::short_id::epic_short_form;
 use serde_json::{Value, json};
 use std::collections::HashSet;
+
+/// What the print calls a feature with no section.
+const UNSORTED: &str = "Unsorted";
+
+/// The features by section: sections in order of first appearance, then the unsorted ones (an empty section) last.
+fn by_section(features: &[Feature]) -> Vec<(&str, Vec<&Feature>)> {
+    let mut named: Vec<(&str, Vec<&Feature>)> = Vec::new();
+    let mut unsorted: Vec<&Feature> = Vec::new();
+    for feature in features {
+        if feature.section.is_empty() {
+            unsorted.push(feature);
+        } else if let Some((_, group)) = named.iter_mut().find(|(name, _)| *name == feature.section)
+        {
+            group.push(feature);
+        } else {
+            named.push((feature.section.as_str(), vec![feature]));
+        }
+    }
+    if !unsorted.is_empty() {
+        named.push((UNSORTED, unsorted));
+    }
+    named
+}
 
 /// The items of one corpus and the ready rule's answer over all of them.
 pub struct View<'a> {
@@ -152,6 +176,24 @@ impl<'a> View<'a> {
                     link.link_type,
                     self.target(&link.to)
                 ));
+            }
+        }
+        if !task.features.is_empty() {
+            text.push_str("  features\n");
+            for (section, features) in by_section(&task.features) {
+                text.push_str(&format!("    {section}\n"));
+                for feature in features {
+                    text.push_str(&format!(
+                        "      {} {}: {}\n",
+                        feature.id, feature.title, feature.summary
+                    ));
+                }
+            }
+        }
+        if !task.feature_problems.is_empty() {
+            text.push_str("  feature problems\n");
+            for problem in &task.feature_problems {
+                text.push_str(&format!("    line {}: {}\n", problem.line, problem.reason));
             }
         }
         if let Some(body) = task.body.as_deref().filter(|body| !body.trim().is_empty()) {

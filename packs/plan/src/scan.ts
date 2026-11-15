@@ -1,7 +1,8 @@
 import { readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import type { TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
-import { KNOWN_KINDS, readItem } from './item.ts'
+import { parseFeatures } from './features.ts'
+import { KNOWN_KINDS, PROPOSAL, readItem, stateOf } from './item.ts'
 import type { Item } from './item.ts'
 import { readItemFile } from './read-file.ts'
 
@@ -16,13 +17,15 @@ export interface FoundItem {
   epic: string | null
   path: string
   body: string
+  /** The line of the file that `body` starts on. */
+  bodyLine: number
   version: string
 }
 
 export interface Scan {
   items: FoundItem[]
   invalid: TaskInvalidOutput[]
-  /** Items whose kind is not `task` or `epic`. They are listed, not dropped. */
+  /** Items whose kind is not `task`, `epic` or `proposal`. They are listed, not dropped. */
   unknownKind: number
   /** Items with a link whose target is no item that was read. They are listed, not dropped. */
   brokenLink: number
@@ -42,7 +45,7 @@ async function entries(dir: string) {
 
 /**
  * Reads the items under `<cwd>/.collide/planning/epics/`: each epic folder's `epic.md` and the `.md` files directly in
- * its `tasks/` folder, and nothing else. Symbolic links are not followed. `spikes/`, `proposals/` and `questions/`
+ * its `tasks/` and `proposals/` folders, and nothing else. Symbolic links are not followed. `spikes/` and `questions/`
  * are never opened. The epic is the folder, so it is reported from the path and never from frontmatter. Every file
  * that reads is returned, in scan order, including a second file with an id another file has (`scanEpics` sets that
  * one aside); `invalid` holds the files that did not read.
@@ -58,7 +61,7 @@ export async function readEpicFiles(cwd: string, checkout: string | null = null)
     if (!read.ok) return reject(absolute, read.reason)
     const checked = readItem(read.frontmatter)
     if (!checked.ok) return reject(absolute, checked.reason)
-    items.push({ item: checked.item, epic, path: posix(cwd, absolute), body: read.body, version: read.version })
+    items.push({ item: checked.item, epic, path: posix(cwd, absolute), body: read.body, bodyLine: read.bodyLine, version: read.version })
   }
 
   for (const folder of (await entries(epicsDir)).filter((entry) => entry.isDirectory())) {
@@ -71,8 +74,10 @@ export async function readEpicFiles(cwd: string, checkout: string | null = null)
     for (const file of (await entries(epicDir)).filter((entry) => entry.isFile() && entry.name === 'epic.md')) {
       await readOne(join(epicDir, file.name), null)
     }
-    for (const file of (await entries(join(epicDir, 'tasks'))).filter((entry) => entry.isFile() && entry.name.endsWith('.md'))) {
-      await readOne(join(epicDir, 'tasks', file.name), epic)
+    for (const subfolder of ['tasks', 'proposals']) {
+      for (const file of (await entries(join(epicDir, subfolder))).filter((entry) => entry.isFile() && entry.name.endsWith('.md'))) {
+        await readOne(join(epicDir, subfolder, file.name), epic)
+      }
     }
   }
 
@@ -100,9 +105,13 @@ export async function scanEpics(cwd: string, checkout: string | null = null): Pr
   return { items: kept, invalid, unknownKind, brokenLink }
 }
 
-/** One item as the provider reports it. `body` is left out of `list`, which carries every item. */
+/**
+ * One item as the provider reports it. `body` is left out of `list`, which carries every item. A proposal also carries
+ * its features and the problems of its Features part, which are read from the body whether or not it is sent.
+ */
 export function toTask(found: FoundItem, withBody: boolean): TaskInput {
   const { item } = found
+  const { features, problems } = item.kind === PROPOSAL ? parseFeatures(found.body, found.bodyLine) : { features: [], problems: [] }
   const partOf = found.epic === null ? [] : [{ type: 'part-of', to: found.epic }]
   return {
     key: `plan:${item.id}`,
@@ -110,12 +119,14 @@ export function toTask(found: FoundItem, withBody: boolean): TaskInput {
     ...(item.alias === null ? {} : { aliases: [item.alias] }),
     title: item.title,
     ...(withBody ? { body: found.body } : {}),
-    state: { category: item.status, status: item.status },
+    state: stateOf(item.kind, item.status),
     version: found.version,
     path: found.path,
     kind: item.kind,
     links: [...partOf, ...item.links],
     owners: item.owners,
     ...(Object.keys(item.fields).length === 0 ? {} : { fields: item.fields }),
+    ...(features.length === 0 ? {} : { features }),
+    ...(problems.length === 0 ? {} : { featureProblems: problems }),
   }
 }

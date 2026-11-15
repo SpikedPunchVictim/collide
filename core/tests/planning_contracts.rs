@@ -2,7 +2,9 @@
 //! `change` payload of the task points, and the schemas of the new keys.
 
 use collide_core::change::{Change, TaskPointPayload};
-use collide_core::item::{self, Category, KindDecl, KindError, Link, PlanningFields};
+use collide_core::item::{
+    self, Category, Feature, FeatureProblem, KindDecl, KindError, Link, PlanningFields,
+};
 use collide_core::pack::{PackManifest, RunBudget};
 use collide_core::points::{self, DerivedPoint, Point, PointError};
 use collide_core::schema;
@@ -66,10 +68,61 @@ fn a_status_outside_its_kinds_list_fails() {
 }
 
 #[test]
+fn a_proposal_status_maps_to_its_category() {
+    let expected = [
+        ("draft", Category::Active),
+        ("proposed", Category::Review),
+        ("accepted", Category::Done),
+        ("deferred", Category::Backlog),
+        ("rejected", Category::Dropped),
+        ("superseded", Category::Dropped),
+    ];
+    for (status, category) in expected {
+        assert_eq!(category_of("proposal", status), Ok(category), "{status}");
+    }
+}
+
+#[test]
+fn a_proposal_has_its_six_statuses_and_no_category_name() {
+    for status in ["ready", "active", "review", "done", "dropped"] {
+        assert_eq!(
+            category_of("proposal", status),
+            Err(KindError::UnknownStatus {
+                kind: "proposal".into(),
+                status: status.into()
+            }),
+            "{status}"
+        );
+    }
+}
+
+#[test]
 fn an_unknown_kind_fails() {
     assert_eq!(
-        category_of("proposal", "draft"),
-        Err(KindError::UnknownKind("proposal".into()))
+        category_of("question", "open"),
+        Err(KindError::UnknownKind("question".into()))
+    );
+}
+
+#[test]
+fn a_feature_and_a_feature_problem_round_trip_and_refuse_other_keys() {
+    let feature = json!({
+        "id": "F1", "title": "Trust prompt", "section": "Packs", "summary": "A repo pack asks first."
+    });
+    let parsed: Feature = serde_json::from_value(feature.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), feature);
+    let problem = json!({ "line": 12, "reason": "F2 is used twice" });
+    let parsed: FeatureProblem = serde_json::from_value(problem.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), problem);
+    let mut extra = feature;
+    extra["extra"] = json!(1);
+    assert!(serde_json::from_value::<Feature>(extra).is_err());
+    assert!(
+        serde_json::from_value::<FeatureProblem>(json!({ "line": 1, "reason": "x", "extra": 1 }))
+            .is_err()
+    );
+    assert!(
+        serde_json::from_value::<FeatureProblem>(json!({ "line": -1, "reason": "x" })).is_err()
     );
 }
 
@@ -585,6 +638,8 @@ fn the_registry_holds_the_planning_types() {
     let names: BTreeSet<String> = schema::registry().render().into_keys().collect();
     for name in [
         "Change",
+        "Feature",
+        "FeatureProblem",
         "KindDecl",
         "LinkTypeDecl",
         "PackManifest",
@@ -718,4 +773,13 @@ fn the_kind_link_owner_checklist_and_budget_keys_are_in_the_schema() {
         set(&["blocking", "to", "type"])
     );
     assert_eq!(keys_of("RunBudget", None), set(&["usd"]));
+}
+
+#[test]
+fn the_feature_keys_are_in_the_schema() {
+    assert_eq!(
+        keys_of("Feature", None),
+        set(&["id", "section", "summary", "title"])
+    );
+    assert_eq!(keys_of("FeatureProblem", None), set(&["line", "reason"]));
 }

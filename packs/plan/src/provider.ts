@@ -10,13 +10,28 @@ import type {
 } from '@collide/pack-sdk'
 import { resolveCheckout } from './checkout.ts'
 import { TITLE_MAX } from './create.ts'
-import { CATEGORIES, ID_PATTERN } from './item.ts'
+import { CATEGORIES, ID_PATTERN, PROPOSAL, PROPOSAL_STATUSES } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
 import { applyOp } from './write.ts'
 
 const statuses = CATEGORIES.map((name) => ({ name, category: name }))
 const kind = (name: string): KindDeclInput => ({ name, statuses })
+
+/**
+ * A proposal's statuses are its own six words, each with a category (0.10). It declares its own `setStatus`, which takes
+ * only those words, because a category does not name one status: `rejected` and `superseded` are both `dropped`.
+ */
+const proposalKind: KindDeclInput = {
+  name: PROPOSAL,
+  statuses: [...PROPOSAL_STATUSES],
+  ops: [
+    {
+      name: 'setStatus',
+      args: { type: 'object', properties: { status: { enum: PROPOSAL_STATUSES.map((status) => status.name) } }, required: ['status'], additionalProperties: false },
+    },
+  ],
+}
 
 const noExtraArgs = { additionalProperties: false }
 
@@ -50,7 +65,7 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
     args: {
       type: 'object',
       properties: {
-        kind: { enum: ['task', 'epic'] },
+        kind: { enum: ['task', 'epic', PROPOSAL] },
         epic: { type: 'string', pattern: '^ep-[0-9]{3,}-[a-z]{2}$' },
         title: { type: 'string', minLength: 1, maxLength: TITLE_MAX },
         seed: { type: 'integer' },
@@ -62,14 +77,14 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
   { name: 'reid', args: { type: 'object', properties: { seed: { type: 'integer' } }, ...noExtraArgs } },
 ]
 
-/** `initialize`'s answer: kinds `task` and `epic`, the five categories as statuses, `blocked-by` as the one blocking link. */
+/** `initialize`'s answer: kinds `task`, `epic` and `proposal`, the five categories as a task's statuses, `blocked-by` as the one blocking link. */
 export const INITIALIZE_RESULT: InitializeResultInput = {
   scope: 'ref',
   idPattern: ID_PATTERN,
   shortIdPattern: '^[0-9]+(-[a-z]{2})?$',
   statuses,
   categoryStatus: Object.fromEntries(CATEGORIES.map((name) => [name, name])),
-  kinds: [kind('task'), kind('epic')],
+  kinds: [kind('task'), kind('epic'), proposalKind],
   ops: OPS,
   links: [
     { name: 'blocked-by', dir: 'out', blocking: true },

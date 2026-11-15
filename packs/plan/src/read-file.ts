@@ -15,7 +15,7 @@ export const BODY_CAP = 256 * 1024
 const MAX_ALIAS_COUNT = 100
 
 export type ReadResult =
-  | { ok: true; frontmatter: Record<string, unknown>; body: string; version: string }
+  | { ok: true; frontmatter: Record<string, unknown>; body: string; bodyLine: number; version: string }
   | { ok: false; reason: string }
 
 const fail = (reason: string): ReadResult => ({ ok: false, reason })
@@ -80,7 +80,7 @@ const decode = (bytes: Buffer): string | null => {
 /**
  * Reads one item file. Only the head of the file is read until the frontmatter block is known to be under its cap,
  * and the rest only when the body is under its cap too, so an oversized file is never held in memory. The body is
- * returned as text and never parsed.
+ * returned as text, with the line of the file it starts on, and never parsed here.
  */
 export async function readItemFile(path: string): Promise<ReadResult> {
   const handle = await open(path, 'r')
@@ -103,7 +103,9 @@ export async function readItemFile(path: string): Promise<ReadResult> {
 
     const parsed = parseFrontmatter(frontmatterText)
     if (!parsed.ok) return fail(parsed.reason)
-    return { ok: true, frontmatter: parsed.value, body, version: versionOf(whole) }
+    // The body's first line is a line of the file, so a problem found in the body can name it.
+    const bodyLine = 1 + whole.subarray(0, fence.bodyStart).filter((byte) => byte === lf).length
+    return { ok: true, frontmatter: parsed.value, body, bodyLine, version: versionOf(whole) }
   } finally {
     await handle.close()
   }

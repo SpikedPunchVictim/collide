@@ -8,7 +8,8 @@ import { addBlockedByLine, clearOwnersLine, setOwnerLine, setStatusLine } from '
 import type { Edit } from './frontmatter-edit.ts'
 import { checkCreate, CREATE, createLocked } from './create.ts'
 import type { IdHooks } from './ids.ts'
-import { CATEGORIES, ID_PATTERN, readItem } from './item.ts'
+import { parseFeatures } from './features.ts'
+import { CATEGORIES, ID_PATTERN, PROPOSAL, PROPOSAL_STATUSES, readItem, stateOf, statusesOf } from './item.ts'
 import { LOCK_FILE, withLock } from './lock.ts'
 import type { LockOptions } from './lock.ts'
 import { CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
@@ -40,6 +41,17 @@ interface OpSpec {
 
 const idRegex = new RegExp(ID_PATTERN)
 
+/** The status values `setStatus` takes for any kind: the five categories, and a proposal's own six words. */
+const SET_STATUS_VALUES: readonly string[] = [...CATEGORIES, ...PROPOSAL_STATUSES.map((status) => status.name)]
+
+/** The refusal for a move to `proposed` while the Features part has problems: every problem, with its line. */
+function proposedRefusal(found: FoundItem): string | null {
+  const { problems } = parseFeatures(found.body, found.bodyLine)
+  if (problems.length === 0) return null
+  const lines = problems.map((problem) => `  line ${problem.line}: ${problem.reason}`)
+  return `${found.item.id} cannot move to proposed: its ## Features part in ${found.path} has ${problems.length} problem${problems.length === 1 ? '' : 's'}; fix ${problems.length === 1 ? 'it' : 'them'} first:\n${lines.join('\n')}`
+}
+
 const OPS: Record<string, OpSpec> = {
   [SET_STATUS]: {
     check: (args) => {
@@ -47,14 +59,25 @@ const OPS: Record<string, OpSpec> = {
       if (status !== undefined && category !== undefined) return 'give either status or category, not both'
       const given = status ?? category
       if (given === undefined) return `give status or category, one of ${CATEGORIES.join(', ')}`
-      // Every status is named after its category (0.10), so both take the same five values.
-      if (typeof given !== 'string' || !(CATEGORIES as readonly string[]).includes(given)) return `${status === undefined ? 'category' : 'status'} must be one of ${CATEGORIES.join(', ')}`
+      // A task's and an epic's status is named after its category (0.10), so `category` takes those five. A proposal's
+      // status is one of its own six words, and `prepare` checks the value against the kind of the item.
+      if (typeof given !== 'string' || !(status === undefined ? CATEGORIES : SET_STATUS_VALUES).includes(given)) {
+        return `${status === undefined ? 'category' : 'status'} must be one of ${(status === undefined ? CATEGORIES : SET_STATUS_VALUES).join(', ')}`
+      }
       return onlyKeys(args, ['status', 'category'])
     },
     prepare: (found, _scan, args, frontmatter) => {
-      const category = (args.status ?? args.category) as string
-      if (found.item.status === category) return { kind: 'nothing' }
-      return { kind: 'edit', edit: (text) => setStatusLine(text, category), expected: { ...frontmatter, status: category } }
+      const { kind, id } = found.item
+      const status = (args.status ?? args.category) as string
+      const allowed = statusesOf(kind).map((candidate) => candidate.name)
+      if (kind === PROPOSAL && args.category !== undefined) return { kind: 'refuse', message: `${id} is a proposal, whose statuses are its own: give status, one of ${allowed.join(', ')}` }
+      if (!allowed.includes(status)) return { kind: 'refuse', message: `${id} is ${kind === PROPOSAL ? 'a proposal' : `an item of kind ${kind}`}; its status is one of ${allowed.join(', ')}, not ${status}` }
+      if (found.item.status === status) return { kind: 'nothing' }
+      if (kind === PROPOSAL && status === 'proposed') {
+        const message = proposedRefusal(found)
+        if (message !== null) return { kind: 'refuse', message }
+      }
+      return { kind: 'edit', edit: (text) => setStatusLine(text, status), expected: { ...frontmatter, status } }
     },
   },
   [CLAIM]: {
@@ -109,7 +132,7 @@ async function readBack(found: FoundItem, absolute: string): Promise<FoundItem> 
   if (!read.ok) throw new Error(`${found.path} does not read back after the write: ${read.reason}`)
   const checked = readItem(read.frontmatter)
   if (!checked.ok) throw new Error(`${found.path} does not read back after the write: ${checked.reason}`)
-  return { ...found, item: checked.item, body: read.body, version: read.version }
+  return { ...found, item: checked.item, body: read.body, bodyLine: read.bodyLine, version: read.version }
 }
 
 async function writeLocked(root: string, id: string, version: string, spec: OpSpec, args: Record<string, unknown>): Promise<ApplyResultInput> {
@@ -149,7 +172,7 @@ async function writeLocked(root: string, id: string, version: string, spec: OpSp
     task: toTask(after, true),
     version: after.version,
     files: [after.path],
-    items: [{ key, version: after.version, from: { category: found.item.status, status: found.item.status }, to: { category: after.item.status, status: after.item.status } }],
+    items: [{ key, version: after.version, from: stateOf(found.item.kind, found.item.status), to: stateOf(after.item.kind, after.item.status) }],
   }
 }
 

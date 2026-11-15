@@ -552,7 +552,7 @@ fn help_prints_the_usage_the_exit_codes_and_where_the_provider_is_found() {
     }
     assert!(run.stdout.contains("COLLIDE_BUILTIN_PACKS"));
     for line in [
-        "collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--checkout <path>] [--commit] [--json]",
+        "collide task create <title> [epic=<epic>] [kind=task|epic|proposal] [seed=<number>] [--checkout <path>] [--commit] [--json]",
         "collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]",
         "Without --commit nothing is committed: review with\n  git diff.",
         "--commit",
@@ -1528,4 +1528,320 @@ fn commit_works_with_json_and_keeps_the_providers_result_on_stdout() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     assert_eq!(json(&run)["outcome"], "ok");
     assert_eq!(committed(&repo.dir), [format!("M\t{THIRD}")]);
+}
+
+// Proposals and their features (ts-0047).
+
+const ALPHA_PROPOSALS: &str = ".collide/planning/epics/ep-001-aa-alpha/proposals";
+const PROPOSAL_FILE: &str = "pr-0003-km-features-in-proposals.md";
+
+fn proposal_text(status: &str, features: &str) -> String {
+    format!(
+        "---\nid: pr-0003-km\nkind: proposal\nstatus: {status}\ntitle: \"Features in proposals\"\nowners: []\nlinks: []\n---\n\n\
+         ## Context\n\nMade-up context.\n\n## Features\n\n{features}\n## Decision\n"
+    )
+}
+
+const FEATURES_EXAMPLE: &str = "\
+### Packs
+- **F1 Trust prompt for repo packs**: a repo pack asks before its first run.
+  A continuation line is indented by two spaces.
+- **F2 Pack lock**: `packs.lock` pins each pack to a tree.
+
+### Unsorted
+- **F3 Menu bar badge**: the Queue count in the menu bar.
+";
+
+/// A fixture repository with a proposal written into the alpha epic's `proposals/` folder and committed.
+fn repo_with_proposal(name: &str, status: &str, features: &str) -> Repo {
+    let repo = Repo::new(name);
+    let folder = repo.dir.join(ALPHA_PROPOSALS);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join(PROPOSAL_FILE), proposal_text(status, features)).unwrap();
+    git(&repo.dir, &["add", "-A"]);
+    git(&repo.dir, &["commit", "-q", "-m", "a proposal"]);
+    repo
+}
+
+#[test]
+fn a_proposal_lists_as_kind_proposal_with_its_status_and_category() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-list", "deferred", FEATURES_EXAMPLE),
+    );
+    let run = collide(&repo, &bundle, &["tasks", "--kind", "proposal"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        "ep-001-aa / pr-0003-km  deferred  proposal  Features in proposals\n"
+    );
+    let document = json(&collide(
+        &repo,
+        &bundle,
+        &["tasks", "--kind", "proposal", "--json"],
+    ));
+    assert_eq!(
+        document["tasks"][0]["state"],
+        serde_json::json!({ "status": "deferred", "category": "backlog" })
+    );
+    assert_eq!(document["invalid"], serde_json::json!([]));
+}
+
+#[test]
+fn task_prints_a_proposals_features_by_section_with_unsorted_last() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-show", "draft", FEATURES_EXAMPLE),
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let head = "\
+ep-001-aa / pr-0003-km
+  title   Features in proposals
+  kind    proposal
+  status  draft
+  ready   no (status is draft)
+  path    .collide/planning/epics/ep-001-aa-alpha/proposals/pr-0003-km-features-in-proposals.md
+  features
+    Packs
+      F1 Trust prompt for repo packs: a repo pack asks before its first run. A continuation line is indented by two spaces.
+      F2 Pack lock: `packs.lock` pins each pack to a tree.
+    Unsorted
+      F3 Menu bar badge: the Queue count in the menu bar.
+
+## Context
+";
+    assert!(run.stdout.starts_with(head), "{}", run.stdout);
+    assert!(!run.stdout.contains("feature problems"), "{}", run.stdout);
+}
+
+#[test]
+fn sections_come_in_order_of_first_appearance_and_a_repeated_section_groups() {
+    let features = "\
+- **F1 Above**: before any heading.
+### Packs
+- **F2 In packs**: a
+### Other
+- **F3 In other**: b
+### Packs
+- **F4 Back in packs**: c
+";
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-order", "draft", features),
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let shown: Vec<&str> = run
+        .stdout
+        .lines()
+        .skip_while(|line| *line != "  features")
+        .take_while(|line| !line.is_empty())
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "  features",
+            "    Packs",
+            "      F2 In packs: a",
+            "      F4 Back in packs: c",
+            "    Other",
+            "      F3 In other: b",
+            "    Unsorted",
+            "      F1 Above: before any heading."
+        ]
+    );
+}
+
+#[test]
+fn task_prints_the_problems_of_the_features_part_after_the_features() {
+    let features = "### Packs\n- **F1 Fine**: ok\nstray text\n- **F1 Again**: dup\n";
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-problems", "draft", features),
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    // The frontmatter is 8 lines and the blank line after it is the 9th; the Features heading is the 14th and its first line the 16th.
+    let expected = "  \
+features
+    Packs
+      F1 Fine: ok
+  feature problems
+    line 18: this line is neither an entry nor a continuation: an entry is written - **F<n> <title>**: <summary>
+    line 19: F1 is already used on line 17; each F<n> appears once in a proposal
+";
+    assert!(
+        run.stdout.contains(&expected[2..]),
+        "{}\n--- wanted\n{expected}",
+        run.stdout
+    );
+    let listed = json(&collide(&repo, &bundle, &["tasks", "--json"]));
+    assert_eq!(
+        listed["invalid"],
+        serde_json::json!([]),
+        "a draft's problem is no task.invalid"
+    );
+}
+
+#[test]
+fn task_json_lists_the_features_and_the_problems() {
+    let features = "\
+### Packs
+- **F1 Trust prompt**: first
+- **F2 Pack lock**: second
+### Unsorted
+- **F3 Badge**: third
+bad
+";
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-json", "draft", features),
+    );
+    let task = json(&collide(&repo, &bundle, &["task", "pr-0003-km", "--json"]));
+    let features: Vec<(&str, &str)> = task["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| (f["id"].as_str().unwrap(), f["section"].as_str().unwrap()))
+        .collect();
+    assert_eq!(features, [("F1", "Packs"), ("F2", "Packs"), ("F3", "")]);
+    assert_eq!(task["featureProblems"][0]["line"], 21);
+    assert!(
+        task["featureProblems"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("neither an entry nor a continuation")
+    );
+}
+
+#[test]
+fn a_proposal_with_no_features_part_prints_none_and_has_none_in_json() {
+    let repo = Repo::new("proposal-none");
+    let folder = repo.dir.join(ALPHA_PROPOSALS);
+    fs::create_dir_all(&folder).unwrap();
+    let text = proposal_text("draft", "").replace("## Features\n\n", "");
+    fs::write(folder.join(PROPOSAL_FILE), text).unwrap();
+    let bundle = bundle();
+    let run = collide(&repo, &bundle, &["task", "pr-0003"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(!run.stdout.contains("  features"), "{}", run.stdout);
+    assert!(!run.stdout.contains("feature problems"), "{}", run.stdout);
+    let task = json(&collide(&repo, &bundle, &["task", "pr-0003", "--json"]));
+    assert!(task.get("features").is_none() && task.get("featureProblems").is_none());
+}
+
+#[test]
+fn create_makes_a_draft_proposal_in_the_epics_proposals_folder() {
+    let (bundle, repo) = (bundle(), Repo::new("create-proposal"));
+    let run = collide(
+        &repo,
+        &bundle,
+        &[
+            "task",
+            "create",
+            "Features in proposals",
+            "epic=ep-001-aa",
+            "kind=proposal",
+            "seed=1",
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let file = format!("{ALPHA_PROPOSALS}/pr-0001-ra-features-in-proposals.md");
+    assert_eq!(
+        run.stdout,
+        format!(
+            "ok  created ep-001-aa / pr-0001-ra\n  title   Features in proposals\n  file    {file}\n"
+        )
+    );
+    assert_eq!(
+        git(
+            &repo.dir,
+            &["status", "--porcelain", "--untracked-files=all"]
+        ),
+        format!("?? {file}\n")
+    );
+    let shown = collide(&repo, &bundle, &["task", "pr-0001"]);
+    assert!(
+        shown.stdout.contains("  status  draft\n"),
+        "{}",
+        shown.stdout
+    );
+}
+
+#[test]
+fn set_status_to_proposed_is_refused_with_every_problem_until_the_part_is_fixed() {
+    let features = "### Packs\nstray\n- **F1 A**: b\n- **F1 B**: c\n";
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-refuse", "draft", features),
+    );
+    let file = repo.dir.join(ALPHA_PROPOSALS).join(PROPOSAL_FILE);
+    let before = fs::read_to_string(&file).unwrap();
+
+    let refused = collide(
+        &repo,
+        &bundle,
+        &["task", "pr-0003", "setStatus", "proposed"],
+    );
+    assert_eq!(refused.code, 5, "{}", refused.stderr);
+    assert!(
+        refused
+            .stderr
+            .contains("pr-0003-km cannot move to proposed")
+            && refused.stderr.contains("2 problems")
+            && refused.stderr.contains("line 17: ")
+            && refused
+                .stderr
+                .contains("line 19: F1 is already used on line 18"),
+        "{}",
+        refused.stderr
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), before);
+    assert_eq!(git(&repo.dir, &["status", "--porcelain"]), "");
+
+    fs::write(&file, before.replace("stray\n", "").replace("F1 B", "F2 B")).unwrap();
+    git(&repo.dir, &["commit", "-q", "-am", "fixed"]);
+    let moved = collide(
+        &repo,
+        &bundle,
+        &["task", "pr-0003", "setStatus", "proposed"],
+    );
+    assert_eq!(moved.code, 0, "{}", moved.stderr);
+    assert!(
+        moved.stdout.contains("status  draft -> proposed"),
+        "{}",
+        moved.stdout
+    );
+    assert_eq!(
+        git(&repo.dir, &["diff", "--numstat"]),
+        format!("1\t1\t{ALPHA_PROPOSALS}/{PROPOSAL_FILE}\n")
+    );
+}
+
+#[test]
+fn a_proposals_set_status_takes_the_six_words_and_lists_them_when_it_is_wrong() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-statuses", "draft", FEATURES_EXAMPLE),
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003", "setStatus", "done"]);
+    assert_eq!(run.code, 2, "{}", run.stderr);
+    assert!(
+        run.stderr
+            .contains("must be one of draft, proposed, accepted, deferred, rejected, superseded"),
+        "{}",
+        run.stderr
+    );
+    let moved = collide(
+        &repo,
+        &bundle,
+        &["task", "pr-0003", "setStatus", "deferred"],
+    );
+    assert_eq!(moved.code, 0, "{}", moved.stderr);
+    assert!(
+        moved.stdout.contains("status  draft -> deferred"),
+        "{}",
+        moved.stdout
+    );
 }

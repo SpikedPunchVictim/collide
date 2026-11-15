@@ -13,6 +13,7 @@ const EPICS = `${SHARED_ROOT}/epics`
 export const KIND_IDS = {
   task: { prefix: 'ts', width: 4 },
   epic: { prefix: 'ep', width: 3 },
+  proposal: { prefix: 'pr', width: 4 },
 } as const
 export type CreatableKind = keyof typeof KIND_IDS
 
@@ -39,18 +40,18 @@ export class IdSourceError extends Error {}
 
 /**
  * The ids that the item paths name. A path is relative to the repository root, with `/`. An epic folder names its epic
- * (whatever is inside it), and a file directly in a `tasks/` folder names its item. Nothing is opened: the id is the
+ * (whatever is inside it), and a file directly in a `tasks/` or `proposals/` folder names its item. Nothing is opened: the id is the
  * start of the name (0.10, ids: names on disk are `<id>-<slug>`).
  */
 export function idsInPaths(paths: string[]): Set<string> {
   const ids = new Set<string>()
   for (const path of paths) {
     if (!path.startsWith(`${EPICS}/`)) continue
-    const [folder, tasks, file, ...rest] = path.slice(EPICS.length + 1).split('/')
+    const [folder, subfolder, file, ...rest] = path.slice(EPICS.length + 1).split('/')
     const epic = FOLDER_ID.exec(folder ?? '')?.[1]
     if (epic === undefined) continue
     ids.add(epic)
-    if (tasks === 'tasks' && file !== undefined && rest.length === 0) {
+    if ((subfolder === 'tasks' || subfolder === 'proposals') && file !== undefined && rest.length === 0) {
       const id = FILE_ID.exec(file)?.[1]
       if (id !== undefined) ids.add(id)
     }
@@ -79,7 +80,7 @@ async function idsInRefs(root: string): Promise<Set<string>> {
   return ids
 }
 
-/** The ids in the working tree: the epic folders and the files in their `tasks/` folders, as `scan.ts` finds them. */
+/** The ids in the working tree: the epic folders and the files in their `tasks/` and `proposals/` folders, as `scan.ts` finds them. */
 async function idsInWorkingTree(root: string): Promise<Set<string>> {
   const names = async (dir: string): Promise<string[]> => {
     try {
@@ -92,7 +93,9 @@ async function idsInWorkingTree(root: string): Promise<Set<string>> {
   const paths: string[] = []
   for (const folder of await names(join(root, EPICS))) {
     paths.push(`${EPICS}/${folder}/`)
-    for (const file of await names(join(root, EPICS, folder, 'tasks'))) paths.push(`${EPICS}/${folder}/tasks/${file}`)
+    for (const subfolder of ['tasks', 'proposals']) {
+      for (const file of await names(join(root, EPICS, folder, subfolder))) paths.push(`${EPICS}/${folder}/${subfolder}/${file}`)
+    }
   }
   return idsInPaths(paths)
 }

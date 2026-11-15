@@ -82,6 +82,50 @@
       ],
       "type": "string"
     },
+    "Feature": {
+      "additionalProperties": false,
+      "description": "One feature of a proposal, read from the `## Features` part of its body (0.8, 0.10, \"A proposal's features\").\n`id` is `F<n>`, `section` is empty for an entry that is unsorted, and `summary` joins an entry's continuation lines.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "section": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "section",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "FeatureProblem": {
+      "additionalProperties": false,
+      "description": "A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.",
+      "properties": {
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "reason"
+      ],
+      "type": "object"
+    },
     "ItemState": {
       "additionalProperties": false,
       "description": "An item's status and its category.",
@@ -160,6 +204,20 @@
           "default": [],
           "items": {
             "type": "string"
+          },
+          "type": "array"
+        },
+        "featureProblems": {
+          "description": "The lines of that part that did not parse. Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/FeatureProblem"
+          },
+          "type": "array"
+        },
+        "features": {
+          "description": "A proposal's features, read from its Features part (0.8). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Feature"
           },
           "type": "array"
         },

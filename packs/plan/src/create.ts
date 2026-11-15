@@ -5,7 +5,7 @@ import type { ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile, syncDirectory } from './atomic.ts'
 import { drawFreeId, IdSourceError, KIND_IDS, nextNumber, seededGenerator, takenIds } from './ids.ts'
 import type { CreatableKind, IdHooks } from './ids.ts'
-import { readItem } from './item.ts'
+import { readItem, stateOf } from './item.ts'
 import { CONTROL, onlyKeys, refused } from './op-util.ts'
 import { readItemFile } from './read-file.ts'
 import { SHARED_ROOT, toTask } from './scan.ts'
@@ -49,20 +49,23 @@ export function generatorFor(args: Record<string, unknown>, hooks: IdHooks): () 
 /** The problem with `create`'s arguments, or null. Runs before the lock is taken. */
 export function checkCreate(args: Record<string, unknown>): string | null {
   const { kind, epic, title } = args
-  if (kind !== undefined && kind !== 'task' && kind !== 'epic') return 'kind must be "task" or "epic"'
+  if (kind !== undefined && kind !== 'task' && kind !== 'epic' && kind !== 'proposal') return 'kind must be "task", "epic" or "proposal"'
   if (typeof title !== 'string' || title.trim() !== title || title === '' || title.length > TITLE_MAX || CONTROL.test(title)) {
     return `title must be text of 1 to ${TITLE_MAX} characters, with no line break or other control character and no space at either end`
   }
   if (kind === 'epic') {
     if (epic !== undefined) return 'an epic is part of no epic: leave epic out'
   } else if (typeof epic !== 'string' || !EPIC_ID.test(epic)) {
-    return 'a task needs epic, the id of its epic, such as ep-002-va'
+    return `a ${kind === 'proposal' ? 'proposal' : 'task'} needs epic, the id of its epic, such as ep-002-va`
   }
   return checkSeed(args) ?? onlyKeys(args, ['kind', 'epic', 'title', 'seed'])
 }
 
-const frontmatterOf = (id: string, kind: CreatableKind, title: string): string =>
-  `---\nid: ${id}\nkind: ${kind}\nstatus: ready\ntitle: ${JSON.stringify(title)}\nowners: []\nlinks: []\n---\n\n## Goal\n\n## Success criteria\n\n## Tests\n\n## Notes\n`
+/** A new item: a task or an epic starts `ready`, with the parts a task has; a proposal starts as a `draft`, with the two parts 0.10 names. */
+const fileOf = (id: string, kind: CreatableKind, title: string): string => {
+  const head = `---\nid: ${id}\nkind: ${kind}\nstatus: ${kind === 'proposal' ? 'draft' : 'ready'}\ntitle: ${JSON.stringify(title)}\nowners: []\nlinks: []\n---\n\n`
+  return head + (kind === 'proposal' ? '## Features\n\n## Decision\n' : '## Goal\n\n## Success criteria\n\n## Tests\n\n## Notes\n')
+}
 
 const exists = async (path: string): Promise<boolean> => {
   try {
@@ -98,8 +101,8 @@ async function makeDirectory(dir: string): Promise<void> {
 
 /**
  * Writes a new item: the number is the next free one for the kind across every ref and the working tree, the suffix is
- * drawn until the id is free, and the file goes in the epic's `tasks/` folder (an epic gets its own folder with an
- * `epic.md`). The caller holds the lock. The reply carries the item as read back from disk and the file it wrote.
+ * drawn until the id is free, and the file goes in the epic's `tasks/` folder, or its `proposals/` folder for a proposal
+ * (an epic gets its own folder with an `epic.md`). The caller holds the lock. The reply carries the item as read back from disk and the file it wrote.
  */
 export async function createLocked(root: string, args: Record<string, unknown>, hooks: IdHooks): Promise<ApplyResultInput> {
   const kind = (args.kind ?? 'task') as CreatableKind
@@ -108,7 +111,7 @@ export async function createLocked(root: string, args: Record<string, unknown>, 
   const epicsDir = join(root, SHARED_ROOT, 'epics')
 
   let folder: string | null = null
-  if (kind === 'task') {
+  if (kind !== 'epic') {
     folder = await epicFolder(epicsDir, args.epic as string)
     if (folder === null) return refused(`there is no epic ${args.epic as string} in the working tree (.collide/planning/epics/); create it first`)
   }
@@ -124,10 +127,11 @@ export async function createLocked(root: string, args: Record<string, unknown>, 
   }
 
   const name = `${id}-${slugOf(title)}`
-  const absolute = kind === 'task' ? join(epicsDir, folder as string, 'tasks', `${name}.md`) : join(epicsDir, name, 'epic.md')
+  const subfolder = kind === 'proposal' ? 'proposals' : 'tasks'
+  const absolute = kind === 'epic' ? join(epicsDir, name, 'epic.md') : join(epicsDir, folder as string, subfolder, `${name}.md`)
   if (await exists(absolute)) return refused(`${absolute} already exists; nothing was written`)
   await makeDirectory(dirname(absolute))
-  await replaceFile(absolute, Buffer.from(frontmatterOf(id, kind, title), 'utf8'), 0o644)
+  await replaceFile(absolute, Buffer.from(fileOf(id, kind, title), 'utf8'), 0o644)
 
   const read = await readItemFile(absolute)
   if (!read.ok) throw new Error(`${absolute} does not read back after the write: ${read.reason}`)
@@ -135,12 +139,12 @@ export async function createLocked(root: string, args: Record<string, unknown>, 
   if (!checked.ok) throw new Error(`${absolute} does not read back after the write: ${checked.reason}`)
   if (checked.item.id !== id || checked.item.title !== title) throw new Error(`${absolute} does not read back as the item that was written`)
   const path = relative(root, absolute).split(sep).join('/')
-  const found = { item: checked.item, epic: folder === null ? null : (EPIC_FOLDER.exec(folder)?.[1] as string), path, body: read.body, version: read.version }
+  const found = { item: checked.item, epic: folder === null ? null : (EPIC_FOLDER.exec(folder)?.[1] as string), path, body: read.body, bodyLine: read.bodyLine, version: read.version }
   return {
     outcome: 'ok',
     task: toTask(found, true),
     version: found.version,
     files: [path],
-    items: [{ key: `plan:${id}`, version: found.version, from: null, to: { category: found.item.status, status: found.item.status } }],
+    items: [{ key: `plan:${id}`, version: found.version, from: null, to: stateOf(kind, found.item.status) }],
   }
 }
