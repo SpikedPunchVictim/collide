@@ -95,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 29] = [
+const FILLED_TAGS: [(&str, &str, &str); 33] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -125,6 +125,10 @@ const FILLED_TAGS: [(&str, &str, &str); 29] = [
     ("resolve: model alias", "3b", "ts-0060-mm"),
     ("claude: capabilities", "3b", "ts-0061-bg"),
     ("claude: launch line", "3b", "ts-0061-bg"),
+    ("claude: session start", "3b", "ts-0062-rj"),
+    ("claude: stream parser", "3b", "ts-0062-rj"),
+    ("claude: turn input", "3b", "ts-0062-rj"),
+    ("claude: replay", "3b", "ts-0062-rj"),
 ];
 
 #[test]
@@ -148,11 +152,7 @@ fn every_filled_tag_stays_registered_under_its_stage_and_counts_no_stub() {
 /// version checks and the sampler's tick are Stage 3b, the provider
 /// supervisor and the config and pack commands Stage 4b, the hook executor and `collide report` Stage 7, observers
 /// Stage 12, the resource sources Stage 13. Each must count at least one stub today.
-const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 22] = [
-    ("claude: session start", "3b"),
-    ("claude: stream parser", "3b"),
-    ("claude: turn input", "3b"),
-    ("claude: replay", "3b"),
+const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 18] = [
     ("claude: version check", "3b"),
     ("claude: smoke check", "3b"),
     ("claude: settings canary", "3b"),

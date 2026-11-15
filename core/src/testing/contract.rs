@@ -30,8 +30,15 @@ pub trait ChildDialect {
     /// A new session, not started.
     fn session(&self) -> Self::Session;
 
-    /// The lines that make the session ready for a turn, in order: whatever binds the session id.
+    /// The lines that make the session ready for a turn, in order: whatever binds the session id. A session that
+    /// binds in `start` (Claude) may have lines here that bind nothing more.
     fn handshake(&self) -> Vec<Vec<u8>>;
+
+    /// The id a session that binds in `start` was asked to bind (`Assign(uuid)`), or `None` for one that binds from
+    /// a line the child writes (ACP, on the `session/new` response).
+    fn bound_at_start(&self) -> Option<String> {
+        None
+    }
 
     /// One chunk of the agent's words.
     fn message(&self, text: &str) -> Vec<u8>;
@@ -132,16 +139,19 @@ fn live_conversation<D: ChildDialect>(dialect: &D) -> (D::Session, Vec<JournalRe
 
 // --- feed ---
 
-pub fn the_handshake_binds_the_session_with_the_time_its_line_arrived<D: ChildDialect>(
+/// 0.3: the id is recorded on `SessionBound` "at once for Claude, on the `session/new` response for ACP". So across
+/// `start` and the handshake lines there is exactly one `SessionBound`. From a fed line it carries that line's stored
+/// time; from `start` it carries the id the start asked for, and no handshake line adds a second.
+pub fn the_session_is_bound_exactly_once_by_start_or_by_a_handshake_line<D: ChildDialect>(
     dialect: &D,
 ) {
     let mut session = dialect.session();
-    session.start();
+    let started = session.start();
     let lines = dialect.handshake();
     let times: Vec<u64> = (0..lines.len() as u64)
         .map(|i| 1_700_000_000_000_000_000 + i)
         .collect();
-    let mut events: Vec<StampedEvent> = Vec::new();
+    let mut events: Vec<StampedEvent> = started.events;
     for (line, time) in lines.iter().zip(&times) {
         events.extend(session.feed(line, *time).events);
     }
@@ -150,11 +160,29 @@ pub fn the_handshake_binds_the_session_with_the_time_its_line_arrived<D: ChildDi
         .filter(|stamped| matches!(stamped.event, AgentEvent::SessionBound { .. }))
         .collect();
     assert_eq!(bound.len(), 1, "one SessionBound, got {events:?}");
-    let time = bound[0].wall_ns.expect("a fed event has the stored time");
-    assert!(
-        times.contains(&time),
-        "{time} is not the time of a handshake line"
-    );
+    match bound[0].wall_ns {
+        Some(time) => {
+            assert!(
+                times.contains(&time),
+                "{time} is not the time of a handshake line"
+            );
+            assert_eq!(
+                dialect.bound_at_start(),
+                None,
+                "a session that binds in start bound from a line"
+            );
+        }
+        None => {
+            let AgentEvent::SessionBound { id } = &bound[0].event else {
+                unreachable!()
+            };
+            assert_eq!(
+                Some(id),
+                dialect.bound_at_start().as_ref(),
+                "a bind in start carries the id start asked for, with no stored time"
+            );
+        }
+    }
 }
 
 pub fn feeding_a_message_writes_nothing_and_stamps_the_event<D: ChildDialect>(dialect: &D) {
@@ -425,8 +453,8 @@ macro_rules! session_contract_tests {
             use super::*;
 
             #[test]
-            fn the_handshake_binds_the_session_with_the_time_its_line_arrived() {
-                $crate::testing::contract::the_handshake_binds_the_session_with_the_time_its_line_arrived(&$dialect);
+            fn the_session_is_bound_exactly_once_by_start_or_by_a_handshake_line() {
+                $crate::testing::contract::the_session_is_bound_exactly_once_by_start_or_by_a_handshake_line(&$dialect);
             }
 
             #[test]

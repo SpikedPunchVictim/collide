@@ -127,8 +127,8 @@ impl fmt::Display for ReplayError {
 
 impl std::error::Error for ReplayError {}
 
-/// One agent child's conversation, as a state machine (0.3). A Claude session is nearly empty: the launch line carries
-/// the first turn, `start` writes nothing and `feed` is the stream parser. An ACP session holds its handshake, its
+/// One agent child's conversation, as a state machine (0.3). A Claude session is nearly empty: `start` writes nothing,
+/// the first turn is a `user` message from `send_turn`, and `feed` is the stream parser. An ACP session holds its handshake, its
 /// request ids and its pending permission requests.
 ///
 /// Every method returns what happened and what to write, and changes only the session. The host writes `writes` to the
@@ -182,7 +182,7 @@ pub struct LaunchRequest {
     pub cwd: PathBuf,
     /// The line's snapshot of settings, agent definitions and MCP config for this phase.
     pub snapshot_dir: PathBuf,
-    /// The phase's first turn. Claude carries it on its launch line; an ACP session sends it in `start`.
+    /// The phase's first turn. Claude is sent it by `send_turn` as a `user` message; an ACP session sends it in `start`.
     pub prompt: String,
     /// What is left of the phase's budget, for a tool that enforces one itself (`budget_native`).
     pub budget_left_usd: Option<f64>,

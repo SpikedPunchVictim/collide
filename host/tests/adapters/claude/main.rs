@@ -1,6 +1,8 @@
-//! The Claude adapter's declarations, launch line, snapshot files and user-config reading (ts-0061-bg; 0.3). These
-//! tests name `CLAUDECODE`, `CLAUDE_` and `ANTHROPIC_`, so they live here (the names check). None reads the owner's own
-//! `~/.claude/settings.json`: the settings are the fixture below, copied into a temp root that stands in for `HOME`.
+//! The Claude adapter's declarations, launch line, snapshot files and user-config reading (ts-0061-bg; 0.3), and fake
+//! Claude with the Claude session (ts-0062-rj). These tests name `CLAUDECODE`, `CLAUDE_` and `ANTHROPIC_`, and start
+//! fake Claude, so they live here (the names check). None reads the owner's own `~/.claude/settings.json`: the settings
+//! are the fixture below, copied into a temp root that stands in for `HOME`. Every process a test starts has an
+//! environment of its own (`env_clear()`, then `HOME` in a temp root), and is reaped.
 
 use collide_core::adapter::LaunchRequest;
 use collide_core::agent::{ModelRef, SessionStart};
@@ -12,7 +14,12 @@ use serde_json::{Value, json};
 mod common;
 
 mod capabilities;
+mod contract;
+mod fake;
+mod fake_claude;
 mod launch;
+mod replay;
+mod session;
 mod snapshot;
 mod user_config;
 
