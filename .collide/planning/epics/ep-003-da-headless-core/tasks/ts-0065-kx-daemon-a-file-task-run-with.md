@@ -1,7 +1,7 @@
 ---
 id: ts-0065-kx
 kind: task
-status: active
+status: done
 title: "Daemon: a file-task run with one Claude phase"
 owners: []
 links:
