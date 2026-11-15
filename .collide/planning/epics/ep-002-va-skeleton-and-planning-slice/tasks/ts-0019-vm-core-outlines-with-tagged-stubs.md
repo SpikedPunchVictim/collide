@@ -1,7 +1,7 @@
 ---
 id: ts-0019-vm
 kind: task
-status: active
+status: done
 title: "core outlines with tagged stubs"
 owners: []
 links:
