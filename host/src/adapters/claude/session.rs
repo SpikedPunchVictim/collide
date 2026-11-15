@@ -12,14 +12,32 @@
 //! | the child writes | the session reads |
 //! |---|---|
 //! | `system/init`, `system/hook_started` | nothing: the id was bound at `start` and `init` comes on every turn; `hook_response` has all that `hook_started` has |
-//! | `assistant` | a `Message` for each non-empty text block, a `ToolCall` for each `tool_use`; thinking is not an event |
+//! | `assistant` | a `Step` `Usage` for a response not seen before (input and cache tokens, once per `message.id`), a `Message` for each non-empty text block, a `ToolCall` for each `tool_use`; thinking is not an event; `error: "rate_limit"` is a limit signal |
+//! | `rate_limit_event` | `rejected` is a limit signal and no event of its own; `allowed_warning` and any other status are an `Other` and pause nothing |
 //! | `control_request` `can_use_tool` | a `PermissionRequest`, kept until `answer`; a hook's `ask` carries the hook's text as its `reason` |
 //! | `system/hook_response` | a `HookCall`: name, event, outcome, exit code and the `decision` read from `stdout`; neither `stdout`, `stderr` nor `output` is kept |
 //! | `system/informational` with `hook_no_verdict` | nothing after a `cancelled` `hook_response`, which it names the call of; else the `HookCall` itself |
 //! | `system/informational` with `prompt_submit_outcome` | nothing: the turn's `result` ends `Blocked` with the hook's reason |
-//! | `user` with `tool_result` | a `ToolRefused` for a call that did not run, by the `tool_result_meta` entry with its id (never its text); a `HookFailedOpen` for a failed tool hook whose tool ran |
-//! | `result` | a `FinalReport` from `result.result`, then a `TurnEnd`; an error result gives no report, but its cost as a `RunningTotal` `Usage`, and a 429 a `Limited` |
+//! | `user` with `tool_result` | a `ToolResultSize` for each result; a `ToolRefused` for a call that did not run, by the `tool_result_meta` entry with its id (never its text); a `HookFailedOpen` for a failed tool hook whose tool ran |
+//! | `system/compact_boundary` | an `Other`; the turn's `result` then reads the compaction call from its model usage |
+//! | `result` | a `FinalReport` from `result.result` (never for an error result), the `Usage` events below, a `Limited` for a limit, then a `TurnEnd`; a 429 error result is a limit signal |
 //! | anything else | an `Other` named by the line's `type`, and its `subtype` when it has one; no content is kept |
+//!
+//! Usage, from every `result` (an error result's included), in this order:
+//!
+//! | event | what it holds |
+//! |---|---|
+//! | `Compaction`, or `OtherCalls` | what `model_usage_since_last_result` counts beyond `usage`, summed over the models: the call a compaction made (a `compact_boundary` came this turn, or `local_command` is `compact`), or any other model call. Its cost is given only when the turn used no tokens of its own |
+//! | `Turn` | tokens from `usage`; cost as the running total less the one before it, less a compaction's cost given above; model time as `duration_api_ms` less the last result with turns; the context of the turn's last response and the window of its model |
+//! | `RunningTotal` | `total_cost_usd` as reported, nothing else |
+//!
+//! `Step` usages are one per response, for context per response, and are never added to a `Turn`. A turn that was sent and
+//! has no `result` when the child ends gives, at `finish`, a `Turn` usage of its responses' input and cache tokens
+//! (`Partial`; `Unreported` with no response), with no output and no cost.
+//!
+//! A limit is one `Limited`: the signals of a turn (`rate_limit_event` `rejected`, an assistant `error: "rate_limit"`,
+//! a 429 error result) are kept, and the event is given at the turn's `result`, or at `finish` if none came, with the
+//! first reset time any of them had (`resetsAt`, epoch seconds, as milliseconds).
 //!
 //! `result.permission_denials` is never read: it lists hook, host, rule and auto denies alike, so it says nothing of
 //! who refused a call.
@@ -45,7 +63,7 @@ use collide_core::agent::{
 };
 use collide_core::journal::JournalRecord;
 use collide_core::replay::{Replayable, replay_records};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 /// The message of a `deny` that carries none: Claude requires one.
 const DENY_WITHOUT_MESSAGE: &str = "The host denied this tool call.";
@@ -56,6 +74,9 @@ const CANCELLED_REQUEST: &str = "The host cancelled this request.";
 
 /// The HTTP status of a usage limit (S1: a limit is an error result with 429).
 const USAGE_LIMIT_STATUS: u64 = 429;
+
+/// The `error` of an assistant message that is a usage or rate limit (S1, Q8).
+const RATE_LIMIT_ERROR: &str = "rate_limit";
 
 /// The exit code with which a hook blocks on purpose (S9).
 const HOOK_BLOCK_EXIT_CODE: i32 = 2;
@@ -86,6 +107,148 @@ struct FailedHook {
     call_id: Option<String>,
 }
 
+/// Token counts, each `None` when the agent did not report it (never 0). Read from a response's or a result's `usage`
+/// (snake case), or from one model's entry of `model_usage_since_last_result` (camel case).
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Tokens {
+    input: Option<u64>,
+    output: Option<u64>,
+    cache_read: Option<u64>,
+    cache_write: Option<u64>,
+    cache_write_1h: Option<u64>,
+    cache_write_5m: Option<u64>,
+    thought: Option<u64>,
+}
+
+impl Tokens {
+    fn from_usage(usage: &Value) -> Self {
+        let count = |pointer: &str| usage.pointer(pointer).and_then(Value::as_u64);
+        Self {
+            input: count("/input_tokens"),
+            output: count("/output_tokens"),
+            cache_read: count("/cache_read_input_tokens"),
+            cache_write: count("/cache_creation_input_tokens"),
+            cache_write_1h: count("/cache_creation/ephemeral_1h_input_tokens"),
+            cache_write_5m: count("/cache_creation/ephemeral_5m_input_tokens"),
+            thought: count("/output_tokens_details/thinking_tokens"),
+        }
+    }
+
+    fn from_model_usage(entry: &Value) -> Self {
+        let count = |key: &str| entry.get(key).and_then(Value::as_u64);
+        Self {
+            input: count("inputTokens"),
+            output: count("outputTokens"),
+            cache_read: count("cacheReadInputTokens"),
+            cache_write: count("cacheCreationInputTokens"),
+            cache_write_1h: count("cacheCreationEphemeral1hInputTokens"),
+            cache_write_5m: count("cacheCreationEphemeral5mInputTokens"),
+            thought: count("thinkingTokens"),
+        }
+    }
+
+    fn fields(&self) -> [&Option<u64>; 7] {
+        [
+            &self.input,
+            &self.output,
+            &self.cache_read,
+            &self.cache_write,
+            &self.cache_write_1h,
+            &self.cache_write_5m,
+            &self.thought,
+        ]
+    }
+
+    /// The counts added: a count only one side reported is kept (a lower bound), and one neither did stays `None`.
+    fn plus(&self, other: &Self) -> Self {
+        let add = |a: Option<u64>, b: Option<u64>| match (a, b) {
+            (Some(a), Some(b)) => Some(a.saturating_add(b)),
+            (a, b) => a.or(b),
+        };
+        Self {
+            input: add(self.input, other.input),
+            output: add(self.output, other.output),
+            cache_read: add(self.cache_read, other.cache_read),
+            cache_write: add(self.cache_write, other.cache_write),
+            cache_write_1h: add(self.cache_write_1h, other.cache_write_1h),
+            cache_write_5m: add(self.cache_write_5m, other.cache_write_5m),
+            thought: add(self.thought, other.thought),
+        }
+    }
+
+    /// What `self` counts beyond `own`: a count is known only when both sides reported it.
+    fn beyond(&self, own: &Self) -> Self {
+        let take = |all: Option<u64>, own: Option<u64>| Some(all?.saturating_sub(own?));
+        Self {
+            input: take(self.input, own.input),
+            output: take(self.output, own.output),
+            cache_read: take(self.cache_read, own.cache_read),
+            cache_write: take(self.cache_write, own.cache_write),
+            cache_write_1h: take(self.cache_write_1h, own.cache_write_1h),
+            cache_write_5m: take(self.cache_write_5m, own.cache_write_5m),
+            thought: take(self.thought, own.thought),
+        }
+    }
+
+    fn has_any(&self) -> bool {
+        self.fields()
+            .iter()
+            .any(|count| matches!(count, Some(n) if *n > 0))
+    }
+
+    /// Input, output and the cache reads and writes are all reported, and all 0.
+    fn is_all_zero(&self) -> bool {
+        [self.input, self.output, self.cache_read, self.cache_write] == [Some(0); 4]
+    }
+
+    /// The tokens in the context of a response: input, cache reads and cache writes, when all three are reported.
+    fn context(&self) -> Option<u64> {
+        Some(self.input? + self.cache_read? + self.cache_write?)
+    }
+
+    /// `Exact` when input, output and both cache counts are reported, `Unreported` when none is, else `Partial`.
+    fn quality(&self) -> UsageQuality {
+        let reported = [self.input, self.output, self.cache_read, self.cache_write]
+            .iter()
+            .filter(|count| count.is_some())
+            .count();
+        match reported {
+            4 => UsageQuality::Exact,
+            0 => UsageQuality::Unreported,
+            _ => UsageQuality::Partial,
+        }
+    }
+
+    /// The counts as a `Usage` of `scope`, with no cost, time or context.
+    fn into_usage(self, scope: UsageScope, quality: UsageQuality) -> Usage {
+        Usage {
+            scope,
+            input: self.input,
+            output: self.output,
+            cache_read: self.cache_read,
+            cache_write: self.cache_write,
+            cache_write_1h: self.cache_write_1h,
+            cache_write_5m: self.cache_write_5m,
+            thought: self.thought,
+            context_used: None,
+            context_size: None,
+            cost: None,
+            model_time_ms: None,
+            quality,
+        }
+    }
+}
+
+/// A model response seen in the turn in flight, by its `message.id`. The stream repeats one `usage` per content block, so
+/// a response is kept once. `tokens` has no output, because a stream row's count is partial (S9); `context` is `None` for
+/// a subagent's response, which is not the context of the session.
+#[derive(Debug, Clone, PartialEq)]
+struct Response {
+    id: String,
+    tokens: Tokens,
+    context: Option<u64>,
+}
+
 /// One Claude child's conversation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClaudeSession {
@@ -103,11 +266,30 @@ pub struct ClaudeSession {
     failed_hooks: Vec<FailedHook>,
     /// A hook blocked the prompt of the turn in flight: `Some(reason)`, the reason being the hook's own, if it gave one.
     blocked: Option<Option<String>>,
+    /// A turn has been sent and has no result yet.
+    turn_open: bool,
+    /// The responses of the turn in flight, each once.
+    responses: Vec<Response>,
+    /// The model of the last response of the session itself, whose window is the context size.
+    last_model: Option<String>,
+    /// A `compact_boundary` came in the turn in flight.
+    compacted: bool,
+    /// A limit signal came in the turn in flight: `Some(reset time in ms, if a line gave one)`. One limit is one
+    /// `Limited`, given at the turn's `result` (or at `finish`), so the first reset time any of its lines has is in it.
+    limit: Option<Option<u64>>,
+    /// The session's running cost as the last result reported it, and `duration_api_ms` as the last result with turns
+    /// did. Both are differenced to give a turn's own. `None` when unknown: a process that resumes a session continues
+    /// its total (S1), so its first result has nothing to be differenced from; and a result that lacked the value
+    /// leaves nothing for the next to be differenced from.
+    cost_anchor: Option<f64>,
+    time_anchor: Option<u64>,
 }
 
 impl ClaudeSession {
     /// A session that starts as `start` says: Claude supports `Assign` (a UUID Collide picked) and `Resume`.
     pub fn new(start: SessionStart) -> Self {
+        // A session Collide assigns starts every total at 0; a resumed one continues the earlier process's.
+        let fresh = matches!(start, SessionStart::Assign { .. });
         Self {
             start,
             pending: Vec::new(),
@@ -118,6 +300,13 @@ impl ClaudeSession {
             calls: Vec::new(),
             failed_hooks: Vec::new(),
             blocked: None,
+            turn_open: false,
+            responses: Vec::new(),
+            last_model: None,
+            compacted: false,
+            limit: None,
+            cost_anchor: fresh.then_some(0.0),
+            time_anchor: fresh.then_some(0),
         }
     }
 
@@ -135,10 +324,16 @@ impl ClaudeSession {
     }
 
     fn read_assistant(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+        if value.get("error").and_then(Value::as_str) == Some(RATE_LIMIT_ERROR) {
+            self.note_limit(value.pointer("/quotaLimits/resetsAt"));
+        }
         let Some(blocks) = value.pointer("/message/content").and_then(Value::as_array) else {
             return vec![other("assistant", wall_ns)];
         };
         let mut events = Vec::new();
+        if let Some(step) = self.note_response(value) {
+            events.push(stamped(Some(wall_ns), step));
+        }
         for block in blocks {
             let event = match block.get("type").and_then(Value::as_str) {
                 Some("text") => match block.get("text").and_then(Value::as_str) {
@@ -163,6 +358,70 @@ impl ClaudeSession {
             events.push(stamped(Some(wall_ns), event));
         }
         events
+    }
+
+    /// A response the session has not seen before: the `Step` usage of its input and cache tokens. A line with no
+    /// `message.id` or no `usage` cannot be counted once, so it is not counted.
+    fn note_response(&mut self, line: &Value) -> Option<AgentEvent> {
+        let message = line.get("message")?;
+        let id = message.get("id").and_then(Value::as_str)?;
+        let usage = message.get("usage").filter(|usage| usage.is_object())?;
+        if self.responses.iter().any(|response| response.id == id) {
+            return None;
+        }
+        let of_the_session = line.get("parent_tool_use_id").is_none_or(Value::is_null);
+        if of_the_session && let Some(model) = message.get("model").and_then(Value::as_str) {
+            self.last_model = Some(model.into());
+        }
+        let tokens = Tokens {
+            output: None,
+            thought: None,
+            ..Tokens::from_usage(usage)
+        };
+        let context = tokens.context().filter(|_| of_the_session);
+        let mut step = tokens
+            .clone()
+            .into_usage(UsageScope::Step, UsageQuality::Partial);
+        step.context_used = context;
+        self.responses.push(Response {
+            id: id.into(),
+            tokens,
+            context,
+        });
+        Some(AgentEvent::Usage { usage: step })
+    }
+
+    /// One limit signal. The first reset time any line of the limit has is kept, so a later line fills in a reset time
+    /// an earlier one lacked, and a second line never gives a second limit. `resets_at` is epoch seconds.
+    fn note_limit(&mut self, resets_at: Option<&Value>) {
+        let reset_at_ms = resets_at
+            .and_then(Value::as_u64)
+            .and_then(|seconds| seconds.checked_mul(1000));
+        match &mut self.limit {
+            Some(known) => {
+                if known.is_none() {
+                    *known = reset_at_ms;
+                }
+            }
+            None => self.limit = Some(reset_at_ms),
+        }
+    }
+
+    fn read_rate_limit(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+        let info = value.get("rate_limit_info");
+        match info
+            .and_then(|info| info.get("status"))
+            .and_then(Value::as_str)
+        {
+            // The limit is given once, at the turn's result (`note_limit`).
+            Some("rejected") => {
+                self.note_limit(info.and_then(|info| info.get("resetsAt")));
+                Vec::new()
+            }
+            // An early warning is recorded and pauses nothing.
+            Some("allowed_warning") => vec![other("rate_limit_event/allowed_warning", wall_ns)],
+            _ => vec![other("rate_limit_event", wall_ns)],
+        }
     }
 
     fn read_control_request(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
@@ -198,6 +457,11 @@ impl ClaudeSession {
             Some("hook_started") => Vec::new(),
             Some("hook_response") => self.read_hook_response(value, wall_ns),
             Some("informational") => self.read_informational(value, wall_ns),
+            Some("compact_boundary") => {
+                // The compaction's own model call is in this turn's `model_usage_since_last_result`, not in its usage.
+                self.compacted = true;
+                vec![other("system/compact_boundary", wall_ns)]
+            }
             _ => vec![other(&type_name("system", value), wall_ns)],
         }
     }
@@ -345,6 +609,12 @@ impl ClaudeSession {
                     .iter()
                     .find(|meta| meta.get("id").and_then(Value::as_str) == Some(id))
             });
+            if let Some(bytes) = result_bytes(result) {
+                events.push(AgentEvent::ToolResultSize {
+                    tool_call_id: id.into(),
+                    bytes,
+                });
+            }
             let refusal = refusal_cause(meta, is_error);
             if let Some(cause) = refusal {
                 events.push(AgentEvent::ToolRefused {
@@ -388,11 +658,147 @@ impl ClaudeSession {
             .collect()
     }
 
-    /// What the turn in flight remembered about its calls, its hooks and a block.
+    /// What the turn in flight remembered about its calls, its hooks, a block, its responses and a limit.
     fn forget_the_turn(&mut self) {
         self.calls.clear();
         self.failed_hooks.clear();
         self.blocked = None;
+        self.responses.clear();
+        self.compacted = false;
+        self.limit = None;
+    }
+
+    /// The `Usage` events of a result, from the turn's own to the session's:
+    /// - a compaction call, or any other model call, as what `model_usage_since_last_result` counts beyond `usage`
+    ///   (S9: the compaction is in the first and not in the second), so the turn's own tokens never hold it;
+    /// - the turn's: tokens from `usage` (the stream's output counts are partial), its cost and model time as
+    ///   differences of the running totals, the context of its last response;
+    /// - the session's running cost, as it was reported.
+    fn usage_events(&mut self, result: &Value) -> Vec<AgentEvent> {
+        let own = result
+            .get("usage")
+            .filter(|usage| usage.is_object())
+            .map(Tokens::from_usage);
+        let models = result
+            .get("model_usage_since_last_result")
+            .and_then(Value::as_object);
+        let total = result.get("total_cost_usd").and_then(Value::as_f64);
+        let has_turns = result.get("num_turns").and_then(Value::as_u64) != Some(0);
+        let spend = self.spend(total, models);
+        let model_time_ms = self.model_time(
+            result.get("duration_api_ms").and_then(Value::as_u64),
+            has_turns,
+        );
+        let mut events = Vec::new();
+        let mut turn_cost = spend;
+        if let (Some(own), Some(models)) = (&own, models) {
+            let all = models
+                .values()
+                .map(Tokens::from_model_usage)
+                .fold(Tokens::default(), |sum, next| sum.plus(&next));
+            let extra = all.beyond(own);
+            if extra.has_any() {
+                let compaction = self.compacted
+                    || result.get("local_command").and_then(Value::as_str) == Some("compact");
+                let scope = if compaction {
+                    UsageScope::Compaction
+                } else {
+                    UsageScope::OtherCalls
+                };
+                let quality = extra.quality();
+                let mut usage = extra.into_usage(scope, quality);
+                // The spend is the turn's and the call's together. It is the call's alone only when the turn used no
+                // tokens of its own (a `/compact`); otherwise it stays in the turn's, and is not given twice.
+                if own.is_all_zero() {
+                    usage.cost = spend.map(usd);
+                    turn_cost = spend.map(|_| 0.0);
+                }
+                events.push(AgentEvent::Usage { usage });
+            }
+        }
+        let tokens = match own {
+            Some(own) => own,
+            None => self.responses_total(),
+        };
+        let quality = tokens.quality();
+        let mut turn = tokens.into_usage(UsageScope::Turn, quality);
+        turn.cost = turn_cost.map(usd);
+        turn.model_time_ms = model_time_ms;
+        turn.context_used = self
+            .responses
+            .iter()
+            .rev()
+            .find_map(|response| response.context);
+        turn.context_size = self.context_size(models);
+        events.push(AgentEvent::Usage { usage: turn });
+        if let Some(amount) = total {
+            let mut running =
+                Tokens::default().into_usage(UsageScope::RunningTotal, UsageQuality::Exact);
+            running.cost = Some(usd(amount));
+            events.push(AgentEvent::Usage { usage: running });
+        }
+        events
+    }
+
+    /// The input and cache tokens of the turn's responses, each counted once. Nothing else is known of them.
+    fn responses_total(&self) -> Tokens {
+        self.responses
+            .iter()
+            .fold(Tokens::default(), |sum, response| {
+                sum.plus(&response.tokens)
+            })
+    }
+
+    /// The window of the model that answered, from `model_usage_since_last_result`.
+    fn context_size(&self, models: Option<&Map<String, Value>>) -> Option<u64> {
+        let entry = models?.get(self.last_model.as_deref()?)?;
+        entry.get("contextWindow").and_then(Value::as_u64)
+    }
+
+    /// A turn's own cost: the running total less the one before it. With no total before it (a resumed process'
+    /// first result), or a total that went backwards, the turn's own figure from `model_usage_since_last_result`.
+    fn spend(&mut self, total: Option<f64>, models: Option<&Map<String, Value>>) -> Option<f64> {
+        let reported = models.and_then(|models| {
+            let costs: Vec<f64> = models
+                .values()
+                .filter_map(|entry| entry.get("costUSD").and_then(Value::as_f64))
+                .collect();
+            (!costs.is_empty()).then(|| costs.iter().sum())
+        });
+        let spend = match (total, self.cost_anchor) {
+            (Some(total), Some(before)) if total >= before => Some(total - before),
+            _ => reported,
+        };
+        self.cost_anchor = total;
+        spend
+    }
+
+    /// A turn's model time: `duration_api_ms` less the one of the last result with turns. A result with no turns (a
+    /// `/compact`, a blocked prompt) reports 0, so it has no model time and is not what the next is taken from. A
+    /// result that lacks the value leaves no total for the next to be taken from.
+    fn model_time(&mut self, duration: Option<u64>, has_turns: bool) -> Option<u64> {
+        if !has_turns {
+            return None;
+        }
+        let time = match (duration, self.time_anchor) {
+            (Some(now), Some(before)) if now >= before => Some(now - before),
+            _ => None,
+        };
+        self.time_anchor = duration;
+        time
+    }
+
+    /// What a turn that was sent and never ended is known to have used: its responses' input and cache tokens.
+    fn cut_usage(&self) -> AgentEvent {
+        let tokens = self.responses_total();
+        let quality = tokens.quality();
+        let mut usage = tokens.into_usage(UsageScope::Turn, quality);
+        usage.context_used = self
+            .responses
+            .iter()
+            .rev()
+            .find_map(|response| response.context);
+        AgentEvent::Usage { usage }
     }
 
     fn read_result(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {
@@ -420,11 +826,14 @@ impl ClaudeSession {
                 source: FinalReportSource::ResultField,
             });
         }
-        if failed {
-            events.extend(session_cost(value));
-            if value.get("api_error_status").and_then(Value::as_u64) == Some(USAGE_LIMIT_STATUS) {
-                events.push(AgentEvent::Limited { reset_at_ms: None });
-            }
+        events.extend(self.usage_events(value));
+        if failed
+            && value.get("api_error_status").and_then(Value::as_u64) == Some(USAGE_LIMIT_STATUS)
+        {
+            self.note_limit(None);
+        }
+        if let Some(reset_at_ms) = self.limit.take() {
+            events.push(AgentEvent::Limited { reset_at_ms });
         }
         events.push(AgentEvent::TurnEnd {
             reason: reason.clone(),
@@ -432,6 +841,7 @@ impl ClaudeSession {
             empty: !self.gave_output && usage_tokens(value) == 0,
         });
         self.gave_output = false;
+        self.turn_open = false;
         self.last_turn = Some(reason);
         self.forget_the_turn();
         events
@@ -518,8 +928,22 @@ impl AgentSession for ClaudeSession {
             },
             (Some(_), Some(reason)) => outcome_of_turn(reason),
         };
+        // What a turn that never ended is known to have used, and a limit no result followed.
+        let mut events = Vec::new();
+        if self.turn_open {
+            events.push(self.cut_usage());
+        }
+        if let Some(reset_at_ms) = self.limit.take() {
+            events.push(AgentEvent::Limited { reset_at_ms });
+        }
         Finished {
-            step: Step::default(),
+            step: Step {
+                events: events
+                    .into_iter()
+                    .map(|event| stamped(None, event))
+                    .collect(),
+                writes: Vec::new(),
+            },
             outcome,
         }
     }
@@ -538,6 +962,7 @@ impl Replayable for ClaudeSession {
             Some("user") => {
                 self.cancel_requested = false;
                 self.gave_output = false;
+                self.turn_open = true;
                 self.last_turn = None;
                 self.forget_the_turn();
             }
@@ -566,6 +991,7 @@ impl Replayable for ClaudeSession {
                 Some("assistant") => self.read_assistant(&value, wall_ns),
                 Some("control_request") => self.read_control_request(&value, wall_ns),
                 Some("result") => self.read_result(&value, wall_ns),
+                Some("rate_limit_event") => self.read_rate_limit(&value, wall_ns),
                 Some("system") => self.read_system(&value, wall_ns),
                 Some("user") => self.read_user(&value, wall_ns),
                 Some(kind) => vec![other(&type_name(kind, &value), wall_ns)],
@@ -744,29 +1170,32 @@ fn hook_decision(stdout: &str) -> Option<HookDecision> {
     }
 }
 
-/// What an error result's `total_cost_usd` is: the session's running cost (S1), carried so the spend counts. Its
-/// tokens, and the cost of a turn that ended well, are the usage item's (`ts-0064-hw`).
-fn session_cost(result: &Value) -> Option<AgentEvent> {
-    let amount = result.get("total_cost_usd").and_then(Value::as_f64)?;
-    Some(AgentEvent::Usage {
-        usage: Usage {
-            scope: UsageScope::RunningTotal,
-            input: None,
-            output: None,
-            cache_read: None,
-            cache_write: None,
-            cache_write_1h: None,
-            cache_write_5m: None,
-            thought: None,
-            context_used: None,
-            context_size: None,
-            cost: Some(Money {
-                amount,
-                currency: "USD".into(),
-            }),
-            quality: UsageQuality::Exact,
-        },
-    })
+fn usd(amount: f64) -> Money {
+    Money {
+        amount,
+        currency: "USD".into(),
+    }
+}
+
+/// The size in bytes of a tool result's content as it enters the context: a string's length, or the sum over its blocks of
+/// a text block's text and any other block's JSON. `None` when the result has no content.
+fn result_bytes(result: &Value) -> Option<u64> {
+    match result.get("content")? {
+        Value::String(text) => Some(text.len() as u64),
+        Value::Array(blocks) => Some(blocks.iter().map(block_bytes).sum()),
+        _ => None,
+    }
+}
+
+fn block_bytes(block: &Value) -> u64 {
+    let text = match block.get("type").and_then(Value::as_str) {
+        Some("text") => block.get("text").and_then(Value::as_str),
+        _ => None,
+    };
+    match text {
+        Some(text) => text.len() as u64,
+        None => block.to_string().len() as u64,
+    }
 }
 
 /// A result that is an error: `is_error`, or a subtype other than `success`. Its `result` is never the phase's report

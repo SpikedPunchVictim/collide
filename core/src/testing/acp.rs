@@ -554,6 +554,7 @@ fn read_usage(usage: &Value) -> Option<Usage> {
         context_used: None,
         context_size: None,
         cost: None,
+        model_time_ms: None,
         quality: UsageQuality::Partial,
     })
 }

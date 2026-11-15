@@ -86,6 +86,7 @@ pub fn capabilities() -> Capabilities {
                 UsageScope::Step,
                 UsageScope::RunningTotal,
                 UsageScope::Compaction,
+                UsageScope::OtherCalls,
             ],
             cost: Support::Yes,
             cache_write_tiers: Support::Yes,

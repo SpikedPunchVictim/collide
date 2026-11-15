@@ -51,6 +51,20 @@ pub(crate) fn named(played: &Played) -> Vec<AgentEvent> {
         .collect()
 }
 
+/// `events` without the usage and tool-result-size events, for the tests that are about something else (usage is in
+/// `usage.rs`, `limits.rs` and `tool_results.rs`).
+pub(crate) fn bare(events: Vec<AgentEvent>) -> Vec<AgentEvent> {
+    events
+        .into_iter()
+        .filter(|event| {
+            !matches!(
+                event,
+                AgentEvent::Usage { .. } | AgentEvent::ToolResultSize { .. }
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn exit_with(code: i32) -> ExitInfo {
     ExitInfo {
         record: Some(ExitRecord {
@@ -574,7 +588,7 @@ fn a_result_is_the_final_report_from_result_result_and_then_the_end_of_the_turn(
     );
     let step = session.feed(&result_line(json!({"result": "All finished."})), 2);
     assert_eq!(
-        events(&step),
+        bare(events(&step)),
         [
             report("All finished."),
             turn_end(TurnEndReason::EndTurn {}, false, false)
@@ -673,7 +687,7 @@ fn a_turn_with_no_message_no_tool_call_and_no_usage_is_empty() {
         2,
     );
     assert_eq!(
-        events(&step),
+        bare(events(&step)),
         [turn_end(TurnEndReason::EndTurn {}, false, true)]
     );
 }
@@ -685,7 +699,7 @@ fn a_result_with_no_usage_field_counts_as_unreported_usage() {
     result.as_object_mut().unwrap().remove("usage");
     let step = session.feed(&line(result), 2);
     assert_eq!(
-        events(&step),
+        bare(events(&step)),
         [turn_end(TurnEndReason::EndTurn {}, false, true)]
     );
 }
@@ -746,7 +760,7 @@ fn an_error_result_is_never_the_report_and_ends_the_turn_as_an_error_with_the_st
         2,
     );
     assert_eq!(
-        events(&step),
+        bare(events(&step)),
         [turn_end(
             TurnEndReason::Error { status: Some(500) },
             false,
@@ -870,7 +884,7 @@ fn a_process_that_dies_mid_turn_with_exit_code_3_is_no_result() {
 fn the_report_recording_gives_messages_tool_calls_the_final_report_and_the_end_of_the_turn() {
     let played = play("report", assigned(), &["read the notes"], answer_nothing);
     assert_eq!(
-        named(&played),
+        bare(named(&played)),
         [
             AgentEvent::SessionBound {
                 id: ASSIGNED.into()

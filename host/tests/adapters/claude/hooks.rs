@@ -3,13 +3,20 @@
 //! of the owner's. The recordings are played through fake Claude under the real shim.
 
 use super::fake::{Played, assigned, play};
-use super::session::{allow_all, answer_nothing, events, line, result_line, session};
+use super::session::{
+    allow_all, answer_nothing, bare, events as events_of, line, result_line, session,
+};
 use collide_core::adapter::{AgentSession, ExitInfo, Step};
 use collide_core::agent::{
     AgentEvent, HookDecision, HookFailure, HookOutcome, PermissionReply, RefusalCause,
 };
 use collide_core::journal::{Direction, read_journal};
 use serde_json::{Value, json};
+
+/// The events of `step` that these tests are about: the usage and size events are in `usage.rs` and `tool_results.rs`.
+fn events(step: &Step) -> Vec<AgentEvent> {
+    bare(events_of(step))
+}
 
 // ---- lines ---------------------------------------------------------------------------------------------------------
 

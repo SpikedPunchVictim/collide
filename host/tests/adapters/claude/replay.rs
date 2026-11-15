@@ -333,3 +333,23 @@ fn a_journal_cut_between_the_failed_hook_and_the_tool_result_still_reports_the_f
         step.events
     );
 }
+
+// ---- usage and limits (ts-0064-hw) -----------------------------------------------------------------------------------
+
+#[test]
+fn replayed_from_the_journal_the_usage_session_reaches_the_state_of_the_live_session() {
+    // The anchors of the running totals, the responses of a turn and a held limit are state: a rebuilt session must
+    // give the next result the same differences.
+    let played = play(
+        "usage-session",
+        assigned(),
+        &["build it", "/compact", "do the task", "continue"],
+        |_, _| Step::default(),
+    );
+    assert_replay_reaches_the_live_state(&played);
+}
+
+#[test]
+fn the_limit_journal_cut_at_any_byte_replays_up_to_the_last_whole_record() {
+    cut_at_every_byte(&play("limit", assigned(), &["go"], allow_all));
+}

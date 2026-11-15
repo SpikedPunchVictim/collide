@@ -286,6 +286,30 @@
         },
         {
           "additionalProperties": false,
+          "description": "The size in bytes of a tool call's result, by the id of the [`AgentEvent::ToolCall`] (0.13, the token and context\nmetrics). It is given for every result, a refused call's included. The result's content is untrusted and may be\nlarge, so the event holds the size and nothing else.",
+          "properties": {
+            "bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tool_call_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_result_size",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool_call_id",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "An event this version has no type for. `raw_type` is its own type name.",
           "properties": {
             "raw": true,
@@ -777,7 +801,7 @@
     },
     "Usage": {
       "additionalProperties": false,
-      "description": "What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never\n0, and is left out of the JSON. `cache_write_1h` and `cache_write_5m` split `cache_write` by tier, where the tool\nreports the tiers (capability `usage_report.cache_write_tiers`).",
+      "description": "What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never\n0, and is left out of the JSON. `cache_write_1h` and `cache_write_5m` split `cache_write` by tier, where the tool\nreports the tiers (capability `usage_report.cache_write_tiers`). `model_time_ms` is the time the model call or calls\ntook, when the agent reports it (0.13: a turn's is a difference of a running total).",
       "properties": {
         "cache_read": {
           "format": "uint64",
@@ -845,6 +869,14 @@
             "null"
           ]
         },
+        "model_time_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "output": {
           "format": "uint64",
           "minimum": 0,
@@ -884,7 +916,7 @@
       "type": "string"
     },
     "UsageScope": {
-      "description": "What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).",
+      "description": "What a [`Usage`] event counts: one turn, one model step, the session so far, a compaction call, or another model call\noutside the turn's own (0.3, Usage).",
       "oneOf": [
         {
           "enum": [
@@ -897,6 +929,11 @@
         {
           "const": "compaction",
           "description": "The model call of a compaction. A turn's own usage leaves it out, so it is its own event, never added into a\n`Turn` (0.3, Usage; S9).",
+          "type": "string"
+        },
+        {
+          "const": "other_calls",
+          "description": "A model call that is neither the turn's own nor a compaction: a helper-model call, read as what the agent\nreports for the turn beyond the turn's own usage. Never added into a `Turn` either.",
           "type": "string"
         }
       ]

@@ -145,7 +145,8 @@ pub enum PermissionReply {
     Cancel {},
 }
 
-/// What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).
+/// What a [`Usage`] event counts: one turn, one model step, the session so far, a compaction call, or another model call
+/// outside the turn's own (0.3, Usage).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UsageScope {
@@ -155,6 +156,9 @@ pub enum UsageScope {
     /// The model call of a compaction. A turn's own usage leaves it out, so it is its own event, never added into a
     /// `Turn` (0.3, Usage; S9).
     Compaction,
+    /// A model call that is neither the turn's own nor a compaction: a helper-model call, read as what the agent
+    /// reports for the turn beyond the turn's own usage. Never added into a `Turn` either.
+    OtherCalls,
 }
 
 /// How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as "at
@@ -177,7 +181,8 @@ pub struct Money {
 
 /// What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never
 /// 0, and is left out of the JSON. `cache_write_1h` and `cache_write_5m` split `cache_write` by tier, where the tool
-/// reports the tiers (capability `usage_report.cache_write_tiers`).
+/// reports the tiers (capability `usage_report.cache_write_tiers`). `model_time_ms` is the time the model call or calls
+/// took, when the agent reports it (0.13: a turn's is a difference of a running total).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
@@ -202,6 +207,8 @@ pub struct Usage {
     pub context_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<Money>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_time_ms: Option<u64>,
     pub quality: UsageQuality,
 }
 
@@ -284,7 +291,7 @@ pub enum FinalReportSource {
 
 /// The `type` of every event but one that [`AgentEvent`] knows, as written in JSON. A test pins this list to the
 /// schema. A `type` outside it reads as [`AgentEvent::Other`].
-const KNOWN_EVENT_TYPES: [&str; 13] = [
+const KNOWN_EVENT_TYPES: [&str; 14] = [
     "message",
     "tool_call",
     "permission_request",
@@ -297,6 +304,7 @@ const KNOWN_EVENT_TYPES: [&str; 13] = [
     "hook_call",
     "hook_failed_open",
     "tool_refused",
+    "tool_result_size",
     "other",
 ];
 
@@ -383,6 +391,13 @@ pub enum AgentEvent {
     ToolRefused {
         id: String,
         cause: RefusalCause,
+    },
+    /// The size in bytes of a tool call's result, by the id of the [`AgentEvent::ToolCall`] (0.13, the token and context
+    /// metrics). It is given for every result, a refused call's included. The result's content is untrusted and may be
+    /// large, so the event holds the size and nothing else.
+    ToolResultSize {
+        tool_call_id: String,
+        bytes: u64,
     },
     /// An event this version has no type for. `raw_type` is its own type name.
     Other {

@@ -4,7 +4,7 @@
 
 use super::fake::{assigned, play};
 use super::session::{
-    answer_nothing, events, exit_with, line, named, report, result_line, session, turn_end,
+    answer_nothing, bare, events, exit_with, line, named, report, result_line, session, turn_end,
 };
 use collide_core::adapter::{AgentSession, PhaseFailure, PhaseOutcome};
 use collide_core::agent::{AgentEvent, Money, TurnEndReason, Usage, UsageQuality, UsageScope};
@@ -27,8 +27,28 @@ fn total_cost(amount: f64) -> AgentEvent {
                 amount,
                 currency: "USD".into(),
             }),
+            model_time_ms: None,
             quality: UsageQuality::Exact,
         },
+    }
+}
+
+/// A `Turn` usage with nothing reported but its quality, `Partial`.
+fn blank_turn() -> Usage {
+    Usage {
+        scope: UsageScope::Turn,
+        input: None,
+        output: None,
+        cache_read: None,
+        cache_write: None,
+        cache_write_1h: None,
+        cache_write_5m: None,
+        thought: None,
+        context_used: None,
+        context_size: None,
+        cost: None,
+        model_time_ms: None,
+        quality: UsageQuality::Partial,
     }
 }
 
@@ -126,7 +146,7 @@ fn both_kinds_of_block_end_the_turn_blocked_and_a_block_with_no_reason_has_none(
         );
         let step = session.feed(&blocked_result(), 2);
         assert_eq!(
-            events(&step),
+            bare(events(&step)),
             [turn_end(
                 TurnEndReason::Blocked {
                     reason: reason.map(String::from)
@@ -157,7 +177,7 @@ fn a_block_is_for_its_own_turn_only() {
     session.send_turn("a different prompt");
     let step = session.feed(&result_line(json!({"result": "Done."})), 3);
     assert_eq!(
-        events(&step),
+        bare(events(&step)),
         [
             report("Done."),
             turn_end(TurnEndReason::EndTurn {}, false, false)
@@ -206,7 +226,7 @@ fn a_cancel_makes_a_blocked_turn_cancelled() {
 // ---- error results -------------------------------------------------------------------------------------------------
 
 #[test]
-fn a_429_gives_a_limited_event_with_no_reset_time_the_cost_and_no_report() {
+fn a_429_gives_a_limited_event_with_the_reset_time_the_cost_and_no_report() {
     let mut played = play("limit", assigned(), &["go"], answer_nothing);
     let all = named(&played);
     assert_eq!(reports_in(&all), 0);
@@ -215,7 +235,9 @@ fn a_429_gives_a_limited_event_with_no_reset_time_the_cost_and_no_report() {
         tail,
         [
             total_cost(0.0041),
-            AgentEvent::Limited { reset_at_ms: None },
+            AgentEvent::Limited {
+                reset_at_ms: Some(1_794_960_000_000)
+            },
             turn_end(TurnEndReason::Error { status: Some(429) }, false, false),
         ]
     );
@@ -259,9 +281,22 @@ fn a_500_fails_the_phase_with_its_status_carries_its_cost_and_is_no_limit() {
         })),
         2,
     );
+    // The error result's tokens are carried as any result's are (ts-0064-hw): the turn's own, then the session's total.
     assert_eq!(
         events(&step),
         [
+            AgentEvent::Usage {
+                usage: Usage {
+                    scope: UsageScope::Turn,
+                    input: Some(4),
+                    output: Some(9),
+                    cost: Some(Money {
+                        amount: 0.02,
+                        currency: "USD".into()
+                    }),
+                    ..blank_turn()
+                }
+            },
             total_cost(0.02),
             turn_end(TurnEndReason::Error { status: Some(500) }, false, false)
         ]
@@ -275,29 +310,26 @@ fn a_500_fails_the_phase_with_its_status_carries_its_cost_and_is_no_limit() {
 }
 
 #[test]
-fn an_error_result_that_reports_no_cost_carries_no_usage() {
+fn an_error_result_that_reports_no_cost_has_no_running_total_and_no_turn_cost() {
     let mut session = session();
     let mut result: Value = serde_json::from_slice(&result_line(
         json!({"is_error": true, "api_error_status": 500, "result": "API Error"}),
     ))
     .unwrap();
     result.as_object_mut().unwrap().remove("total_cost_usd");
-    let step = session.feed(&line(result.clone()), 2);
-    assert_eq!(
-        events(&step),
-        [turn_end(
-            TurnEndReason::Error { status: Some(500) },
-            false,
-            false
-        )]
-    );
+    let expected = [
+        AgentEvent::Usage {
+            usage: Usage {
+                input: Some(4),
+                output: Some(9),
+                ..blank_turn()
+            },
+        },
+        turn_end(TurnEndReason::Error { status: Some(500) }, false, false),
+    ];
+    assert_eq!(events(&session.feed(&line(result.clone()), 2)), expected);
     result["total_cost_usd"] = Value::Null;
-    let step = session.feed(&line(result), 3);
-    assert!(
-        !events(&step)
-            .iter()
-            .any(|e| matches!(e, AgentEvent::Usage { .. }))
-    );
+    assert_eq!(events(&session.feed(&line(result), 3)), expected);
 }
 
 #[test]

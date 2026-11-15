@@ -86,6 +86,11 @@ export type AgentEvent =
       type: 'tool_refused'
     }
   | {
+      bytes: number
+      tool_call_id: string
+      type: 'tool_result_size'
+    }
+  | {
       raw?: unknown
       raw_type: string
       type: 'other'
@@ -107,9 +112,10 @@ export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once'
  */
 export type UsageQuality = 'exact' | 'partial' | 'unreported'
 /**
- * What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).
+ * What a [`Usage`] event counts: one turn, one model step, the session so far, a compaction call, or another model call
+ * outside the turn's own (0.3, Usage).
  */
-export type UsageScope = ('turn' | 'step' | 'running_total') | 'compaction'
+export type UsageScope = ('turn' | 'step' | 'running_total') | 'compaction' | 'other_calls'
 /**
  * Why a turn ended (0.3, A turn ends with). `error` carries the HTTP status of an API failure when there is one
  * (S1 measured a 429). `blocked` is a prompt a `UserPromptSubmit` hook refused: the turn never ran, and `reason` is
@@ -233,7 +239,8 @@ export interface PermissionOption {
 /**
  * What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never
  * 0, and is left out of the JSON. `cache_write_1h` and `cache_write_5m` split `cache_write` by tier, where the tool
- * reports the tiers (capability `usage_report.cache_write_tiers`).
+ * reports the tiers (capability `usage_report.cache_write_tiers`). `model_time_ms` is the time the model call or calls
+ * took, when the agent reports it (0.13: a turn's is a difference of a running total).
  */
 export interface Usage {
   cache_read?: number | null
@@ -244,6 +251,7 @@ export interface Usage {
   context_used?: number | null
   cost?: Money | null
   input?: number | null
+  model_time_ms?: number | null
   output?: number | null
   quality: UsageQuality
   scope: UsageScope

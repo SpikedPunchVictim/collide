@@ -60,6 +60,7 @@ fn usage() -> Usage {
             amount: 0.25,
             currency: "USD".into(),
         }),
+        model_time_ms: Some(1300),
         quality: UsageQuality::Exact,
     }
 }
@@ -336,6 +337,23 @@ fn a_refused_tool_call_round_trips_with_every_cause() {
 }
 
 #[test]
+fn the_size_of_a_tool_result_round_trips_and_has_no_place_for_its_content() {
+    round_trip(
+        AgentEvent::ToolResultSize {
+            tool_call_id: "c1".into(),
+            bytes: 2048,
+        },
+        json!({ "type": "tool_result_size", "tool_call_id": "c1", "bytes": 2048 }),
+    );
+    let error = serde_json::from_value::<AgentEvent>(
+        json!({ "type": "tool_result_size", "tool_call_id": "c1", "bytes": 1, "content": "text" }),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("content"), "{error}");
+}
+
+#[test]
 fn a_turn_blocked_by_a_hook_round_trips_with_its_reason() {
     round_trip(
         TurnEndReason::Blocked {
@@ -394,6 +412,8 @@ fn every_usage_scope_and_quality_round_trips() {
     round_trip(UsageScope::Turn, json!("turn"));
     round_trip(UsageScope::Step, json!("step"));
     round_trip(UsageScope::RunningTotal, json!("running_total"));
+    round_trip(UsageScope::Compaction, json!("compaction"));
+    round_trip(UsageScope::OtherCalls, json!("other_calls"));
     round_trip(UsageQuality::Exact, json!("exact"));
     round_trip(UsageQuality::Partial, json!("partial"));
     round_trip(UsageQuality::Unreported, json!("unreported"));
@@ -413,6 +433,7 @@ fn an_absent_usage_number_reads_as_none() {
     assert_eq!(read.context_used, None);
     assert_eq!(read.context_size, None);
     assert_eq!(read.cost, None);
+    assert_eq!(read.model_time_ms, None);
 }
 
 #[test]
@@ -429,12 +450,13 @@ fn an_absent_usage_number_is_written_as_absent_not_zero() {
         context_used: None,
         context_size: None,
         cost: None,
+        model_time_ms: None,
         quality: UsageQuality::Partial,
     };
     assert_eq!(
         serde_json::to_value(&usage).unwrap(),
         json!({ "scope": "turn", "output": 0, "quality": "partial" }),
-        "a reported 0 is kept, an absent number is left out"
+        "a reported 0 is kept, an absent number is left out, the model time included"
     );
 }
 
@@ -468,6 +490,7 @@ fn the_usage_schema_makes_every_number_optional_and_nullable_with_no_zero_defaul
             "thought",
             "context_used",
             "context_size",
+            "model_time_ms",
         ] {
             let property = &schema["properties"][number];
             assert_eq!(
@@ -506,6 +529,7 @@ fn an_unknown_key_fails_in_every_known_event() {
         json!({ "type": "limited", "reset_at_ms": 1 }),
         json!({ "type": "hook_call", "name": "n", "event": "e", "outcome": "success", "exit_code": 0 }),
         json!({ "type": "tool_refused", "id": "c", "cause": "hook" }),
+        json!({ "type": "tool_result_size", "tool_call_id": "c", "bytes": 3 }),
         json!({ "type": "hook_failed_open", "name": "n", "event": "e", "tool_call_id": "c", "cause": "no_verdict" }),
         json!({ "type": "other", "raw_type": "x" }),
     ];
@@ -645,7 +669,7 @@ fn every_known_event_type_in_the_schema_reads_as_itself_not_as_other() {
                 .to_string()
         })
         .collect();
-    assert_eq!(tags.len(), 13);
+    assert_eq!(tags.len(), 14);
     for tag in &tags {
         let bare = json!({ "type": tag });
         if let Ok(AgentEvent::Other { raw_type, .. }) = serde_json::from_value::<AgentEvent>(bare) {

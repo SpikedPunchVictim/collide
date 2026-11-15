@@ -164,7 +164,7 @@
       "type": "object"
     },
     "UsageScope": {
-      "description": "What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).",
+      "description": "What a [`Usage`] event counts: one turn, one model step, the session so far, a compaction call, or another model call\noutside the turn's own (0.3, Usage).",
       "oneOf": [
         {
           "enum": [
@@ -177,6 +177,11 @@
         {
           "const": "compaction",
           "description": "The model call of a compaction. A turn's own usage leaves it out, so it is its own event, never added into a\n`Turn` (0.3, Usage; S9).",
+          "type": "string"
+        },
+        {
+          "const": "other_calls",
+          "description": "A model call that is neither the turn's own nor a compaction: a helper-model call, read as what the agent\nreports for the turn beyond the turn's own usage. Never added into a `Turn` either.",
           "type": "string"
         }
       ]

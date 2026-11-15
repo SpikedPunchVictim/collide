@@ -388,6 +388,7 @@ fn every_normalized_event() -> Vec<AgentEvent> {
                 context_used: None,
                 context_size: None,
                 cost: Some(usd(0.001)),
+                model_time_ms: None,
                 quality: UsageQuality::Partial,
             },
         },

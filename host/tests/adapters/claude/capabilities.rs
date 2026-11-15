@@ -58,7 +58,7 @@ fn a_resumed_session_is_silent_and_the_model_is_chosen_on_the_launch_line() {
 }
 
 #[test]
-fn usage_comes_in_four_scopes_and_is_exact() {
+fn usage_comes_in_five_scopes_and_is_exact() {
     let usage = ClaudeAdapter.capabilities().usage_report;
     assert_eq!(
         usage.granularity,
@@ -66,7 +66,8 @@ fn usage_comes_in_four_scopes_and_is_exact() {
             UsageScope::Turn,
             UsageScope::Step,
             UsageScope::RunningTotal,
-            UsageScope::Compaction
+            UsageScope::Compaction,
+            UsageScope::OtherCalls
         ]
     );
     assert_eq!(usage.quality, Some(UsageQuality::Exact));

@@ -554,7 +554,9 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     word the hook's output gave, when it gave one), `HookFailedOpen { name, event, tool_call_id, cause }` (a
     `PreToolUse` or `PostToolUse` hook that timed out or exited with a code other than 0 or 2, and whose tool then
     ran: the failed-open detector's observation, 0.13), `ToolRefused { id, cause }` with `cause` one of `hook`,
-    `host`, `rule`, `missing_tool` or `unknown`, and `Other` (revision 18 errata, from `ts-0060-mm` and `ts-0063-rw`).
+    `host`, `rule`, `missing_tool` or `unknown`, `ToolResultSize { tool_call_id, bytes }` (the size of a tool result,
+    for each result, with no content), and `Other` (revision 18 errata, from `ts-0060-mm`, `ts-0063-rw` and
+    `ts-0064-hw`).
   - **A session starts as `Assign(uuid)`, `AgentAssigned` or `Resume(id)`.** Claude supports the first and last; ACP
     the last two. The id is recorded on `SessionBound`: at once for Claude, on the `session/new` response for ACP. If
     the daemon dies between the spawn and `SessionBound`, the id is lost, and recovery lists sessions by working
@@ -569,9 +571,11 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       rules into its own config.
     - A request whose input is unknown shows in the Queue as "input not available until approved" and is never
       auto-allowed by a pack rule that reads the input (0.11).
-  - **Usage** is an event with a scope (`Turn`, `Step`, `RunningTotal` or `Compaction`, the model call of a
-    compaction, never added into a `Turn`), every number an `Option`, a cost with its currency, and a `quality`:
-    `Exact`, `Partial` or `Unreported`. A total built from partial figures is shown as "at least" and never summed
+  - **Usage** is an event with a scope (`Turn`, `Step`, `RunningTotal`, `Compaction`, the model call of a
+    compaction, or `OtherCalls`, any other model call outside the turn's own; neither is ever added into a `Turn`,
+    and a `Step` is for context per response and is never added to a `Turn` either), every number an `Option`, a
+    cost with its currency, `model_time_ms` (the model time, a difference of `duration_api_ms` for Claude), and a
+    `quality`: `Exact`, `Partial` or `Unreported`. A total built from partial figures is shown as "at least" and never summed
     with exact ones (0.13).
   - **A turn ends with** `TurnEnd { reason, cancel_requested, empty }`. `reason` is `EndTurn`, `MaxTokens`,
     `MaxTurns`, `Refusal`, `Cancelled`, `Error { status }` or `Blocked { reason }` (a prompt a hook refused). `empty`
@@ -592,7 +596,7 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     | `system_prompt` | `none`, `append` or `override` |
     | `tool_allowlist` | the tool takes a list of the tools an agent may use |
     | `named_agent` | the tool takes a named agent definition (Claude's `--agents`) |
-    | `usage_report` | what usage gives: `granularity` (`turn`, `step`, `running_total`), `cost`, `cache_write_tiers`, `context`, `quality` |
+    | `usage_report` | what usage gives: `granularity` (`turn`, `step`, `running_total`, `compaction`, `other_calls`), `cost`, `cache_write_tiers`, `context`, `quality` |
     | `limit_signal` | a structured usage limit with its reset time. Claude has it; ACP does not |
     | `compaction_events` | the tool reports compactions. Claude does; ACP only if the agent sends the update |
     | `hook_events` | hook outcomes appear in the stream. Claude has it; ACP does not |
@@ -819,7 +823,9 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     message, and a role may require `limit_signal` to get the pause and resume below.
   - The adapter turns the tool's limit signal into a `limited` event with the reset time. For Claude that is a
     `rate_limit_event` whose `rate_limit_info.status` is `rejected`, with `resetsAt` in epoch seconds, or an
-    assistant message with `error: "rate_limit"`. No text parsing is needed. Read from the binary's schemas and
+    assistant message with `error: "rate_limit"`. No text parsing is needed. One limit is one `limited` event: the
+    signals of a turn (the rejected `rate_limit_event`, the message, a 429 error result) are held until the turn's
+    `result`, and the event carries the first reset time any of them has. Read from the binary's schemas and
     local transcripts by S1; a live limit is unmeasured. `status: "allowed_warning"` lets other runs pause early.
   - The phase pauses (`paused: usage limit`) instead of failing. Other runs on the same account pause before their
     next turn.
