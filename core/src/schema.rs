@@ -10,6 +10,7 @@
 //!   `deny_unknown_fields` on a unit variant of an internally tagged enum;
 //! - to add a type, add one `registry.add::<T>()` line to [`registry`].
 
+use crate::board::{Board, CollidePointer};
 use crate::change::{Change, Rename, TaskPointPayload};
 use crate::events::Event;
 use crate::hook::{HookInput, HookResult};
@@ -25,6 +26,7 @@ use crate::provider::{
     TaskRemoved, WatchParams, WatchResult,
 };
 use crate::report::ReportLine;
+use crate::settings::ConfigFile;
 use crate::stage::Stage;
 use crate::view::View;
 use crate::workflow::{Adoption, Workflow};
@@ -90,7 +92,10 @@ pub fn registry() -> Registry {
     registry.add::<Adoption>();
     registry.add::<ApplyParams>();
     registry.add::<ApplyResult>();
+    registry.add::<Board>();
     registry.add::<Change>();
+    registry.add::<CollidePointer>();
+    registry.add::<ConfigFile>();
     registry.add::<Event>();
     registry.add::<GetParams>();
     registry.add::<GetResult>();

@@ -1,0 +1,3 @@
+# Parses. A board is committed, and a folder being developed is per user.
+packs:
+  - source: dev:~/dev/ferry-pack

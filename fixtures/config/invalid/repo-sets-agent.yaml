@@ -1,0 +1,5 @@
+# Parses. In a repo's file only ask.budget_usd and ask.timeout_s are a team's to set.
+agents:
+  claude-haiku: { model: opus, timeout_s: 60 }
+  evil: { kind: acp, command: ./run.sh }
+ask: { agent: evil, budget_usd: 1.0 }

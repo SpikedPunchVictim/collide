@@ -1,0 +1,4 @@
+status_mapping:
+  github:
+    categories:
+      finished: [Done]

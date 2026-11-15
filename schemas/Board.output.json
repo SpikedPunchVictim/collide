@@ -1,0 +1,233 @@
+{
+  "$defs": {
+    "BoardPack": {
+      "additionalProperties": false,
+      "description": "One pack of the board's list. A line may reorder or replace the list (0.12).",
+      "properties": {
+        "source": {
+          "description": "`<scheme>:<rest>`: a `repo:` or `git:` source. `dev:` is refused.",
+          "pattern": "^[a-z][a-z0-9+.-]*:.+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "BoardProfiles": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "description": "The profile a run gets when nothing earlier picks one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/ProfileRule"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "BoardSources": {
+      "additionalProperties": false,
+      "description": "`sources:` (0.10: configuration lives in `board.yaml`).",
+      "properties": {
+        "github": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GithubSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CheckoutFilter": {
+      "additionalProperties": false,
+      "description": "`checkout_filter:` (0.10, Ref-scoped sources): which `git worktree list` entries are not checkouts of the\nboard.",
+      "properties": {
+        "exclude": {
+          "description": "Globs, such as `scratch/*`. What a glob is matched against is the checkout code's (Stage 4).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "GithubProject": {
+      "additionalProperties": false,
+      "description": "A GitHub Projects v2 project: its owner (a user or an organization) and its number.",
+      "properties": {
+        "number": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "owner": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "number"
+      ],
+      "type": "object"
+    },
+    "GithubSource": {
+      "additionalProperties": false,
+      "description": "The GitHub source: repos for Issues, projects for Projects v2. The account is per user, in the user's\nsettings, never here (0.7).",
+      "properties": {
+        "projects": {
+          "items": {
+            "$ref": "#/$defs/GithubProject"
+          },
+          "type": "array"
+        },
+        "repos": {
+          "description": "Each `owner/name`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "GithubStatusMapping": {
+      "additionalProperties": false,
+      "description": "The GitHub Projects v2 Status field mapped to the categories (0.10, Status categories; Stage 6c).",
+      "properties": {
+        "categories": {
+          "additionalProperties": false,
+          "description": "Each category and the Projects statuses that map to it. The first status of a category is the one a\ncategory write sets (`setStatus` with `done` sets the first status listed under `done`).",
+          "properties": {
+            "active": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "backlog": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "done": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "dropped": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "ready": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "review": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "status_field": {
+          "description": "The Projects field that holds the status. When it is absent the field is named `Status`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProfileRule": {
+      "additionalProperties": false,
+      "description": "`profiles.rules[]`: `{ when: <CEL over the task>, profile: <name> }`. The first rule that matches picks the\nrun's profile (0.7, Profiles).",
+      "properties": {
+        "profile": {
+          "type": "string"
+        },
+        "when": {
+          "description": "CEL over one task, as text. Its length is capped at [`MAX_CEL_SOURCE_BYTES`].",
+          "type": "string"
+        }
+      },
+      "required": [
+        "when",
+        "profile"
+      ],
+      "type": "object"
+    },
+    "StatusMapping": {
+      "additionalProperties": false,
+      "description": "`status_mapping:`, by source.",
+      "properties": {
+        "github": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GithubStatusMapping"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`.collide/board.yaml`. Every key is optional: `collide init` writes a short file.",
+  "properties": {
+    "checkout_filter": {
+      "$ref": "#/$defs/CheckoutFilter"
+    },
+    "packs": {
+      "description": "The packs, in order. A pack in the repo is `repo:`; `git:` ones are pinned in `.collide/packs.lock`.",
+      "items": {
+        "$ref": "#/$defs/BoardPack"
+      },
+      "type": "array"
+    },
+    "profiles": {
+      "$ref": "#/$defs/BoardProfiles"
+    },
+    "sources": {
+      "$ref": "#/$defs/BoardSources"
+    },
+    "status_mapping": {
+      "$ref": "#/$defs/StatusMapping"
+    },
+    "workflow": {
+      "description": "The default workflow, as `pack/workflow`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "Board",
+  "type": "object"
+}

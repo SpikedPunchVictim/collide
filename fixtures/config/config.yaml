@@ -1,0 +1,21 @@
+# The user's file: ~/.config/collide/config.yaml. The agent entries of 0.7.
+agents:
+  claude-haiku:
+    kind: claude-code
+    model: haiku
+    config: none
+    read: ["<board root>"]
+    tools: [read, search]
+    timeout_s: 180
+    budget_usd: null
+  local-opencode:
+    kind: acp
+    command: opencode
+    args: [acp]
+    model: ollama/qwen2.5:7b
+    env: { OPENCODE_DISABLE_CLAUDE_CODE: "1" }
+    secrets: { SOME_API_KEY: keychain-item-name }
+  my-client: { kind: external }
+ask: { agent: claude-haiku }
+config:
+  ferry: { lanePool: 4 }

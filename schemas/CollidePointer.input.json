@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The `.collide` pointer file: a file in place of the directory, as git's `.git` file points a worktree at its git\ndirectory (0.7).",
+  "properties": {
+    "dir": {
+      "description": "The Collide directory, relative to the repo root.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "dir"
+  ],
+  "title": "CollidePointer",
+  "type": "object"
+}

@@ -1,0 +1,27 @@
+# A board with the keys of 0.7 set: packs in order, the default workflow, profiles, GitHub sources including
+# Projects v2, the status mapping and the checkout filter.
+packs:
+  - source: repo:.collide/packs/ferry
+  - source: git:github.com/org/ferry-pack//pack@v1.2
+workflow: ferry/loop
+profiles:
+  default: small-fix
+  rules:
+    - when: "'bug' in task.labels"
+      profile: small-fix
+sources:
+  github:
+    repos: [org/ferry]
+    projects:
+      - { owner: org, number: 3 }
+status_mapping:
+  github:
+    status_field: Status
+    categories:
+      backlog: [Todo]
+      active: [In progress]
+      review: [In review]
+      done: [Done, Shipped]
+      dropped: [Won't do]
+checkout_filter:
+  exclude: ["scratch/*"]

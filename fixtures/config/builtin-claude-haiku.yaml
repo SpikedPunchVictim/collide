@@ -1,0 +1,10 @@
+# The built-in entry exactly as 0.7 shows it, every field it has.
+agents:
+  claude-haiku:
+    kind: claude-code
+    model: haiku
+    config: none
+    read: ["<board root>"]
+    tools: [read, search]
+    timeout_s: 180
+    budget_usd: null

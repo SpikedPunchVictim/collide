@@ -1,0 +1,6 @@
+# Parses. One Projects status cannot map to two categories.
+status_mapping:
+  github:
+    categories:
+      active: [Doing]
+      review: [Doing]

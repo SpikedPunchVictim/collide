@@ -210,6 +210,49 @@ fn schema_lists_the_pack_keys_points_and_checklists() {
 }
 
 #[test]
+fn schema_lists_the_board_config_agents_ask_and_pointer_keys() {
+    let types = listed_types(&schema_stdout());
+    assert_eq!(
+        keys(&types, "Board"),
+        [
+            "checkout_filter",
+            "packs",
+            "profiles",
+            "sources",
+            "status_mapping",
+            "workflow"
+        ]
+    );
+    assert_eq!(keys(&types, "BoardProfiles"), ["default", "rules"]);
+    assert_eq!(keys(&types, "ProfileRule"), ["profile", "when"]);
+    assert_eq!(keys(&types, "GithubSource"), ["projects", "repos"]);
+    assert_eq!(keys(&types, "GithubProject"), ["number", "owner"]);
+    assert_eq!(
+        keys(&types, "GithubStatusMapping"),
+        ["categories", "status_field"]
+    );
+    assert_eq!(keys(&types, "CollidePointer"), ["dir"]);
+    assert_eq!(keys(&types, "ConfigFile"), ["agents", "ask", "config"]);
+    assert_eq!(
+        keys(&types, "AgentEntry"),
+        [
+            "args",
+            "budget_usd",
+            "command",
+            "config",
+            "env",
+            "kind",
+            "model",
+            "read",
+            "secrets",
+            "timeout_s",
+            "tools"
+        ]
+    );
+    assert_eq!(keys(&types, "Ask"), ["agent", "budget_usd", "timeout_s"]);
+}
+
+#[test]
 fn schema_lists_kinds_op_effects_links_owners_checklist_and_budget() {
     let types = listed_types(&schema_stdout());
     assert_eq!(

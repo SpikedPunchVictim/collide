@@ -1,0 +1,3 @@
+# Parses. The range is 5 to 1800.
+agents:
+  claude-haiku: { timeout_s: 1801 }

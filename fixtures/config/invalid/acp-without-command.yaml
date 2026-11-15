@@ -1,0 +1,3 @@
+# Parses. An ACP agent needs a command.
+agents:
+  local-opencode: { kind: acp, args: [acp] }

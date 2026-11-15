@@ -1,0 +1,4 @@
+# .collide/config.yaml: a team's defaults for every ask, and pack settings.
+ask: { budget_usd: 0.5, timeout_s: 240 }
+config:
+  ferry: { lanePool: 2 }

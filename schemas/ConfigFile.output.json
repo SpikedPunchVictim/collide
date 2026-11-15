@@ -1,0 +1,192 @@
+{
+  "$defs": {
+    "AgentEntry": {
+      "additionalProperties": false,
+      "description": "One entry of `agents:`. Every key is optional, because a layer may change the built-in entry field by field\n(0.7); a file's entry for any other id must name its `kind` ([`SettingsError::MissingKind`]).",
+      "properties": {
+        "args": {
+          "description": "An ACP agent's arguments. `--mdns`, `--cors` and a `--hostname` that is not loopback are refused.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "budget_usd": {
+          "description": "An optional cap on the spend of one ask. Claude Code only.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The program an ACP agent starts. Required for `kind: acp`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which Claude settings the agent tool reads: `none`, or `user` for \"use my Claude config\" (0.3)."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment for the child. A literal value under a name that ends in `KEY`, `TOKEN`, `SECRET` or\n`PASSWORD` is refused: use `secrets`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "description": "A model name for Claude Code (`haiku`), or an opaque id for ACP (`ollama/qwen2.5:7b`, 0.3).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "read": {
+          "description": "Folders it may read. `<board root>` stands for the board's default line root.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "secrets": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variable to the name of an item in the OS keychain. A reference, never a value.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "timeout_s": {
+          "description": "Collide's timeout for one ask, in seconds: 5 to 1800.",
+          "format": "uint64",
+          "maximum": 1800,
+          "minimum": 5,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolKind"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AgentKind": {
+      "description": "What an agent runs as. The variants carry plain comments, not doc comments, so the schema stays a bare enum.",
+      "enum": [
+        "claude-code",
+        "acp",
+        "external"
+      ],
+      "type": "string"
+    },
+    "Ask": {
+      "additionalProperties": false,
+      "description": "`ask:`. `agent` names the entry the ask box uses. `budget_usd` and `timeout_s` are the defaults for every\nask, and the only keys a repo file may set here.",
+      "properties": {
+        "agent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "budget_usd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "timeout_s": {
+          "format": "uint64",
+          "maximum": 1800,
+          "minimum": 5,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RoleConfig": {
+      "description": "`config: user | none`: which settings the agent tool reads (0.3, Context options).",
+      "enum": [
+        "user",
+        "none"
+      ],
+      "type": "string"
+    },
+    "ToolKind": {
+      "description": "A tool kind an agent may use. v0 accepts only these two: any other kind is a load error that names the key.",
+      "enum": [
+        "read",
+        "search"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`.collide/config.yaml` and `~/.config/collide/config.yaml`.",
+  "properties": {
+    "agents": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AgentEntry"
+      },
+      "description": "One entry per agent id. Only the user's file may hold these (0.7).",
+      "type": "object"
+    },
+    "ask": {
+      "$ref": "#/$defs/Ask"
+    },
+    "config": {
+      "additionalProperties": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "description": "Pack settings: pack name, then key, then value. A pack's schema checks each value (Stage 4a), and a key\nthe pack marks `secret: true` is refused here ([`secrets_in_file`]).",
+      "type": "object"
+    }
+  },
+  "title": "ConfigFile",
+  "type": "object"
+}

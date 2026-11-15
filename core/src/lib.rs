@@ -1,3 +1,4 @@
+pub mod board;
 pub mod change;
 pub mod duration;
 pub mod events;
@@ -12,6 +13,7 @@ pub mod provider;
 pub mod ready;
 pub mod report;
 pub mod schema;
+pub mod settings;
 pub mod short_id;
 pub mod stage;
 pub mod view;

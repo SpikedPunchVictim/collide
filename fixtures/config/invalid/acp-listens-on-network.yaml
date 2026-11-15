@@ -1,0 +1,6 @@
+# Parses. `--mdns`, `--cors` and a non-loopback `--hostname` are refused.
+agents:
+  local-opencode:
+    kind: acp
+    command: opencode
+    args: [acp, --hostname, 0.0.0.0, --mdns, --cors=https://example.com]

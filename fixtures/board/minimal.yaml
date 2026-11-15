@@ -1,0 +1,3 @@
+# What `collide init` writes first: one repo pack.
+packs:
+  - source: repo:.collide/packs/ferry
