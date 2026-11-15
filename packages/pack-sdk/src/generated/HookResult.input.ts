@@ -8,7 +8,7 @@ export type HookStatus = 'ok' | 'fail' | 'unverified' | 'pending' | 'refused' | 
 
 /**
  * The result file (0.5). Its status is the verdict. `retryAfter` is a hint in seconds for `pending`; the engine
- * clamps it against the phase's `interval:` (`ts-0038-ng`).
+ * clamps it against the phase's `interval:` ([`crate::run_rules::poll_delay`]).
  */
 export interface HookResult {
   message?: string

@@ -15,7 +15,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The result file (0.5). Its status is the verdict. `retryAfter` is a hint in seconds for `pending`; the engine\nclamps it against the phase's `interval:` (`ts-0038-ng`).",
+  "description": "The result file (0.5). Its status is the verdict. `retryAfter` is a hint in seconds for `pending`; the engine\nclamps it against the phase's `interval:` ([`crate::run_rules::poll_delay`]).",
   "properties": {
     "message": {
       "default": "",

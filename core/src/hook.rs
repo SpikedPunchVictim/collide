@@ -172,7 +172,7 @@ pub enum HookStatus {
 }
 
 /// The result file (0.5). Its status is the verdict. `retryAfter` is a hint in seconds for `pending`; the engine
-/// clamps it against the phase's `interval:` (`ts-0038-ng`).
+/// clamps it against the phase's `interval:` ([`crate::run_rules::poll_delay`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HookResult {
@@ -203,7 +203,7 @@ pub enum HookKind {
 }
 
 impl HookKind {
-    fn may_answer_pending(self) -> bool {
+    pub fn may_answer_pending(self) -> bool {
         matches!(self, HookKind::Wait | HookKind::IntegratePullRequest)
     }
 
@@ -213,6 +213,13 @@ impl HookKind {
             HookKind::Gate | HookKind::Script | HookKind::Wait | HookKind::Point
         )
     }
+}
+
+/// Why `pending` is an error from this kind of hook (0.5). The run-state rules add where it happened.
+pub fn misplaced_pending_message(kind: HookKind) -> String {
+    format!(
+        "`pending` is valid only from a wait hook or a pull request integrate, not from {kind:?}"
+    )
 }
 
 fn error(message: String) -> HookResult {
@@ -255,9 +262,7 @@ pub fn effective_result(kind: HookKind, exit_zero: bool, file: Option<&[u8]>) ->
         ));
     }
     if result.status == HookStatus::Pending && !kind.may_answer_pending() {
-        return error(format!(
-            "`pending` is valid only from a wait hook or a pull request integrate, not from {kind:?}"
-        ));
+        return error(misplaced_pending_message(kind));
     }
     if result.status == HookStatus::Unverified && !kind.may_answer_unverified() {
         return error(format!(

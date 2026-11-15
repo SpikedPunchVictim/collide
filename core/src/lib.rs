@@ -17,6 +17,7 @@ pub mod profile;
 pub mod provider;
 pub mod ready;
 pub mod report;
+pub mod run_rules;
 pub mod schema;
 pub mod section;
 pub mod settings;
