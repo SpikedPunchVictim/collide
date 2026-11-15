@@ -1,7 +1,7 @@
 ---
 id: ts-0062-rj
 kind: task
-status: active
+status: done
 title: "Fake Claude and the Claude session: turns, permissions, replay"
 owners: []
 links:
