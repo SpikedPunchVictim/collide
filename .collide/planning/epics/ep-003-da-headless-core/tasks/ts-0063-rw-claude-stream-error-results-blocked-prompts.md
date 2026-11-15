@@ -1,7 +1,7 @@
 ---
 id: ts-0063-rw
 kind: task
-status: ready
+status: active
 title: "Claude stream: error results, blocked prompts, refusals, hooks"
 owners: []
 links:
