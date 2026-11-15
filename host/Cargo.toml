@@ -29,3 +29,10 @@ path = "src/bin/collide.rs"
 [[bin]]
 name = "collide-daemon"
 path = "src/bin/collide-daemon.rs"
+
+# The Claude adapter's integration tests (ts-0061-bg). They name Claude's environment variables, which only
+# `host/src/adapters/claude/` and `host/tests/adapters/claude/` may do (the names check), so they sit below
+# `tests/adapters/claude/` and need a target of their own: cargo does not find a test two folders down.
+[[test]]
+name = "claude_adapter"
+path = "tests/adapters/claude/main.rs"

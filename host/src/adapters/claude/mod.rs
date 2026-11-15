@@ -1,10 +1,12 @@
 //! The Claude adapter (0.3, v0 ships one adapter, Claude, for runs; Stage 3b). [`ClaudeAdapter`] is the stateless
 //! [`AgentAdapter`] and [`session::ClaudeSession`] its [`collide_core::adapter::AgentSession`]. A Claude session is
-//! nearly empty: the launch line carries the first turn, and `feed` is the stream parser measured by S1.
+//! nearly empty: every turn, the first included, is a `user` message on stdin, and `feed` is the stream parser
+//! measured by S1.
 //!
 //! This module and its children are the only place a Claude environment variable name may appear (the no-names check
 //! of ts-0013-nz): the variables the adapter strips ([`env_strip`]) and the three it sets for context options
-//! ([`launch`]).
+//! ([`launch`]). Also here: the snapshot files the line names ([`snapshot`]) and the user's own hooks and settings
+//! `env` a phase loads ([`user_config`]).
 //!
 //! | tag | where | what it does |
 //! |---|---|---|
@@ -22,10 +24,15 @@ use collide_core::adapter::{
     AgentAdapter, AgentSession, CommandSpec, ConfigPath, ConfigRoot, EnvStrip, LaunchError,
     LaunchRequest, LaunchSpec, SessionRef,
 };
-use collide_core::agent::Capabilities;
+use collide_core::agent::{
+    Capabilities, ContextOptions, McpServers, ModelSelect, PermissionHost, SessionResume, Support,
+    SystemPrompt, UsageQuality, UsageReport, UsageScope,
+};
 
 pub mod launch;
 pub mod session;
+pub mod snapshot;
+pub mod user_config;
 pub mod version;
 
 /// The program the adapter starts and the take-over command runs.
@@ -47,13 +54,73 @@ pub fn env_strip() -> EnvStrip {
     }
 }
 
+/// Claude's row of the capability table (0.3, Capabilities). `Yes` is what S1, S7, S9 or S6 measured. `Unknown` is what
+/// none of them did, so a role that requires it is refused until the contract test (Stage 3b) says `Yes`:
+///
+/// - `background`: the tool running detached under a shim is the daemon's first real run (`ts-0070-mk`);
+/// - `system_prompt`: S1 showed a definition's prompt takes effect, not whether it replaces or adds to Claude's own;
+/// - `mcp_servers.sse`: no spike used an SSE server.
+///
+/// `limit_signal` is `Yes` on S1's reading of the binary's schemas and two recorded limit messages, with a live
+/// `rate_limit_event` seen at `allowed`; a live `rejected` is unmeasured, and the contract test records one when it
+/// happens (0.3, Usage and rate limits).
+pub fn capabilities() -> Capabilities {
+    Capabilities {
+        headless_stream: Support::Yes,
+        permission_host: PermissionHost {
+            support: Support::Yes,
+            deny_message: Support::Yes,
+            input_at_request: Support::Yes,
+            request_reason: Support::Yes,
+        },
+        session_resume: SessionResume::Silent,
+        background: Support::Unknown,
+        budget_native: Support::Yes,
+        system_prompt: SystemPrompt::Unknown,
+        tool_allowlist: Support::Yes,
+        named_agent: Support::Yes,
+        usage_report: UsageReport {
+            support: Support::Yes,
+            granularity: vec![
+                UsageScope::Turn,
+                UsageScope::Step,
+                UsageScope::RunningTotal,
+                UsageScope::Compaction,
+            ],
+            cost: Support::Yes,
+            cache_write_tiers: Support::Yes,
+            context: Support::Yes,
+            quality: Some(UsageQuality::Exact),
+        },
+        limit_signal: Support::Yes,
+        compaction_events: Support::Yes,
+        hook_events: Support::Yes,
+        refusal_source: Support::Yes,
+        strict_config: Support::Yes,
+        context_options: ContextOptions {
+            support: Support::Yes,
+            compact_at: Support::Yes,
+            bash_output_max: Support::Yes,
+            mcp_output_max: Support::Yes,
+        },
+        model_select: ModelSelect::Launch,
+        take_over: Support::Yes,
+        mcp_servers: McpServers {
+            support: Support::Yes,
+            stdio: Support::Yes,
+            http: Support::Yes,
+            sse: Support::Unknown,
+        },
+    }
+}
+
 /// Claude Code as an [`AgentAdapter`]. It has no state, so one value serves every phase.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClaudeAdapter;
 
 impl AgentAdapter for ClaudeAdapter {
     fn capabilities(&self) -> Capabilities {
-        todo!("claude: capabilities")
+        capabilities()
     }
 
     fn launch(&self, request: &LaunchRequest) -> Result<LaunchSpec, LaunchError> {
@@ -144,11 +211,5 @@ mod tests {
         let command = ClaudeAdapter.interactive_command(&session).unwrap();
         assert_eq!(command.argv, ["claude", "--resume", "7c1b"]);
         assert_eq!(command.cwd, PathBuf::from("/work/tree"));
-    }
-
-    #[test]
-    #[should_panic(expected = "claude: capabilities")]
-    fn capabilities_is_a_stub_tagged_for_stage_3b() {
-        let _ = ClaudeAdapter.capabilities();
     }
 }

@@ -21,6 +21,11 @@
 
 use super::env_strip;
 use collide_core::adapter::{LaunchError, LaunchRequest, LaunchSpec};
+use collide_core::agent::SessionStart;
+use collide_core::pack::Role;
+use collide_core::profile::RoleConfig;
+use collide_core::resolve::is_safe_token;
+use std::collections::BTreeMap;
 
 /// The words of the line that never change, in order: `-p`, the stream formats, `--verbose` (without it `-p` with
 /// stream-json output exits 1), `--include-hook-events` (without it a failed hook leaves no event), the host as the
@@ -73,12 +78,172 @@ pub const MCP_OUTPUT_MAX_VAR: &str = "MAX_MCP_OUTPUT_TOKENS";
 pub const COMPACT_AT_FLOOR: u64 = 100_000;
 
 /// The launch spec for a role and a phase: the argv above, the environment the context options set after the strip,
-/// the variables to strip ([`env_strip`]) and the working directory. A capability the role requires and the adapter
-/// cannot promise, a mapped model that fails the pack's pattern and a `compact_at` under [`COMPACT_AT_FLOOR`] are a
-/// [`LaunchError`].
+/// the variables to strip ([`env_strip`]) and the working directory. A `compact_at` under [`COMPACT_AT_FLOOR`], an
+/// output cap of zero, a budget that is spent, a session the tool would name itself and a value that is not a safe
+/// token (0.5) where one becomes an argument are each a [`LaunchError::Invalid`] that says why.
+///
+/// The role's required capabilities are not checked here: the caller refuses them with
+/// [`collide_core::adapter::refuse_unmet_capabilities`] over [`super::ClaudeAdapter`]'s table, before it builds the
+/// request. The model is the one the alias already resolved to (`collide_core::resolve::resolve_model_alias`), and only
+/// its `name` is used.
+///
+/// The first turn is not in the spec. It goes on stdin as a `user` message, written by the session.
 pub fn launch_spec(request: &LaunchRequest) -> Result<LaunchSpec, LaunchError> {
-    let _ = (request, env_strip);
-    todo!("claude: launch line")
+    let role = &request.role;
+    let env = context_env(role)?;
+
+    let mut argv: Vec<String> = FIXED_ARGV.map(String::from).to_vec();
+    argv.extend(session_args(&request.session)?);
+    if let Some(model) = &request.model {
+        argv.extend(["--model".into(), safe("the model name", &model.name)?]);
+    }
+    if let Some(left) = request.budget_left_usd {
+        if !left.is_finite() || left <= 0.0 {
+            return invalid(format!(
+                "the phase has no budget left to pass as --max-budget-usd ({left}); \
+                 a spent phase is paused, not launched"
+            ));
+        }
+        argv.extend(["--max-budget-usd".into(), left.to_string()]);
+    }
+    let snapshot = |file: &str| -> Result<String, LaunchError> {
+        match request.snapshot_dir.join(file).to_str() {
+            Some(path) => Ok(path.to_string()),
+            None => invalid(format!(
+                "the snapshot directory {} is not valid UTF-8",
+                request.snapshot_dir.display()
+            )),
+        }
+    };
+    argv.extend([
+        "--agents".into(),
+        snapshot(AGENTS_FILE)?,
+        "--agent".into(),
+        agent_name(&request.role_name)?,
+        "--setting-sources".into(),
+        setting_sources(role.config).into(),
+        "--settings".into(),
+        snapshot(SETTINGS_FILE)?,
+        "--mcp-config".into(),
+        snapshot(MCP_FILE)?,
+    ]);
+    let disallowed = disallowed_tools_without(&[]);
+    if !disallowed.is_empty() {
+        argv.push("--disallowed-tools".into());
+        argv.extend(disallowed.into_iter().map(String::from));
+    }
+
+    Ok(LaunchSpec {
+        argv,
+        env,
+        env_strip: env_strip(),
+        cwd: request.cwd.clone(),
+    })
+}
+
+fn invalid<T>(message: String) -> Result<T, LaunchError> {
+    Err(LaunchError::Invalid { message })
+}
+
+/// `value` when it is a safe token (0.5), so it cannot become a flag or climb out of a directory.
+fn safe(what: &str, value: &str) -> Result<String, LaunchError> {
+    if is_safe_token(value) {
+        Ok(value.to_string())
+    } else {
+        invalid(format!(
+            "{what} `{value}` is not a safe token (1 to 64 of A-Z a-z 0-9 . _ -, not starting with - or .)"
+        ))
+    }
+}
+
+/// `--session-id <uuid>` for `Assign` and `--resume <id>` for `Resume`. A tool that names its own session is ACP's
+/// shape, so `AgentAssigned` is not a Claude start.
+fn session_args(start: &SessionStart) -> Result<[String; 2], LaunchError> {
+    match start {
+        SessionStart::Assign { uuid } => Ok(["--session-id".into(), safe("the session id", uuid)?]),
+        SessionStart::Resume { id } => Ok(["--resume".into(), safe("the session id", id)?]),
+        SessionStart::AgentAssigned {} => invalid(
+            "Claude cannot name its own session: a phase starts with Assign (--session-id) or Resume (--resume)"
+                .into(),
+        ),
+    }
+}
+
+/// `collide-<pack>-<role>` from a role as a workflow names it, `pack/role`. Both parts are safe tokens, because the
+/// name reaches argv and a definition's key.
+pub fn agent_name(role_name: &str) -> Result<String, LaunchError> {
+    match role_name.split_once('/') {
+        Some((pack, role)) if !role.contains('/') => Ok(format!(
+            "collide-{}-{}",
+            safe("the pack name", pack)?,
+            safe("the role name", role)?
+        )),
+        _ => invalid(format!(
+            "the role `{role_name}` is not written as `pack/role`"
+        )),
+    }
+}
+
+/// `user` or `""` (0.3, Context options). Both lines keep `--strict-mcp-config`, which is fixed.
+fn setting_sources(config: Option<RoleConfig>) -> &'static str {
+    match config {
+        Some(RoleConfig::None) => "",
+        Some(RoleConfig::User) | None => "user",
+    }
+}
+
+/// [`DISALLOWED_TOOLS`] but the ones a role asks for. A role has no key to ask with yet, so [`launch_spec`] passes none.
+pub fn disallowed_tools_without(asked_for: &[String]) -> Vec<&'static str> {
+    DISALLOWED_TOOLS
+        .into_iter()
+        .filter(|tool| !asked_for.iter().any(|asked| asked == tool))
+        .collect()
+}
+
+/// The variables the role's context options set, after the strip, so they beat an inherited value. An unusable value
+/// is refused here because `claude` ignores one without a warning.
+fn context_env(role: &Role) -> Result<BTreeMap<String, String>, LaunchError> {
+    let mut env = BTreeMap::new();
+    if let Some(window) = role.compact_at {
+        if window < COMPACT_AT_FLOOR {
+            return invalid(format!(
+                "`compact_at` {} is under the floor of {} tokens: claude ignores a smaller window without a warning",
+                with_commas(window),
+                with_commas(COMPACT_AT_FLOOR)
+            ));
+        }
+        env.insert(COMPACT_AT_VAR.to_string(), window.to_string());
+    }
+    for (option, value, variable) in [
+        ("bash_output_max", role.bash_output_max, BASH_OUTPUT_MAX_VAR),
+        ("mcp_output_max", role.mcp_output_max, MCP_OUTPUT_MAX_VAR),
+    ] {
+        match value {
+            Some(0) => {
+                return invalid(format!(
+                    "`{option}` is 0: claude would ignore it without a warning, so give it at least 1"
+                ));
+            }
+            Some(value) => {
+                env.insert(variable.to_string(), value.to_string());
+            }
+            None => {}
+        }
+    }
+    Ok(env)
+}
+
+/// 100000 as `100,000`.
+fn with_commas(number: u64) -> String {
+    let digits = number.to_string();
+    let mut text = String::new();
+    for (at, digit) in digits.chars().enumerate() {
+        if at > 0 && (digits.len() - at).is_multiple_of(3) {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    text
 }
 
 #[cfg(test)]
@@ -102,6 +267,18 @@ mod tests {
         for tool in ["CronCreate", "EnterWorktree", "SendMessage", "Workflow"] {
             assert!(DISALLOWED_TOOLS.contains(&tool), "{tool}");
         }
+    }
+
+    #[test]
+    fn numbers_in_messages_have_thousands_separators() {
+        let shown: Vec<String> = [0, 999, 1_000, 99_999, 100_000, 1_234_567]
+            .into_iter()
+            .map(with_commas)
+            .collect();
+        assert_eq!(
+            shown,
+            ["0", "999", "1,000", "99,999", "100,000", "1,234,567"]
+        );
     }
 
     #[test]
