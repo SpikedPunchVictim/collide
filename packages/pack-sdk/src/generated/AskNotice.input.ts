@@ -62,6 +62,22 @@ export type AgentEvent =
       type: 'final_report'
     }
   | {
+      reset_at_ms?: number | null
+      type: 'limited'
+    }
+  | {
+      event: string
+      exit_code?: number | null
+      name: string
+      outcome: HookOutcome
+      type: 'hook_call'
+    }
+  | {
+      cause: RefusalCause
+      id: string
+      type: 'tool_refused'
+    }
+  | {
       raw?: unknown
       raw_type: string
       type: 'other'
@@ -83,12 +99,13 @@ export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once'
  */
 export type UsageQuality = 'exact' | 'partial' | 'unreported'
 /**
- * What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).
+ * What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).
  */
-export type UsageScope = 'turn' | 'step' | 'running_total'
+export type UsageScope = ('turn' | 'step' | 'running_total') | 'compaction'
 /**
  * Why a turn ended (0.3, A turn ends with). `error` carries the HTTP status of an API failure when there is one
- * (S1 measured a 429).
+ * (S1 measured a 429). `blocked` is a prompt a `UserPromptSubmit` hook refused: the turn never ran, and `reason` is
+ * the hook's own, when it gave one (S9). The result that follows it is the hook's message, never the phase's report.
  */
 export type TurnEndReason =
   | {
@@ -110,11 +127,25 @@ export type TurnEndReason =
       status?: number | null
       type: 'error'
     }
+  | {
+      reason?: string | null
+      type: 'blocked'
+    }
 /**
  * Where a [`AgentEvent::FinalReport`] came from: Claude's `result` field, or, for ACP, the message chunks after the
  * last tool call.
  */
 export type FinalReportSource = 'result_field' | 'reconstructed'
+/**
+ * How a hook call ended, as the agent reports it (S9: `success`, `error` for an exit other than 0, `cancelled` for a
+ * timeout).
+ */
+export type HookOutcome = 'success' | 'error' | 'cancelled'
+/**
+ * Who refused a tool call, or why it did not run (0.3, The stream protocol). The adapter reads it from the tool's own
+ * metadata and never from the result's text. `unknown` is any other shape of refusal.
+ */
+export type RefusalCause = 'unknown' | 'hook' | 'host' | 'rule' | 'missing_tool'
 /**
  * What an ask cost. A cost that the agent did not report is [`AskCost::NotReported`], never 0: an ACP agent reports
  * no cost (0.3, measured S6), and 0 would read as free.

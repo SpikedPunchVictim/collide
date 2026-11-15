@@ -1,0 +1,40 @@
+{
+  "$defs": {
+    "ModelRef": {
+      "additionalProperties": false,
+      "description": "The model a role runs on, as one mapping of `models.yaml` gives it (0.3, Who picks what). `name` is the safe\nlabel that reaches env values, paths, arguments and a pack's `requires.modelName`. `id` is opaque: only the\nadapter reads it, and it never reaches env, paths or argv, because an ACP model id such as `ollama/qwen2.5:7b`\nfails the safe token. When there is no `id`, the adapter's id is the `name` (Claude: `model.id` is `model.name`).",
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`~/.config/collide/models.yaml` (0.3, Who picks what): for each tool, the aliases a pack's roles name (`fast`,\n`strong`) and the model each one maps to. An alias never switches the tool, so the table is keyed by tool first. A\ntool or an alias that is not here is unmapped, and launch refuses a role that names it. The model source and the\naccount stay the user's own.",
+  "properties": {
+    "tools": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "$ref": "#/$defs/ModelRef"
+        },
+        "type": "object"
+      },
+      "default": {},
+      "type": "object"
+    }
+  },
+  "title": "UserModels",
+  "type": "object"
+}

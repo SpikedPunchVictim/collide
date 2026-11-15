@@ -279,6 +279,8 @@ export type { UiToolsTokenResult as UiToolsTokenResultInput } from './UiToolsTok
 export type { UiToolsTokenResult as UiToolsTokenResultOutput } from './UiToolsTokenResult.output.ts'
 export type { Usage as UsageInput } from './Usage.input.ts'
 export type { Usage as UsageOutput } from './Usage.output.ts'
+export type { UserModels as UserModelsInput } from './UserModels.input.ts'
+export type { UserModels as UserModelsOutput } from './UserModels.output.ts'
 export type { UserPacks as UserPacksInput } from './UserPacks.input.ts'
 export type { UserPacks as UserPacksOutput } from './UserPacks.output.ts'
 export type { View as ViewInput } from './View.input.ts'

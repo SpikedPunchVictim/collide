@@ -15,7 +15,8 @@
 //! The data the traits move is in [`crate::agent`] (events, permissions, usage, capabilities). The ACP engine and the
 //! ACP profile are `host`'s (Stage 3d) and are not here: `core` holds only these traits and the capability names.
 //!
-//! The one function here, [`refuse_unmet_capabilities`], is a stub. Its stage is the first one with an adapter.
+//! The one function here, [`refuse_unmet_capabilities`], is the rule that a role is refused for a capability the
+//! adapter cannot promise.
 
 use crate::agent::{AgentEvent, Capabilities, ModelRef, PermissionReply, SessionStart, Support};
 use crate::journal::JournalRecord;
@@ -65,6 +66,9 @@ pub enum PhaseFailure {
     MaxTokens,
     /// A turn ended `max_turns`.
     MaxTurns,
+    /// A hook blocked the prompt, so the turn never ran. Carries the hook's reason when it gave one. The phase's Queue
+    /// item shows it (0.3, The user's own tooling).
+    Blocked { reason: Option<String> },
     /// An API failure other than a usage limit. Carries the HTTP status when there is one.
     Api { status: Option<u16> },
     /// The child exited and its stdout ended with no final result.
@@ -303,8 +307,12 @@ impl std::error::Error for CapabilityRefusal {}
 /// than losing it silently. `required` holds the names the role requires: a name of
 /// [`crate::agent::CAPABILITY_NAMES`], or a name with a sub-flag as `permission_host.deny_message`. Only `Yes` meets
 /// a requirement. An unprobed ACP profile says `Unknown`, so a role that requires anything of it is refused until a
-/// probe says `Yes`. Every unmet capability is returned, so one message names them all; an empty `required` is met.
-/// A role with a budget requires `budget_native` or `usage_report.cost`, and is refused on a tool with neither.
+/// probe says `Yes`. A name the table does not have cannot be promised either, and reads as `Unknown`. Every unmet
+/// capability is returned once, in the order the role wrote them, so one message names them all; an empty `required`
+/// is met.
+///
+/// A role with a budget needs `budget_native` or `usage_report.cost`, either one. That choice is the caller's: it
+/// puts the one the adapter says `Yes` for in `required`, or `budget_native` when neither is, so the refusal names it.
 ///
 /// The role key that carries `required` is a decision for the owner (`pack::Role` has none yet).
 pub fn refuse_unmet_capabilities(
@@ -312,6 +320,21 @@ pub fn refuse_unmet_capabilities(
     capabilities: &Capabilities,
     required: &[String],
 ) -> Result<(), Vec<CapabilityRefusal>> {
-    let _ = (agent, capabilities, required);
-    todo!("launch: capability refusal")
+    let mut refusals: Vec<CapabilityRefusal> = Vec::new();
+    for name in required {
+        let support = capabilities.support_of(name).unwrap_or(Support::Unknown);
+        let already = refusals.iter().any(|refusal| &refusal.capability == name);
+        if support != Support::Yes && !already {
+            refusals.push(CapabilityRefusal {
+                agent: agent.to_string(),
+                capability: name.clone(),
+                support,
+            });
+        }
+    }
+    if refusals.is_empty() {
+        Ok(())
+    } else {
+        Err(refusals)
+    }
 }

@@ -6,9 +6,9 @@
  */
 export type UsageQuality = 'exact' | 'partial' | 'unreported'
 /**
- * What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).
+ * What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).
  */
-export type UsageScope = 'turn' | 'step' | 'running_total'
+export type UsageScope = ('turn' | 'step' | 'running_total') | 'compaction'
 
 /**
  * What an agent spent (0.3, Usage). Every number is an `Option`: a figure the agent did not report is `None`, never

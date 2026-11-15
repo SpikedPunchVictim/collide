@@ -11,7 +11,7 @@
 //! - to add a type, add one `registry.add::<T>()` line to [`registry`].
 
 use crate::agent::{
-    AgentEvent, Capabilities, PermissionReply, PermissionRequest, SessionStart, Usage,
+    AgentEvent, Capabilities, PermissionReply, PermissionRequest, SessionStart, Usage, UserModels,
 };
 use crate::ask;
 use crate::board::{Board, CollidePointer};
@@ -156,6 +156,7 @@ pub fn registry() -> Registry {
     registry.add::<TaskPointPayload>();
     registry.add::<TaskRemoved>();
     registry.add::<Usage>();
+    registry.add::<UserModels>();
     registry.add::<UserPacks>();
     registry.add::<View>();
     registry.add::<WatchParams>();

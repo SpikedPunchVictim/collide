@@ -2,9 +2,9 @@
 //! the all-`unknown` table, the unknown-key cases, `Other`, and the generated schemas.
 
 use collide_core::agent::{
-    AgentEvent, CAPABILITY_NAMES, Capabilities, FinalReportSource, Money, PermissionOption,
-    PermissionOptionKind, PermissionReply, PermissionRequest, SessionStart, ToolKind,
-    TurnEndReason, Usage, UsageQuality, UsageScope,
+    AgentEvent, CAPABILITY_NAMES, Capabilities, FinalReportSource, HookOutcome, Money,
+    PermissionOption, PermissionOptionKind, PermissionReply, PermissionRequest, RefusalCause,
+    SessionStart, ToolKind, TurnEndReason, Usage, UsageQuality, UsageScope,
 };
 use collide_core::schema;
 use serde::Serialize;
@@ -201,6 +201,114 @@ fn every_agent_event_round_trips() {
 }
 
 #[test]
+fn a_limited_event_round_trips_with_and_without_a_reset_time() {
+    round_trip(
+        AgentEvent::Limited {
+            reset_at_ms: Some(1_763_000_000_000),
+        },
+        json!({ "type": "limited", "reset_at_ms": 1_763_000_000_000u64 }),
+    );
+    round_trip(
+        AgentEvent::Limited { reset_at_ms: None },
+        json!({ "type": "limited" }),
+    );
+}
+
+#[test]
+fn a_hook_call_round_trips_and_leaves_out_an_exit_code_it_was_not_given() {
+    round_trip(
+        AgentEvent::HookCall {
+            name: "PreToolUse:Bash".into(),
+            event: "PreToolUse".into(),
+            outcome: HookOutcome::Error,
+            exit_code: Some(2),
+        },
+        json!({ "type": "hook_call", "name": "PreToolUse:Bash", "event": "PreToolUse", "outcome": "error", "exit_code": 2 }),
+    );
+    round_trip(
+        AgentEvent::HookCall {
+            name: "Stop".into(),
+            event: "Stop".into(),
+            outcome: HookOutcome::Cancelled,
+            exit_code: None,
+        },
+        json!({ "type": "hook_call", "name": "Stop", "event": "Stop", "outcome": "cancelled" }),
+    );
+}
+
+#[test]
+fn a_hook_call_has_no_place_for_the_hooks_output() {
+    // A hook's stdout and stderr are untrusted text that may hold secrets: the event cannot carry them (0.3).
+    for key in ["stdout", "stderr", "output"] {
+        let mut wire =
+            json!({ "type": "hook_call", "name": "n", "event": "e", "outcome": "success" });
+        wire[key] = json!("secret");
+        let error = serde_json::from_value::<AgentEvent>(wire)
+            .expect_err(key)
+            .to_string();
+        assert!(error.contains(key), "{error}");
+    }
+}
+
+#[test]
+fn every_hook_outcome_round_trips() {
+    round_trip(HookOutcome::Success, json!("success"));
+    round_trip(HookOutcome::Error, json!("error"));
+    round_trip(HookOutcome::Cancelled, json!("cancelled"));
+}
+
+#[test]
+fn a_refused_tool_call_round_trips_with_every_cause() {
+    for (cause, wire) in [
+        (RefusalCause::Hook, "hook"),
+        (RefusalCause::Host, "host"),
+        (RefusalCause::Rule, "rule"),
+        (RefusalCause::MissingTool, "missing_tool"),
+        (RefusalCause::Unknown, "unknown"),
+    ] {
+        round_trip(
+            AgentEvent::ToolRefused {
+                id: "c1".into(),
+                cause,
+            },
+            json!({ "type": "tool_refused", "id": "c1", "cause": wire }),
+        );
+        round_trip(cause, json!(wire));
+    }
+}
+
+#[test]
+fn a_turn_blocked_by_a_hook_round_trips_with_its_reason() {
+    round_trip(
+        TurnEndReason::Blocked {
+            reason: Some("not on a Friday".into()),
+        },
+        json!({ "type": "blocked", "reason": "not on a Friday" }),
+    );
+    round_trip(
+        TurnEndReason::Blocked { reason: None },
+        json!({ "type": "blocked" }),
+    );
+}
+
+#[test]
+fn a_compaction_call_is_a_usage_with_its_own_scope() {
+    round_trip(UsageScope::Compaction, json!("compaction"));
+    let compaction = Usage {
+        scope: UsageScope::Compaction,
+        input: Some(90_000),
+        output: Some(2_000),
+        ..usage()
+    };
+    round_trip(
+        AgentEvent::Usage {
+            usage: compaction.clone(),
+        },
+        json!({ "type": "usage", "usage": serde_json::to_value(&compaction).unwrap() }),
+    );
+}
+
+#[test]
 fn every_turn_end_reason_round_trips() {
     round_trip(TurnEndReason::EndTurn {}, json!({ "type": "end_turn" }));
     round_trip(TurnEndReason::MaxTokens {}, json!({ "type": "max_tokens" }));
@@ -337,6 +445,9 @@ fn an_unknown_key_fails_in_every_known_event() {
         json!({ "type": "usage", "usage": serde_json::to_value(usage()).unwrap() }),
         json!({ "type": "turn_end", "reason": { "type": "end_turn" }, "cancel_requested": false, "empty": true }),
         json!({ "type": "final_report", "text": "t", "source": "result_field" }),
+        json!({ "type": "limited", "reset_at_ms": 1 }),
+        json!({ "type": "hook_call", "name": "n", "event": "e", "outcome": "success", "exit_code": 0 }),
+        json!({ "type": "tool_refused", "id": "c", "cause": "hook" }),
         json!({ "type": "other", "raw_type": "x" }),
     ];
     for mut event in events {
@@ -475,7 +586,7 @@ fn every_known_event_type_in_the_schema_reads_as_itself_not_as_other() {
                 .to_string()
         })
         .collect();
-    assert_eq!(tags.len(), 9);
+    assert_eq!(tags.len(), 12);
     for tag in &tags {
         let bare = json!({ "type": tag });
         if let Ok(AgentEvent::Other { raw_type, .. }) = serde_json::from_value::<AgentEvent>(bare) {

@@ -546,10 +546,13 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     bytes to write. The same input gives the same output, so a daemon restart rebuilds a session with `replay`: it
     feeds the shim's journal back in `seq` order, `in` records as the bytes the session wrote and `out` records
     through `feed` with their stored `wall_ns` (0.2). A replay writes nothing to the child. A Claude session is nearly
-    empty: the launch line carries the first turn and `feed` is the S1 parser. An ACP session holds its handshake,
-    request ids and pending permission requests.
+    empty: every turn, the first included, is a `user` message on stdin (measured S1), and `feed` is the S1 parser.
+    An ACP session holds its handshake, request ids and pending permission requests.
   - **Normalized events:** message, tool call, permission request, `SessionBound`, `Usage`, `TurnEnd`,
-    `FinalReport` and `Other`.
+    `FinalReport`, `Limited { reset_at_ms }` (a usage or rate limit, with its reset time when known),
+    `HookCall { name, event, outcome, exit_code }` (never the hook's `stdout` or `stderr`), `ToolRefused { id, cause }`
+    with `cause` one of `hook`, `host`, `rule`, `missing_tool` or `unknown`, and `Other` (revision 18 erratum, from
+    `ts-0060-mm`).
   - **A session starts as `Assign(uuid)`, `AgentAssigned` or `Resume(id)`.** Claude supports the first and last; ACP
     the last two. The id is recorded on `SessionBound`: at once for Claude, on the `session/new` response for ACP. If
     the daemon dies between the spawn and `SessionBound`, the id is lost, and recovery lists sessions by working
@@ -564,11 +567,13 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       rules into its own config.
     - A request whose input is unknown shows in the Queue as "input not available until approved" and is never
       auto-allowed by a pack rule that reads the input (0.11).
-  - **Usage** is an event with a scope (`Turn`, `Step` or `RunningTotal`), every number an `Option`, a cost with
-    its currency, and a `quality`: `Exact`, `Partial` or `Unreported`. A total built from partial figures is shown
-    as "at least" and never summed with exact ones (0.13).
+  - **Usage** is an event with a scope (`Turn`, `Step`, `RunningTotal` or `Compaction`, the model call of a
+    compaction, never added into a `Turn`), every number an `Option`, a cost with its currency, and a `quality`:
+    `Exact`, `Partial` or `Unreported`. A total built from partial figures is shown as "at least" and never summed
+    with exact ones (0.13).
   - **A turn ends with** `TurnEnd { reason, cancel_requested, empty }`. `reason` is `EndTurn`, `MaxTokens`,
-    `MaxTurns`, `Refusal`, `Cancelled` or `Error { status }`. `empty` is true when the turn gave no message, no tool
+    `MaxTurns`, `Refusal`, `Cancelled`, `Error { status }` or `Blocked { reason }` (a prompt a hook refused). `empty`
+    is true when the turn gave no message, no tool
     call and zero or unreported usage. `FinalReport` carries `source`: `ResultField` (Claude) or `Reconstructed` (ACP:
     the message chunks after the last tool call).
   - **Capabilities.** Each is `Yes`, `No` or `Unknown` (a profile for an ACP agent that has not been probed). A role

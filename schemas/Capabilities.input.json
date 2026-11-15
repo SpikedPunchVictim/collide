@@ -164,13 +164,22 @@
       "type": "object"
     },
     "UsageScope": {
-      "description": "What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).",
-      "enum": [
-        "turn",
-        "step",
-        "running_total"
-      ],
-      "type": "string"
+      "description": "What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).",
+      "oneOf": [
+        {
+          "enum": [
+            "turn",
+            "step",
+            "running_total"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "compaction",
+          "description": "The model call of a compaction. A turn's own usage leaves it out, so it is its own event, never added into a\n`Turn` (0.3, Usage; S9).",
+          "type": "string"
+        }
+      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",

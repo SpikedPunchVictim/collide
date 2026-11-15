@@ -169,6 +169,83 @@
         },
         {
           "additionalProperties": false,
+          "description": "The account's usage limit is reached (0.3, Usage and rate limits). `reset_at_ms` is the wall-clock time it\nresets, in milliseconds since the Unix epoch, and is absent when the tool does not say. Only an adapter with\n`limit_signal` reports it.",
+          "properties": {
+            "reset_at_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "limited",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One hook call: its name (`PreToolUse:Bash`), the event it hooked (`PreToolUse`), how it ended and its exit code.\nThe hook's `stdout` and `stderr` are untrusted text that may hold secrets, so the event has no place for them\n(0.3, The stream protocol).",
+          "properties": {
+            "event": {
+              "type": "string"
+            },
+            "exit_code": {
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/$defs/HookOutcome"
+            },
+            "type": {
+              "const": "hook_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "event",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool call that did not run, by the id of the [`AgentEvent::ToolCall`], and who refused it.",
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/RefusalCause"
+            },
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_refused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "An event this version has no type for. `raw_type` is its own type name.",
           "properties": {
             "raw": true,
@@ -377,6 +454,15 @@
       ],
       "type": "string"
     },
+    "HookOutcome": {
+      "description": "How a hook call ended, as the agent reports it (S9: `success`, `error` for an exit other than 0, `cancelled` for a\ntimeout).",
+      "enum": [
+        "success",
+        "error",
+        "cancelled"
+      ],
+      "type": "string"
+    },
     "Money": {
       "additionalProperties": false,
       "description": "An amount in a currency. Claude reports USD.",
@@ -467,6 +553,37 @@
       ],
       "type": "object"
     },
+    "RefusalCause": {
+      "description": "Who refused a tool call, or why it did not run (0.3, The stream protocol). The adapter reads it from the tool's own\nmetadata and never from the result's text. `unknown` is any other shape of refusal.",
+      "oneOf": [
+        {
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "hook",
+          "description": "A hook denied it.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "Collide's own `deny` answer.",
+          "type": "string"
+        },
+        {
+          "const": "rule",
+          "description": "A permission rule, or an automatic deny.",
+          "type": "string"
+        },
+        {
+          "const": "missing_tool",
+          "description": "The session does not have the tool.",
+          "type": "string"
+        }
+      ]
+    },
     "ToolKind": {
       "description": "What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title\n(S7, O12).",
       "enum": [
@@ -483,7 +600,7 @@
       "type": "string"
     },
     "TurnEndReason": {
-      "description": "Why a turn ended (0.3, A turn ends with). `error` carries the HTTP status of an API failure when there is one\n(S1 measured a 429).",
+      "description": "Why a turn ended (0.3, A turn ends with). `error` carries the HTTP status of an API failure when there is one\n(S1 measured a 429). `blocked` is a prompt a `UserPromptSubmit` hook refused: the turn never ran, and `reason` is\nthe hook's own, when it gave one (S9). The result that follows it is the hook's message, never the phase's report.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -564,6 +681,25 @@
             },
             "type": {
               "const": "error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "blocked",
               "type": "string"
             }
           },
@@ -683,13 +819,22 @@
       "type": "string"
     },
     "UsageScope": {
-      "description": "What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).",
-      "enum": [
-        "turn",
-        "step",
-        "running_total"
-      ],
-      "type": "string"
+      "description": "What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).",
+      "oneOf": [
+        {
+          "enum": [
+            "turn",
+            "step",
+            "running_total"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "compaction",
+          "description": "The model call of a compaction. A turn's own usage leaves it out, so it is its own event, never added into a\n`Turn` (0.3, Usage; S9).",
+          "type": "string"
+        }
+      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",

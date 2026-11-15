@@ -12,6 +12,7 @@
 //! | what a turn spent | [`Usage`] |
 //! | what an adapter can do | [`Capabilities`] |
 //! | the model a role runs on | [`ModelRef`] |
+//! | the user's aliases for it | [`UserModels`] |
 //!
 //! The wire form of every tagged type is an object with a `type` key in `snake_case`. A number that an agent does
 //! not report is absent, never 0.
@@ -19,6 +20,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 
 /// How a session starts (0.3). Claude supports `assign` and `resume`; ACP supports `agent_assigned` and `resume`.
 /// The id is then recorded on [`AgentEvent::SessionBound`].
@@ -49,6 +51,24 @@ impl ModelRef {
     /// The id the adapter hands to its tool: `id` when the mapping names one, else `name`.
     pub fn adapter_id(&self) -> &str {
         self.id.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// `~/.config/collide/models.yaml` (0.3, Who picks what): for each tool, the aliases a pack's roles name (`fast`,
+/// `strong`) and the model each one maps to. An alias never switches the tool, so the table is keyed by tool first. A
+/// tool or an alias that is not here is unmapped, and launch refuses a role that names it. The model source and the
+/// account stay the user's own.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UserModels {
+    #[serde(default)]
+    pub tools: BTreeMap<String, BTreeMap<String, ModelRef>>,
+}
+
+impl UserModels {
+    /// The aliases mapped for `tool`: empty when the user mapped none.
+    pub fn mapping_for(&self, tool: &str) -> BTreeMap<String, ModelRef> {
+        self.tools.get(tool).cloned().unwrap_or_default()
     }
 }
 
@@ -125,13 +145,16 @@ pub enum PermissionReply {
     Cancel {},
 }
 
-/// What a [`Usage`] event counts: one turn, one model step, or the session so far (0.3, Usage).
+/// What a [`Usage`] event counts: one turn, one model step, the session so far, or a compaction call (0.3, Usage).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UsageScope {
     Turn,
     Step,
     RunningTotal,
+    /// The model call of a compaction. A turn's own usage leaves it out, so it is its own event, never added into a
+    /// `Turn` (0.3, Usage; S9).
+    Compaction,
 }
 
 /// How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as "at
@@ -183,7 +206,8 @@ pub struct Usage {
 }
 
 /// Why a turn ended (0.3, A turn ends with). `error` carries the HTTP status of an API failure when there is one
-/// (S1 measured a 429).
+/// (S1 measured a 429). `blocked` is a prompt a `UserPromptSubmit` hook refused: the turn never ran, and `reason` is
+/// the hook's own, when it gave one (S9). The result that follows it is the hook's message, never the phase's report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TurnEndReason {
@@ -196,6 +220,36 @@ pub enum TurnEndReason {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         status: Option<u16>,
     },
+    Blocked {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+}
+
+/// How a hook call ended, as the agent reports it (S9: `success`, `error` for an exit other than 0, `cancelled` for a
+/// timeout).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HookOutcome {
+    Success,
+    Error,
+    Cancelled,
+}
+
+/// Who refused a tool call, or why it did not run (0.3, The stream protocol). The adapter reads it from the tool's own
+/// metadata and never from the result's text. `unknown` is any other shape of refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RefusalCause {
+    /// A hook denied it.
+    Hook,
+    /// Collide's own `deny` answer.
+    Host,
+    /// A permission rule, or an automatic deny.
+    Rule,
+    /// The session does not have the tool.
+    MissingTool,
+    Unknown,
 }
 
 /// Where a [`AgentEvent::FinalReport`] came from: Claude's `result` field, or, for ACP, the message chunks after the
@@ -209,7 +263,7 @@ pub enum FinalReportSource {
 
 /// The `type` of every event but one that [`AgentEvent`] knows, as written in JSON. A test pins this list to the
 /// schema. A `type` outside it reads as [`AgentEvent::Other`].
-const KNOWN_EVENT_TYPES: [&str; 9] = [
+const KNOWN_EVENT_TYPES: [&str; 12] = [
     "message",
     "tool_call",
     "permission_request",
@@ -218,6 +272,9 @@ const KNOWN_EVENT_TYPES: [&str; 9] = [
     "usage",
     "turn_end",
     "final_report",
+    "limited",
+    "hook_call",
+    "tool_refused",
     "other",
 ];
 
@@ -272,6 +329,28 @@ pub enum AgentEvent {
     FinalReport {
         text: String,
         source: FinalReportSource,
+    },
+    /// The account's usage limit is reached (0.3, Usage and rate limits). `reset_at_ms` is the wall-clock time it
+    /// resets, in milliseconds since the Unix epoch, and is absent when the tool does not say. Only an adapter with
+    /// `limit_signal` reports it.
+    Limited {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reset_at_ms: Option<u64>,
+    },
+    /// One hook call: its name (`PreToolUse:Bash`), the event it hooked (`PreToolUse`), how it ended and its exit code.
+    /// The hook's `stdout` and `stderr` are untrusted text that may hold secrets, so the event has no place for them
+    /// (0.3, The stream protocol).
+    HookCall {
+        name: String,
+        event: String,
+        outcome: HookOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+    },
+    /// A tool call that did not run, by the id of the [`AgentEvent::ToolCall`], and who refused it.
+    ToolRefused {
+        id: String,
+        cause: RefusalCause,
     },
     /// An event this version has no type for. `raw_type` is its own type name.
     Other {
@@ -463,4 +542,71 @@ pub struct Capabilities {
     /// The tool can name an interactive command for a session.
     pub take_over: Support,
     pub mcp_servers: McpServers,
+}
+
+impl Capabilities {
+    /// What the adapter says about one capability, by the name a role's `require` writes: a name of
+    /// [`CAPABILITY_NAMES`], or a name with a sub-flag (`permission_host.deny_message`). A capability that has a
+    /// sub-flag or a mode reads as `Yes` when the tool has any (`session_resume` is `Yes` for `replay` and `silent`,
+    /// and `usage_report` and `context_options` read their `support`). `None` is a name the table does not have.
+    pub fn support_of(&self, name: &str) -> Option<Support> {
+        fn mode(has_it: bool, says_none: bool) -> Support {
+            match (has_it, says_none) {
+                (true, _) => Support::Yes,
+                (false, true) => Support::No,
+                (false, false) => Support::Unknown,
+            }
+        }
+        Some(match name {
+            "headless_stream" => self.headless_stream,
+            "permission_host" | "permission_host.support" => self.permission_host.support,
+            "permission_host.deny_message" => self.permission_host.deny_message,
+            "permission_host.input_at_request" => self.permission_host.input_at_request,
+            "permission_host.request_reason" => self.permission_host.request_reason,
+            "session_resume" => mode(
+                matches!(
+                    self.session_resume,
+                    SessionResume::Replay | SessionResume::Silent
+                ),
+                self.session_resume == SessionResume::None,
+            ),
+            "background" => self.background,
+            "budget_native" => self.budget_native,
+            "system_prompt" => mode(
+                matches!(
+                    self.system_prompt,
+                    SystemPrompt::Append | SystemPrompt::Override
+                ),
+                self.system_prompt == SystemPrompt::None,
+            ),
+            "tool_allowlist" => self.tool_allowlist,
+            "named_agent" => self.named_agent,
+            "usage_report" | "usage_report.support" => self.usage_report.support,
+            "usage_report.cost" => self.usage_report.cost,
+            "usage_report.cache_write_tiers" => self.usage_report.cache_write_tiers,
+            "usage_report.context" => self.usage_report.context,
+            "limit_signal" => self.limit_signal,
+            "compaction_events" => self.compaction_events,
+            "hook_events" => self.hook_events,
+            "refusal_source" => self.refusal_source,
+            "strict_config" => self.strict_config,
+            "context_options" | "context_options.support" => self.context_options.support,
+            "context_options.compact_at" => self.context_options.compact_at,
+            "context_options.bash_output_max" => self.context_options.bash_output_max,
+            "context_options.mcp_output_max" => self.context_options.mcp_output_max,
+            "model_select" => mode(
+                matches!(
+                    self.model_select,
+                    ModelSelect::Launch | ModelSelect::Session
+                ),
+                self.model_select == ModelSelect::None,
+            ),
+            "take_over" => self.take_over,
+            "mcp_servers" | "mcp_servers.support" => self.mcp_servers.support,
+            "mcp_servers.stdio" => self.mcp_servers.stdio,
+            "mcp_servers.http" => self.mcp_servers.http,
+            "mcp_servers.sse" => self.mcp_servers.sse,
+            _ => return None,
+        })
+    }
 }

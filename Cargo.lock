@@ -468,6 +468,7 @@ version = "0.0.0"
 dependencies = [
  "cel",
  "collide-core",
+ "regex",
  "schemars 1.2.3",
  "serde",
  "serde-saphyr",

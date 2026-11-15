@@ -66,10 +66,10 @@ fn an_adapter_is_usable_through_a_trait_object_and_is_stateless() {
 // --- The stubs: each one has the signature the outline gives, and says which work fills it ---
 
 #[test]
-#[should_panic(expected = "launch: capability refusal")]
-fn the_capability_refusal_is_a_stub_that_names_its_tag() {
+fn the_capability_refusal_is_no_longer_a_stub() {
     let required = vec!["session_resume".to_string()];
-    let _ = refuse_unmet_capabilities("tool", &Capabilities::default(), &required);
+    let result = refuse_unmet_capabilities("tool", &Capabilities::default(), &required);
+    assert_eq!(result.unwrap_err().len(), 1);
 }
 
 #[test]
@@ -105,9 +105,9 @@ fn the_capability_refusals_doc_names_the_rule() {
 }
 
 #[test]
-#[should_panic(expected = "resolve: model alias")]
-fn the_model_alias_resolution_is_a_stub_that_names_its_tag() {
-    let _ = resolve_model_alias("fast", &BTreeMap::new(), None);
+fn the_model_alias_resolution_is_no_longer_a_stub() {
+    let error = resolve_model_alias("fast", &BTreeMap::new(), None).unwrap_err();
+    assert!(error.to_string().contains("fast"));
 }
 
 #[test]

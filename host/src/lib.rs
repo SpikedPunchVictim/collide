@@ -10,6 +10,7 @@ pub mod daemon;
 pub mod disk;
 pub mod hooks;
 pub mod launch;
+pub mod models;
 pub mod otlp;
 pub mod owner_client;
 pub mod pack_location;

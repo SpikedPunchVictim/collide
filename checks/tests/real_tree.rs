@@ -39,9 +39,7 @@ fn every_stub_of_the_repository_is_registered_under_a_stage() {
 
 /// The tags of the `core` outlines (ts-0019-vm) and the stage that fills each one. A tag is not complete until its
 /// stage has replaced every stub that carries it, so each must count at least one stub today.
-const CORE_OUTLINE_TAGS: [(&str, &str); 10] = [
-    ("launch: capability refusal", "3b"),
-    ("resolve: model alias", "3b"),
+const CORE_OUTLINE_TAGS: [(&str, &str); 8] = [
     ("resolve: implementations", "7"),
     ("engine: run preview", "8"),
     ("engine: start run", "8"),
@@ -97,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 25] = [
+const FILLED_TAGS: [(&str, &str, &str); 27] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -123,6 +121,8 @@ const FILLED_TAGS: [(&str, &str, &str); 25] = [
     ("stop: find tree", "3a", "ts-0059-xs"),
     ("stop: escalation", "3a", "ts-0059-xs"),
     ("cli: stop", "3a", "ts-0059-xs"),
+    ("launch: capability refusal", "3b", "ts-0060-mm"),
+    ("resolve: model alias", "3b", "ts-0060-mm"),
 ];
 
 #[test]

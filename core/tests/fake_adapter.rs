@@ -224,6 +224,16 @@ fn finish_reads_the_outcome_from_how_the_turn_ended() {
                 cause: PhaseFailure::Api { status: Some(429) },
             },
         ),
+        (
+            TurnEndReason::Blocked {
+                reason: Some("not now".into()),
+            },
+            PhaseOutcome::Failed {
+                cause: PhaseFailure::Blocked {
+                    reason: Some("not now".into()),
+                },
+            },
+        ),
     ];
     for (reason, outcome) in cases {
         let mut session = NormalizedSession::new();

@@ -75,5 +75,8 @@ pub(crate) fn outcome_of_turn(
         TurnEndReason::MaxTurns {} => failed(PhaseFailure::MaxTurns),
         TurnEndReason::Refusal {} => failed(PhaseFailure::Refusal),
         TurnEndReason::Error { status } => failed(PhaseFailure::Api { status: *status }),
+        TurnEndReason::Blocked { reason } => failed(PhaseFailure::Blocked {
+            reason: reason.clone(),
+        }),
     }
 }
