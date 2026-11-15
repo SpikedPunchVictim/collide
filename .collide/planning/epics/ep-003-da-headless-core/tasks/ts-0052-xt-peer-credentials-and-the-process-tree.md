@@ -1,7 +1,7 @@
 ---
 id: ts-0052-xt
 kind: task
-status: active
+status: done
 title: "Peer credentials and the process tree"
 owners: []
 links: []
