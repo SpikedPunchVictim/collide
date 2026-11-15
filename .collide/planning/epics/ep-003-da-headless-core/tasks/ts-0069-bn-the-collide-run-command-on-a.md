@@ -1,7 +1,7 @@
 ---
 id: ts-0069-bn
 kind: task
-status: ready
+status: active
 title: "The collide run command on a file task"
 owners: []
 links:
