@@ -41,15 +41,18 @@
 //! variable (a scan in `host/tests/token_not_in_env.rs` keeps that so). File metadata is behind [`DirFs`], with
 //! [`StdFs`] over `std` for the real one.
 //!
-//! | tag | function | what it does |
-//! |---|---|---|
-//! | `auth: peer credentials` | [`UnixPeer`], [`daemon_uid`] | `LOCAL_PEERPID` and `getpeereid` on a connection, and the daemon's own uid |
-//! | `auth: process tree` | [`SystemProcessTree`] | a process's parent, its `COLLIDE_RUN`, and whether it is the app, from the system |
+//! ## The real readers
+//!
+//! [`UnixPeer`] and [`daemon_uid`] (`getpeereid`, `LOCAL_PEERPID`, `geteuid`) and [`SystemProcessTree`] (a process's
+//! parent from libproc, its `COLLIDE_RUN` from `KERN_PROCARGS2`, and the app by its executable) are over
+//! [`crate::sysproc`], which holds every call into the system. `host/tests/real_peer.rs` runs them over real sockets
+//! and python3 children.
 
 use crate::daemon::{
     DaemonPaths, MAX_SOCKET_PATH_BYTES, SOCKET_DIR_MODE, SocketError, TOKEN_FILE_MODE,
 };
 use crate::shim;
+use crate::sysproc;
 use collide_core::change::{Actor, ActorKind};
 use collide_core::owner::{OwnerInitializeParams, RpcError, check_initialize, code};
 use std::collections::HashSet;
@@ -106,8 +109,8 @@ impl Caller {
     }
 }
 
-/// What the system says about a process. The real one reads it with `sysctl` and `proc_pidinfo` (Stage 3a); a test
-/// gives a table.
+/// What the system says about a process. The real one ([`SystemProcessTree`]) reads it with `sysctl` and
+/// `proc_pidinfo`; a test gives a table.
 pub trait ProcessTree {
     /// The parent of `pid`, or `None` at the top of the tree or when `pid` cannot be looked up.
     fn parent(&self, pid: u32) -> Option<u32>;
@@ -138,8 +141,8 @@ pub fn classify_peer(tree: &dyn ProcessTree, peer_pid: u32) -> Caller {
 
 // ---- the peer and the checks on a connection --------------------------------------------------------------------
 
-/// What the kernel says about the other end of a connected socket. The real one is `getpeereid` for the uid and
-/// `LOCAL_PEERPID` for the pid (Stage 3a).
+/// What the kernel says about the other end of a connected socket. The real one ([`UnixPeer`]) is `getpeereid` for the
+/// uid and `LOCAL_PEERPID` for the pid.
 pub trait PeerCredentials {
     fn uid(&self) -> io::Result<u32>;
     fn pid(&self) -> io::Result<u32>;
@@ -527,79 +530,69 @@ pub fn mint_token() -> Result<String, SocketError> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-// ---- the real peer and process lookups: Stage 3a ----------------------------------------------------------------
+// ---- the real peer and process lookups --------------------------------------------------------------------------
 
-/// The real [`PeerCredentials`] of a connected socket.
+/// The real [`PeerCredentials`] of a connected socket: the kernel's answer for the other end, as it was when the peer
+/// connected ([`crate::sysproc`]).
 pub struct UnixPeer<'a> {
     pub stream: &'a UnixStream,
 }
 
 impl PeerCredentials for UnixPeer<'_> {
     fn uid(&self) -> io::Result<u32> {
-        let _ = self.stream;
-        todo!("auth: peer credentials")
+        sysproc::peer_uid(self.stream)
     }
 
     fn pid(&self) -> io::Result<u32> {
-        let _ = self.stream;
-        todo!("auth: peer credentials")
+        sysproc::peer_pid(self.stream)
     }
 }
 
-/// The daemon's own uid, for [`admit`] and [`check_socket_dir`].
+/// The daemon's own uid, for [`admit`] and [`check_socket_dir`]. Off macOS it is [`sysproc::NO_UID`], which no peer
+/// has, so a connection is refused there and not let in.
 pub fn daemon_uid() -> u32 {
-    todo!("auth: peer credentials")
+    sysproc::daemon_uid()
 }
 
-/// The real [`ProcessTree`], from the system.
-pub struct SystemProcessTree;
+/// The real [`ProcessTree`], from the system. The app is known by its executable: the daemon is told the path of
+/// the app's binary, and a process is the app when the system says it runs that file. A process cannot take the
+/// app's path without writing to the app's files, which is stronger than a marker in an environment that any child
+/// can copy; it is still a guardrail, not a boundary (0.1).
+pub struct SystemProcessTree {
+    app_executable: Option<PathBuf>,
+}
+
+impl SystemProcessTree {
+    /// `app_executable` is the path of the app's binary, or `None` when the daemon does not know it (then no process
+    /// is the app, and a person-only operation waits for a Queue confirmation). The path's links are resolved, as
+    /// the system's answer for a process is.
+    pub fn new(app_executable: Option<PathBuf>) -> SystemProcessTree {
+        SystemProcessTree {
+            app_executable: app_executable.map(|path| fs::canonicalize(&path).unwrap_or(path)),
+        }
+    }
+}
 
 impl ProcessTree for SystemProcessTree {
     fn parent(&self, pid: u32) -> Option<u32> {
-        let _ = pid;
-        todo!("auth: process tree")
+        sysproc::parent_pid(pid)
     }
 
     fn run_marker(&self, pid: u32) -> Option<String> {
-        let _ = pid;
-        todo!("auth: process tree")
+        sysproc::env_var_of(pid, RUN_MARKER)
     }
 
     fn is_app(&self, pid: u32) -> bool {
-        let _ = pid;
-        todo!("auth: process tree")
+        match &self.app_executable {
+            Some(app) => sysproc::executable_of(pid).is_some_and(|exe| exe == *app),
+            None => false,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    #[should_panic(expected = "auth: peer credentials")]
-    fn the_real_peer_uid_is_a_stub_tagged_for_stage_3a() {
-        let (a, _b) = UnixStream::pair().unwrap();
-        let _ = UnixPeer { stream: &a }.uid();
-    }
-
-    #[test]
-    #[should_panic(expected = "auth: peer credentials")]
-    fn the_real_peer_pid_is_a_stub_tagged_for_stage_3a() {
-        let (a, _b) = UnixStream::pair().unwrap();
-        let _ = UnixPeer { stream: &a }.pid();
-    }
-
-    #[test]
-    #[should_panic(expected = "auth: peer credentials")]
-    fn the_daemons_own_uid_is_a_stub_tagged_for_stage_3a() {
-        let _ = daemon_uid();
-    }
-
-    #[test]
-    #[should_panic(expected = "auth: process tree")]
-    fn the_real_process_tree_is_a_stub_tagged_for_stage_3a() {
-        let _ = SystemProcessTree.parent(1);
-    }
 
     #[test]
     fn the_run_marker_is_the_variable_the_plan_names() {
