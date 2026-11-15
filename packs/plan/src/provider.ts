@@ -8,6 +8,7 @@ import type {
   ListResultInput,
   ProviderHandlers,
 } from '@collide/pack-sdk'
+import { resolveCheckout } from './checkout.ts'
 import { TITLE_MAX } from './create.ts'
 import { CATEGORIES, ID_PATTERN } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
@@ -23,7 +24,7 @@ const noExtraArgs = { additionalProperties: false }
  * The write ops, for both kinds. `create` makes an item, so it is sent with no `id` and no `version`; `reid` is sent with
  * an `id` and no `version`; the others change one item and need both. None has `movesTo`: a status write moves the item to the category its argument names,
  * which one fixed category cannot say, and `claim` records an owner without changing the status. `checkouts` is left
- * out (any), though only the main checkout is written until `ts-0031-xu`.
+ * out (any): `apply` writes in the main checkout, or in the one that `checkout` names.
  */
 const OPS: NonNullable<InitializeResultInput['ops']> = [
   {
@@ -90,7 +91,9 @@ export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
 
   const scan = async (checkout: string | null): Promise<Scan> => {
     if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')
-    const result = await scanEpics(root, checkout)
+    // A named checkout is read in place of the main checkout, so an item is listed with the version that a write
+    // there will check; one that is not a checkout of the repository is an error.
+    const result = await scanEpics(checkout === null ? root : await resolveCheckout(root, checkout), checkout)
     if (result.invalid.length + result.unknownKind + result.brokenLink > 0) {
       log(`plan: ${result.items.length} items, ${result.invalid.length} invalid, ${result.unknownKind} with an unknown kind, ${result.brokenLink} with a broken link`)
     }

@@ -4,13 +4,16 @@
 //! provider supervisor.
 
 use crate::builtin_packs::{BuiltinPacks, Environment};
-use crate::checkout::main_checkout;
+use crate::checkout::{CheckoutError, main_checkout, resolve_checkout};
+use crate::commit::commit_files;
 use crate::pack_location::{self, locate_bundle};
 use crate::provider_client::ProviderClient;
 use crate::task_args::{describe, map_args};
 use crate::task_view::View;
 use collide_core::item::OpDecl;
-use collide_core::provider::{ApplyParams, ApplyResult, InitializeParams, InitializeResult, Task};
+use collide_core::provider::{
+    ApplyParams, ApplyResult, InitializeParams, InitializeResult, Task, TaskInvalid,
+};
 use collide_core::ready::readiness;
 use collide_core::short_id::{Lookup, resolve};
 use serde_json::{Value, json};
@@ -21,9 +24,10 @@ use std::path::{Path, PathBuf};
 /// Exit codes. An op's outcome has its own: `ok` is 0, `conflict` 4 and `refused` 5.
 pub mod exit {
     pub const OK: u8 = 0;
-    /// Something failed: no repository, no built-in packs, the provider did not start or answered badly.
+    /// Something failed: no repository, no built-in packs, the provider did not start or answered badly, or the
+    /// commit that `--commit` asked for failed (the write itself stands).
     pub const FAILED: u8 = 1;
-    /// The command line is wrong: an option, an op, an argument.
+    /// The command line is wrong: an option, an op, an argument, a `--checkout` that is no checkout of the repository.
     pub const USAGE: u8 = 2;
     /// An id names no item, or several.
     pub const ID: u8 = 3;
@@ -37,9 +41,9 @@ pub const USAGE: &str = "\
 usage:
   collide tasks [--ready] [--kind <kind>] [--json]
   collide task <id> [--json]
-  collide task <id> <op> [<value>] [name=value ...] [--json]
-  collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--json]
-  collide task reid <id> [seed=<number>] [--json]";
+  collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
+  collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--checkout <path>] [--commit] [--json]
+  collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]";
 
 /// What `collide help` prints.
 pub const HELP: &str = "\
@@ -54,10 +58,22 @@ if it matches several they are listed with their epics, and you add the suffix.
 collide task create <title>: make an item in an epic (epic=ep-002-va, or a short form such as ep-2; kind=epic makes an
   epic, which takes no epic=). The id is the next free number for the kind across every local branch, every fetched
   remote branch and the working tree, with a two-letter suffix drawn from a seeded generator (seed=, random when left
-  out). The new file is written and nothing is committed.
+  out). The new file is written; without --commit nothing is committed.
 collide task reid <id>: give an item a new suffix and rewrite every link that names the old id, in every item file.
   Where two files share one id, the second (the one `collide tasks` reports as skipped) is the one renamed; links meant
-  for the other file are rewritten too. Each file touched is printed. Nothing is committed: review with git diff.
+  for the other file are rewritten too. Each file touched is printed. Without --commit nothing is committed: review with
+  git diff.
+
+Where a write goes: the main checkout's .collide/planning/, also when you run collide inside a linked worktree (which
+is left untouched). --checkout <path> names another checkout instead: <path> must be an entry of `git worktree list`
+for this repository (relative paths are taken from the working directory), or nothing is written and the exit code is
+2. The item is then read from that checkout too, so a version check is against the file that is written. A write
+leaves the file modified (or untracked, for a new one) and commits nothing.
+--commit commits the write, in the checkout it went to: exactly the files the write reported (for reid, the new and
+the removed paths too), with a message naming the item and the op, such as: task ts-0012-ua setStatus: <title>. Another
+modified, staged or untracked file is not touched, and what you have staged stays staged. Hooks run (there is no
+--no-verify). An op that changes nothing, and a conflict or a refusal, commit nothing. If the commit fails (a hook,
+git's own refusal) git's message is printed, the files stay written and uncommitted, and the exit code is 1.
 
 An op's words are name=value, or one bare value that sets the op's main property (setStatus active sets status).
 Lengths and patterns are checked by the provider.
@@ -65,7 +81,8 @@ Lengths and patterns are checked by the provider.
 An item is ready when its status is ready and each blocked-by target is done or dropped. A blocked-by cycle, and
 a blocked-by target that is no item, keep their items from being ready and are reported on stderr.
 
-exit codes: 0 ok, 1 failed, 2 wrong command line, 3 id not found or ambiguous, 4 conflict (nothing was written),
+exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line (also: a
+--checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was written),
 5 refused by the provider
 
 The provider is found through COLLIDE_BUILTIN_PACKS, else the staged bundle above the executable (pnpm build:packs),
@@ -107,12 +124,23 @@ pub struct TaskOptions {
     pub id: String,
     pub op: Option<String>,
     pub words: Vec<String>,
+    pub write: WriteOptions,
     pub json: bool,
+}
+
+/// Where a write goes and whether it is committed (ts-0031).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct WriteOptions {
+    /// `--checkout <path>`: write in this checkout instead of the main one.
+    pub checkout: Option<String>,
+    /// `--commit`: commit the files the write reported.
+    pub commit: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CreateOptions {
     pub words: Vec<String>,
+    pub write: WriteOptions,
     pub json: bool,
 }
 
@@ -120,6 +148,7 @@ pub struct CreateOptions {
 pub struct ReidOptions {
     pub id: String,
     pub words: Vec<String>,
+    pub write: WriteOptions,
     pub json: bool,
 }
 
@@ -166,14 +195,45 @@ pub fn parse_tasks(args: &[String]) -> Result<Command, CliError> {
 /// Reads the words after `collide task`: an id, then an op and its words.
 pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
     let mut json = false;
+    let mut write = WriteOptions::default();
     let mut plain = Vec::new();
-    for word in args {
-        match word.as_str() {
-            "--json" => json = true,
-            other if other.starts_with("--") => {
-                return Err(CliError::usage(format!("unknown option `{other}`")));
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        let given = match word.as_str() {
+            "--json" => {
+                json = true;
+                continue;
             }
-            _ => plain.push(word.clone()),
+            "--commit" => {
+                write.commit = true;
+                continue;
+            }
+            "--checkout" => match words.next() {
+                Some(path) => path.clone(),
+                None => {
+                    return Err(CliError::usage(
+                        "--checkout needs a path, such as --checkout ../other-worktree",
+                    ));
+                }
+            },
+            other => match other.strip_prefix("--checkout=") {
+                Some(path) => path.to_string(),
+                None if other.starts_with("--") => {
+                    return Err(CliError::usage(format!("unknown option `{other}`")));
+                }
+                None => {
+                    plain.push(word.clone());
+                    continue;
+                }
+            },
+        };
+        if given.is_empty() {
+            return Err(CliError::usage(
+                "--checkout needs a path, such as --checkout ../other-worktree",
+            ));
+        }
+        if write.checkout.replace(given).is_some() {
+            return Err(CliError::usage("--checkout is given twice"));
         }
     }
     let mut plain = plain.into_iter();
@@ -186,6 +246,7 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
     if id == "create" {
         return Ok(Command::Create(CreateOptions {
             words: plain.collect(),
+            write,
             json,
         }));
     }
@@ -198,6 +259,7 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
         return Ok(Command::Reid(ReidOptions {
             id,
             words: plain.collect(),
+            write,
             json,
         }));
     }
@@ -207,13 +269,20 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
         return Ok(Command::Reid(ReidOptions {
             id,
             words: plain.collect(),
+            write,
             json,
         }));
+    }
+    if op.is_none() && write != WriteOptions::default() {
+        return Err(CliError::usage(
+            "--checkout and --commit are for a write: give an op after the id, such as setStatus active",
+        ));
     }
     Ok(Command::Task(TaskOptions {
         id,
         op,
         words: plain.collect(),
+        write,
         json,
     }))
 }
@@ -223,10 +292,53 @@ struct Session {
     client: ProviderClient,
     init: InitializeResult,
     root: PathBuf,
+    /// The checkout that `--checkout` named, as git lists it, when there was one.
+    checkout: Option<PathBuf>,
 }
 
-fn open(cwd: &Path) -> Result<Session, CliError> {
+impl Session {
+    /// The checkout the provider is told to read and write in: none means the main checkout.
+    fn checkout_arg(&self) -> Option<String> {
+        self.checkout
+            .as_ref()
+            .map(|path| path.display().to_string())
+    }
+
+    /// The folder that the files of a write are in, and that `--commit` commits in.
+    fn written_in(&self) -> &Path {
+        self.checkout.as_deref().unwrap_or(&self.root)
+    }
+
+    fn list(&mut self) -> Result<(Vec<Task>, Vec<TaskInvalid>), CliError> {
+        let checkout = self.checkout_arg();
+        self.client
+            .list_all(checkout.as_deref())
+            .map_err(CliError::failed)
+    }
+
+    fn get(&mut self, id: &str) -> Result<Option<Task>, CliError> {
+        let checkout = self.checkout_arg();
+        self.client
+            .get(id, checkout.as_deref())
+            .map_err(CliError::failed)
+    }
+}
+
+/// Starts the provider on the main checkout of the repository that `cwd` is in. `checkout` is `--checkout`'s
+/// path: checked here, before the provider starts, so that a path that is no checkout of the repository writes and
+/// reads nothing. (The provider checks it again: it is the one that writes.)
+fn open(cwd: &Path, checkout: Option<&str>) -> Result<Session, CliError> {
     let root = main_checkout(cwd).map_err(CliError::failed)?;
+    let checkout = checkout
+        .map(|given| {
+            resolve_checkout(&root, cwd, given).map_err(|error| match error {
+                CheckoutError::NotACheckout { .. } | CheckoutError::UnreadableCheckout { .. } => {
+                    CliError::usage(format!("--checkout: {error}"))
+                }
+                other => CliError::failed(other),
+            })
+        })
+        .transpose()?;
     let bundle = locate_bundle(&pack_location::Inputs::from_process()).map_err(CliError::failed)?;
     let launch = BuiltinPacks::new(bundle)
         .provider("collide/plan", "plan", &Environment::from_process())
@@ -238,7 +350,12 @@ fn open(cwd: &Path) -> Result<Session, CliError> {
             root: root.display().to_string(),
         })
         .map_err(CliError::failed)?;
-    Ok(Session { client, init, root })
+    Ok(Session {
+        client,
+        init,
+        root,
+        checkout,
+    })
 }
 
 fn emit(out: &mut dyn Write, text: &str) -> Result<(), CliError> {
@@ -269,7 +386,7 @@ fn run_tasks(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<u8, CliError> {
-    let mut session = open(cwd)?;
+    let mut session = open(cwd, None)?;
     if let Some(kind) = &options.kind {
         let kinds: Vec<&str> = session.init.kinds.iter().map(|k| k.name.as_str()).collect();
         if !kinds.is_empty() && !kinds.contains(&kind.as_str()) {
@@ -279,7 +396,7 @@ fn run_tasks(
             )));
         }
     }
-    let (tasks, invalid) = session.client.list_all().map_err(CliError::failed)?;
+    let (tasks, invalid) = session.list()?;
     let found = readiness(&tasks);
     for item in &invalid {
         let _ = writeln!(err, "collide: skipped {}: {}", item.path, item.reason);
@@ -377,21 +494,17 @@ fn run_task(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<u8, CliError> {
-    let mut session = open(cwd)?;
-    let (tasks, _invalid) = session.client.list_all().map_err(CliError::failed)?;
+    let mut session = open(cwd, options.write.checkout.as_deref())?;
+    let (tasks, _invalid) = session.list()?;
     let item = lookup(&tasks, &options.id)?;
     let found = readiness(&tasks);
     let view = View::new(&tasks, &found);
-    let current = session
-        .client
-        .get(&item.id)
-        .map_err(CliError::failed)?
-        .ok_or_else(|| {
-            CliError::failed(format!(
-                "{} was listed, then was not there to read",
-                item.id
-            ))
-        })?;
+    let current = session.get(&item.id)?.ok_or_else(|| {
+        CliError::failed(format!(
+            "{} was listed, then was not there to read",
+            item.id
+        ))
+    })?;
 
     let Some(op_name) = &options.op else {
         if options.json {
@@ -430,7 +543,7 @@ fn run_task(
             id: Some(current.id.clone()),
             args,
             version: Some(current.version.clone()),
-            checkout: None,
+            checkout: session.checkout_arg(),
         })
         .map_err(CliError::failed)?;
     if options.json {
@@ -442,20 +555,29 @@ fn run_task(
             ),
         )?;
     }
-    match result {
+    match &result {
         ApplyResult::Ok { task, files, .. } => {
             if !options.json {
-                emit(out, &ok_text(&current, &task, &files))?;
+                emit(out, &ok_text(&current, task, files))?;
             }
-            Ok(exit::OK)
+            let commit = options.write.commit.then(|| session.written_in());
+            Ok(commit_reported(
+                commit,
+                task,
+                files,
+                &format!("task {} {}: {}", task.id, op.name, task.title),
+                options.json,
+                out,
+                err,
+            ))
         }
         ApplyResult::Conflict { current: latest } => {
             if !options.json {
                 let _ = writeln!(
                     err,
                     "collide: conflict: {} changed after it was read; nothing was written. It is now:\n{}",
-                    View::heading(&latest),
-                    view.show_text(&latest).trim_end()
+                    View::heading(latest),
+                    view.show_text(latest).trim_end()
                 );
             }
             Ok(exit::CONFLICT)
@@ -560,9 +682,45 @@ fn resolve_epic(tasks: &[Task], query: &str) -> Result<String, CliError> {
     Ok(item.id.clone())
 }
 
-/// Prints the outcome of an op that is not a write to one version of one item (`create`, `reid`).
+/// Commits what an `ok` reported, when `--commit` was given (`commit` is the checkout to commit in), and returns the
+/// exit code: 0, or 1 when the commit failed (the files are then left written). Under `--json` the one document on
+/// stdout stays the provider's result, so the new commit is not printed.
+fn commit_reported(
+    commit: Option<&Path>,
+    task: &Task,
+    files: &[String],
+    subject: &str,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
+    let Some(dir) = commit.filter(|_| !files.is_empty()) else {
+        return exit::OK;
+    };
+    match commit_files(dir, files, subject) {
+        Ok(short) => {
+            if !json {
+                let _ = writeln!(out, "  commit  {short}  {subject}");
+            }
+            exit::OK
+        }
+        Err(message) => {
+            let _ = writeln!(
+                err,
+                "collide: {} was written, but git commit failed; the files are left written and uncommitted:\n{message}",
+                task.id
+            );
+            exit::FAILED
+        }
+    }
+}
+
+/// Prints the outcome of an op that is not a write to one version of one item (`create`, `reid`), then commits it
+/// when `commit` names a checkout (`--commit`). `subject` is the commit message, from the new item.
 fn finish(
     result: ApplyResult,
+    commit: Option<&Path>,
+    subject: impl FnOnce(&Task) -> String,
     json: bool,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -582,7 +740,15 @@ fn finish(
             if !json {
                 emit(out, &ok_text(&task, &files))?;
             }
-            Ok(exit::OK)
+            Ok(commit_reported(
+                commit,
+                &task,
+                &files,
+                &subject(&task),
+                json,
+                out,
+                err,
+            ))
         }
         ApplyResult::Conflict { current } => {
             if !json {
@@ -609,11 +775,11 @@ fn run_create(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<u8, CliError> {
-    let mut session = open(cwd)?;
+    let mut session = open(cwd, options.write.checkout.as_deref())?;
     let op = declared_op(&session, "create")?;
     let mut args = map_args(&op, &options.words).map_err(CliError::usage)?;
     if let Some(Value::String(epic)) = args.get("epic").cloned() {
-        let (tasks, _invalid) = session.client.list_all().map_err(CliError::failed)?;
+        let (tasks, _invalid) = session.list()?;
         args.insert(
             "epic".to_string(),
             Value::String(resolve_epic(&tasks, &epic)?),
@@ -626,20 +792,30 @@ fn run_create(
             id: None,
             args,
             version: None,
-            checkout: None,
+            checkout: session.checkout_arg(),
         })
         .map_err(CliError::failed)?;
-    finish(result, options.json, out, err, |task, files| {
-        let mut text = format!(
-            "ok  created {}\n  title   {}\n",
-            View::heading(task),
-            task.title
-        );
-        for file in files {
-            text.push_str(&format!("  file    {file}\n"));
-        }
-        text
-    })
+    let commit = options.write.commit.then(|| session.written_in());
+    let subject = |task: &Task| format!("task {} create: {}", task.id, task.title);
+    finish(
+        result,
+        commit,
+        subject,
+        options.json,
+        out,
+        err,
+        |task, files| {
+            let mut text = format!(
+                "ok  created {}\n  title   {}\n",
+                View::heading(task),
+                task.title
+            );
+            for file in files {
+                text.push_str(&format!("  file    {file}\n"));
+            }
+            text
+        },
+    )
 }
 
 fn run_reid(
@@ -648,9 +824,9 @@ fn run_reid(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<u8, CliError> {
-    let mut session = open(cwd)?;
+    let mut session = open(cwd, options.write.checkout.as_deref())?;
     let op = declared_op(&session, "reid")?;
-    let (tasks, _invalid) = session.client.list_all().map_err(CliError::failed)?;
+    let (tasks, _invalid) = session.list()?;
     let item = lookup(&tasks, &options.id)?;
     let old_id = item.id.clone();
     let args = map_args(&op, &options.words).map_err(CliError::usage)?;
@@ -663,25 +839,39 @@ fn run_reid(
             id: Some(old_id.clone()),
             args,
             version: None,
-            checkout: None,
+            checkout: session.checkout_arg(),
         })
         .map_err(CliError::failed)?;
-    let root = session.root.clone();
-    finish(result, options.json, out, err, |task, files| {
-        let mut text = format!(
-            "ok  {}\n  id      {old_id} -> {}\n",
-            View::heading(task),
-            task.id
-        );
-        for file in files {
-            let label = if root.join(file).exists() {
-                "file   "
-            } else {
-                "removed"
-            };
-            text.push_str(&format!("  {label} {file}\n"));
-        }
-        text.push_str("nothing is committed; review the changes with git diff and git status\n");
-        text
-    })
+    let written_in = session.written_in();
+    let commit = options.write.commit.then_some(written_in);
+    let subject = |task: &Task| format!("task {} reid (was {old_id}): {}", task.id, task.title);
+    finish(
+        result,
+        commit,
+        subject,
+        options.json,
+        out,
+        err,
+        |task, files| {
+            let mut text = format!(
+                "ok  {}\n  id      {old_id} -> {}\n",
+                View::heading(task),
+                task.id
+            );
+            for file in files {
+                let label = if written_in.join(file).exists() {
+                    "file   "
+                } else {
+                    "removed"
+                };
+                text.push_str(&format!("  {label} {file}\n"));
+            }
+            if !options.write.commit {
+                text.push_str(
+                    "nothing is committed; review the changes with git diff and git status\n",
+                );
+            }
+            text
+        },
+    )
 }

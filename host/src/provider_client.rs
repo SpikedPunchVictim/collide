@@ -186,10 +186,14 @@ impl ProviderClient {
         serde_json::from_value(result).map_err(|error| malformed("initialize", error))
     }
 
-    /// Every task, following `nextCursor` to the end, and every item the source could not read.
-    pub fn list_all(&mut self) -> Result<(Vec<Task>, Vec<TaskInvalid>), ClientError> {
+    /// Every task, following `nextCursor` to the end, and every item the source could not read. `checkout` names
+    /// the checkout to read; none means the main checkout.
+    pub fn list_all(
+        &mut self,
+        checkout: Option<&str>,
+    ) -> Result<(Vec<Task>, Vec<TaskInvalid>), ClientError> {
         let mut params = ListParams {
-            checkout: None,
+            checkout: checkout.map(str::to_string),
             cursor: None,
         };
         let (mut tasks, mut invalid) = (Vec::new(), Vec::new());
@@ -206,10 +210,10 @@ impl ProviderClient {
         }
     }
 
-    pub fn get(&mut self, id: &str) -> Result<Option<Task>, ClientError> {
+    pub fn get(&mut self, id: &str, checkout: Option<&str>) -> Result<Option<Task>, ClientError> {
         let params = GetParams {
             id: id.to_string(),
-            checkout: None,
+            checkout: checkout.map(str::to_string),
         };
         let result = self.call("get", serde_json::to_value(&params))?;
         let result: GetResult =

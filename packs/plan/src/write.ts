@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { ApplyParamsOutput, ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile } from './atomic.ts'
+import { CheckoutError, resolveCheckout } from './checkout.ts'
 import { addBlockedByLine, clearOwnersLine, setOwnerLine, setStatusLine } from './frontmatter-edit.ts'
 import type { Edit } from './frontmatter-edit.ts'
 import { checkCreate, CREATE, createLocked } from './create.ts'
@@ -153,19 +154,32 @@ async function writeLocked(root: string, id: string, version: string, spec: OpSp
 }
 
 /**
- * Protocol v0's `apply` for the markdown provider. The root is the main checkout; the shared root is
- * `<root>/.collide/planning`, and every write there holds that root's lock file. `version` is required: a write
+ * Protocol v0's `apply` for the markdown provider. `mainRoot` is the main checkout, and a write goes there unless
+ * `checkout` names another checkout of the repository (an entry of `git worktree list`; anything else is refused and
+ * writes nothing). The shared root is `<checkout>/.collide/planning`, and every write there holds that checkout's own
+ * lock file; `create` and `reid` still see every ref when they number or draw an id. `version` is required: a write
  * must say which content it was made against. An op that would change nothing writes nothing and answers `ok` with
  * no `files` and no `items`. Two ops are not about one version of one item: `create` makes an item, so it takes no id
  * and no version, and `reid` rewrites links in several files, each read under the lock, so it takes no version (it
  * refuses one rather than ignore it). `hooks` are for tests.
  */
-export async function applyOp(root: string, params: ApplyParamsOutput, lock: LockOptions = {}, hooks: IdHooks = {}): Promise<ApplyResultInput> {
+export async function applyOp(mainRoot: string, params: ApplyParamsOutput, lock: LockOptions = {}, hooks: IdHooks = {}): Promise<ApplyResultInput> {
   const { op, id, version, checkout } = params
   const spec = Object.hasOwn(OPS, op) ? OPS[op] : undefined
   if (spec === undefined && op !== CREATE && op !== REID) return refused(`unknown op "${op}"; this provider has ${OP_NAMES.join(', ')}`)
-  if (checkout !== undefined && checkout !== null) return refused(`writes into another checkout are not supported yet (checkout "${checkout}"); leave checkout out to write to the main checkout`)
   const args = params.args ?? {}
+
+  // The checkout to write in: the main checkout unless one is named. The item is found, version-checked, locked (its
+  // own lock file) and written there.
+  let root = mainRoot
+  if (checkout !== undefined && checkout !== null) {
+    try {
+      root = await resolveCheckout(mainRoot, checkout)
+    } catch (error) {
+      if (error instanceof CheckoutError) return refused(`${op}: ${error.message}`)
+      throw error
+    }
+  }
   const planning = join(root, SHARED_ROOT)
 
   if (op === CREATE) {

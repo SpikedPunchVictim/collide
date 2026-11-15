@@ -174,7 +174,7 @@ describe('refusals before any write', () => {
     ['an unknown op', { op: 'rename', id: 'ts-0001-aa', args: {} }, 'unknown op "rename"'],
     ['an unknown id', { op: 'setStatus', id: 'ts-9999-zz', args: { category: 'done' } }, 'there is no item ts-9999-zz'],
     ['no id', { op: 'setStatus', args: { category: 'done' } }, 'needs the id'],
-    ['a named checkout', { op: 'setStatus', id: 'ts-0001-aa', args: { category: 'done' }, checkout: '/elsewhere' }, 'another checkout'],
+    ['a named checkout', { op: 'setStatus', id: 'ts-0001-aa', args: { category: 'done' }, checkout: '/elsewhere' }, 'checkout'],
   ])('%s is refused', async (_name, params, message) => {
     const root = standard()
     const before = read(root)

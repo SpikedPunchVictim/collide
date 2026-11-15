@@ -527,7 +527,7 @@ fn a_wrong_command_line_prints_usage_and_exits_2() {
         vec!["task"],
         vec!["task", "reid"],
         vec!["task", "create", "--seed"],
-        vec!["task", "3", "setStatus", "--commit"],
+        vec!["task", "3", "setStatus", "--no-verify"],
         vec!["nonsense"],
     ] {
         let run = collide(&repo, &bundle, &args);
@@ -544,16 +544,19 @@ fn help_prints_the_usage_the_exit_codes_and_where_the_provider_is_found() {
         run.stdout
             .contains("collide tasks [--ready] [--kind <kind>] [--json]")
     );
-    assert!(
-        run.stdout.contains(
-            "exit codes: 0 ok, 1 failed, 2 wrong command line, 3 id not found or ambiguous"
-        )
-    );
+    for line in [
+        "exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line",
+        "3 id not found or ambiguous, 4 conflict (nothing was written),",
+    ] {
+        assert!(run.stdout.contains(line), "{line} in {}", run.stdout);
+    }
     assert!(run.stdout.contains("COLLIDE_BUILTIN_PACKS"));
     for line in [
-        "collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--json]",
-        "collide task reid <id> [seed=<number>] [--json]",
-        "Nothing is committed: review with git diff.",
+        "collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--checkout <path>] [--commit] [--json]",
+        "collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]",
+        "Without --commit nothing is committed: review with\n  git diff.",
+        "--commit",
+        "--checkout <path>",
     ] {
         assert!(run.stdout.contains(line), "{line} in {}", run.stdout);
     }
@@ -992,4 +995,537 @@ fn reid_of_an_id_nobody_has_exits_3_and_writes_nothing() {
     let run = collide(&repo, &bundle, &["task", "reid", "ts-0099-zz"]);
     assert_eq!(run.code, 3);
     assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+}
+
+// Where a write lands and when it is committed (ts-0031).
+
+/// What `git` needs to commit in a temp repository, set on the `collide` process (never in a git config).
+const IDENTITY: [(&str, &str); 6] = [
+    ("GIT_AUTHOR_NAME", "test"),
+    ("GIT_AUTHOR_EMAIL", "test@example.invalid"),
+    ("GIT_COMMITTER_NAME", "test"),
+    ("GIT_COMMITTER_EMAIL", "test@example.invalid"),
+    ("GIT_CONFIG_GLOBAL", "/dev/null"),
+    ("GIT_CONFIG_SYSTEM", "/dev/null"),
+];
+
+fn collide_in(cwd: &Path, bundle: &Bundle, args: &[&str]) -> Run {
+    collide_with(cwd, bundle, &IDENTITY, args)
+}
+
+/// A linked worktree of a fixture repository, on its own branch, removed when dropped.
+struct Linked {
+    dir: PathBuf,
+}
+
+impl Linked {
+    fn new(repo: &Repo) -> Self {
+        let name = repo.dir.file_name().unwrap().to_str().unwrap();
+        let dir = repo.dir.with_file_name(format!("{name}-linked"));
+        let _ = fs::remove_dir_all(&dir);
+        git(
+            &repo.dir,
+            &["worktree", "add", "-q", "-b", "side", dir.to_str().unwrap()],
+        );
+        Self { dir }
+    }
+}
+
+impl Drop for Linked {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+const THIRD: &str = ".collide/planning/epics/ep-001-aa-alpha/tasks/ts-0003-cc-third.md";
+const SECOND: &str = ".collide/planning/epics/ep-001-aa-alpha/tasks/ts-0002-bb-second.md";
+const TWELVE: &str = ".collide/planning/epics/ep-001-aa-alpha/tasks/ts-0012-dd-twelve-a.md";
+
+/// The files the newest commit changed, as `status<TAB>path` lines (no rename detection), sorted.
+fn committed(dir: &Path) -> Vec<String> {
+    let text = git(
+        dir,
+        &["show", "--no-renames", "--name-status", "--format=", "HEAD"],
+    );
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    lines.sort();
+    lines
+}
+
+fn head_subject(dir: &Path) -> String {
+    git(dir, &["log", "-1", "--format=%s"]).trim().to_string()
+}
+
+fn text_of(dir: &Path, file: &str) -> String {
+    fs::read_to_string(dir.join(file)).unwrap()
+}
+
+#[test]
+fn checkout_writes_into_that_worktree_and_leaves_the_main_checkout_alone() {
+    let (bundle, repo) = (bundle(), Repo::new("checkout-into"));
+    let linked = Linked::new(&repo);
+    let commits = commit_count(&repo.dir);
+    let path = linked.dir.to_str().unwrap();
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "3", "setStatus", "active", "--checkout", path],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        git(&linked.dir, &["status", "--porcelain"]),
+        format!(" M {THIRD}\n")
+    );
+    assert!(text_of(&linked.dir, THIRD).contains("status: active"));
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+    assert_eq!(commit_count(&repo.dir), commits);
+}
+
+#[test]
+fn checkout_reads_the_item_in_that_worktree_so_one_that_exists_only_there_is_found() {
+    let (bundle, repo) = (bundle(), Repo::new("checkout-only-there"));
+    let linked = Linked::new(&repo);
+    let path = linked.dir.to_str().unwrap();
+    let made = collide_in(
+        &repo.dir,
+        &bundle,
+        &[
+            "task",
+            "create",
+            "Only in the worktree",
+            "epic=ep-001-aa",
+            "seed=1",
+            "--checkout",
+            path,
+        ],
+    );
+    assert_eq!(made.code, 0, "{}", made.stderr);
+    assert!(
+        made.stdout.contains("ts-0013-ra"),
+        "{}{}",
+        made.stdout,
+        made.stderr
+    );
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+    let set = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "ts-0013-ra", "setStatus", "active", "--checkout="],
+    );
+    // An empty path is no checkout.
+    assert_eq!(set.code, 2, "{}", set.stderr);
+    let set = collide_in(
+        &repo.dir,
+        &bundle,
+        &[
+            "task",
+            "ts-0013-ra",
+            "setStatus",
+            "active",
+            "--checkout",
+            path,
+        ],
+    );
+    assert_eq!(set.code, 0, "{}", set.stderr);
+    let from_main = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "ts-0013-ra", "setStatus", "active"],
+    );
+    assert_eq!(from_main.code, 3, "{}", from_main.stderr);
+}
+
+#[test]
+fn checkout_may_be_given_relative_to_the_working_directory_and_may_be_the_main_checkout() {
+    let (bundle, repo) = (bundle(), Repo::new("checkout-forms"));
+    let linked = Linked::new(&repo);
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &[
+            "task",
+            "3",
+            "setStatus",
+            "active",
+            "--checkout",
+            &format!("../{}", linked.dir.file_name().unwrap().to_str().unwrap()),
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(text_of(&linked.dir, THIRD).contains("status: active"));
+    // The `--checkout=<path>` form.
+    let name = linked.dir.file_name().unwrap().to_str().unwrap();
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &[
+            "task",
+            "ts-0012-dd",
+            "setStatus",
+            "active",
+            &format!("--checkout=../{name}"),
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(text_of(&linked.dir, TWELVE).contains("status: active"));
+    // From the linked worktree, the main checkout is named by its path.
+    let run = collide_in(
+        &linked.dir,
+        &bundle,
+        &[
+            "task",
+            "ts-0002-bb",
+            "setStatus",
+            "active",
+            "--checkout",
+            repo.dir.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(text_of(&repo.dir, SECOND).contains("status: active"));
+    assert!(!text_of(&linked.dir, SECOND).contains("status: active"));
+}
+
+#[test]
+fn a_path_that_is_not_a_checkout_of_the_repository_is_refused_and_nothing_is_written() {
+    let (bundle, repo) = (bundle(), Repo::new("checkout-refused"));
+    let linked = Linked::new(&repo);
+    let stranger =
+        std::env::temp_dir().join(format!("collide-not-a-checkout-{}", std::process::id()));
+    fs::create_dir_all(&stranger).unwrap();
+    let inside = repo.dir.join(".collide");
+    let stranger_text = stranger.to_str().unwrap();
+    let missing = stranger.join("missing");
+    let missing_text = missing.to_str().unwrap();
+    for given in [
+        stranger_text,
+        inside.to_str().unwrap(),
+        missing_text,
+        "no-such-folder",
+    ] {
+        let run = collide_in(
+            &repo.dir,
+            &bundle,
+            &["task", "3", "setStatus", "active", "--checkout", given],
+        );
+        assert_eq!(run.code, 2, "{given}: {}", run.stderr);
+        assert!(run.stdout.is_empty(), "{given}: {}", run.stdout);
+        assert!(
+            run.stderr.contains("--checkout") && run.stderr.contains("not a checkout"),
+            "{given}: {}",
+            run.stderr
+        );
+    }
+    let create = collide_in(
+        &repo.dir,
+        &bundle,
+        &[
+            "task",
+            "create",
+            "Nowhere",
+            "epic=ep-001-aa",
+            "--checkout",
+            stranger_text,
+        ],
+    );
+    assert_eq!(create.code, 2, "{}", create.stderr);
+    let entries: Vec<_> = fs::read_dir(&stranger).unwrap().collect();
+    let _ = fs::remove_dir_all(&stranger);
+    assert!(entries.is_empty());
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+    assert!(git(&linked.dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn the_default_root_is_the_main_checkout_also_with_commit_from_a_worktree() {
+    let (bundle, repo) = (bundle(), Repo::new("default-root-commit"));
+    let linked = Linked::new(&repo);
+    let linked_commits = commit_count(&linked.dir);
+    let run = collide_in(
+        &linked.dir,
+        &bundle,
+        &["task", "3", "setStatus", "active", "--commit"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(committed(&repo.dir), [format!("M\t{THIRD}")]);
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+    assert!(git(&linked.dir, &["status", "--porcelain"]).is_empty());
+    assert!(!text_of(&linked.dir, THIRD).contains("status: active"));
+    // The commit went to the main checkout's branch, not to the worktree's.
+    assert_eq!(
+        git(&linked.dir, &["rev-list", "--count", "HEAD"]).trim(),
+        linked_commits.to_string()
+    );
+}
+
+#[test]
+fn commit_commits_into_the_checkout_that_was_written() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-checkout"));
+    let linked = Linked::new(&repo);
+    let main_before = git(&repo.dir, &["rev-parse", "HEAD"]);
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &[
+            "task",
+            "3",
+            "setStatus",
+            "active",
+            "--commit",
+            "--checkout",
+            linked.dir.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(committed(&linked.dir), [format!("M\t{THIRD}")]);
+    assert_eq!(git(&repo.dir, &["rev-parse", "HEAD"]), main_before);
+    assert!(git(&linked.dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn commit_takes_exactly_the_reported_file_beside_an_unrelated_dirty_and_an_unrelated_staged_file() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-exact"));
+    let dir = &repo.dir;
+    fs::write(
+        dir.join(SECOND),
+        format!("{}\nan unstaged edit\n", text_of(dir, SECOND)),
+    )
+    .unwrap();
+    fs::write(
+        dir.join(TWELVE),
+        format!("{}\na staged edit\n", text_of(dir, TWELVE)),
+    )
+    .unwrap();
+    git(dir, &["add", "--", TWELVE]);
+    fs::write(dir.join("notes.txt"), "untracked\n").unwrap();
+    let before = commit_count(dir);
+
+    let run = collide_in(
+        dir,
+        &bundle,
+        &["task", "3", "setStatus", "active", "--commit"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(commit_count(dir), before + 1);
+    assert_eq!(committed(dir), [format!("M\t{THIRD}")]);
+    let stat = git(dir, &["show", "--stat", "--format=", "HEAD"]);
+    assert!(
+        stat.contains("ts-0003-cc-third.md")
+            && !stat.contains("ts-0002")
+            && !stat.contains("ts-0012"),
+        "{stat}"
+    );
+    // The unrelated edits are as they were: one unstaged, one still staged, one untracked.
+    assert_eq!(
+        git(dir, &["status", "--porcelain"]),
+        format!(" M {SECOND}\nM  {TWELVE}\n?? notes.txt\n")
+    );
+    assert!(run.stdout.contains("commit"), "{}", run.stdout);
+}
+
+#[test]
+fn the_commit_message_names_the_op_and_the_item() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-message"));
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "3", "setStatus", "active", "--commit"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        head_subject(&repo.dir),
+        "task ts-0003-cc setStatus: Third task, waits for the second"
+    );
+}
+
+#[test]
+fn without_commit_the_file_is_modified_and_nothing_is_committed() {
+    let (bundle, repo) = (bundle(), Repo::new("no-commit"));
+    let before = git(&repo.dir, &["rev-parse", "HEAD"]);
+    let run = collide_in(&repo.dir, &bundle, &["task", "3", "setStatus", "active"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        git(&repo.dir, &["status", "--porcelain"]),
+        format!(" M {THIRD}\n")
+    );
+    assert_eq!(git(&repo.dir, &["rev-parse", "HEAD"]), before);
+    assert!(!run.stdout.contains("commit"), "{}", run.stdout);
+}
+
+#[test]
+fn an_op_that_changes_nothing_commits_nothing() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-nothing"));
+    let before = git(&repo.dir, &["rev-parse", "HEAD"]);
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "3", "setStatus", "ready", "--commit"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        "ok  ep-001-aa / ts-0003-cc: nothing to change\n"
+    );
+    assert_eq!(git(&repo.dir, &["rev-parse", "HEAD"]), before);
+}
+
+#[test]
+fn a_refused_claim_with_commit_writes_nothing_and_commits_nothing() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-refused"));
+    let first = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "ts-2", "claim", "agent-one", "--commit"],
+    );
+    assert_eq!(first.code, 0, "{}", first.stderr);
+    let before = git(&repo.dir, &["rev-parse", "HEAD"]);
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "ts-2", "claim", "agent-two", "--commit"],
+    );
+    assert_eq!(run.code, 5, "{}", run.stderr);
+    assert!(run.stderr.contains("agent-one"), "{}", run.stderr);
+    assert!(run.stdout.is_empty(), "{}", run.stdout);
+    assert_eq!(git(&repo.dir, &["rev-parse", "HEAD"]), before);
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn commit_after_create_commits_the_new_file_and_not_an_unrelated_dirty_one() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-create"));
+    let dir = &repo.dir;
+    fs::write(
+        dir.join(SECOND),
+        format!("{}\nan unstaged edit\n", text_of(dir, SECOND)),
+    )
+    .unwrap();
+    let run = collide_in(
+        dir,
+        &bundle,
+        &[
+            "task",
+            "create",
+            "Fresh item, for the test",
+            "epic=ep-001-aa",
+            "seed=1",
+            "--commit",
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let file = format!("{ALPHA_TASKS}/ts-0013-ra-fresh-item-for-the-test.md");
+    assert_eq!(committed(dir), [format!("A\t{file}")]);
+    assert_eq!(
+        git(dir, &["status", "--porcelain"]),
+        format!(" M {SECOND}\n")
+    );
+    assert_eq!(
+        head_subject(dir),
+        "task ts-0013-ra create: Fresh item, for the test"
+    );
+}
+
+#[test]
+fn commit_after_reid_commits_the_new_and_the_removed_paths_and_the_rewritten_links() {
+    let (bundle, (repo, copy)) = (bundle(), repo_with_a_shared_id("commit-reid"));
+    let dir = &repo.dir;
+    fs::write(dir.join("notes.txt"), "untracked\n").unwrap();
+    let run = collide_in(
+        dir,
+        &bundle,
+        &["task", "ts-0002-bb", "reid", "seed=1", "--commit"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let renamed = copy.replace("ts-0002-bb", "ts-0002-ra");
+    let lines = committed(dir);
+    assert!(lines.contains(&format!("D\t{copy}")), "{lines:?}");
+    assert!(lines.contains(&format!("A\t{renamed}")), "{lines:?}");
+    assert_eq!(git(dir, &["status", "--porcelain"]), "?? notes.txt\n");
+    assert!(
+        head_subject(dir).starts_with("task ts-0002-ra reid"),
+        "{}",
+        head_subject(dir)
+    );
+}
+
+#[test]
+fn commit_after_reid_of_a_file_that_was_never_committed_commits_only_the_new_path() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-reid-new"));
+    let dir = &repo.dir;
+    let made = collide_in(
+        dir,
+        &bundle,
+        &["task", "create", "Fresh item", "epic=ep-001-aa", "seed=1"],
+    );
+    assert_eq!(made.code, 0, "{}", made.stderr);
+    let run = collide_in(
+        dir,
+        &bundle,
+        &["task", "ts-0013-ra", "reid", "seed=2", "--commit"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let lines = committed(dir);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("A\t") && lines[0].contains("/ts-0013-"),
+        "{lines:?}"
+    );
+    assert!(git(dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn a_commit_that_fails_is_reported_leaves_the_file_written_and_exits_1() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-fails"));
+    let hook = repo.dir.join(".git/hooks/pre-commit");
+    fs::write(&hook, "#!/bin/sh\necho 'the hook says no' >&2\nexit 1\n").unwrap();
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let before = git(&repo.dir, &["rev-parse", "HEAD"]);
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "3", "setStatus", "active", "--commit"],
+    );
+    assert_eq!(run.code, 1, "{}", run.stderr);
+    assert!(
+        run.stdout.contains("ok  ep-001-aa / ts-0003-cc"),
+        "{}",
+        run.stdout
+    );
+    assert!(run.stderr.contains("the hook says no"), "{}", run.stderr);
+    assert!(run.stderr.contains("git commit failed"), "{}", run.stderr);
+    assert_eq!(git(&repo.dir, &["rev-parse", "HEAD"]), before);
+    assert!(text_of(&repo.dir, THIRD).contains("status: active"));
+    assert_eq!(
+        git(&repo.dir, &["status", "--porcelain"]),
+        format!(" M {THIRD}\n")
+    );
+}
+
+#[test]
+fn commit_and_checkout_need_an_op_and_checkout_needs_a_path() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-usage"));
+    for args in [
+        &["task", "3", "--commit"][..],
+        &["task", "3", "--checkout", "."][..],
+        &["task", "3", "setStatus", "active", "--checkout"][..],
+        &["tasks", "--commit"][..],
+    ] {
+        let run = collide_in(&repo.dir, &bundle, args);
+        assert_eq!(run.code, 2, "{args:?}: {}", run.stderr);
+        assert!(run.stderr.contains("usage:"), "{args:?}: {}", run.stderr);
+    }
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn commit_works_with_json_and_keeps_the_providers_result_on_stdout() {
+    let (bundle, repo) = (bundle(), Repo::new("commit-json"));
+    let run = collide_in(
+        &repo.dir,
+        &bundle,
+        &["task", "3", "setStatus", "active", "--commit", "--json"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(json(&run)["outcome"], "ok");
+    assert_eq!(committed(&repo.dir), [format!("M\t{THIRD}")]);
 }

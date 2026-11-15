@@ -1,5 +1,6 @@
 pub mod builtin_packs;
 pub mod checkout;
+pub mod commit;
 pub mod pack_location;
 pub mod provider_client;
 pub mod schema_list;

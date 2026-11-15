@@ -163,12 +163,12 @@ describe('create', () => {
     expect(git(root, 'status', '--porcelain')).toBe('')
   })
 
-  test('refuses an id, a version and another checkout, which a create has no use for', async () => {
+  test('refuses an id, a version and a path that is not a checkout of the repository', async () => {
     const root = repoWith()
     const args = { epic: EPIC, title: 'Extra' }
     expect((await call(root, 'apply', { op: 'create', id: 'ts-0001-aa', args })).result).toMatchObject({ outcome: 'refused', message: expect.stringContaining('leave id out') })
     expect((await call(root, 'apply', { op: 'create', version: 'abc', args })).result).toMatchObject({ outcome: 'refused', message: expect.stringContaining('takes no version') })
-    expect((await call(root, 'apply', { op: 'create', checkout: 'wt', args })).result).toMatchObject({ outcome: 'refused', message: expect.stringContaining('another checkout') })
+    expect((await call(root, 'apply', { op: 'create', checkout: 'wt', args })).result).toMatchObject({ outcome: 'refused', message: expect.stringContaining('checkout') })
     expect(git(root, 'status', '--porcelain')).toBe('')
   })
 
