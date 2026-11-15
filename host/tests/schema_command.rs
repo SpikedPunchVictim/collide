@@ -290,7 +290,10 @@ fn schema_lists_kinds_op_effects_links_owners_checklist_and_budget() {
         keys(&types, "OpDecl"),
         ["args", "checkouts", "movesTo", "name"]
     );
-    assert_eq!(keys(&types, "LinkTypeDecl"), ["blocking", "dir", "name"]);
+    assert_eq!(
+        keys(&types, "LinkTypeDecl"),
+        ["blocking", "dir", "name", "target"]
+    );
     assert_eq!(
         keys(&types, "PlanningFields"),
         ["checklist", "kind", "links", "owners"]

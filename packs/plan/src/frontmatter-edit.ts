@@ -89,18 +89,18 @@ const LINK_ENTRY = /^([ \t]*)-[ \t]+\{[^\n]*\}[ \t]*(#.*)?$/
 const SKIPPED = /^[ \t]*(#.*)?$/
 
 /**
- * Adds `- { type: blocked-by, to: <to> }` to the `links` list. An empty `links: []` becomes `links:` with the one
+ * Adds `- { type: <type>, to: <to> }` to the `links` list. An empty `links: []` becomes `links:` with the one
  * entry under it. A list of one-line `- { ... }` entries gets the new entry after the last one, indented like it.
  * Any other form (a list in `[...]` with entries, entries over several lines) is refused.
  */
-export function addBlockedByLine(text: string, to: string): Edit {
+export function addLinkLine(text: string, type: string, to: string): Edit {
   const all = splitLines(text)
   const at = find(all, 'links')
   if (typeof at !== 'number') return at
   if (at === -1) return refuse('the frontmatter has no "links:" line to add the link to')
   const line = all[at] as string
   const eol = endingOf(line) || '\n'
-  const entry = (indent: string): string => `${indent}- { type: blocked-by, to: ${to} }${eol}`
+  const entry = (indent: string): string => `${indent}- { type: ${type}, to: ${to} }${eol}`
 
   const empty = LINKS_EMPTY.exec(withoutEnding(line))
   if (empty !== null) {
@@ -147,7 +147,7 @@ export function setIdLine(text: string, id: string): Edit {
 const TOP_LEVEL_KEY = /^[^\s#-]/
 
 /**
- * Changes every `to: <from>` of the `links` lines to `to: <to>`: the target of a link, in a one-line entry, a block
+ * Changes every `to: <from>` (or `to: <from>#F2`, whose fragment stays) of the `links` lines to `to: <to>`: the target of a link, in a one-line entry, a block
  * mapping or a flow list, quoted or not. Nothing else on those lines changes. A `links` key with no such target is
  * refused. The caller parses the result and checks that only the targets changed, which catches a link in a form
  * this does not match.
@@ -159,13 +159,14 @@ export function replaceLinkTarget(text: string, from: string, to: string): Edit 
   if (at === -1) return refuse('the frontmatter has no "links:" line')
   let end = at + 1
   while (end < all.length && !TOP_LEVEL_KEY.test(all[end] as string)) end++
-  const target = new RegExp(`(\\bto:[ \\t]*["']?)${from}(?=["']?(?:[ \\t]*[},#]|[ \\t]*\\r?\\n?$))`, 'g')
+  // A target is the id and, for a feature link, what follows `#` (`pr-0003-km#F2`), which is kept. `#` after a space starts a comment.
+  const target = new RegExp(`(\\bto:[ \\t]*["']?)${from}(#[^\\s"'},]*)?(?=["']?(?:[ \\t]*[},]|[ \\t]+#|[ \\t]*\\r?\\n?$))`, 'g')
   let changed = 0
   for (let index = at; index < end; index++) {
     const line = all[index] as string
-    const edited = line.replace(target, (_whole, lead: string) => {
+    const edited = line.replace(target, (_whole, lead: string, fragment: string | undefined) => {
       changed++
-      return `${lead}${to}`
+      return `${lead}${to}${fragment ?? ''}`
     })
     all[index] = edited
   }

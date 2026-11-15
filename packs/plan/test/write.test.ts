@@ -46,7 +46,7 @@ describe('initialize declares the write ops', () => {
       oneOf: [{ required: ['status'] }, { required: ['category'] }],
       additionalProperties: false,
     })
-    expect(ops[1]?.args).toMatchObject({ required: ['to'], properties: { type: { enum: ['blocked-by'] } } })
+    expect(ops[1]?.args).toMatchObject({ required: ['to'], properties: { type: { enum: ['blocked-by', 'implements'] } } })
     expect(ops[2]?.args).toMatchObject({ required: ['claimant'] })
   })
 })

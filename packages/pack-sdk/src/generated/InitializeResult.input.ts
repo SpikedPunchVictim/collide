@@ -10,6 +10,10 @@ export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dro
  */
 export type LinkDir = 'out' | 'in'
 /**
+ * What a link type points at: an item, or a feature of a proposal (`pr-0003-km#F2`, revision 14).
+ */
+export type LinkTarget = 'item' | 'feature'
+/**
  * Whether one task has one state (`global`) or one state per checkout (`ref`).
  */
 export type Scope = 'global' | 'ref'
@@ -92,12 +96,14 @@ export interface TransitionDecl {
   to: string
 }
 /**
- * A link type a provider holds: its direction and whether it blocks.
+ * A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no
+ * `target` targets an item, so every declaration written before revision 14 reads as it did.
  */
 export interface LinkTypeDecl {
   blocking: boolean
   dir: LinkDir
   name: string
+  target?: LinkTarget
 }
 /**
  * A field that templates may use (0.5): its name and the regex every value must match.

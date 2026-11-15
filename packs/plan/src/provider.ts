@@ -10,7 +10,7 @@ import type {
 } from '@collide/pack-sdk'
 import { resolveCheckout } from './checkout.ts'
 import { TITLE_MAX } from './create.ts'
-import { CATEGORIES, ID_PATTERN, PROPOSAL, PROPOSAL_STATUSES } from './item.ts'
+import { BLOCKED_BY, CATEGORIES, ID_PATTERN, IMPLEMENTS, LINK_TO_PATTERN, LINK_TYPES, PROPOSAL, PROPOSAL_STATUSES } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
 import { applyOp } from './write.ts'
@@ -53,7 +53,7 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
   },
   {
     name: 'link',
-    args: { type: 'object', properties: { to: { type: 'string', pattern: ID_PATTERN }, type: { enum: ['blocked-by'] } }, required: ['to'], ...noExtraArgs },
+    args: { type: 'object', properties: { to: { type: 'string', pattern: LINK_TO_PATTERN }, type: { enum: [BLOCKED_BY, IMPLEMENTS] } }, required: ['to'], ...noExtraArgs },
   },
   {
     name: 'claim',
@@ -77,7 +77,7 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
   { name: 'reid', args: { type: 'object', properties: { seed: { type: 'integer' } }, ...noExtraArgs } },
 ]
 
-/** `initialize`'s answer: kinds `task`, `epic` and `proposal`, the five categories as a task's statuses, `blocked-by` as the one blocking link. */
+/** `initialize`'s answer: kinds `task`, `epic` and `proposal`, the five categories as a task's statuses, `blocked-by` as the one blocking link, and `implements`, whose target is a feature. */
 export const INITIALIZE_RESULT: InitializeResultInput = {
   scope: 'ref',
   idPattern: ID_PATTERN,
@@ -86,10 +86,7 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
   categoryStatus: Object.fromEntries(CATEGORIES.map((name) => [name, name])),
   kinds: [kind('task'), kind('epic'), proposalKind],
   ops: OPS,
-  links: [
-    { name: 'blocked-by', dir: 'out', blocking: true },
-    { name: 'part-of', dir: 'out', blocking: false },
-  ],
+  links: [...LINK_TYPES],
   capabilities: { watch: false, create: true, collections: false, preview: false },
 }
 

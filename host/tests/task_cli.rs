@@ -1605,9 +1605,12 @@ ep-001-aa / pr-0003-km
   features
     Packs
       F1 Trust prompt for repo packs: a repo pack asks before its first run. A continuation line is indented by two spaces.
+        state  planned
       F2 Pack lock: `packs.lock` pins each pack to a tree.
+        state  planned
     Unsorted
       F3 Menu bar badge: the Queue count in the menu bar.
+        state  planned
 
 ## Context
 ";
@@ -1644,11 +1647,15 @@ fn sections_come_in_order_of_first_appearance_and_a_repeated_section_groups() {
             "  features",
             "    Packs",
             "      F2 In packs: a",
+            "        state  planned",
             "      F4 Back in packs: c",
+            "        state  planned",
             "    Other",
             "      F3 In other: b",
+            "        state  planned",
             "    Unsorted",
-            "      F1 Above: before any heading."
+            "      F1 Above: before any heading.",
+            "        state  planned"
         ]
     );
 }
@@ -1667,6 +1674,7 @@ fn task_prints_the_problems_of_the_features_part_after_the_features() {
 features
     Packs
       F1 Fine: ok
+        state  planned
   feature problems
     line 18: this line is neither an entry nor a continuation: an entry is written - **F<n> <title>**: <summary>
     line 19: F1 is already used on line 17; each F<n> appears once in a proposal
@@ -1843,5 +1851,371 @@ fn a_proposals_set_status_takes_the_six_words_and_lists_them_when_it_is_wrong() 
         moved.stdout.contains("status  draft -> deferred"),
         "{}",
         moved.stdout
+    );
+}
+
+// Feature links, the derived state and reid (ts-0048).
+
+const BETA_TASKS: &str = ".collide/planning/epics/ep-002-bb-beta/tasks";
+
+/// One more task in the beta epic, committed: its id, its status and the lines of its `links` (empty for none).
+struct Implementer<'a> {
+    id: &'a str,
+    status: &'a str,
+    links: &'a str,
+}
+
+fn add_tasks(repo: &Repo, tasks: &[Implementer]) {
+    for task in tasks {
+        let links = if task.links.is_empty() {
+            "links: []\n".to_string()
+        } else {
+            format!("links:\n{}", task.links)
+        };
+        let text = format!(
+            "---\nid: {id}\nkind: task\nstatus: {status}\ntitle: \"Work on {id}\"\nowners: []\n{links}---\n\n## Goal\n\nMade-up.\n",
+            id = task.id,
+            status = task.status,
+        );
+        fs::write(
+            repo.dir
+                .join(BETA_TASKS)
+                .join(format!("{}-work.md", task.id)),
+            text,
+        )
+        .unwrap();
+    }
+    git(&repo.dir, &["add", "-A"]);
+    git(&repo.dir, &["commit", "-q", "-m", "tasks that implement"]);
+}
+
+fn implements(to: &str) -> String {
+    format!("  - {{ type: implements, to: {to} }}\n")
+}
+
+#[test]
+fn task_prints_a_feature_link_with_its_epic() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("feature-link-print", "accepted", FEATURES_EXAMPLE),
+    );
+    add_tasks(
+        &repo,
+        &[Implementer {
+            id: "ts-0020-xa",
+            status: "active",
+            links: &implements("pr-0003-km#F2"),
+        }],
+    );
+    let run = collide(&repo, &bundle, &["task", "ts-0020"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(
+        run.stdout
+            .contains("  links\n    implements pr-0003-km#F2 (ep-001)\n"),
+        "{}",
+        run.stdout
+    );
+    assert!(run.stdout.contains("ready   no (status is active)"));
+}
+
+#[test]
+fn task_says_when_a_feature_link_names_no_feature_or_no_item() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("feature-link-broken", "accepted", FEATURES_EXAMPLE),
+    );
+    let links = format!(
+        "{}{}",
+        implements("pr-0003-km#F9"),
+        implements("pr-0099-zz#F1")
+    );
+    add_tasks(
+        &repo,
+        &[Implementer {
+            id: "ts-0020-xa",
+            status: "ready",
+            links: &links,
+        }],
+    );
+    let run = collide(&repo, &bundle, &["task", "ts-0020"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(
+        run.stdout.contains(
+            "    implements pr-0003-km#F9 (feature not found)\n    implements pr-0099-zz#F1 (not found)\n"
+        ),
+        "{}",
+        run.stdout
+    );
+    let listed = collide(&repo, &bundle, &["tasks", "--json"]);
+    assert!(ids(&json(&listed)).contains(&"ts-0020-xa".to_string()));
+    assert!(
+        // The fixture's own ts-0008-jj is the other one.
+        listed.stderr.contains("2 with a broken link"),
+        "{}",
+        listed.stderr
+    );
+}
+
+#[test]
+fn a_feature_link_does_not_hold_back_a_ready_task() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("feature-link-ready", "draft", FEATURES_EXAMPLE),
+    );
+    add_tasks(
+        &repo,
+        &[Implementer {
+            id: "ts-0020-xa",
+            status: "ready",
+            links: &implements("pr-0003-km#F1"),
+        }],
+    );
+    let run = collide(&repo, &bundle, &["tasks", "--ready"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert!(run.stdout.contains("ts-0020-xa"), "{}", run.stdout);
+}
+
+/// The lines of a proposal's print from `  features` up to the blank line before its body.
+fn features_block(stdout: &str) -> Vec<&str> {
+    stdout
+        .lines()
+        .skip_while(|line| *line != "  features")
+        .take_while(|line| !line.is_empty())
+        .collect()
+}
+
+#[test]
+fn task_prints_each_features_state_and_the_tasks_that_implement_it() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("feature-states", "accepted", FEATURES_EXAMPLE),
+    );
+    add_tasks(
+        &repo,
+        &[
+            Implementer {
+                id: "ts-0020-xa",
+                status: "done",
+                links: &implements("pr-0003-km#F1"),
+            },
+            Implementer {
+                id: "ts-0021-xb",
+                status: "active",
+                links: &implements("pr-0003-km#F1"),
+            },
+            Implementer {
+                id: "ts-0022-xc",
+                status: "ready",
+                links: &implements("pr-0003-km#F1"),
+            },
+            Implementer {
+                id: "ts-0023-xd",
+                status: "dropped",
+                links: &implements("pr-0003-km#F3"),
+            },
+        ],
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        features_block(&run.stdout),
+        [
+            "  features",
+            "    Packs",
+            "      F1 Trust prompt for repo packs: a repo pack asks before its first run. A continuation line is indented by two spaces.",
+            "        state  1 of 3 done",
+            "        ts-0020-xa (ep-002)  done  Work on ts-0020-xa",
+            "        ts-0021-xb (ep-002)  active  Work on ts-0021-xb",
+            "        ts-0022-xc (ep-002)  ready  Work on ts-0022-xc",
+            "      F2 Pack lock: `packs.lock` pins each pack to a tree.",
+            "        state  accepted",
+            "    Unsorted",
+            "      F3 Menu bar badge: the Queue count in the menu bar.",
+            "        state  accepted",
+            "        ts-0023-xd (ep-002)  dropped  Work on ts-0023-xd",
+        ]
+    );
+}
+
+#[test]
+fn a_feature_is_done_when_every_task_that_is_not_dropped_is_done() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("feature-done", "accepted", FEATURES_EXAMPLE),
+    );
+    add_tasks(
+        &repo,
+        &[
+            Implementer {
+                id: "ts-0020-xa",
+                status: "done",
+                links: &implements("pr-0003-km#F2"),
+            },
+            Implementer {
+                id: "ts-0021-xb",
+                status: "dropped",
+                links: &implements("pr-0003-km#F2"),
+            },
+        ],
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003"]);
+    assert!(
+        run.stdout.contains(
+            "      F2 Pack lock: `packs.lock` pins each pack to a tree.\n        state  done\n"
+        ),
+        "{}",
+        run.stdout
+    );
+}
+
+#[test]
+fn a_feature_takes_its_state_from_the_proposal_until_the_proposal_is_accepted() {
+    let expected = [
+        ("draft", "planned"),
+        ("proposed", "planned"),
+        ("deferred", "deferred"),
+        ("rejected", "dropped"),
+        ("superseded", "dropped"),
+        ("accepted", "done"),
+    ];
+    let bundle = bundle();
+    for (status, state) in expected {
+        let repo = repo_with_proposal(
+            &format!("feature-from-{status}"),
+            status,
+            "- **F1 Only**: one\n",
+        );
+        add_tasks(
+            &repo,
+            &[Implementer {
+                id: "ts-0020-xa",
+                status: "done",
+                links: &implements("pr-0003-km#F1"),
+            }],
+        );
+        let run = collide(&repo, &bundle, &["task", "pr-0003"]);
+        assert_eq!(run.code, 0, "{status}: {}", run.stderr);
+        assert!(
+            run.stdout
+                .contains(&format!("      F1 Only: one\n        state  {state}\n")),
+            "{status}: {}",
+            run.stdout
+        );
+    }
+}
+
+#[test]
+fn link_implements_writes_the_link_and_task_prints_it() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("link-implements", "accepted", FEATURES_EXAMPLE),
+    );
+    let run = collide(
+        &repo,
+        &bundle,
+        &[
+            "task",
+            "ts-0002",
+            "link",
+            "pr-0003-km#F2",
+            "type=implements",
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(
+        git(&repo.dir, &["diff", "--numstat"]),
+        "1\t0\t.collide/planning/epics/ep-001-aa-alpha/tasks/ts-0002-bb-second.md\n"
+    );
+    let shown = collide(&repo, &bundle, &["task", "ts-0002"]);
+    assert!(
+        shown
+            .stdout
+            .contains("    implements pr-0003-km#F2 (ep-001)\n"),
+        "{}",
+        shown.stdout
+    );
+    let proposal = collide(&repo, &bundle, &["task", "pr-0003"]);
+    assert!(
+        proposal
+            .stdout
+            .contains("        state  0 of 1 done\n        ts-0002-bb (ep-001)  ready  "),
+        "{}",
+        proposal.stdout
+    );
+}
+
+#[test]
+fn link_implements_to_a_feature_the_proposal_lacks_is_refused_naming_its_features() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("link-refused", "accepted", FEATURES_EXAMPLE),
+    );
+    for (to, wanted) in [
+        ("pr-0003-km#F9", "pr-0003-km has no feature F9"),
+        ("pr-0003-km", "implements links to a feature"),
+        ("ts-0001-aa#F1", "ts-0001-aa is a task, not a proposal"),
+    ] {
+        let run = collide(
+            &repo,
+            &bundle,
+            &["task", "ts-0002", "link", to, "type=implements"],
+        );
+        assert_eq!(run.code, 5, "{to}: {}", run.stderr);
+        assert!(run.stderr.contains(wanted), "{to}: {}", run.stderr);
+        if to.starts_with("pr-") {
+            assert!(
+                run.stderr.contains(
+                    "F1 (Trust prompt for repo packs), F2 (Pack lock), F3 (Menu bar badge)"
+                ),
+                "{to}: {}",
+                run.stderr
+            );
+        }
+    }
+    let blocked = collide(
+        &repo,
+        &bundle,
+        &["task", "ts-0002", "link", "pr-0003-km#F1"],
+    );
+    assert_eq!(blocked.code, 5, "{}", blocked.stderr);
+    assert!(
+        blocked
+            .stderr
+            .contains("blocked-by names an item, not a feature"),
+        "{}",
+        blocked.stderr
+    );
+    assert_eq!(git(&repo.dir, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn reid_of_a_proposal_keeps_the_feature_in_the_links_it_rewrites() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("reid-feature", "accepted", FEATURES_EXAMPLE),
+    );
+    add_tasks(
+        &repo,
+        &[Implementer {
+            id: "ts-0020-xa",
+            status: "active",
+            links: &implements("pr-0003-km#F2"),
+        }],
+    );
+    let run = collide(&repo, &bundle, &["task", "reid", "pr-0003", "seed=1"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let after = fs::read_to_string(repo.dir.join(BETA_TASKS).join("ts-0020-xa-work.md")).unwrap();
+    assert!(
+        after.contains("  - { type: implements, to: pr-0003-ra#F2 }\n"),
+        "{after}"
+    );
+    assert!(!after.contains("pr-0003-km"), "{after}");
+    let shown = collide(&repo, &bundle, &["task", "ts-0020"]);
+    assert!(
+        shown
+            .stdout
+            .contains("    implements pr-0003-ra#F2 (ep-001)\n"),
+        "{}",
+        shown.stdout
     );
 }

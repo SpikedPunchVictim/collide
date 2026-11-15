@@ -4,12 +4,14 @@ import { isDeepStrictEqual } from 'node:util'
 import type { ApplyParamsOutput, ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile } from './atomic.ts'
 import { CheckoutError, resolveCheckout } from './checkout.ts'
-import { addBlockedByLine, clearOwnersLine, setOwnerLine, setStatusLine } from './frontmatter-edit.ts'
+import { addLinkLine, clearOwnersLine, setOwnerLine, setStatusLine } from './frontmatter-edit.ts'
 import type { Edit } from './frontmatter-edit.ts'
 import { checkCreate, CREATE, createLocked } from './create.ts'
 import type { IdHooks } from './ids.ts'
+import { FEATURE_TARGET_EXAMPLE, parseFeatureTarget } from './feature-target.ts'
 import { parseFeatures } from './features.ts'
-import { CATEGORIES, ID_PATTERN, PROPOSAL, PROPOSAL_STATUSES, readItem, stateOf, statusesOf } from './item.ts'
+import { BLOCKED_BY, CATEGORIES, ID_PATTERN, IMPLEMENTS, PROPOSAL, PROPOSAL_STATUSES, readItem, stateOf, statusesOf } from './item.ts'
+import { describeFeatures, featuresOf } from './links.ts'
 import { LOCK_FILE, withLock } from './lock.ts'
 import type { LockOptions } from './lock.ts'
 import { CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
@@ -104,22 +106,41 @@ const OPS: Record<string, OpSpec> = {
   [LINK]: {
     check: (args) => {
       const to = stringArg(args, 'to')
-      if (to === null || !idRegex.test(to)) return `to must be the id of an item, matching ${ID_PATTERN}`
-      if (args.type !== undefined && args.type !== 'blocked-by') return 'type must be "blocked-by", the one link type that is stored'
+      const form = `to must be the id of an item, matching ${ID_PATTERN}, or of a feature of a proposal, such as ${FEATURE_TARGET_EXAMPLE}`
+      if (to === null || !idRegex.test(to.split('#')[0] as string)) return form
+      if (to.includes('#')) {
+        const target = parseFeatureTarget(to)
+        if (!target.ok) return `to ${to}: ${target.reason}`
+      }
+      if (args.type !== undefined && args.type !== BLOCKED_BY && args.type !== IMPLEMENTS) return `type must be "${BLOCKED_BY}" or "${IMPLEMENTS}", the link types that are stored`
       return onlyKeys(args, ['to', 'type'])
     },
     prepare: (found, scan, args, frontmatter) => {
       const to = args.to as string
+      const type = (args.type ?? BLOCKED_BY) as string
       const { id, links } = found.item
-      if (to === id) return { kind: 'refuse', message: `${id} cannot be blocked by itself` }
-      if (!scan.items.some((other) => other.item.id === to)) return { kind: 'refuse', message: `there is no item ${to} to be blocked by` }
-      if (links.some((link) => link.type === 'blocked-by' && link.to === to)) return { kind: 'nothing' }
       const stored = Array.isArray(frontmatter.links) ? frontmatter.links : []
-      return {
-        kind: 'edit',
-        edit: (text) => addBlockedByLine(text, to),
-        expected: { ...frontmatter, links: [...stored, { type: 'blocked-by', to }] },
+      const add = (): Prepared => ({ kind: 'edit', edit: (text) => addLinkLine(text, type, to), expected: { ...frontmatter, links: [...stored, { type, to }] } })
+
+      if (type === BLOCKED_BY) {
+        if (to.includes('#')) return { kind: 'refuse', message: `${BLOCKED_BY} names an item, not a feature, so ${to} cannot be its target; to link a task to the feature it builds, use type=${IMPLEMENTS}` }
+        if (to === id) return { kind: 'refuse', message: `${id} cannot be blocked by itself` }
+        if (!scan.items.some((other) => other.item.id === to)) return { kind: 'refuse', message: `there is no item ${to} to be blocked by` }
+        return links.some((link) => link.type === BLOCKED_BY && link.to === to) ? { kind: 'nothing' } : add()
       }
+
+      // implements: the target is a feature of a proposal that has it.
+      const [itemId] = to.split('#') as [string]
+      const proposal = scan.items.find((other) => other.item.id === itemId)
+      if (proposal === undefined) return { kind: 'refuse', message: `there is no item ${itemId} to implement a feature of` }
+      const { kind } = proposal.item
+      if (kind !== PROPOSAL) return { kind: 'refuse', message: `${itemId} is ${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}, not a proposal; ${IMPLEMENTS} links to a feature of a proposal, such as ${FEATURE_TARGET_EXAMPLE}` }
+      if (itemId === id) return { kind: 'refuse', message: `${id} cannot implement its own feature` }
+      const features = featuresOf(proposal)
+      const target = parseFeatureTarget(to)
+      if (!target.ok) return { kind: 'refuse', message: `${IMPLEMENTS} links to a feature: give ${itemId}#F<n>; ${describeFeatures(features)}` }
+      if (!features.some((feature) => feature.id === target.feature)) return { kind: 'refuse', message: `${itemId} has no feature ${target.feature}; ${describeFeatures(features)}` }
+      return links.some((link) => link.type === IMPLEMENTS && link.to === to) ? { kind: 'nothing' } : add()
     },
   },
 }

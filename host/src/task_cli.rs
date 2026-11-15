@@ -49,8 +49,8 @@ usage:
 pub const HELP: &str = "\
 collide tasks: list the items (epics, tasks and proposals) under .collide/planning/epics/ (--ready: only the items that can be started now;
   --kind: only items of that kind; --json: machine-readable)
-collide task <id>: show one item (a proposal also lists its features by section, then the problems of its Features
-  part)
+collide task <id>: show one item (a proposal also lists its features by section, each with its state and the tasks
+  that implement it, then the problems of its Features part)
 collide task <id> <op> ...: change one item with an op the provider declares (an unknown op lists them)
 
 <id> is the full id (ts-0012-ua) or a short form: 12, 0012, 12-ua, ts-12. A short form must match exactly one item;
@@ -75,6 +75,9 @@ the removed paths too), with a message naming the item and the op, such as: task
 modified, staged or untracked file is not touched, and what you have staged stays staged. Hooks run (there is no
 --no-verify). An op that changes nothing, and a conflict or a refusal, commit nothing. If the commit fails (a hook,
 git's own refusal) git's message is printed, the files stay written and uncommitted, and the exit code is 1.
+
+A task links to the feature it builds with: collide task <task> link pr-0003-km#F2 type=implements. The target is a
+proposal and a feature it has (F<n>), or the link is refused and the message names the features the proposal has.
 
 An op's words are name=value, or one bare value that sets the op's main property (setStatus active sets status).
 Lengths and patterns are checked by the provider.

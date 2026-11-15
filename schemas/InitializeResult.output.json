@@ -115,9 +115,17 @@
       ],
       "type": "string"
     },
+    "LinkTarget": {
+      "description": "What a link type points at: an item, or a feature of a proposal (`pr-0003-km#F2`, revision 14).",
+      "enum": [
+        "item",
+        "feature"
+      ],
+      "type": "string"
+    },
     "LinkTypeDecl": {
       "additionalProperties": false,
-      "description": "A link type a provider holds: its direction and whether it blocks.",
+      "description": "A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no\n`target` targets an item, so every declaration written before revision 14 reads as it did.",
       "properties": {
         "blocking": {
           "type": "boolean"
@@ -127,6 +135,9 @@
         },
         "name": {
           "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/LinkTarget"
         }
       },
       "required": [

@@ -4,6 +4,7 @@ import type { TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
 import { parseFeatures } from './features.ts'
 import { KNOWN_KINDS, PROPOSAL, readItem, stateOf } from './item.ts'
 import type { Item } from './item.ts'
+import { isBrokenLink } from './links.ts'
 import { readItemFile } from './read-file.ts'
 
 /** The shared root's default path, relative to the repository root (0.10). */
@@ -27,7 +28,7 @@ export interface Scan {
   invalid: TaskInvalidOutput[]
   /** Items whose kind is not `task`, `epic` or `proposal`. They are listed, not dropped. */
   unknownKind: number
-  /** Items with a link whose target is no item that was read. They are listed, not dropped. */
+  /** Items with a link whose target is no item that was read, or no feature that its proposal has. They are listed, not dropped. */
   brokenLink: number
 }
 
@@ -101,7 +102,7 @@ export async function scanEpics(cwd: string, checkout: string | null = null): Pr
   }
 
   const unknownKind = kept.filter((found) => !(KNOWN_KINDS as readonly string[]).includes(found.item.kind)).length
-  const brokenLink = kept.filter((found) => found.item.links.some((link) => !seen.has(link.to))).length
+  const brokenLink = kept.filter((found) => found.item.links.some((link) => isBrokenLink(link, seen))).length
   return { items: kept, invalid, unknownKind, brokenLink }
 }
 

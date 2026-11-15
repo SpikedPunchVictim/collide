@@ -4,6 +4,7 @@ pub mod change;
 pub mod context;
 pub mod duration;
 pub mod events;
+pub mod feature;
 pub mod hook;
 pub mod item;
 pub mod lock;

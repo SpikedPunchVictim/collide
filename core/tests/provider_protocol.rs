@@ -1,7 +1,7 @@
 //! Tests for the provider and observer protocols (ts-0010). The types cover the params, the result and the
 //! notification bodies of each message, not the JSON-RPC envelope around them.
 
-use collide_core::item::Category;
+use collide_core::item::{Category, LinkTarget};
 use collide_core::observer::{ObserverAck, ObserverEvent};
 use collide_core::provider::{
     self, ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult,
@@ -93,6 +93,25 @@ fn initialize_result_round_trips_with_every_key() {
     doc["links"] = json!([{ "name": "blocked-by", "dir": "out", "blocking": true }]);
     let result: InitializeResult = round_trip(doc);
     assert_eq!(result.category_status[&Category::Active], "active");
+}
+
+#[test]
+fn an_initialize_result_whose_links_declare_no_target_validates_unchanged_and_targets_items() {
+    let mut doc = initialize_result();
+    doc["links"] = json!([{ "name": "blocked-by", "dir": "out", "blocking": true }]);
+    let result: InitializeResult = round_trip(doc);
+    assert_eq!(result.links[0].target, LinkTarget::Item);
+}
+
+#[test]
+fn an_initialize_result_may_declare_a_link_that_targets_a_feature() {
+    let mut doc = initialize_result();
+    doc["links"] = json!([
+        { "name": "blocked-by", "dir": "out", "blocking": true },
+        { "name": "implements", "dir": "out", "blocking": false, "target": "feature" }
+    ]);
+    let result: InitializeResult = round_trip(doc);
+    assert_eq!(result.links[1].target, LinkTarget::Feature);
 }
 
 #[test]

@@ -1,4 +1,8 @@
+import type { LinkTypeDeclInput } from '@collide/pack-sdk'
+
 export const ID_PATTERN = '^[a-z]{2}-[0-9]{3,}-[a-z]{2}$'
+/** What a `link`'s `to` may be: an item's id, or a feature of a proposal, `pr-0003-km#F2`. */
+export const LINK_TO_PATTERN = `${ID_PATTERN.slice(0, -1)}(#F[1-9][0-9]*)?$`
 const idRegex = new RegExp(ID_PATTERN)
 
 /** A task's statuses are five of the categories themselves (0.10); an epic uses the same five. */
@@ -18,6 +22,23 @@ export const PROPOSAL_STATUSES: ReadonlyArray<{ name: string; category: Category
 ]
 
 export const PROPOSAL = 'proposal'
+
+export const BLOCKED_BY = 'blocked-by'
+export const IMPLEMENTS = 'implements'
+
+/**
+ * The link types the provider holds. `blocked-by` is the one that blocks. `implements` is a task's link to the feature it
+ * builds, so its target is `feature` (revision 14); the others name an item, which is what a declaration with no `target`
+ * means.
+ */
+export const LINK_TYPES: ReadonlyArray<LinkTypeDeclInput> = [
+  { name: BLOCKED_BY, dir: 'out', blocking: true },
+  { name: 'part-of', dir: 'out', blocking: false },
+  { name: IMPLEMENTS, dir: 'out', blocking: false, target: 'feature' },
+]
+
+/** What a link of `type` points at: a feature when the type is declared so, otherwise an item. */
+export const targetOf = (type: string): 'item' | 'feature' => LINK_TYPES.find((declared) => declared.name === type)?.target ?? 'item'
 
 export const KNOWN_KINDS = ['task', 'epic', PROPOSAL] as const
 

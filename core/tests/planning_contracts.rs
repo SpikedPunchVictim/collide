@@ -2,8 +2,10 @@
 //! `change` payload of the task points, and the schemas of the new keys.
 
 use collide_core::change::{Change, TaskPointPayload};
+use collide_core::feature::{self, FeatureState, FeatureTargetError};
 use collide_core::item::{
-    self, Category, Feature, FeatureProblem, KindDecl, KindError, Link, PlanningFields,
+    self, Category, Feature, FeatureProblem, KindDecl, KindError, Link, LinkTarget, LinkTypeDecl,
+    PlanningFields,
 };
 use collide_core::pack::{PackManifest, RunBudget};
 use collide_core::points::{self, DerivedPoint, Point, PointError};
@@ -762,7 +764,7 @@ fn the_kind_link_owner_checklist_and_budget_keys_are_in_the_schema() {
     );
     assert_eq!(
         keys_of("LinkTypeDecl", None),
-        set(&["blocking", "dir", "name"])
+        set(&["blocking", "dir", "name", "target"])
     );
     assert_eq!(
         keys_of("PlanningFields", None),
@@ -782,4 +784,228 @@ fn the_feature_keys_are_in_the_schema() {
         set(&["id", "section", "summary", "title"])
     );
     assert_eq!(keys_of("FeatureProblem", None), set(&["line", "reason"]));
+}
+
+// Feature links (revision 14): the link type's target, the target's parse and the derived state.
+
+fn link_type(extra: Value) -> Value {
+    let mut doc = json!({ "name": "implements", "dir": "out", "blocking": false });
+    doc.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    doc
+}
+
+#[test]
+fn a_link_type_declared_without_a_target_targets_an_item() {
+    let declared: LinkTypeDecl = serde_json::from_value(link_type(json!({}))).unwrap();
+    assert_eq!(declared.target, LinkTarget::Item);
+}
+
+#[test]
+fn a_link_type_without_a_target_serializes_as_it_was_written() {
+    let doc = link_type(json!({}));
+    let declared: LinkTypeDecl = serde_json::from_value(doc.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&declared).unwrap(), doc);
+}
+
+#[test]
+fn a_link_type_may_target_an_item_or_a_feature_and_nothing_else() {
+    for (word, target) in [("item", LinkTarget::Item), ("feature", LinkTarget::Feature)] {
+        let declared: LinkTypeDecl =
+            serde_json::from_value(link_type(json!({ "target": word }))).unwrap();
+        assert_eq!(declared.target, target, "{word}");
+    }
+    assert!(
+        serde_json::from_value::<LinkTypeDecl>(link_type(json!({ "target": "section" }))).is_err()
+    );
+}
+
+#[test]
+fn a_feature_link_type_round_trips_with_its_target() {
+    let doc = link_type(json!({ "target": "feature" }));
+    let declared: LinkTypeDecl = serde_json::from_value(doc.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&declared).unwrap(), doc);
+}
+
+#[test]
+fn the_link_target_key_is_in_the_schema_and_is_not_required() {
+    assert_eq!(
+        keys_of("LinkTypeDecl", None),
+        set(&["blocking", "dir", "name", "target"])
+    );
+    let text = &schema::registry().render()["LinkTypeDecl.input.json"];
+    let schema: Value = serde_json::from_str(text).unwrap();
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|key| key.as_str().unwrap())
+        .collect();
+    assert!(!required.contains(&"target"), "{required:?}");
+}
+
+#[test]
+fn a_feature_target_parses_into_the_item_and_the_feature_number() {
+    let target = feature::parse_feature_target("pr-0003-km#F2").unwrap();
+    assert_eq!(target.item, "pr-0003-km");
+    assert_eq!(target.number, 2);
+    assert_eq!(target.feature_id(), "F2");
+}
+
+#[test]
+fn a_feature_number_may_have_several_digits() {
+    assert_eq!(
+        feature::parse_feature_target("pr-0003-km#F10")
+            .unwrap()
+            .number,
+        10
+    );
+}
+
+#[test]
+fn a_target_with_no_fragment_is_refused_and_says_so() {
+    let error = feature::parse_feature_target("pr-0003-km").unwrap_err();
+    assert_eq!(error, FeatureTargetError::NoFragment);
+    assert!(error.to_string().contains("pr-0003-km#F"), "{error}");
+}
+
+#[test]
+fn a_malformed_fragment_is_refused_and_named() {
+    for fragment in [
+        "F0",
+        "f2",
+        "F2x",
+        "F02",
+        "F",
+        "",
+        "2",
+        "F-1",
+        "F99999999999",
+    ] {
+        let to = format!("pr-0003-km#{fragment}");
+        assert_eq!(
+            feature::parse_feature_target(&to),
+            Err(FeatureTargetError::BadFragment(fragment.to_string())),
+            "{to}"
+        );
+    }
+}
+
+#[test]
+fn a_target_with_two_fragments_is_refused() {
+    assert_eq!(
+        feature::parse_feature_target("pr-0003-km#F2#F3"),
+        Err(FeatureTargetError::TwoFragments)
+    );
+}
+
+#[test]
+fn a_target_with_no_item_before_the_fragment_is_refused() {
+    assert_eq!(
+        feature::parse_feature_target("#F2"),
+        Err(FeatureTargetError::NoItem)
+    );
+}
+
+fn state(status: &str, tasks: &[Category]) -> String {
+    feature::derived_state(status, tasks).unwrap().to_string()
+}
+
+#[test]
+fn a_feature_of_a_draft_or_proposed_proposal_is_planned_whatever_its_tasks_do() {
+    for status in ["draft", "proposed"] {
+        for tasks in tasks_cases() {
+            assert_eq!(state(status, &tasks), "planned", "{status} {tasks:?}");
+        }
+    }
+}
+
+#[test]
+fn a_feature_of_a_deferred_proposal_is_deferred_whatever_its_tasks_do() {
+    for tasks in tasks_cases() {
+        assert_eq!(state("deferred", &tasks), "deferred", "{tasks:?}");
+    }
+}
+
+#[test]
+fn a_feature_of_a_rejected_or_superseded_proposal_is_dropped_whatever_its_tasks_do() {
+    for status in ["rejected", "superseded"] {
+        for tasks in tasks_cases() {
+            assert_eq!(state(status, &tasks), "dropped", "{status} {tasks:?}");
+        }
+    }
+}
+
+/// No tasks, some done, all done, and all dropped.
+fn tasks_cases() -> Vec<Vec<Category>> {
+    use Category::{Active, Done, Dropped};
+    vec![
+        vec![],
+        vec![Done, Active, Active],
+        vec![Done, Done],
+        vec![Dropped, Dropped],
+    ]
+}
+
+#[test]
+fn an_accepted_feature_no_task_implements_is_accepted() {
+    assert_eq!(state("accepted", &[]), "accepted");
+}
+
+#[test]
+fn an_accepted_feature_whose_tasks_are_all_dropped_is_accepted() {
+    assert_eq!(
+        state("accepted", &[Category::Dropped, Category::Dropped]),
+        "accepted"
+    );
+}
+
+#[test]
+fn an_accepted_feature_with_one_of_three_tasks_done_is_one_of_three_done() {
+    use Category::{Active, Done};
+    assert_eq!(state("accepted", &[Done, Active, Active]), "1 of 3 done");
+}
+
+#[test]
+fn an_accepted_feature_with_none_of_its_tasks_done_is_zero_of_n_done() {
+    use Category::{Active, Ready};
+    assert_eq!(state("accepted", &[Ready, Active]), "0 of 2 done");
+}
+
+#[test]
+fn a_dropped_task_is_left_out_of_the_count() {
+    use Category::{Active, Done, Dropped};
+    assert_eq!(state("accepted", &[Done, Dropped, Active]), "1 of 2 done");
+}
+
+#[test]
+fn an_accepted_feature_with_every_task_that_is_not_dropped_done_is_done() {
+    use Category::{Done, Dropped};
+    assert_eq!(state("accepted", &[Done, Done]), "done");
+    assert_eq!(state("accepted", &[Done, Dropped]), "done");
+}
+
+#[test]
+fn the_derived_state_of_an_unknown_proposal_status_names_the_six() {
+    let error = feature::derived_state("open", &[]).unwrap_err();
+    let text = error.to_string();
+    assert!(text.contains("`open`"), "{text}");
+    assert!(
+        text.contains("draft, proposed, accepted, deferred, rejected, superseded"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_derived_state_is_a_value_that_tells_its_parts_apart() {
+    use Category::{Active, Done};
+    assert_eq!(
+        feature::derived_state("accepted", &[Done, Active]),
+        Ok(FeatureState::Progress { done: 1, total: 2 })
+    );
+    assert_eq!(
+        feature::derived_state("accepted", &[Done]),
+        Ok(FeatureState::Done)
+    );
 }

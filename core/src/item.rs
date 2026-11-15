@@ -75,13 +75,31 @@ pub enum LinkDir {
     In,
 }
 
-/// A link type a provider holds: its direction and whether it blocks.
+/// What a link type points at: an item, or a feature of a proposal (`pr-0003-km#F2`, revision 14).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkTarget {
+    #[default]
+    Item,
+    Feature,
+}
+
+impl LinkTarget {
+    fn is_item(&self) -> bool {
+        *self == LinkTarget::Item
+    }
+}
+
+/// A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no
+/// `target` targets an item, so every declaration written before revision 14 reads as it did.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinkTypeDecl {
     pub name: String,
     pub dir: LinkDir,
     pub blocking: bool,
+    #[serde(default, skip_serializing_if = "LinkTarget::is_item")]
+    pub target: LinkTarget,
 }
 
 /// A typed link on an item (0.8).

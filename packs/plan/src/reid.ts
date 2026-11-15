@@ -6,6 +6,7 @@ import { replaceFile, syncDirectory, TEMP_SUFFIX } from './atomic.ts'
 import { replaceLinkTarget, setIdLine } from './frontmatter-edit.ts'
 import type { Edit } from './frontmatter-edit.ts'
 import { checkSeed, generatorFor } from './create.ts'
+import { namesItem } from './feature-target.ts'
 import { drawFreeId, IdSourceError, takenIds } from './ids.ts'
 import type { IdHooks } from './ids.ts'
 import { stateOf } from './item.ts'
@@ -63,9 +64,10 @@ async function plan(root: string, found: FoundItem, oldId: string, newId: string
     edited = setIdLine(text, newId)
     expected.id = newId
   }
-  if (edited.ok && found.item.links.some((link) => link.to === oldId)) {
+  if (edited.ok && found.item.links.some((link) => namesItem(link.to, oldId))) {
     edited = replaceLinkTarget(edited.text, oldId, newId)
-    expected.links = (parsed.value.links as Array<Record<string, unknown>>).map((link) => (link.to === oldId ? { ...link, to: newId } : link))
+    // A link to a feature, `pr-0003-km#F2`, keeps its feature: only the id before the `#` is the old one.
+    expected.links = (parsed.value.links as Array<Record<string, unknown>>).map((link) => (typeof link.to === 'string' && namesItem(link.to, oldId) ? { ...link, to: `${newId}${link.to.slice(oldId.length)}` } : link))
   }
   if (!edited.ok) return `${found.path}: ${edited.reason}`
   const reparsed = parseFrontmatter(edited.text)
@@ -105,7 +107,7 @@ export async function reidLocked(root: string, id: string, args: Record<string, 
   }
 
   const planned: Planned[] = []
-  for (const found of all.filter((candidate) => candidate === target || candidate.item.links.some((link) => link.to === id))) {
+  for (const found of all.filter((candidate) => candidate === target || candidate.item.links.some((link) => namesItem(link.to, id)))) {
     const result = await plan(root, found, id, newId, found === target)
     if (typeof result === 'string') return refused(result)
     planned.push(result)
