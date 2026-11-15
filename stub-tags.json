@@ -3,5 +3,15 @@
   "sdk: ctx.report": "7",
   "sdk: ctx.result": "7",
   "sdk: defineHook": "4b",
-  "sdk: defineObserver": "12"
+  "sdk: defineObserver": "12",
+  "launch: capability refusal": "3b",
+  "resolve: model alias": "3b",
+  "resolve: implementations": "7",
+  "engine: run preview": "8",
+  "engine: start run": "8",
+  "engine: transition": "8",
+  "engine: fan-out join": "8",
+  "engine: read-only check": "8",
+  "engine: adopt run": "8",
+  "engine: workflow ops": "8"
 }

@@ -36,3 +36,34 @@ fn every_stub_of_the_repository_is_registered_under_a_stage() {
     let report = stubs::check(&repo()).unwrap();
     assert!(report.problems.is_empty(), "{}", report.problems.join("\n"));
 }
+
+/// The tags of the `core` outlines (ts-0019-vm) and the stage that fills each one. A tag is not complete until its
+/// stage has replaced every stub that carries it, so each must count at least one stub today.
+const CORE_OUTLINE_TAGS: [(&str, &str); 10] = [
+    ("launch: capability refusal", "3b"),
+    ("resolve: model alias", "3b"),
+    ("resolve: implementations", "7"),
+    ("engine: run preview", "8"),
+    ("engine: start run", "8"),
+    ("engine: transition", "8"),
+    ("engine: fan-out join", "8"),
+    ("engine: read-only check", "8"),
+    ("engine: adopt run", "8"),
+    ("engine: workflow ops", "8"),
+];
+
+#[test]
+fn every_core_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
+    let report = stubs::check(&repo()).unwrap();
+    for (tag, stage) in CORE_OUTLINE_TAGS {
+        assert_eq!(
+            report.stages.get(tag).map(String::as_str),
+            Some(stage),
+            "tag \"{tag}\" is not registered under stage {stage}"
+        );
+        assert!(
+            report.counts[tag] >= 1,
+            "tag \"{tag}\" is registered but no stub carries it"
+        );
+    }
+}

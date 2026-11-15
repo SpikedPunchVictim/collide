@@ -1,7 +1,7 @@
 //! The normalized agent events and the capability table (0.3, Agents and model sources). An agent tool's own stream
 //! (Claude's stream-json, ACP's JSON-RPC) is turned into [`AgentEvent`]s by an adapter, and the rest of Collide reads
-//! only these. The traits that produce them (`AgentAdapter`, `AgentSession`) are `ts-0019-vm`'s; this module holds
-//! the data only, and names no process, Tauri or SQLite type.
+//! only these. The traits that produce them (`AgentAdapter`, `AgentSession`) are in [`crate::adapter`]; this module
+//! holds the data only, and names no process, Tauri or SQLite type.
 //!
 //! | what | type |
 //! |---|---|
@@ -11,6 +11,7 @@
 //! | the answer to it | [`PermissionReply`] |
 //! | what a turn spent | [`Usage`] |
 //! | what an adapter can do | [`Capabilities`] |
+//! | the model a role runs on | [`ModelRef`] |
 //!
 //! The wire form of every tagged type is an object with a `type` key in `snake_case`. A number that an agent does
 //! not report is absent, never 0.
@@ -30,6 +31,25 @@ pub enum SessionStart {
     AgentAssigned {},
     /// Continue the session with this id.
     Resume { id: String },
+}
+
+/// The model a role runs on, as one mapping of `models.yaml` gives it (0.3, Who picks what). `name` is the safe
+/// label that reaches env values, paths, arguments and a pack's `requires.modelName`. `id` is opaque: only the
+/// adapter reads it, and it never reaches env, paths or argv, because an ACP model id such as `ollama/qwen2.5:7b`
+/// fails the safe token. When there is no `id`, the adapter's id is the `name` (Claude: `model.id` is `model.name`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ModelRef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}
+
+impl ModelRef {
+    /// The id the adapter hands to its tool: `id` when the mapping names one, else `name`.
+    pub fn adapter_id(&self) -> &str {
+        self.id.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title
