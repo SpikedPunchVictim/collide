@@ -11,9 +11,14 @@ serde_json = "1"
 # copy. It belongs to `host` and never to `core` (the dependency check).
 rusqlite = { version = "0.42", features = ["bundled"] }
 
-# The clock_gettime binding for the real clocks (host/src/clock.rs), on macOS only.
-[target.'cfg(target_os = "macos")'.dependencies]
+# The system calls of the clocks (host/src/clock.rs), the process readers (host/src/sysproc.rs) and the shim's setsid,
+# wait4 and openpty (host/src/shim.rs). The shim's calls are Unix; the clock and process readers use their own on macOS.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+# The test doubles of `core` (0.15), so the shim's journal is replayed into a session double.
+collide-core = { path = "../core", features = ["testing"] }
 
 [[bin]]
 name = "collide"

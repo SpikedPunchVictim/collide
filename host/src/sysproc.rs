@@ -37,6 +37,12 @@ pub fn parent_pid(pid: u32) -> Option<u32> {
     imp::parent_pid(pid)
 }
 
+/// When `pid` started, in microseconds since the Unix epoch, as the kernel records it (`p_starttime`); `None` when
+/// `pid` cannot be looked up. The start time with the pid names one process for good, where a pid alone can be reused.
+pub fn start_time_us(pid: u32) -> Option<u64> {
+    imp::start_time_us(pid)
+}
+
 /// The value of the variable `name` in `pid`'s environment as it was when the process started; `None` when it is
 /// not there, when macOS hides the environment (a platform binary's) or when `pid` cannot be looked up.
 pub fn env_var_of(pid: u32, name: &str) -> Option<String> {
@@ -135,7 +141,8 @@ mod imp {
             .ok_or_else(|| io::Error::other(format!("the peer's pid is {pid}")))
     }
 
-    pub fn parent_pid(pid: u32) -> Option<u32> {
+    /// The kernel's BSD record of `pid`, or `None` when it cannot be looked up.
+    fn bsd_info(pid: u32) -> Option<libc::proc_bsdinfo> {
         let pid = c_int::try_from(pid).ok()?;
         let mut info = MaybeUninit::<libc::proc_bsdinfo>::zeroed();
         let size = size_of::<libc::proc_bsdinfo>() as c_int;
@@ -155,9 +162,20 @@ mod imp {
         }
         // SAFETY: the call wrote the whole struct (`written == size`), and zeroed memory is a valid
         // `proc_bsdinfo` in any case (integers and arrays of integers only).
-        let info = unsafe { info.assume_init() };
+        Some(unsafe { info.assume_init() })
+    }
+
+    pub fn parent_pid(pid: u32) -> Option<u32> {
+        let info = bsd_info(pid)?;
         let parent = info.pbi_ppid;
         (parent != 0 && parent != info.pbi_pid).then_some(parent)
+    }
+
+    pub fn start_time_us(pid: u32) -> Option<u64> {
+        let info = bsd_info(pid)?;
+        info.pbi_start_tvsec
+            .checked_mul(1_000_000)?
+            .checked_add(info.pbi_start_tvusec)
     }
 
     pub fn procargs(pid: u32) -> Option<Vec<u8>> {
@@ -248,6 +266,10 @@ mod imp {
     }
 
     pub fn parent_pid(_: u32) -> Option<u32> {
+        None
+    }
+
+    pub fn start_time_us(_: u32) -> Option<u64> {
         None
     }
 
@@ -367,5 +389,26 @@ mod tests {
         let mut buffer = procargs("/bin/x", &["x"], &["COLLIDE_RUN=1"]);
         buffer[..4].copy_from_slice(&(-1i32).to_ne_bytes());
         assert_eq!(env_var_in(&buffer, "COLLIDE_RUN"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_process_has_a_start_time_that_is_in_the_past_and_not_long_ago() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let started = start_time_us(std::process::id()).expect("this process can be read");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+        assert!(started <= now, "{started} is after {now}");
+        assert!(
+            now - started < 3_600_000_000,
+            "the test run is under an hour old"
+        );
+    }
+
+    #[test]
+    fn a_pid_that_is_not_there_has_no_start_time() {
+        assert_eq!(start_time_us(u32::MAX), None);
     }
 }
