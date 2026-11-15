@@ -3706,8 +3706,12 @@ compaction; per-turn differences of running totals; missing values stored as nul
 calls; settling on exit and end of output in either order; the hook-blocked prompt; refusal classification and hook
 outcomes; context-option validation; span-tree tests against fake-Claude streams; fake-Claude end-to-end; the version
 range and the canary; `TurnEnd` reasons; `Usage.quality`; real-claude contract test (opt-in in CI).
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-003-da`, items lettered `3b`
-(part L).
+**Status**: Not Started. Items from revision 18 (with revisions 15 and 16), split on 2026-11-15: `ts-0060-mm` to
+`ts-0071-fd` in epic `ep-003-da`, built one at a time in id order (agent events and aliases, Claude launch, fake Claude
+and session, error and hook parsing, usage parsing, file-task run, permissions and limits, metrics, version checks,
+`collide run`, real-`claude` steps, owner checks). Each Stage 3b criterion is named in one item, and the parts carried
+from 3a are placed in `ts-0065-kx`, `ts-0066-zb` and `ts-0067-kw`. The real-`claude` steps (`ts-0070-mk`) each need the
+owner's OK; the Orchard run, the restart and the sleep test are owner-run (`ts-0071-fd`).
 
 ### Stage 3c: The thin loop, in the app
 

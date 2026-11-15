@@ -21,4 +21,4 @@ links: []
 
 ## Notes
 
-Stage 3a is split (2026-11-15): `ts-0050-xc` to `ts-0059-xs`, built one at a time in id order, because they share `host` and the generated files. Stages 3b to 3d are split as each starts (0.10, 0.15: only the next stage is split). Each stage's Status line in the plan names the revision its items must come from.
+Stage 3a is split (2026-11-15): `ts-0050-xc` to `ts-0059-xs`, built one at a time in id order, because they share `host` and the generated files. Stage 3b is split (2026-11-15): `ts-0060-mm` to `ts-0071-fd`, built the same way. Fake-Claude work comes first. The real-`claude` steps are in `ts-0070-mk`, and each needs the owner's OK. The owner's own checks (the Orchard run, the restart, the sleep test) are in `ts-0071-fd`. Stages 3c and 3d are split as each starts (0.10, 0.15: only the next stage is split). Each stage's Status line in the plan names the revision its items must come from.
