@@ -21,6 +21,7 @@ mod file_run;
 mod hooks;
 mod launch;
 mod limits;
+mod metrics;
 mod pause;
 mod replay;
 mod results;

@@ -257,6 +257,11 @@ impl ClockPair {
             continuous: clocks.read(Clock::Continuous),
         }
     }
+
+    /// The continuous reading of the pair, in nanoseconds: what spans are measured on.
+    pub fn continuous_nanos(&self) -> u64 {
+        self.continuous.nanos
+    }
 }
 
 /// How long the machine slept between `earlier` and `later`: the time the continuous clock counted and the uptime

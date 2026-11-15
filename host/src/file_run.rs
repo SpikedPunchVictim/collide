@@ -44,12 +44,17 @@
 //!   the Queue, and resumes a limit that reset while no daemon ran.
 
 use crate::adapters::claude::session::ClaudeSession;
+use crate::adapters::claude::user_config::{
+    endpoint_in_environment, read_user_config, user_config_fingerprint,
+};
 use crate::adapters::claude::{ClaudeAdapter, PROGRAM, capabilities, snapshot::snapshot_files};
 use crate::agent_feed::AgentFeed;
 use crate::base_env::BaseEnvironment;
 use crate::builtin_roles::{BUILDER_DEFINITION, BUILDER_ROLE_NAME, builder_role};
 use crate::clock::{Clock, Clocks};
 use crate::disk::{Before, DiskError, DiskGuard, DiskPause, Floor, FreeSpace};
+use crate::metrics::Metrics;
+use crate::metrics_store::WaitKind;
 use crate::models::load_user_models;
 use crate::phases::{PhaseEnd, PhaseKey, PhasePause, PhaseSpec, Phases};
 use crate::queue::Queue;
@@ -66,6 +71,7 @@ use collide_core::owner::{
     AnswerKind, LaunchProblem, QueueAnswer, QueueAnswerResult, QueueItem, QueueKind,
     RunStartFileParams,
 };
+use collide_core::profile::RoleConfig;
 use collide_core::resolve::resolve_model_alias;
 use collide_core::state::{PauseCause, PhaseState, RunState, WorkspaceState};
 use collide_core::workflow::{AgentPhase, OnCold, Prompt};
@@ -118,6 +124,8 @@ pub struct FileRunConfig {
     pub limit_poll: Duration,
     /// The least a run stays paused for a limit before the reset time resumes it, on the continuous clock.
     pub limit_min_pause: Duration,
+    /// The always-recorded metrics: the run's span, its waits, its workspace's size and its fingerprint.
+    pub metrics: Arc<Metrics>,
 }
 
 /// The text of the turn that goes first to a session that was resumed: the stream ended mid-work, and the tool waits for
@@ -577,6 +585,7 @@ impl FileRuns {
         })?;
         let key = PhaseKey::new(run, PHASE_NAME)
             .map_err(|error| problem(format!("the phase's name: {error}")))?;
+        self.record_fingerprint(run, request.role.config, &env);
         let feed =
             AgentFeed::new(adapter.session(&request), &run_dir.join(PHASE_NAME)).close_after_turn();
         let spec = PhaseSpec {
@@ -600,6 +609,34 @@ impl FileRuns {
         Ok(())
     }
 
+    /// Writes the user-config part of the run's fingerprint (0.13): the user's hooks and flagged `env` by name and the
+    /// endpoint's host, read as the phase's launch line will load them. A settings file that cannot be read is logged and
+    /// leaves the part out: a missing part is not an empty config.
+    fn record_fingerprint(
+        &self,
+        run: &str,
+        config: Option<RoleConfig>,
+        env: &BTreeMap<String, String>,
+    ) {
+        let mut user = match read_user_config(self.config.home.as_deref(), config) {
+            Ok(user) => user,
+            Err(error) => {
+                self.log(&format!(
+                    "run {run}: the user config was not read for its fingerprint: {error}"
+                ));
+                return;
+            }
+        };
+        if user.endpoint.is_none() {
+            user.endpoint = endpoint_in_environment(env);
+        }
+        self.config.metrics.fingerprint_part(
+            run,
+            "user_config",
+            &user_config_fingerprint(&user).to_string(),
+        );
+    }
+
     /// Checks the floor for `path`. A volume under it is a pause; one that cannot be read is a refusal.
     fn disk_check(&self, guard: &DiskGuard, path: &Path, before: Before) -> Result<(), Halt> {
         match guard.check(path, before) {
@@ -614,6 +651,12 @@ impl FileRuns {
         let item = pause.queue_item();
         self.log(&format!("run {run}: {}", item.title));
         self.record_run_state(phases, live, pause.run_state());
+        self.config.metrics.wait_started(
+            &run,
+            PHASE_NAME,
+            WaitKind::Disk,
+            Some(&disk_item_id(&run)),
+        );
         self.config.queue.push(QueueItem {
             id: disk_item_id(&run),
             kind: QueueKind::DiskFull,
@@ -642,7 +685,10 @@ impl FileRuns {
 
     fn end_workspace_phase(&self, phases: &Phases, run: &str, workspace: &mut BuiltinWorkspace) {
         match workspace.end_phase() {
-            Ok(bytes) => self.log(&format!("run {run}: its worktree uses {bytes} bytes")),
+            Ok(bytes) => {
+                self.log(&format!("run {run}: its worktree uses {bytes} bytes"));
+                self.config.metrics.workspace_bytes(run, PHASE_NAME, bytes);
+            }
             Err(error) => self.log(&format!(
                 "run {run}: its worktree was not measured: {error}"
             )),
@@ -703,6 +749,12 @@ impl FileRuns {
         match cause {
             PauseCause::UsageLimit => {
                 let reset_ms = paused.pause.reset_at_ms;
+                self.config.metrics.wait_started(
+                    run,
+                    &paused.key.phase,
+                    WaitKind::UsageLimit,
+                    Some(&limit_item_id(run)),
+                );
                 self.config.queue.push(QueueItem {
                     id: limit_item_id(run),
                     kind: QueueKind::UsageLimit,
@@ -726,6 +778,12 @@ impl FileRuns {
             }
             PauseCause::AskHuman => {
                 let item = budget_item_id(run);
+                self.config.metrics.wait_started(
+                    run,
+                    &paused.key.phase,
+                    WaitKind::Budget,
+                    Some(&item),
+                );
                 self.append(
                     phases,
                     run,
@@ -1067,6 +1125,14 @@ impl FileRuns {
         from: Option<RunState>,
         to: RunState,
     ) -> Result<(), crate::store::StoreError> {
+        let metrics = &self.config.metrics;
+        match (&from, &to) {
+            (None, RunState::Running {}) => metrics.run_started(run),
+            (_, RunState::Ended { .. }) => metrics.run_ended(run, "ended"),
+            (_, RunState::Failed {}) => metrics.run_ended(run, "failed"),
+            (_, RunState::Stopped {}) => metrics.run_ended(run, "stopped"),
+            _ => {}
+        }
         phases.append_event(
             Actor {
                 kind: ActorKind::Workflow,

@@ -28,7 +28,9 @@
 
 use crate::shim::files;
 use crate::store::PhaseRecord;
-use collide_core::adapter::{AgentSession, ExitInfo, PhaseFailure, PhaseOutcome, Step};
+use collide_core::adapter::{
+    AgentSession, ExitInfo, PhaseFailure, PhaseOutcome, StampedEvent, Step,
+};
 use collide_core::agent::{AgentEvent, PermissionRequest, Usage, UsageScope};
 use collide_core::journal::{Direction, JournalEnd, read_journal_from};
 use collide_core::replay::replay_journal_bytes;
@@ -118,6 +120,8 @@ pub struct AgentFeed {
     limited: Option<Option<u64>>,
     /// The running total's cost, the last time the session gave one.
     spent_usd: Option<f64>,
+    /// The events taken since the caller last asked ([`AgentFeed::take_events`]), for the metrics.
+    taken: Vec<StampedEvent>,
 }
 
 impl AgentFeed {
@@ -137,6 +141,7 @@ impl AgentFeed {
             turn_ended: false,
             limited: None,
             spent_usd: None,
+            taken: Vec::new(),
         }
     }
 
@@ -160,6 +165,8 @@ impl AgentFeed {
         feed.next_seq = replayed.records as u64;
         feed.damaged = matches!(replayed.end, JournalEnd::Damaged { .. });
         feed.take(&replayed.step);
+        // The replayed events were recorded before the restart.
+        feed.taken.clear();
         Ok(feed)
     }
 
@@ -205,6 +212,12 @@ impl AgentFeed {
             reset_at_ms: self.limited.flatten(),
             spent_usd: self.spent_usd,
         })
+    }
+
+    /// The events the feed took since the last call, in order: what the metrics record. The caller drains them after
+    /// each call that can take some, so the list stays short.
+    pub fn take_events(&mut self) -> Vec<StampedEvent> {
+        std::mem::take(&mut self.taken)
     }
 
     /// What the session had cost, as far as it has said.
@@ -316,6 +329,7 @@ impl AgentFeed {
 
     /// Takes what a step reported.
     fn take(&mut self, step: &Step) {
+        self.taken.extend(step.events.iter().cloned());
         for stamped in &step.events {
             match &stamped.event {
                 AgentEvent::Usage { usage } => {
@@ -507,6 +521,42 @@ mod tests {
         );
         assert!(record.usage.is_some());
         assert_eq!(record.failure, None);
+    }
+
+    #[test]
+    fn the_events_a_feed_took_are_given_once_and_in_order() {
+        let dir = Dir::new();
+        let mut feed = feed_in(&dir);
+        feed.send_turn("go");
+        for (seq, line) in report_lines().iter().enumerate() {
+            dir.append(&out(seq as u64, line));
+        }
+        feed.pump();
+        let taken = feed.take_events();
+        assert!(
+            matches!(
+                taken.last().map(|e| &e.event),
+                Some(AgentEvent::TurnEnd { .. })
+            ),
+            "{taken:?}"
+        );
+        assert!(feed.take_events().is_empty(), "given once");
+    }
+
+    #[test]
+    fn a_rebuilt_feed_gives_no_events_for_the_journal_it_replayed() {
+        let dir = Dir::new();
+        for (seq, line) in report_lines().iter().enumerate() {
+            dir.append(&out(seq as u64, line));
+        }
+        let session = ClaudeSession::new(SessionStart::Assign {
+            uuid: "7c1b0e52-9f3a-4d2e-8b61-0a5d3c9e4f17".to_string(),
+        });
+        let mut feed = AgentFeed::rebuild(Box::new(session), &dir.0).unwrap();
+        assert!(
+            feed.take_events().is_empty(),
+            "the events of the replay were recorded before the restart"
+        );
     }
 
     #[test]

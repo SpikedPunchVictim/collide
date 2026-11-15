@@ -19,7 +19,7 @@
 //! | `system/informational` with `hook_no_verdict` | nothing after a `cancelled` `hook_response`, which it names the call of; else the `HookCall` itself |
 //! | `system/informational` with `prompt_submit_outcome` | nothing: the turn's `result` ends `Blocked` with the hook's reason |
 //! | `user` with `tool_result` | a `ToolResultSize` for each result; a `ToolRefused` for a call that did not run, by the `tool_result_meta` entry with its id (never its text); a `HookFailedOpen` for a failed tool hook whose tool ran |
-//! | `system/compact_boundary` | an `Other`; the turn's `result` then reads the compaction call from its model usage |
+//! | `system/compact_boundary` | a `Compaction` (trigger, tokens before, duration, mid-task); the turn's `result` then reads the compaction call from its model usage |
 //! | `result` | a `FinalReport` from `result.result` (never for an error result), the `Usage` events below, a `Limited` for a limit, then a `TurnEnd`; a 429 error result is a limit signal |
 //! | anything else | an `Other` named by the line's `type`, and its `subtype` when it has one; no content is kept |
 //!
@@ -57,9 +57,9 @@ use collide_core::adapter::{
     AgentSession, ExitInfo, Finished, PhaseFailure, PhaseOutcome, ReplayError, StampedEvent, Step,
 };
 use collide_core::agent::{
-    AgentEvent, FinalReportSource, HookDecision, HookFailure, HookOutcome, Money, PermissionReply,
-    PermissionRequest, RefusalCause, SessionStart, ToolKind, TurnEndReason, Usage, UsageQuality,
-    UsageScope,
+    AgentEvent, CompactionTrigger, FinalReportSource, HookDecision, HookFailure, HookOutcome,
+    Money, PermissionReply, PermissionRequest, RefusalCause, SessionStart, ToolKind, TurnEndReason,
+    Usage, UsageQuality, UsageScope,
 };
 use collide_core::journal::JournalRecord;
 use collide_core::replay::{Replayable, replay_records};
@@ -463,10 +463,35 @@ impl ClaudeSession {
             Some("compact_boundary") => {
                 // The compaction's own model call is in this turn's `model_usage_since_last_result`, not in its usage.
                 self.compacted = true;
-                vec![other("system/compact_boundary", wall_ns)]
+                vec![self.read_compact_boundary(value, wall_ns)]
             }
             _ => vec![other(&type_name("system", value), wall_ns)],
         }
+    }
+
+    /// The `compact_metadata` of the line, where it gives one. `post_tokens` is left out on purpose: the size after is
+    /// the context the next response reports. A figure the line lacks is `None`. A compaction is mid-task when a tool
+    /// call has no result yet.
+    fn read_compact_boundary(&self, value: &Value, wall_ns: u64) -> StampedEvent {
+        let metadata = value.get("compact_metadata");
+        let number = |key| metadata.and_then(|m| m.get(key)).and_then(Value::as_u64);
+        let trigger = match metadata
+            .and_then(|m| m.get("trigger"))
+            .and_then(Value::as_str)
+        {
+            Some("manual") => Some(CompactionTrigger::Manual),
+            Some("auto") => Some(CompactionTrigger::Auto),
+            _ => None,
+        };
+        stamped(
+            Some(wall_ns),
+            AgentEvent::Compaction {
+                trigger,
+                context_before: number("pre_tokens"),
+                duration_ms: number("duration_ms"),
+                mid_task: !self.calls.is_empty(),
+            },
+        )
     }
 
     fn read_hook_response(&mut self, value: &Value, wall_ns: u64) -> Vec<StampedEvent> {

@@ -17,13 +17,12 @@
 //!
 //! | tag | function | what it does |
 //! |---|---|---|
-//! | `sampler: tick and sleep` | [`Sampler::tick`] | reads both clocks, finds a sleep interval |
 //! | `sampler: process tree` | [`sample_process_tree`] | CPU, memory and disk I/O of every process of the tree |
 //! | `sampler: network` | [`NetworkStream`] | per-process network deltas from the streamed `nettop` |
 //! | `sampler: gpu` | [`poll_gpu`] | device utilization and memory |
 //! | `sampler: containers` | [`sample_containers`] | CPU, memory and I/O of the run's lane containers |
 
-use crate::clock::{ClockPair, Clocks};
+use crate::clock::{ClockPair, Clocks, sleep_gap};
 use std::io;
 use std::time::Duration;
 
@@ -72,8 +71,13 @@ impl Sampler {
     /// Reads both clocks, compares them with the last tick's and returns what changed. The sampler's `last` becomes
     /// this tick's clocks.
     pub fn tick(&mut self, clocks: &dyn Clocks) -> Tick {
-        let _ = (clocks, self.last);
-        todo!("sampler: tick and sleep")
+        let now = ClockPair::read(clocks);
+        let gap = sleep_gap(&self.last, &now);
+        self.last = now;
+        Tick {
+            now,
+            sleep: (gap > SLEEP_THRESHOLD).then_some(SleepInterval { length: gap }),
+        }
     }
 }
 
@@ -177,11 +181,78 @@ mod tests {
         assert_eq!(Sampler::new(first).last(), first);
     }
 
+    /// Clocks a test sets: the uptime and the continuous reading, in nanoseconds.
+    struct Set(std::cell::Cell<(u64, u64)>);
+
+    impl Clocks for Set {
+        fn read(&self, clock: Clock) -> Reading {
+            let (uptime, continuous) = self.0.get();
+            let nanos = match clock {
+                Clock::Uptime => uptime,
+                _ => continuous,
+            };
+            Reading { clock, nanos }
+        }
+    }
+
+    const SECOND: u64 = 1_000_000_000;
+
+    /// One tick after the clocks moved from `(0, 0)` to `(uptime, continuous)` seconds-in-nanoseconds.
+    fn tick_after(uptime: u64, continuous: u64) -> (Tick, Sampler) {
+        let clocks = Set(std::cell::Cell::new((0, 0)));
+        let mut sampler = Sampler::new(ClockPair::read(&clocks));
+        clocks.0.set((uptime, continuous));
+        (sampler.tick(&clocks), sampler)
+    }
+
     #[test]
-    #[should_panic(expected = "sampler: tick and sleep")]
-    fn the_tick_is_a_stub_tagged_for_stage_3b() {
-        let mut sampler = Sampler::new(ClockPair::read(&Fixed));
-        let _ = sampler.tick(&Fixed);
+    fn an_awake_tick_finds_no_sleep() {
+        assert_eq!(tick_after(SECOND, SECOND).0.sleep, None);
+    }
+
+    #[test]
+    fn a_gap_under_the_threshold_is_no_sleep() {
+        assert_eq!(tick_after(SECOND, 2 * SECOND).0.sleep, None);
+    }
+
+    #[test]
+    fn a_gap_of_exactly_the_threshold_is_no_sleep() {
+        assert_eq!(tick_after(0, 2 * SECOND).0.sleep, None);
+    }
+
+    #[test]
+    fn a_gap_over_the_threshold_is_a_sleep_of_that_length() {
+        let sleep = tick_after(SECOND, 11 * SECOND).0.sleep;
+        assert_eq!(
+            sleep,
+            Some(SleepInterval {
+                length: Duration::from_secs(10)
+            })
+        );
+    }
+
+    #[test]
+    fn clocks_that_went_backwards_find_no_sleep() {
+        let clocks = Set(std::cell::Cell::new((10 * SECOND, 10 * SECOND)));
+        let mut sampler = Sampler::new(ClockPair::read(&clocks));
+        clocks.0.set((SECOND, SECOND));
+        assert_eq!(sampler.tick(&clocks).sleep, None);
+    }
+
+    #[test]
+    fn a_tick_makes_its_clocks_the_next_ones_start() {
+        let (tick, sampler) = tick_after(SECOND, 11 * SECOND);
+        assert_eq!(sampler.last(), tick.now);
+    }
+
+    #[test]
+    fn the_sleep_is_counted_once() {
+        let clocks = Set(std::cell::Cell::new((0, 0)));
+        let mut sampler = Sampler::new(ClockPair::read(&clocks));
+        clocks.0.set((SECOND, 11 * SECOND));
+        assert!(sampler.tick(&clocks).sleep.is_some());
+        clocks.0.set((2 * SECOND, 12 * SECOND));
+        assert_eq!(sampler.tick(&clocks).sleep, None);
     }
 
     #[test]

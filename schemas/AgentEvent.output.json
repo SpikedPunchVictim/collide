@@ -1,5 +1,13 @@
 {
   "$defs": {
+    "CompactionTrigger": {
+      "description": "What started a compaction: the owner's `/compact`, or the agent when its context filled.",
+      "enum": [
+        "manual",
+        "auto"
+      ],
+      "type": "string"
+    },
     "FinalReportSource": {
       "description": "Where a [`AgentEvent::FinalReport`] came from: Claude's `result` field, or, for ACP, the message chunks after the\nlast tool call.",
       "enum": [
@@ -749,6 +757,50 @@
         "type",
         "tool_call_id",
         "bytes"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The agent compacted its context (0.13, the compaction metrics). Each figure the tool's line lacks is absent,\nnever 0. The tokens after are not here: they are the context the next response reports. `mid_task` is true\nwhen a tool call was still open when the compaction came.",
+      "properties": {
+        "context_before": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mid_task": {
+          "type": "boolean"
+        },
+        "trigger": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompactionTrigger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "const": "compaction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "mid_task"
       ],
       "type": "object"
     },

@@ -96,6 +96,8 @@ use crate::auth::check_socket_path;
 use crate::clock::{Clock, Clocks};
 use crate::daemon::{AdoptedShim, AdoptedState};
 use crate::disk::{DiskGuard, Floor, FreeSpace};
+use crate::metrics::Metrics;
+use crate::metrics_store::WaitKind;
 use crate::queue::Queue;
 use crate::shim::{
     ChildIdentity, ChildStdio, DaemonStart, PROBLEM_PREFIX, ShimSpec, files as shim_files,
@@ -106,7 +108,7 @@ use crate::stop::{
 };
 use crate::store::{PhaseRecord, Store, StoreError};
 use crate::sysproc;
-use collide_core::adapter::{PhaseFailure, PhaseOutcome};
+use collide_core::adapter::{PhaseFailure, PhaseOutcome, StampedEvent};
 use collide_core::agent::{PermissionReply, PermissionRequest};
 use collide_core::change::{Actor, ActorKind};
 use collide_core::events::{Event, EventBody, PermissionAnswer};
@@ -419,6 +421,8 @@ pub struct PhasesConfig {
     pub on_phase_pause: Option<PhasePauseHook>,
     /// Rebuilds the feed of an agent phase from its journal after a restart ([`FeedRebuilder`]).
     pub rebuild_feed: Option<FeedRebuilder>,
+    /// The always-recorded metrics: the phase's spans, its agent's events and how it ended.
+    pub metrics: Arc<Metrics>,
 }
 
 /// A lock that a panicking thread poisoned is still a lock.
@@ -557,6 +561,7 @@ struct PhasesShared {
     disk: Option<(Arc<dyn FreeSpace + Send + Sync>, Floor)>,
     queue: Arc<Queue>,
     on_phase_pause: Option<PhasePauseHook>,
+    metrics: Arc<Metrics>,
     table: Mutex<HashMap<PhaseKey, Arc<Entry>>>,
     /// Held to take the next event number and write the event, so two threads never take the same one.
     events: Mutex<()>,
@@ -609,6 +614,7 @@ impl Phases {
             queue,
             on_phase_pause,
             rebuild_feed,
+            metrics,
         } = config;
         let mut last: HashMap<PhaseKey, PhaseState> = HashMap::new();
         for event in store.events_since(0)? {
@@ -659,6 +665,7 @@ impl Phases {
                 disk,
                 queue,
                 on_phase_pause,
+                metrics,
                 table: Mutex::new(table),
                 events: Mutex::new(()),
                 watchers: Mutex::new(Vec::new()),
@@ -1201,10 +1208,36 @@ impl Phases {
                 .map(|e| format!(" ({})", exit_text(e)))
                 .unwrap_or_default()
         ));
+        self.record_state_metrics(&entry.key, &state.state, state.exit.as_ref());
         Ok(Advanced {
             changed: true,
             durable,
         })
+    }
+
+    /// What the metrics keep of a phase's move: the phase span opens when it runs, and each attempt's end (a pause
+    /// or a final state) is a row with the shim's exit totals. A final state also ends the phase's spans.
+    fn record_state_metrics(&self, key: &PhaseKey, state: &PhaseState, exit: Option<&ExitRecord>) {
+        let metrics = &self.shared.metrics;
+        match state {
+            PhaseState::Pending {} => {}
+            PhaseState::Running {} => metrics.phase_running(&key.run, &key.phase),
+            PhaseState::Paused { .. } => {
+                metrics.phase_exit(&key.run, &key.phase, state_name(state), exit);
+            }
+            PhaseState::Ended {}
+            | PhaseState::Failed { .. }
+            | PhaseState::Stopped {}
+            | PhaseState::Lost {} => {
+                metrics.phase_exit(&key.run, &key.phase, state_name(state), exit);
+                metrics.phase_ended(&key.run, &key.phase, state_name(state));
+            }
+        }
+    }
+
+    /// Records the events a feed took, which its caller drained while it held the feed.
+    fn record_events(&self, key: &PhaseKey, events: &[StampedEvent]) {
+        self.shared.metrics.events(&key.run, &key.phase, events);
     }
 
     /// Tells the end hook that the phase reached a final state, or the pause hook that it paused. No lock is held while
@@ -1408,7 +1441,7 @@ impl Phases {
             return None;
         }
         let stop_requested = locked(&entry.inner).stop_requested;
-        let (outcome, mut record, problem, pause) = {
+        let (outcome, mut record, problem, pause, events) = {
             let mut feed = locked(feed);
             let (outcome, record, problem) = feed.settle(Some(exit.clone()));
             let pause = if stop_requested {
@@ -1416,8 +1449,9 @@ impl Phases {
             } else {
                 feed.pause(&outcome)
             };
-            (outcome, record, problem, pause)
+            (outcome, record, problem, pause, feed.take_events())
         };
+        self.record_events(&entry.key, &events);
         if let Some(problem) = problem {
             self.log(&format!("phase {}: {problem}", entry.key));
         }
@@ -1479,12 +1513,13 @@ impl Phases {
         if is_settled(&locked(&entry.inner).state) {
             return;
         }
-        let (pumped, record) = {
+        let (pumped, record, events) = {
             let mut feed = locked(feed);
             let pumped = feed.pump();
             let record = pumped.record_changed.then(|| feed.record(None));
-            (pumped, record)
+            (pumped, record, feed.take_events())
         };
+        self.record_events(&entry.key, &events);
         if let Some(problem) = &pumped.problem {
             self.log(&format!("phase {}: {problem}", entry.key));
         }
@@ -1526,6 +1561,13 @@ impl Phases {
         self.shared
             .queue
             .push(permission_item(key, request, self.now_ms()));
+        // The wait is from the item's push to its answer.
+        self.shared.metrics.wait_started(
+            &key.run,
+            &key.phase,
+            WaitKind::Permission,
+            Some(&permission_item_id(key, &request.id)),
+        );
         let written = self.append_event(
             Actor {
                 kind: ActorKind::Agent,
@@ -1571,7 +1613,12 @@ impl Phases {
             PermissionReply::Deny { .. } => PermissionAnswer::Deny,
             PermissionReply::Cancel {} => PermissionAnswer::Cancel,
         };
-        let step = locked(feed).answer(request_id, reply);
+        let (step, events) = {
+            let mut feed = locked(feed);
+            let step = feed.answer(request_id, reply);
+            (step, feed.take_events())
+        };
+        self.record_events(key, &events);
         if step.writes.is_empty() {
             return Err(format!(
                 "phase {key} holds no request {request_id:?}: it was answered already"
@@ -1582,6 +1629,11 @@ impl Phases {
                 .map_err(|error| format!("the answer was not sent: {error}"))?;
         }
         self.shared.queue.take(&permission_item_id(key, request_id));
+        self.shared.metrics.wait_ended_for_item(
+            &key.run,
+            &key.phase,
+            &permission_item_id(key, request_id),
+        );
         let written = self.append_event(
             Actor {
                 kind: ActorKind::Person,
@@ -1613,7 +1665,13 @@ impl Phases {
             .feed
             .as_ref()
             .ok_or_else(|| LinkError::NoLink(key.clone()))?;
-        let step = locked(feed).send_turn(text);
+        self.shared.metrics.turn_started(&key.run, &key.phase);
+        let (step, events) = {
+            let mut feed = locked(feed);
+            let step = feed.send_turn(text);
+            (step, feed.take_events())
+        };
+        self.record_events(key, &events);
         for bytes in step.writes {
             self.write(key, &String::from_utf8_lossy(&bytes))?;
         }
@@ -1865,7 +1923,12 @@ impl Phases {
         let agents: Vec<&Arc<Entry>> = marked.iter().filter(|e| e.feed.is_some()).collect();
         for entry in &agents {
             let Some(feed) = &entry.feed else { continue };
-            let step = locked(feed).interrupt();
+            let (step, events) = {
+                let mut feed = locked(feed);
+                let step = feed.interrupt();
+                (step, feed.take_events())
+            };
+            self.record_events(&entry.key, &events);
             for bytes in step.writes {
                 if let Err(error) = self.write(&entry.key, &String::from_utf8_lossy(&bytes)) {
                     self.log(&format!(

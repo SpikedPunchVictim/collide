@@ -66,7 +66,7 @@ pub struct Migration {
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
 /// written with, and `line` is its JSON.
-pub const MIGRATIONS: [Migration; 3] = [
+pub const MIGRATIONS: [Migration; 4] = [
     Migration {
         version: 1,
         name: "events",
@@ -101,7 +101,137 @@ pub const MIGRATIONS: [Migration; 3] = [
               json TEXT NOT NULL
           )",
     },
+    Migration {
+        version: 4,
+        name: "metrics",
+        sql: METRICS_SQL,
+    },
 ];
+
+/// The tables of the always-recorded metrics (ts-0067-kw; 0.13). `spans` holds runs, phases, turns and waits, each
+/// with the continuous clock's nanoseconds (`started_ns`, `ended_ns`: what lengths are measured on) and the wall
+/// clock's milliseconds (for display). A span that has no end is open. Every figure an agent may not report is
+/// nullable: a missing value is NULL, never 0. Nothing here holds a message, a tool's input, a tool's result, a hook's
+/// output or an `Other` event's body.
+const METRICS_SQL: &str = "
+    CREATE TABLE spans (
+        id              INTEGER PRIMARY KEY,
+        run             TEXT NOT NULL,
+        phase           TEXT,
+        parent          INTEGER,
+        kind            TEXT NOT NULL,
+        wait            TEXT,
+        item            TEXT,
+        started_wall_ms INTEGER NOT NULL,
+        started_ns      INTEGER NOT NULL,
+        ended_wall_ms   INTEGER,
+        ended_ns        INTEGER,
+        outcome         TEXT
+    );
+    CREATE INDEX spans_by_run ON spans (run, kind);
+    CREATE TABLE usage_rows (
+        id             INTEGER PRIMARY KEY,
+        run            TEXT NOT NULL,
+        phase          TEXT NOT NULL,
+        turn           INTEGER,
+        wall_ms        INTEGER NOT NULL,
+        scope          TEXT NOT NULL,
+        quality        TEXT NOT NULL,
+        input          INTEGER,
+        output         INTEGER,
+        cache_read     INTEGER,
+        cache_write    INTEGER,
+        cache_write_1h INTEGER,
+        cache_write_5m INTEGER,
+        thought        INTEGER,
+        context_used   INTEGER,
+        context_size   INTEGER,
+        cost_amount    REAL,
+        cost_currency  TEXT,
+        model_time_ms  INTEGER
+    );
+    CREATE INDEX usage_rows_by_phase ON usage_rows (run, phase);
+    CREATE TABLE tool_calls (
+        run     TEXT NOT NULL,
+        phase   TEXT NOT NULL,
+        call_id TEXT NOT NULL,
+        tool    TEXT,
+        kind    TEXT,
+        bytes   INTEGER,
+        refused TEXT,
+        PRIMARY KEY (run, phase, call_id)
+    );
+    CREATE TABLE hook_calls (
+        id        INTEGER PRIMARY KEY,
+        run       TEXT NOT NULL,
+        phase     TEXT NOT NULL,
+        turn      INTEGER,
+        name      TEXT NOT NULL,
+        event     TEXT NOT NULL,
+        outcome   TEXT NOT NULL,
+        exit_code INTEGER,
+        decision  TEXT
+    );
+    CREATE TABLE findings (
+        id            INTEGER PRIMARY KEY,
+        run           TEXT NOT NULL,
+        phase         TEXT NOT NULL,
+        turn          INTEGER,
+        detector      TEXT NOT NULL,
+        name          TEXT,
+        event         TEXT,
+        tool_call_id  TEXT,
+        cause         TEXT NOT NULL,
+        cost_amount   REAL,
+        cost_currency TEXT,
+        cost_basis    TEXT NOT NULL
+    );
+    CREATE TABLE compactions (
+        id            INTEGER PRIMARY KEY,
+        run           TEXT NOT NULL,
+        phase         TEXT NOT NULL,
+        turn          INTEGER,
+        wall_ms       INTEGER NOT NULL,
+        trigger_kind  TEXT,
+        tokens_before INTEGER,
+        tokens_after  INTEGER,
+        duration_ms   INTEGER,
+        mid_task      INTEGER NOT NULL
+    );
+    CREATE TABLE other_counts (
+        run      TEXT NOT NULL,
+        raw_type TEXT NOT NULL,
+        count    INTEGER NOT NULL,
+        PRIMARY KEY (run, raw_type)
+    );
+    CREATE TABLE phase_ends (
+        id              INTEGER PRIMARY KEY,
+        run             TEXT NOT NULL,
+        phase           TEXT NOT NULL,
+        wall_ms         INTEGER NOT NULL,
+        state           TEXT NOT NULL,
+        exit_code       INTEGER,
+        signal          INTEGER,
+        cpu_user_us     INTEGER,
+        cpu_system_us   INTEGER,
+        max_rss_bytes   INTEGER,
+        workspace_bytes INTEGER
+    );
+    CREATE TABLE cold_returns (
+        id      INTEGER PRIMARY KEY,
+        run     TEXT NOT NULL,
+        phase   TEXT NOT NULL,
+        cause   TEXT NOT NULL,
+        idle_ms INTEGER NOT NULL,
+        wall_ms INTEGER NOT NULL
+    );
+    CREATE TABLE fingerprints (
+        run  TEXT NOT NULL,
+        part TEXT NOT NULL,
+        json TEXT NOT NULL,
+        PRIMARY KEY (run, part)
+    );
+";
 
 /// What the daemon keeps of a phase beyond its state events (ts-0065-kx): the last usage its session reported, why it
 /// failed when the session could tell, and its report. Nothing of the agent's stream is stored here: the events of
@@ -381,7 +511,7 @@ impl Store {
 
     /// A connection for one call. Opened without `CREATE`: the file was made by [`Store::open`], and a call that finds
     /// it gone is an error and not a second, empty store.
-    fn connect(&self) -> Result<Connection, StoreError> {
+    pub(crate) fn connect(&self) -> Result<Connection, StoreError> {
         let conn = Connection::open_with_flags(
             self.db_path(),
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -528,7 +658,7 @@ fn lines_since(conn: &Connection, after: u64) -> Result<Vec<(u64, String)>, Stor
 
 /// A SQLite error as a [`StoreError::Io`]. A full database (`SQLITE_FULL`) is [`io::ErrorKind::StorageFull`], so a
 /// caller handles a full disk the same whether it came from a writer or from SQLite.
-fn sql_error(context: &str, error: rusqlite::Error) -> StoreError {
+pub(crate) fn sql_error(context: &str, error: rusqlite::Error) -> StoreError {
     let full = matches!(
         error,
         rusqlite::Error::SqliteFailure(ref failure, _) if failure.code == ErrorCode::DiskFull

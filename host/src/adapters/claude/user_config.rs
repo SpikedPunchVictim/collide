@@ -47,6 +47,16 @@ impl HookFlag {
         }
     }
 
+    /// The flag's name in the fingerprint.
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            HookFlag::PreToolUse => "pre_tool_use",
+            HookFlag::UserPromptSubmit => "user_prompt_submit",
+            HookFlag::SessionStart => "session_start",
+            HookFlag::PostToolUse => "post_tool_use",
+        }
+    }
+
     /// What a hook of this event can do, for the preview.
     pub fn can_change(&self) -> &'static str {
         match self {
@@ -251,6 +261,42 @@ fn read_env(settings: &Map<String, Value>, user: &mut UserConfig) -> Result<(), 
     }
     user.env_flags.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(())
+}
+
+/// The fingerprint's user-config part (0.13): the hooks by name, event and flag, the flagged `env` names, and the
+/// endpoint's host. It is the same names and flags the run preview shows; a command, a value, a key and a path are not
+/// in it, because [`UserConfig`] never held them.
+pub fn user_config_fingerprint(config: &UserConfig) -> Value {
+    let hooks: Vec<Value> = config
+        .hooks
+        .iter()
+        .map(|hook| {
+            serde_json::json!({
+                "name": hook.name,
+                "event": hook.event,
+                "flag": hook.flag.map(HookFlag::wire_name),
+            })
+        })
+        .collect();
+    let env_flags: Vec<Value> = config
+        .env_flags
+        .iter()
+        .map(|flag| {
+            let kind = match flag.kind {
+                EnvFlagKind::ContextVariable => "context_variable",
+                EnvFlagKind::Endpoint => "endpoint",
+            };
+            serde_json::json!({"name": flag.name, "kind": kind})
+        })
+        .collect();
+    let endpoint = config.endpoint.as_ref().map(|endpoint| {
+        let source = match endpoint.source {
+            EndpointSource::Environment => "environment",
+            EndpointSource::SettingsEnv => "settings_env",
+        };
+        serde_json::json!({"source": source, "host": endpoint.host})
+    });
+    serde_json::json!({"hooks": hooks, "env_flags": env_flags, "endpoint": endpoint})
 }
 
 /// The endpoint variable of the captured environment, recorded the way a settings `env` one is.

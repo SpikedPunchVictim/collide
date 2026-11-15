@@ -6,7 +6,7 @@ use crate::common::TempRoot;
 use collide_core::profile::RoleConfig;
 use collide_host::adapters::claude::user_config::{
     Endpoint, EndpointSource, EnvFlagKind, HookFlag, UserConfig, UserConfigError, endpoint_host,
-    endpoint_in_environment, read_user_config,
+    endpoint_in_environment, read_user_config, user_config_fingerprint,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -229,4 +229,57 @@ fn the_same_variable_in_the_captured_environment_is_recorded_the_same_way() {
 #[test]
 fn an_environment_without_the_variable_has_no_endpoint() {
     assert_eq!(endpoint_in_environment(&BTreeMap::new()), None);
+}
+
+#[test]
+fn the_fingerprint_part_names_the_hooks_the_flagged_env_and_the_endpoint_host() {
+    let home = home_with(FIXTURE);
+    let config = read(&home, Some(RoleConfig::User)).unwrap();
+    let part = user_config_fingerprint(&config);
+    assert_eq!(
+        part["hooks"][1],
+        serde_json::json!({"name": "PreToolUse:Bash", "event": "PreToolUse", "flag": "pre_tool_use"})
+    );
+    assert_eq!(
+        part["hooks"][3]["flag"],
+        serde_json::Value::Null,
+        "Stop is not flagged"
+    );
+    assert_eq!(
+        part["env_flags"],
+        serde_json::json!([
+            {"name": "ANTHROPIC_BASE_URL", "kind": "endpoint"},
+            {"name": "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "kind": "context_variable"},
+        ])
+    );
+    assert_eq!(
+        part["endpoint"],
+        serde_json::json!({"source": "settings_env", "host": "gateway.example.com"})
+    );
+}
+
+#[test]
+fn the_fingerprint_part_holds_no_command_key_path_or_port() {
+    let home = home_with(FIXTURE);
+    let config = read(&home, Some(RoleConfig::User)).unwrap();
+    let text = user_config_fingerprint(&config).to_string();
+    for leaked in [
+        "FIXTURE-KEY",
+        "api_key",
+        "v1/proxy",
+        "8443",
+        "FIXTURE-HOOK-SECRET",
+        "fixture-rewrite",
+    ] {
+        assert!(!text.contains(leaked), "{leaked} in {text}");
+    }
+}
+
+#[test]
+fn an_empty_config_has_a_part_with_empty_lists_and_no_endpoint() {
+    let part = user_config_fingerprint(&UserConfig::default());
+    assert_eq!(
+        part,
+        serde_json::json!({"hooks": [], "env_flags": [], "endpoint": null})
+    );
 }

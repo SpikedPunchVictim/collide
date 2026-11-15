@@ -15,6 +15,8 @@ pub mod hooks;
 pub mod launch;
 pub mod log_cap;
 pub mod login;
+pub mod metrics;
+pub mod metrics_store;
 pub mod models;
 pub mod otlp;
 pub mod owner_client;

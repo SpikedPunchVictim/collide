@@ -48,43 +48,51 @@ const HOUR: Duration = Duration::from_secs(3600);
 /// Real time plus the distance the injected sleep has moved the wall and the continuous clocks. The wall clock starts
 /// `wall_base` after the epoch, so a test chooses whether the reset is ahead of it. The uptime clock is the real one:
 /// a machine that sleeps does not move it.
-struct TestClocks {
-    real: SystemClocks,
-    began: Instant,
-    wall_base: Duration,
-    moved: Mutex<Duration>,
-    step: Mutex<Duration>,
+pub(crate) struct TestClocks {
+    pub(crate) real: SystemClocks,
+    pub(crate) began: Instant,
+    pub(crate) wall_base: Duration,
+    pub(crate) moved: Mutex<Duration>,
+    /// Time that passed with the machine awake: it moves all three clocks.
+    pub(crate) awake: Mutex<Duration>,
+    pub(crate) step: Mutex<Duration>,
     /// The injected sleeps that moved the clocks (a sleep while the step is zero only waits, so these are the sleeps a test asked for).
-    moving_sleeps: AtomicUsize,
+    pub(crate) moving_sleeps: AtomicUsize,
 }
 
 impl TestClocks {
-    fn new(wall_base_secs: u64) -> Arc<TestClocks> {
+    pub(crate) fn new(wall_base_secs: u64) -> Arc<TestClocks> {
         Arc::new(TestClocks {
             real: SystemClocks,
             began: Instant::now(),
             wall_base: Duration::from_secs(wall_base_secs),
             moved: Mutex::new(Duration::ZERO),
+            awake: Mutex::new(Duration::ZERO),
             step: Mutex::new(Duration::ZERO),
             moving_sleeps: AtomicUsize::new(0),
         })
     }
 
     /// How far each injected sleep moves the clocks.
-    fn set_step(&self, step: Duration) {
+    pub(crate) fn set_step(&self, step: Duration) {
         *self.step.lock().unwrap() = step;
     }
 
+    /// `gap` passed with the machine awake, while no code ran.
+    pub(crate) fn advance(&self, gap: Duration) {
+        *self.awake.lock().unwrap() += gap;
+    }
+
     /// The machine slept for `gap` while no code ran.
-    fn jump(&self, gap: Duration) {
+    pub(crate) fn jump(&self, gap: Duration) {
         *self.moved.lock().unwrap() += gap;
     }
 
-    fn sleeps(&self) -> usize {
+    pub(crate) fn sleeps(&self) -> usize {
         self.moving_sleeps.load(Ordering::SeqCst)
     }
 
-    fn sleep(&self) {
+    pub(crate) fn sleep(&self) {
         thread::sleep(Duration::from_millis(1));
         let step = *self.step.lock().unwrap();
         if !step.is_zero() {
@@ -94,24 +102,25 @@ impl TestClocks {
     }
 }
 
-fn nanos(duration: Duration) -> u64 {
+pub(crate) fn nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap()
 }
 
 impl Clocks for TestClocks {
     fn read(&self, clock: Clock) -> Reading {
         let moved = *self.moved.lock().unwrap();
+        let awake = *self.awake.lock().unwrap();
         let nanos = match clock {
-            Clock::Uptime => self.real.read(Clock::Uptime).nanos,
-            Clock::Continuous => self.real.read(Clock::Continuous).nanos + nanos(moved),
-            Clock::Wall => nanos(self.wall_base + self.began.elapsed() + moved),
+            Clock::Uptime => self.real.read(Clock::Uptime).nanos + nanos(awake),
+            Clock::Continuous => self.real.read(Clock::Continuous).nanos + nanos(moved + awake),
+            Clock::Wall => nanos(self.wall_base + self.began.elapsed() + moved + awake),
         };
         Reading { clock, nanos }
     }
 }
 
 /// The login session as a test sets it: it can be told that the user is logging out.
-struct TestLogin {
+pub(crate) struct TestLogin {
     leaving: AtomicBool,
 }
 
@@ -125,13 +134,15 @@ impl LoginSessions for TestLogin {
     }
 }
 
-struct Settings {
+pub(crate) struct Settings {
     /// Where the wall clock starts, in seconds: before the reset by default.
-    wall_base_secs: u64,
-    min_pause: Duration,
-    free: Option<Arc<FakeFree>>,
-    interrupt_wait: Duration,
-    close_wait: Duration,
+    pub(crate) wall_base_secs: u64,
+    pub(crate) min_pause: Duration,
+    pub(crate) free: Option<Arc<FakeFree>>,
+    pub(crate) interrupt_wait: Duration,
+    pub(crate) close_wait: Duration,
+    /// How often the daemon's sampler reads the clocks.
+    pub(crate) sampler_tick: Duration,
 }
 
 impl Default for Settings {
@@ -142,27 +153,28 @@ impl Default for Settings {
             free: None,
             interrupt_wait: Duration::from_millis(1500),
             close_wait: Duration::from_millis(1500),
+            sampler_tick: Duration::from_millis(20),
         }
     }
 }
 
-struct Rig {
-    root: TempRoot,
-    daemon: Option<Daemon>,
-    phases: Phases,
-    client: Option<OwnerClient>,
-    repo: PathBuf,
-    task: PathBuf,
-    shell: PathBuf,
-    argv_log: PathBuf,
-    clocks: Arc<TestClocks>,
-    login: Arc<TestLogin>,
-    settings: Settings,
+pub(crate) struct Rig {
+    pub(crate) root: TempRoot,
+    pub(crate) daemon: Option<Daemon>,
+    pub(crate) phases: Phases,
+    pub(crate) client: Option<OwnerClient>,
+    pub(crate) repo: PathBuf,
+    pub(crate) task: PathBuf,
+    pub(crate) shell: PathBuf,
+    pub(crate) argv_log: PathBuf,
+    pub(crate) clocks: Arc<TestClocks>,
+    pub(crate) login: Arc<TestLogin>,
+    pub(crate) settings: Settings,
 }
 
 impl Rig {
     /// A daemon whose `claude` plays `first`, or `second` when it is started with `--resume`.
-    fn new(first: &Path, second: &Path, settings: Settings) -> Rig {
+    pub(crate) fn new(first: &Path, second: &Path, settings: Settings) -> Rig {
         let root = TempRoot::new();
         let bin = root.join("bin");
         fs::create_dir(&bin).unwrap();
@@ -224,12 +236,12 @@ impl Rig {
     }
 
     /// Stops the daemon. Its shims and their children go on, as they do when the real daemon ends.
-    fn stop_daemon(&mut self) {
+    pub(crate) fn stop_daemon(&mut self) {
         self.client = None;
         drop(self.daemon.take());
     }
 
-    fn start_daemon(&mut self) {
+    pub(crate) fn start_daemon(&mut self) {
         let (daemon, phases, client) = start_daemon(
             &self.root,
             &self.shell,
@@ -242,12 +254,16 @@ impl Rig {
         self.client = Some(client);
     }
 
-    fn restart(&mut self) {
+    pub(crate) fn restart(&mut self) {
         self.stop_daemon();
         self.start_daemon();
     }
 
-    fn call<P: Serialize, R: DeserializeOwned>(&mut self, method: &str, params: &P) -> R {
+    pub(crate) fn call<P: Serialize, R: DeserializeOwned>(
+        &mut self,
+        method: &str,
+        params: &P,
+    ) -> R {
         self.client
             .as_mut()
             .expect("a daemon runs")
@@ -255,7 +271,7 @@ impl Rig {
             .unwrap_or_else(|error| panic!("{method}: {error:?}"))
     }
 
-    fn started(&mut self, budget_usd: Option<f64>) -> String {
+    pub(crate) fn started(&mut self, budget_usd: Option<f64>) -> String {
         let params = RunStartFileParams {
             repo: self.repo.to_str().unwrap().to_string(),
             task_file: self.task.to_str().unwrap().to_string(),
@@ -268,11 +284,11 @@ impl Rig {
         }
     }
 
-    fn key(run: &str) -> PhaseKey {
+    pub(crate) fn key(run: &str) -> PhaseKey {
         PhaseKey::new(run, PHASE_NAME).unwrap()
     }
 
-    fn wait_final(&self, run: &str) -> PhaseState {
+    pub(crate) fn wait_final(&self, run: &str) -> PhaseState {
         let key = Rig::key(run);
         wait_until("the phase is final", Duration::from_secs(30), || {
             self.phases.state(&key).is_some_and(|state| {
@@ -288,21 +304,21 @@ impl Rig {
         self.phases.state(&key).unwrap()
     }
 
-    fn wait_run(&self, run: &str, want: impl Fn(&RunState) -> bool) -> RunState {
+    pub(crate) fn wait_run(&self, run: &str, want: impl Fn(&RunState) -> bool) -> RunState {
         wait_until("the run reaches its state", Duration::from_secs(30), || {
             self.phases.run_state(run).is_some_and(|state| want(&state))
         });
         self.phases.run_state(run).unwrap()
     }
 
-    fn wait_running(&self, run: &str) {
+    pub(crate) fn wait_running(&self, run: &str) {
         let key = Rig::key(run);
         wait_until("the phase runs", Duration::from_secs(30), || {
             self.phases.state(&key) == Some(PhaseState::Running {})
         });
     }
 
-    fn queue(&mut self, run: &str) -> Vec<QueueItem> {
+    pub(crate) fn queue(&mut self, run: &str) -> Vec<QueueItem> {
         let result: QueueListResult = self.call(
             "queue.list",
             &QueueListParams {
@@ -314,7 +330,7 @@ impl Rig {
         result.items
     }
 
-    fn wait_item(&mut self, run: &str, kind: QueueKind) -> QueueItem {
+    pub(crate) fn wait_item(&mut self, run: &str, kind: QueueKind) -> QueueItem {
         let until = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(item) = self.queue(run).into_iter().find(|item| item.kind == kind) {
@@ -325,7 +341,7 @@ impl Rig {
         }
     }
 
-    fn answer(&mut self, item: &QueueItem, answer: QueueAnswer) -> QueueAnswerResult {
+    pub(crate) fn answer(&mut self, item: &QueueItem, answer: QueueAnswer) -> QueueAnswerResult {
         self.call(
             "queue.answer",
             &QueueAnswerParams {
@@ -335,7 +351,7 @@ impl Rig {
         )
     }
 
-    fn stop(&mut self, run: &str) -> RunStopResult {
+    pub(crate) fn stop(&mut self, run: &str) -> RunStopResult {
         self.call(
             "run.stop",
             &RunStopParams {
@@ -345,7 +361,7 @@ impl Rig {
         )
     }
 
-    fn events(&self) -> Vec<EventBody> {
+    pub(crate) fn events(&self) -> Vec<EventBody> {
         self.daemon
             .as_ref()
             .unwrap()
@@ -357,7 +373,7 @@ impl Rig {
     }
 
     /// The runs the event log has seen, in the order they began.
-    fn run_ids(&self) -> Vec<String> {
+    pub(crate) fn run_ids(&self) -> Vec<String> {
         let mut runs = Vec::new();
         for body in self.events() {
             if let EventBody::RunTransition { run, .. } = body
@@ -370,7 +386,7 @@ impl Rig {
     }
 
     /// The command line of each launch of `claude`, in order.
-    fn launches(&self) -> Vec<Vec<String>> {
+    pub(crate) fn launches(&self) -> Vec<Vec<String>> {
         fs::read_to_string(&self.argv_log)
             .unwrap_or_default()
             .lines()
@@ -378,12 +394,12 @@ impl Rig {
             .collect()
     }
 
-    fn workspace_dir(&self, run: &str) -> PathBuf {
+    pub(crate) fn workspace_dir(&self, run: &str) -> PathBuf {
         self.root.join("data/workspaces").join(run)
     }
 }
 
-fn start_daemon(
+pub(crate) fn start_daemon(
     root: &TempRoot,
     shell: &Path,
     clocks: &Arc<TestClocks>,
@@ -425,6 +441,7 @@ fn start_daemon(
     options.sleep = Arc::new(move |_| sleeper.sleep());
     options.limit_poll = Duration::from_secs(1);
     options.limit_min_pause = settings.min_pause;
+    options.sampler_tick = settings.sampler_tick;
     let daemon = Daemon::start(options).expect("the daemon starts");
     let phases = daemon.phases();
     let client = OwnerClient::connect(daemon.paths(), "pause-test").expect("connects");
@@ -456,7 +473,11 @@ impl Drop for Rig {
 
 /// A copy of the recording `name` in `root`, with `edit` applied to each of its lines (a line `edit` returns `None`
 /// for is dropped).
-fn edited(root: &TempRoot, name: &str, edit: impl Fn(&str) -> Option<String>) -> PathBuf {
+pub(crate) fn edited(
+    root: &TempRoot,
+    name: &str,
+    edit: impl Fn(&str) -> Option<String>,
+) -> PathBuf {
     let text = fs::read_to_string(recording(name)).unwrap();
     let lines: Vec<String> = text.lines().filter_map(edit).collect();
     let path = root.join(&format!("{name}-edited.jsonl"));
@@ -465,7 +486,7 @@ fn edited(root: &TempRoot, name: &str, edit: impl Fn(&str) -> Option<String>) ->
 }
 
 /// A recording that is the lines `lines`, one step each.
-fn written(root: &TempRoot, name: &str, lines: &[Value]) -> PathBuf {
+pub(crate) fn written(root: &TempRoot, name: &str, lines: &[Value]) -> PathBuf {
     let path = root.join(name);
     let text: Vec<String> = lines.iter().map(Value::to_string).collect();
     fs::write(&path, text.join("\n")).unwrap();
@@ -473,7 +494,7 @@ fn written(root: &TempRoot, name: &str, lines: &[Value]) -> PathBuf {
 }
 
 /// The lines of `recordings/limit.jsonl` that set the scene: the turn, the init, the stream before the limit.
-fn said_line(recording_name: &str, ty: &str) -> Value {
+pub(crate) fn said_line(recording_name: &str, ty: &str) -> Value {
     let text = fs::read_to_string(recording(recording_name)).unwrap();
     text.lines()
         .filter(|line| line.starts_with("{\"say\""))
@@ -484,7 +505,7 @@ fn said_line(recording_name: &str, ty: &str) -> Value {
 
 // ---- permission requests ------------------------------------------------------------------------------------------
 
-fn permission_item(rig: &mut Rig, run: &str) -> QueueItem {
+pub(crate) fn permission_item(rig: &mut Rig, run: &str) -> QueueItem {
     let item = rig.wait_item(run, QueueKind::Permission);
     let request = item
         .permission

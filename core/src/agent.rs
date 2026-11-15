@@ -266,6 +266,14 @@ pub enum HookFailure {
     NoVerdict,
 }
 
+/// What started a compaction: the owner's `/compact`, or the agent when its context filled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionTrigger {
+    Manual,
+    Auto,
+}
+
 /// Who refused a tool call, or why it did not run (0.3, The stream protocol). The adapter reads it from the tool's own
 /// metadata and never from the result's text. `unknown` is any other shape of refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -293,7 +301,7 @@ pub enum FinalReportSource {
 
 /// The `type` of every event but one that [`AgentEvent`] knows, as written in JSON. A test pins this list to the
 /// schema. A `type` outside it reads as [`AgentEvent::Other`].
-const KNOWN_EVENT_TYPES: [&str; 14] = [
+const KNOWN_EVENT_TYPES: [&str; 15] = [
     "message",
     "tool_call",
     "permission_request",
@@ -307,6 +315,7 @@ const KNOWN_EVENT_TYPES: [&str; 14] = [
     "hook_failed_open",
     "tool_refused",
     "tool_result_size",
+    "compaction",
     "other",
 ];
 
@@ -400,6 +409,18 @@ pub enum AgentEvent {
     ToolResultSize {
         tool_call_id: String,
         bytes: u64,
+    },
+    /// The agent compacted its context (0.13, the compaction metrics). Each figure the tool's line lacks is absent,
+    /// never 0. The tokens after are not here: they are the context the next response reports. `mid_task` is true
+    /// when a tool call was still open when the compaction came.
+    Compaction {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger: Option<CompactionTrigger>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_before: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        mid_task: bool,
     },
     /// An event this version has no type for. `raw_type` is its own type name.
     Other {

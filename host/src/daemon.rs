@@ -89,16 +89,18 @@
 
 use crate::auth::{self, Admitted, Caller, Session, StdFs, SystemProcessTree, UnixPeer};
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
-use crate::clock::{Clock, Clocks, Reading, SystemClocks};
+use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
+use crate::metrics::Metrics;
 use crate::phases::{
     BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, PhasePauseHook, Phases,
     PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
 };
 use crate::queue::Queue;
+use crate::sampler::{Sampler, TICK};
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
@@ -466,6 +468,8 @@ pub struct DaemonOptions {
     pub limit_poll: Duration,
     /// The least a run stays paused for a limit before its reset time resumes it, on the continuous clock.
     pub limit_min_pause: Duration,
+    /// How often the sampler reads the clocks ([`crate::sampler::TICK`]). A test passes a short one.
+    pub sampler_tick: Duration,
 }
 
 /// How often a limit's timer looks at the wall clock ([`DaemonOptions::limit_poll`]).
@@ -502,6 +506,7 @@ impl DaemonOptions {
             sleep: Arc::new(std::thread::sleep),
             limit_poll: LIMIT_POLL,
             limit_min_pause: LIMIT_MIN_PAUSE,
+            sampler_tick: TICK,
         }
     }
 }
@@ -573,6 +578,7 @@ impl Shared {
 pub struct Daemon {
     shared: Arc<Shared>,
     accept: Option<JoinHandle<()>>,
+    sampler: Option<JoinHandle<()>>,
 }
 
 impl Daemon {
@@ -603,6 +609,7 @@ impl Daemon {
             sleep,
             limit_poll,
             limit_min_pause,
+            sampler_tick,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -665,6 +672,12 @@ impl Daemon {
             Arc::new(move |text: &str| log.line(text))
         }));
 
+        // The metrics every run is recorded in, whatever the observers are set to (ts-0067-kw).
+        let metrics = Arc::new(Metrics::new(store.clone(), clocks.clone(), {
+            let log = log.clone();
+            Arc::new(move |text: &str| log.line(text))
+        }));
+
         // File-task runs (ts-0065-kx). They wait for the first capture of the base environment, which is in `env`, and
         // they end their run and release their workspace in the phase-end hook, ahead of the hook the options carry.
         let env: Arc<Mutex<Option<BaseEnvironment>>> = Arc::new(Mutex::new(None));
@@ -691,6 +704,7 @@ impl Daemon {
             sleep,
             limit_poll,
             limit_min_pause,
+            metrics: metrics.clone(),
         }));
         let on_phase_pause: Option<PhasePauseHook> = {
             let runs = file_runs.clone();
@@ -729,6 +743,7 @@ impl Daemon {
                 let runs = file_runs.clone();
                 Some(Box::new(move |key, dir| runs.rebuild_feed(key, dir)))
             },
+            metrics: metrics.clone(),
         })
         .map_err(SocketError::Store)?;
         match adopt_shims(&paths.runs_dir) {
@@ -789,9 +804,18 @@ impl Daemon {
                 context: "could not start the accept thread".to_string(),
                 source,
             })?;
+        let sampling = shared.clone();
+        let sampler = spawn_named("collide-sampler", move || {
+            sampler_loop(&sampling, &metrics, sampler_tick);
+        })
+        .map_err(|source| SocketError::Io {
+            context: "could not start the sampler's thread".to_string(),
+            source,
+        })?;
         Ok(Daemon {
             shared,
             accept: Some(accept),
+            sampler: Some(sampler),
         })
     }
 
@@ -807,6 +831,11 @@ impl Daemon {
     /// The daemon's phases: start one, write to one, ask its state. Cloning it shares them.
     pub fn phases(&self) -> Phases {
         self.shared.phases.clone()
+    }
+
+    /// The daemon's store, for a reader of the events and of the metrics tables.
+    pub fn store(&self) -> Arc<Store> {
+        self.shared.store.clone()
     }
 
     /// The events of the store after `seq`, oldest first.
@@ -844,6 +873,11 @@ impl Daemon {
         if let Some(accept) = self.accept.take() {
             let _ = accept.join();
         }
+        // The sampler ends within a slice of the stop flag; nothing else ends it.
+        if let Some(sampler) = self.sampler.take() {
+            self.shared.stop.store(true, Ordering::SeqCst);
+            let _ = sampler.join();
+        }
     }
 }
 
@@ -879,6 +913,30 @@ impl Drop for Daemon {
                     .log
                     .line(&format!("the launchd job could not be booted out: {error}")),
             }
+        }
+    }
+}
+
+/// The longest the sampler sleeps before it looks at the stop flag again.
+const SAMPLER_SLICE: Duration = Duration::from_millis(50);
+
+/// One tick every `tick`: reads the clocks and records a sleep the sampler finds ([`Sampler::tick`]). It sleeps in
+/// slices so a stop is seen within one.
+fn sampler_loop(shared: &Shared, metrics: &Metrics, tick: Duration) {
+    let mut sampler = Sampler::new(ClockPair::read(shared.clocks.as_ref()));
+    let slice = SAMPLER_SLICE.min(tick);
+    loop {
+        let mut waited = Duration::ZERO;
+        while waited < tick {
+            if shared.stopping() {
+                return;
+            }
+            std::thread::sleep(slice);
+            waited += slice;
+        }
+        let ticked = sampler.tick(shared.clocks.as_ref());
+        if let Some(sleep) = ticked.sleep {
+            metrics.sleep_interval(sleep.length, &ticked.now);
         }
     }
 }

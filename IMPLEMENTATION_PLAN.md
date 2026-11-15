@@ -556,8 +556,9 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     `PreToolUse` or `PostToolUse` hook that timed out or exited with a code other than 0 or 2, and whose tool then
     ran: the failed-open detector's observation, 0.13), `ToolRefused { id, cause }` with `cause` one of `hook`,
     `host`, `rule`, `missing_tool` or `unknown`, `ToolResultSize { tool_call_id, bytes }` (the size of a tool result,
-    for each result, with no content), and `Other` (revision 18 errata, from `ts-0060-mm`, `ts-0063-rw` and
-    `ts-0064-hw`).
+    for each result, with no content), `Compaction { trigger, context_before, duration_ms, mid_task }` (from
+    `compact_boundary`, each value null when the line lacks it; the context after is the next response's, 0.13), and
+    `Other` (revision 18 errata, from `ts-0060-mm`, `ts-0063-rw`, `ts-0064-hw` and `ts-0067-kw`).
   - **A session starts as `Assign(uuid)`, `AgentAssigned` or `Resume(id)`.** Claude supports the first and last; ACP
     the last two. The id is recorded on `SessionBound`: at once for Claude, on the `session/new` response for ACP. If
     the daemon dies between the spawn and `SessionBound`, the id is lost, and recovery lists sessions by working
@@ -2851,6 +2852,9 @@ Every run is a trace. The core needed for run state is always recorded; the reso
   - **A wait on the user is a span of its own kind**, with the id of the Queue item it waited on (S6). A phase's time
     then splits into work and waiting, and a question such as "where did this run wait" is answerable from the
     spans.
+  - A span is measured on the continuous clock, with wall time kept for display. Active time is a span's length less
+    the union of the waits inside it, so overlapping waits count once. Spans are kept in the store and survive a
+    daemon restart.
   - Resource samples are tied to spans.
   - Everything is stored in SQLite next to the event log, per machine. Nothing leaves the machine in v0.
   - **Sleep is not work.** A laptop that sleeps mid-run would otherwise add hours of "active" time. The owner
@@ -2936,6 +2940,8 @@ Every run is a trace. The core needed for run state is always recorded; the reso
     compaction summaries and helper-model calls (read: a Ferry fixture whose `total_cost_usd` includes a haiku
     call that `result.usage` lacks). `modelUsage` is a running total over the process, so it is not used per turn
     (measured: S9's recordings);
+  - a total sums turn, compaction and other-call usage, never a response's own usage or a running total. Partial
+    figures are "at least" and kept apart from exact ones;
   - a phase killed before its `result` keeps the input and cache tokens of the responses seen so far; its output
     tokens and cost are "not reported", never 0;
   - per phase:

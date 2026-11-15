@@ -8,7 +8,8 @@ use super::fake::{assigned, play};
 use super::session::{answer_nothing, events, exit_with, line, named, result_line, session};
 use collide_core::adapter::AgentSession;
 use collide_core::agent::{
-    AgentEvent, Money, SessionStart, TurnEndReason, Usage, UsageQuality, UsageScope,
+    AgentEvent, CompactionTrigger, Money, SessionStart, TurnEndReason, Usage, UsageQuality,
+    UsageScope,
 };
 use collide_host::adapters::claude::session::ClaudeSession;
 use serde_json::{Value, json};
@@ -634,6 +635,81 @@ fn an_automatic_compaction_inside_a_turn_is_the_difference_between_the_two_usage
     );
     assert_cost(&compaction, None);
     assert_cost(&turn, Some(0.0230));
+}
+
+fn compactions(events: &[AgentEvent]) -> Vec<AgentEvent> {
+    events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::Compaction { .. }))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn a_compact_boundary_is_a_compaction_with_the_trigger_the_size_before_and_the_duration() {
+    let mut session = session();
+    let boundary = line(json!({"type": "system", "subtype": "compact_boundary",
+        "compact_metadata": {"trigger": "manual", "pre_tokens": 53376, "post_tokens": 10422, "duration_ms": 10314}}));
+    let found = compactions(&events(&session.feed(&boundary, 2)));
+    assert_eq!(
+        found,
+        [AgentEvent::Compaction {
+            trigger: Some(CompactionTrigger::Manual),
+            context_before: Some(53376),
+            duration_ms: Some(10314),
+            mid_task: false,
+        }],
+        "the tokens after are the next response's context, not post_tokens"
+    );
+}
+
+#[test]
+fn a_compaction_while_a_tool_call_is_open_is_mid_task() {
+    let mut session = session();
+    session.feed(
+        &response("msg_01", tool_use("toolu_1"), stream_usage(2, 0, 100, 1)),
+        1,
+    );
+    let found = compactions(&events(&session.feed(&compact_boundary(), 2)));
+    assert!(
+        matches!(found[..], [AgentEvent::Compaction { mid_task: true, .. }]),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn a_boundary_whose_line_lacks_the_metadata_has_every_figure_absent_and_not_zero() {
+    let mut session = session();
+    let boundary = line(json!({"type": "system", "subtype": "compact_boundary"}));
+    let found = compactions(&events(&session.feed(&boundary, 2)));
+    assert_eq!(
+        found,
+        [AgentEvent::Compaction {
+            trigger: None,
+            context_before: None,
+            duration_ms: None,
+            mid_task: false,
+        }]
+    );
+}
+
+#[test]
+fn a_trigger_this_build_does_not_know_is_absent() {
+    let mut session = session();
+    let boundary = line(json!({"type": "system", "subtype": "compact_boundary",
+        "compact_metadata": {"trigger": "scheduled", "pre_tokens": 5}}));
+    let found = compactions(&events(&session.feed(&boundary, 2)));
+    assert!(
+        matches!(
+            found[..],
+            [AgentEvent::Compaction {
+                trigger: None,
+                context_before: Some(5),
+                ..
+            }]
+        ),
+        "{found:?}"
+    );
 }
 
 #[test]

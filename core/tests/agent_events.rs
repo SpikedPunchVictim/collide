@@ -2,9 +2,10 @@
 //! the all-`unknown` table, the unknown-key cases, `Other`, and the generated schemas.
 
 use collide_core::agent::{
-    AgentEvent, CAPABILITY_NAMES, Capabilities, FinalReportSource, HookDecision, HookFailure,
-    HookOutcome, Money, PermissionOption, PermissionOptionKind, PermissionReply, PermissionRequest,
-    RefusalCause, SessionStart, ToolKind, TurnEndReason, Usage, UsageQuality, UsageScope,
+    AgentEvent, CAPABILITY_NAMES, Capabilities, CompactionTrigger, FinalReportSource, HookDecision,
+    HookFailure, HookOutcome, Money, PermissionOption, PermissionOptionKind, PermissionReply,
+    PermissionRequest, RefusalCause, SessionStart, ToolKind, TurnEndReason, Usage, UsageQuality,
+    UsageScope,
 };
 use collide_core::schema;
 use serde::Serialize;
@@ -354,6 +355,28 @@ fn the_size_of_a_tool_result_round_trips_and_has_no_place_for_its_content() {
 }
 
 #[test]
+fn a_compaction_round_trips_and_a_figure_the_line_lacks_is_absent() {
+    round_trip(
+        AgentEvent::Compaction {
+            trigger: Some(CompactionTrigger::Auto),
+            context_before: Some(67000),
+            duration_ms: Some(10314),
+            mid_task: true,
+        },
+        json!({ "type": "compaction", "trigger": "auto", "context_before": 67000, "duration_ms": 10314, "mid_task": true }),
+    );
+    round_trip(
+        AgentEvent::Compaction {
+            trigger: Some(CompactionTrigger::Manual),
+            context_before: None,
+            duration_ms: None,
+            mid_task: false,
+        },
+        json!({ "type": "compaction", "trigger": "manual", "mid_task": false }),
+    );
+}
+
+#[test]
 fn a_turn_blocked_by_a_hook_round_trips_with_its_reason() {
     round_trip(
         TurnEndReason::Blocked {
@@ -532,6 +555,7 @@ fn an_unknown_key_fails_in_every_known_event() {
         json!({ "type": "tool_refused", "id": "c", "cause": "hook" }),
         json!({ "type": "tool_result_size", "tool_call_id": "c", "bytes": 3 }),
         json!({ "type": "hook_failed_open", "name": "n", "event": "e", "tool_call_id": "c", "cause": "no_verdict" }),
+        json!({ "type": "compaction", "trigger": "auto", "mid_task": false }),
         json!({ "type": "other", "raw_type": "x" }),
     ];
     for mut event in events {
@@ -670,7 +694,7 @@ fn every_known_event_type_in_the_schema_reads_as_itself_not_as_other() {
                 .to_string()
         })
         .collect();
-    assert_eq!(tags.len(), 14);
+    assert_eq!(tags.len(), 15);
     for tag in &tags {
         let bare = json!({ "type": tag });
         if let Ok(AgentEvent::Other { raw_type, .. }) = serde_json::from_value::<AgentEvent>(bare) {

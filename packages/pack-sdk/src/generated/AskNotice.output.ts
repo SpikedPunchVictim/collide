@@ -91,6 +91,13 @@ export type AgentEvent =
       type: 'tool_result_size'
     }
   | {
+      context_before?: number | null
+      duration_ms?: number | null
+      mid_task: boolean
+      trigger?: CompactionTrigger | null
+      type: 'compaction'
+    }
+  | {
       raw?: unknown
       raw_type: string
       type: 'other'
@@ -172,6 +179,10 @@ export type HookFailure = 'exit_error' | 'no_verdict'
  * metadata and never from the result's text. `unknown` is any other shape of refusal.
  */
 export type RefusalCause = 'unknown' | 'hook' | 'host' | 'rule' | 'missing_tool'
+/**
+ * What started a compaction: the owner's `/compact`, or the agent when its context filled.
+ */
+export type CompactionTrigger = 'manual' | 'auto'
 /**
  * What an ask cost. A cost that the agent did not report is [`AskCost::NotReported`], never 0: an ACP agent reports
  * no cost (0.3, measured S6), and 0 would read as free.
