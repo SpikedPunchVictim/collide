@@ -1,7 +1,7 @@
 ---
 id: ts-0072-sk
 kind: task
-status: active
+status: done
 title: "Fix the cargo doc link warnings"
 owners: []
 links: []
