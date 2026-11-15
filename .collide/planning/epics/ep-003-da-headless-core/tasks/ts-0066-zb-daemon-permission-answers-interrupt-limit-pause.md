@@ -1,7 +1,7 @@
 ---
 id: ts-0066-zb
 kind: task
-status: ready
+status: active
 title: "Daemon: permission answers, interrupt, limit pause and resume"
 owners: []
 links:
