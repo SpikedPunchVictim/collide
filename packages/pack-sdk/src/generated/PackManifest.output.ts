@@ -6,12 +6,18 @@
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
 
 export interface PackManifest {
+  apiVersion?: string | null
   checklists: {
     [k: string]: ChecklistTemplate
   }
+  name?: string | null
   points: {
     [k: string]: DerivedPoint
   }
+  providers?: {
+    [k: string]: ProviderEntry
+  }
+  requires?: Requires | null
 }
 /**
  * A checklist template. `gates` is the category whose status write the pack's gate blocks. The template's name
@@ -38,4 +44,24 @@ export interface DerivedPoint {
   match?: string[] | null
   on: string
   when?: string | null
+}
+/**
+ * One entry of `providers:`: the script that starts the provider, relative to the pack directory.
+ */
+export interface ProviderEntry {
+  script: string
+}
+/**
+ * `requires:` in a manifest. Only `tools` is read so far; `sdk` and `agents` come with `ts-0012-ua`.
+ */
+export interface Requires {
+  tools: ToolRequirement[]
+}
+/**
+ * A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `">=22.18"`; it is
+ * optional, as in `- { name: pnpm }`. Checking it is Stage 4.
+ */
+export interface ToolRequirement {
+  name: string
+  version?: string | null
 }

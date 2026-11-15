@@ -1,6 +1,7 @@
-//! The `pack.yaml` keys and values that planning adds (0.7, Keys added for planning). This is the start of the
-//! manifest type: `ts-0012-ua` adds the other keys beside `points` and `checklists`, and `views:` comes with the
-//! view type in `ts-0026-es`.
+//! The `pack.yaml` keys and values that planning adds (0.7, Keys added for planning), and the few identity keys
+//! the built-in packs need to load (`apiVersion`, `name`, `requires.tools`, `providers`). This is the start of the
+//! manifest type: `ts-0012-ua` adds the other keys beside these, makes the identity keys required and checks
+//! them, and `views:` comes with the view type in `ts-0026-es`.
 
 use crate::item::Category;
 use crate::points::DerivedPoint;
@@ -37,9 +38,46 @@ pub struct ChecklistTemplate {
     pub items: Vec<ChecklistTemplateItem>,
 }
 
+/// A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `">=22.18"`; it is
+/// optional, as in `- { name: pnpm }`. Checking it is Stage 4.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolRequirement {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+/// `requires:` in a manifest. Only `tools` is read so far; `sdk` and `agents` come with `ts-0012-ua`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Requires {
+    #[serde(default)]
+    pub tools: Vec<ToolRequirement>,
+}
+
+/// One entry of `providers:`: the script that starts the provider, relative to the pack directory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderEntry {
+    pub script: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackManifest {
+    #[serde(
+        rename = "apiVersion",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires: Option<Requires>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub providers: BTreeMap<String, ProviderEntry>,
     #[serde(default)]
     pub points: BTreeMap<String, DerivedPoint>,
     #[serde(default)]

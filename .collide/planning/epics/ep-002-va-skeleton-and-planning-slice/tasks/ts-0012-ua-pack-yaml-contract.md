@@ -32,3 +32,4 @@ Write first: manifest validation over all five manifests plus invalid fixtures, 
 - Area: `core` (manifest type, load-time checks), the five `pack.yaml` files.
 - `board.yaml`, `config.yaml`, views and the lock files are `ts-0025-st` and `ts-0026-es`.
 - Done when the criteria hold and `collide schema` lists the manifest keys.
+- `ts-0029-ea` started `PackManifest` with `apiVersion`, `name`, `requires.tools` and `providers.<name>.script`, all optional so the built-in packs load. Make `apiVersion` and `name` required here, with the rest of the manifest check.

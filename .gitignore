@@ -25,3 +25,6 @@ private/
 
 # Tauri build output
 app/src-tauri/gen/
+
+# Built-in packs staged for the bundle by `pnpm build:packs` (read-only; also its staging directory)
+app/src-tauri/resources/

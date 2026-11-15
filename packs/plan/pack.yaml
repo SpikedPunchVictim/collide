@@ -1,2 +1,7 @@
 apiVersion: collide/v0
 name: collide/plan
+requires:
+  tools:
+    - { name: node, version: ">=22.18" }
+providers:
+  plan: { script: src/main.ts }

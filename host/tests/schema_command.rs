@@ -119,7 +119,20 @@ fn schema_lists_the_change_keys_and_latest_run() {
 #[test]
 fn schema_lists_the_pack_keys_points_and_checklists() {
     let types = listed_types(&schema_stdout());
-    assert_eq!(keys(&types, "PackManifest"), ["checklists", "points"]);
+    assert_eq!(
+        keys(&types, "PackManifest"),
+        [
+            "apiVersion",
+            "checklists",
+            "name",
+            "points",
+            "providers",
+            "requires"
+        ]
+    );
+    assert_eq!(keys(&types, "Requires"), ["tools"]);
+    assert_eq!(keys(&types, "ToolRequirement"), ["name", "version"]);
+    assert_eq!(keys(&types, "ProviderEntry"), ["script"]);
     assert_eq!(keys(&types, "DerivedPoint"), ["match", "on", "when"]);
 }
 

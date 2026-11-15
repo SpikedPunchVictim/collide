@@ -11,6 +11,7 @@
   },
   "bundle": {
     "active": false,
+    "resources": { "resources/builtin-packs/": "builtin-packs/" },
     "icon": ["icons/icon.png"]
   }
 }

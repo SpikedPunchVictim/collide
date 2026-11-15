@@ -328,6 +328,33 @@ fn a_pack_manifest_holds_points_and_checklists_and_both_are_optional() {
     assert!(serde_json::from_value::<PackManifest>(json!({ "views": {} })).is_err());
 }
 
+#[test]
+fn a_pack_manifest_holds_the_identity_tool_requirements_and_provider_entries_of_a_built_in_pack() {
+    let doc = json!({
+        "apiVersion": "collide/v0",
+        "name": "collide/plan",
+        "requires": { "tools": [{ "name": "node", "version": ">=22.18" }, { "name": "pnpm" }] },
+        "providers": { "plan": { "script": "src/main.ts" } }
+    });
+    let manifest: PackManifest = serde_json::from_value(doc.clone()).unwrap();
+    assert_eq!(manifest.name.as_deref(), Some("collide/plan"));
+    let written = serde_json::to_value(&manifest).unwrap();
+    for key in ["apiVersion", "name", "requires", "providers"] {
+        assert_eq!(written[key], doc[key], "{key}");
+    }
+    for bad in [
+        json!({ "requires": { "sdk": ">=0.1 <0.2" } }),
+        json!({ "requires": { "tools": [{ "name": "node", "extra": 1 }] } }),
+        json!({ "providers": { "plan": { "script": "x.ts", "timeout": "5s" } } }),
+        json!({ "providers": { "plan": {} } }),
+    ] {
+        assert!(
+            serde_json::from_value::<PackManifest>(bad.clone()).is_err(),
+            "{bad}"
+        );
+    }
+}
+
 // The `change` payload.
 
 fn base_change() -> Value {
@@ -557,7 +584,23 @@ fn the_registry_holds_the_planning_types() {
 fn the_pack_keys_points_and_checklists_are_in_the_schema() {
     assert_eq!(
         keys_of("PackManifest", None),
-        set(&["checklists", "points"])
+        set(&[
+            "apiVersion",
+            "checklists",
+            "name",
+            "points",
+            "providers",
+            "requires"
+        ])
+    );
+    assert_eq!(keys_of("PackManifest", Some("Requires")), set(&["tools"]));
+    assert_eq!(
+        keys_of("PackManifest", Some("ToolRequirement")),
+        set(&["name", "version"])
+    );
+    assert_eq!(
+        keys_of("PackManifest", Some("ProviderEntry")),
+        set(&["script"])
     );
     assert_eq!(
         keys_of("PackManifest", Some("DerivedPoint")),

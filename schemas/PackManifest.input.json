@@ -92,11 +92,63 @@
         "on"
       ],
       "type": "object"
+    },
+    "ProviderEntry": {
+      "additionalProperties": false,
+      "description": "One entry of `providers:`: the script that starts the provider, relative to the pack directory.",
+      "properties": {
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "script"
+      ],
+      "type": "object"
+    },
+    "Requires": {
+      "additionalProperties": false,
+      "description": "`requires:` in a manifest. Only `tools` is read so far; `sdk` and `agents` come with `ts-0012-ua`.",
+      "properties": {
+        "tools": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ToolRequirement"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ToolRequirement": {
+      "additionalProperties": false,
+      "description": "A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `\">=22.18\"`; it is\noptional, as in `- { name: pnpm }`. Checking it is Stage 4.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "apiVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "checklists": {
       "additionalProperties": {
         "$ref": "#/$defs/ChecklistTemplate"
@@ -104,12 +156,34 @@
       "default": {},
       "type": "object"
     },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "points": {
       "additionalProperties": {
         "$ref": "#/$defs/DerivedPoint"
       },
       "default": {},
       "type": "object"
+    },
+    "providers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProviderEntry"
+      },
+      "type": "object"
+    },
+    "requires": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Requires"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "title": "PackManifest",
