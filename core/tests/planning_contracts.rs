@@ -4,7 +4,7 @@
 use collide_core::change::{Change, TaskPointPayload};
 use collide_core::item::{self, Category, KindDecl, KindError, Link, PlanningFields};
 use collide_core::pack::{PackManifest, RunBudget};
-use collide_core::points::{self, DerivedPoint, PointError};
+use collide_core::points::{self, DerivedPoint, Point, PointError};
 use collide_core::schema;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -173,7 +173,7 @@ fn a_run_budget_is_a_total_in_dollars() {
 
 // Derived points.
 
-const KNOWN: &[&str] = &["task.before_status", "task.after_status"];
+const KNOWN: &[Point] = &[Point::TaskBeforeStatus, Point::TaskAfterStatus];
 
 fn derived(entries: &[(&str, &str)]) -> BTreeMap<String, DerivedPoint> {
     entries
@@ -253,17 +253,18 @@ fn a_derived_point_name_with_no_side_is_refused() {
 
 #[test]
 fn the_known_core_points_are_an_input_to_the_check() {
-    let points = derived(&[("item.before_rename", "item.before_op")]);
+    let points = derived(&[("item.before_rename", "task.before_op")]);
     assert!(points::check_derived_points(&points, KNOWN).is_err());
     assert_eq!(
-        points::check_derived_points(&points, &["item.before_op"]),
+        points::check_derived_points(&points, &[Point::TaskBeforeOp]),
         Ok(())
     );
 }
 
 #[test]
-fn the_core_points_this_item_defines_pass_their_own_check() {
-    for core in points::CORE_POINTS {
+fn every_point_of_the_catalogue_passes_the_check_on_its_own_side() {
+    for core in Point::ALL {
+        let core = core.name();
         let side = if core.contains(".before_") {
             "before"
         } else {
@@ -272,7 +273,7 @@ fn the_core_points_this_item_defines_pass_their_own_check() {
         let name = format!("pack.{side}_x");
         let points = derived(&[(name.as_str(), core)]);
         assert_eq!(
-            points::check_derived_points(&points, points::CORE_POINTS),
+            points::check_derived_points(&points, &Point::ALL),
             Ok(()),
             "{core}"
         );
@@ -288,7 +289,10 @@ fn the_five_new_task_points_are_core_points() {
         "task.before_move",
         "task.after_move",
     ] {
-        assert!(points::CORE_POINTS.contains(&point), "{point}");
+        assert!(
+            Point::ALL.iter().any(|core| core.name() == point),
+            "{point}"
+        );
     }
 }
 

@@ -34,11 +34,17 @@ test('an apply result is ok, conflict or refused, each with its own payload', ()
 
 test('task.invalid and the observer lines carry their keys', () => {
   const invalid: TaskInvalidOutput = { path: 'a.md', checkout: null, reason: 'no title' }
-  const event: ObserverEventOutput = { seq: 1, event: 'run.started', payload: { run: 'r-1' } }
+  const event: ObserverEventOutput = {
+    seq: 1,
+    wall_ms: 1_700_000_000_000,
+    actor: { kind: 'workflow', run: 'r-1' },
+    experiment: null,
+    body: { event: 'run.transition', run: 'r-1', from: null, to: 'running' },
+  }
   const ack: ObserverAckOutput = { seq: 1 }
   // @ts-expect-error an acknowledgement names a sequence number.
   const bare: ObserverAckOutput = {}
-  expect([invalid.reason, event.seq, ack.seq, bare]).toHaveLength(4)
+  expect([invalid.reason, event.body.event, ack.seq, bare]).toHaveLength(4)
 })
 
 test('a preview answers ok, conflict or refused, like apply', () => {

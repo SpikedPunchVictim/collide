@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A stage, by the id its heading carries in the plan: `## Stage 2:`, `### Stage 3a:`.",
+  "enum": [
+    "1",
+    "2",
+    "3a",
+    "3b",
+    "3c",
+    "3d",
+    "4a",
+    "4b",
+    "4c",
+    "5",
+    "6a",
+    "6b",
+    "6c",
+    "7",
+    "8",
+    "9a",
+    "9b",
+    "9c",
+    "9d",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15"
+  ],
+  "title": "Stage",
+  "type": "string"
+}

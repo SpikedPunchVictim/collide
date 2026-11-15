@@ -605,33 +605,50 @@ fn a_message_with_a_newline_in_its_text_is_still_one_line() {
 
 // The observer protocol.
 
-#[test]
-fn an_observer_event_has_a_sequence_number_a_name_and_a_payload() {
-    let event: ObserverEvent = round_trip(json!({
-        "seq": 41,
-        "event": "run.started",
-        "payload": { "run": "r-77", "experiment": null }
-    }));
-    assert_eq!(event.seq, 41);
-    assert_eq!(event.event, "run.started");
+/// One observer line: the event envelope with a body. `body` carries the event's name in its `event` tag.
+fn event_line(seq: u64, body: Value) -> Value {
+    json!({
+        "seq": seq,
+        "wall_ms": 1_700_000_000_000u64,
+        "actor": { "kind": "workflow", "run": "r-77" },
+        "experiment": null,
+        "body": body
+    })
 }
 
 #[test]
-fn an_observer_event_payload_is_any_json_value() {
-    for payload in [json!(null), json!([1, 2]), json!("text"), json!({ "a": 1 })] {
-        round_trip::<ObserverEvent>(json!({ "seq": 1, "event": "x.y", "payload": payload }));
-    }
+fn an_observer_event_has_a_sequence_number_and_a_typed_body() {
+    let event: ObserverEvent = round_trip(event_line(
+        41,
+        json!({ "event": "run.transition", "run": "r-77", "from": null, "to": "running" }),
+    ));
+    assert_eq!(event.0.seq, 41);
+    assert_eq!(event.0.body.name(), "run.transition");
 }
 
 #[test]
 fn an_observer_event_with_an_unknown_key_or_a_missing_one_is_refused() {
-    let doc = json!({ "seq": 1, "event": "run.started", "payload": {} });
+    let doc = event_line(
+        1,
+        json!({ "event": "run.transition", "run": "r-77", "from": null, "to": "running" }),
+    );
     refused::<ObserverEvent>(with_extra(doc.clone()));
-    for key in ["seq", "event", "payload"] {
+    for key in ["seq", "wall_ms", "actor", "body"] {
         let mut missing = doc.clone();
         missing.as_object_mut().unwrap().remove(key);
         refused::<ObserverEvent>(missing);
     }
+    let mut extra_in_body = doc.clone();
+    extra_in_body["body"]["extra"] = json!(1);
+    refused::<ObserverEvent>(extra_in_body);
+}
+
+#[test]
+fn an_observer_event_with_an_unknown_event_name_is_refused() {
+    refused::<ObserverEvent>(event_line(
+        1,
+        json!({ "event": "run.started", "run": "r-77" }),
+    ));
 }
 
 #[test]
@@ -647,7 +664,12 @@ fn a_sequence_number_is_a_non_negative_integer() {
     refused::<ObserverAck>(json!({ "seq": -1 }));
     refused::<ObserverAck>(json!({ "seq": 1.5 }));
     refused::<ObserverAck>(json!({ "seq": "41" }));
-    refused::<ObserverEvent>(json!({ "seq": -1, "event": "a.b", "payload": {} }));
+    let mut line = event_line(
+        1,
+        json!({ "event": "budget.exceeded", "run": "r-77", "scope": "run" }),
+    );
+    line["seq"] = json!(-1);
+    refused::<ObserverEvent>(line);
 }
 
 // The schemas.
@@ -731,7 +753,11 @@ fn the_protocol_keys_are_in_the_schema() {
         ])
     );
     assert_eq!(keys_of("TaskInvalid"), set(&["checkout", "path", "reason"]));
-    assert_eq!(keys_of("ObserverEvent"), set(&["event", "payload", "seq"]));
+    assert_eq!(schema_of("ObserverEvent")["$ref"], "#/$defs/Event");
+    assert_eq!(
+        keys_of("Event"),
+        set(&["actor", "body", "experiment", "seq", "wall_ms"])
+    );
     assert_eq!(keys_of("ObserverAck"), set(&["seq"]));
     assert_eq!(
         keys_of("TaskChanged"),

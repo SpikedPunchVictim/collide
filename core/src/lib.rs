@@ -1,4 +1,5 @@
 pub mod change;
+pub mod events;
 pub mod hook;
 pub mod item;
 pub mod observer;
@@ -7,6 +8,7 @@ pub mod points;
 pub mod provider;
 pub mod report;
 pub mod schema;
+pub mod stage;
 pub mod yaml;
 
 pub const NAME: &str = "collide-core";

@@ -11,16 +11,19 @@
 //! - to add a type, add one `registry.add::<T>()` line to [`registry`].
 
 use crate::change::{Change, Rename, TaskPointPayload};
+use crate::events::Event;
 use crate::hook::{HookInput, HookResult};
 use crate::item::{KindDecl, LinkTypeDecl, PlanningFields};
 use crate::observer::{ObserverAck, ObserverEvent};
 use crate::pack::{PackManifest, RunBudget};
+use crate::points::Point;
 use crate::provider::{
     ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult, ListParams,
     ListResult, PreviewResult, SourceStale, Task, TaskChanged, TaskCollision, TaskInvalid,
     TaskRemoved, WatchParams, WatchResult,
 };
 use crate::report::ReportLine;
+use crate::stage::Stage;
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde_json::Value;
@@ -83,6 +86,7 @@ pub fn registry() -> Registry {
     registry.add::<ApplyParams>();
     registry.add::<ApplyResult>();
     registry.add::<Change>();
+    registry.add::<Event>();
     registry.add::<GetParams>();
     registry.add::<GetResult>();
     registry.add::<HookInput>();
@@ -96,6 +100,7 @@ pub fn registry() -> Registry {
     registry.add::<ObserverAck>();
     registry.add::<ObserverEvent>();
     registry.add::<PackManifest>();
+    registry.add::<Point>();
     registry.add::<PlanningFields>();
     registry.add::<PreviewResult>();
     registry.add::<ReportLine>();
@@ -103,6 +108,7 @@ pub fn registry() -> Registry {
     registry.add::<Rename>();
     registry.add::<RunBudget>();
     registry.add::<SourceStale>();
+    registry.add::<Stage>();
     registry.add::<Task>();
     registry.add::<TaskChanged>();
     registry.add::<TaskCollision>();

@@ -1,21 +1,151 @@
 //! Named points (0.4) and the derived points a pack declares over them.
 
+use crate::stage::Stage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// The core points this item defines, in the catalogue's order: the five new task points and
-/// `task.before_status`, which 0.4 already named. This is the start of the point catalogue, which `ts-0018-dd`
-/// completes; the check below takes the set as an argument so the catalogue can supply it.
-pub const CORE_POINTS: &[&str] = &[
-    "task.before_status",
-    "task.after_status",
-    "task.before_op",
-    "task.after_op",
-    "task.before_move",
-    "task.after_move",
-];
+/// The object a point is attached to (0.4, Named points).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Object {
+    Run,
+    Workspace,
+    Phase,
+    Task,
+    Experiment,
+}
+
+/// The point catalogue (0.4, Named points), in the table's order. Serialized as its dotted name. Adding a point is
+/// a schema change: `Point.input.json` lists the names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum Point {
+    #[serde(rename = "run.before_start")]
+    RunBeforeStart,
+    #[serde(rename = "run.after_end")]
+    RunAfterEnd,
+    #[serde(rename = "run.before_integrate")]
+    RunBeforeIntegrate,
+    #[serde(rename = "run.after_integrate")]
+    RunAfterIntegrate,
+    #[serde(rename = "workspace.after_create")]
+    WorkspaceAfterCreate,
+    #[serde(rename = "workspace.before_remove")]
+    WorkspaceBeforeRemove,
+    #[serde(rename = "phase.before_start")]
+    PhaseBeforeStart,
+    #[serde(rename = "phase.after_end")]
+    PhaseAfterEnd,
+    #[serde(rename = "task.before_status")]
+    TaskBeforeStatus,
+    #[serde(rename = "task.after_status")]
+    TaskAfterStatus,
+    #[serde(rename = "task.before_op")]
+    TaskBeforeOp,
+    #[serde(rename = "task.after_op")]
+    TaskAfterOp,
+    #[serde(rename = "task.before_move")]
+    TaskBeforeMove,
+    #[serde(rename = "task.after_move")]
+    TaskAfterMove,
+    #[serde(rename = "experiment.before_arm")]
+    ExperimentBeforeArm,
+    #[serde(rename = "experiment.after_arm")]
+    ExperimentAfterArm,
+}
+
+impl Point {
+    /// Every point, in the catalogue's order.
+    pub const ALL: [Point; 16] = [
+        Point::RunBeforeStart,
+        Point::RunAfterEnd,
+        Point::RunBeforeIntegrate,
+        Point::RunAfterIntegrate,
+        Point::WorkspaceAfterCreate,
+        Point::WorkspaceBeforeRemove,
+        Point::PhaseBeforeStart,
+        Point::PhaseAfterEnd,
+        Point::TaskBeforeStatus,
+        Point::TaskAfterStatus,
+        Point::TaskBeforeOp,
+        Point::TaskAfterOp,
+        Point::TaskBeforeMove,
+        Point::TaskAfterMove,
+        Point::ExperimentBeforeArm,
+        Point::ExperimentAfterArm,
+    ];
+
+    /// The dotted name, as a pack writes it: `run.before_start`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Point::RunBeforeStart => "run.before_start",
+            Point::RunAfterEnd => "run.after_end",
+            Point::RunBeforeIntegrate => "run.before_integrate",
+            Point::RunAfterIntegrate => "run.after_integrate",
+            Point::WorkspaceAfterCreate => "workspace.after_create",
+            Point::WorkspaceBeforeRemove => "workspace.before_remove",
+            Point::PhaseBeforeStart => "phase.before_start",
+            Point::PhaseAfterEnd => "phase.after_end",
+            Point::TaskBeforeStatus => "task.before_status",
+            Point::TaskAfterStatus => "task.after_status",
+            Point::TaskBeforeOp => "task.before_op",
+            Point::TaskAfterOp => "task.after_op",
+            Point::TaskBeforeMove => "task.before_move",
+            Point::TaskAfterMove => "task.after_move",
+            Point::ExperimentBeforeArm => "experiment.before_arm",
+            Point::ExperimentAfterArm => "experiment.after_arm",
+        }
+    }
+
+    /// The stage that makes this point fire (0.4: "A point fires once the stage that owns it lands").
+    pub fn stage(self) -> Stage {
+        match self {
+            Point::RunBeforeStart
+            | Point::RunAfterEnd
+            | Point::WorkspaceAfterCreate
+            | Point::WorkspaceBeforeRemove => Stage::S7,
+            Point::RunBeforeIntegrate
+            | Point::RunAfterIntegrate
+            | Point::PhaseBeforeStart
+            | Point::PhaseAfterEnd
+            | Point::TaskBeforeStatus
+            | Point::TaskAfterStatus
+            | Point::TaskBeforeOp
+            | Point::TaskAfterOp => Stage::S8,
+            Point::TaskBeforeMove | Point::TaskAfterMove => Stage::S12,
+            Point::ExperimentBeforeArm | Point::ExperimentAfterArm => Stage::S15,
+        }
+    }
+
+    /// The object the point is on: the part of the name before its dot, as an enum.
+    pub fn object(self) -> Object {
+        match self {
+            Point::RunBeforeStart
+            | Point::RunAfterEnd
+            | Point::RunBeforeIntegrate
+            | Point::RunAfterIntegrate => Object::Run,
+            Point::WorkspaceAfterCreate | Point::WorkspaceBeforeRemove => Object::Workspace,
+            Point::PhaseBeforeStart | Point::PhaseAfterEnd => Object::Phase,
+            Point::TaskBeforeStatus
+            | Point::TaskAfterStatus
+            | Point::TaskBeforeOp
+            | Point::TaskAfterOp
+            | Point::TaskBeforeMove
+            | Point::TaskAfterMove => Object::Task,
+            Point::ExperimentBeforeArm | Point::ExperimentAfterArm => Object::Experiment,
+        }
+    }
+
+    /// The point with this dotted name. A name that is not in the catalogue is refused, and the error names it.
+    pub fn parse(name: &str) -> Result<Point, PointError> {
+        Point::ALL
+            .into_iter()
+            .find(|point| point.name() == name)
+            .ok_or_else(|| PointError::NotInCatalogue {
+                point: name.to_string(),
+            })
+    }
+}
 
 /// A derived point (0.4): a name in the pack's namespace over one core point, with what it matches and a `when:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -34,6 +164,7 @@ pub enum PointError {
     DerivedFromDerived { point: String, on: String },
     SideMismatch { point: String, on: String },
     NoSide { point: String },
+    NotInCatalogue { point: String },
 }
 
 impl fmt::Display for PointError {
@@ -63,6 +194,9 @@ impl fmt::Display for PointError {
                     "derived point `{point}` has no `before_` or `after_` side in its name"
                 )
             }
+            PointError::NotInCatalogue { point } => {
+                write!(f, "`{point}` is not a point in the catalogue")
+            }
         }
     }
 }
@@ -86,7 +220,7 @@ fn side(point: &str) -> Option<&'static str> {
 /// the order of the points' names.
 pub fn check_derived_points(
     points: &BTreeMap<String, DerivedPoint>,
-    known_core_points: &[&str],
+    known: &[Point],
 ) -> Result<(), Vec<PointError>> {
     let mut errors = Vec::new();
     for (name, point) in points {
@@ -96,7 +230,7 @@ pub fn check_derived_points(
                 point: point_name,
                 on,
             });
-        } else if !known_core_points.contains(&point.on.as_str()) {
+        } else if !known.iter().any(|core| core.name() == point.on) {
             errors.push(PointError::UnknownCorePoint {
                 point: point_name,
                 on,

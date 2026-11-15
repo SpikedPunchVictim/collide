@@ -1,6 +1,8 @@
-//! The text of `collide schema`: every core point, then every type of the generated schema with its keys.
+//! The text of `collide schema`: every point and every event with its stage, then every type of the generated schema
+//! with its keys.
 
-use collide_core::points::CORE_POINTS;
+use collide_core::events::EventKind;
+use collide_core::points::Point;
 use collide_core::schema;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -40,11 +42,20 @@ fn keys_by_type() -> BTreeMap<String, BTreeSet<String>> {
     types
 }
 
-/// Plain text, in a fixed order: the points in catalogue order, then the types and their keys, sorted.
+/// Plain text, in a fixed order: the points in catalogue order, each with its stage; the events likewise; then the
+/// types and their keys, sorted.
 pub fn listing() -> String {
     let mut text = String::from("points\n");
-    for point in CORE_POINTS {
-        text.push_str(&format!("  {point}\n"));
+    for point in Point::ALL {
+        text.push_str(&format!(
+            "  {}  stage {}\n",
+            point.name(),
+            point.stage().id()
+        ));
+    }
+    text.push_str("\nevents\n");
+    for kind in EventKind::ALL {
+        text.push_str(&format!("  {}  stage {}\n", kind.name(), kind.stage().id()));
     }
     text.push_str("\ntypes\n");
     for (name, keys) in keys_by_type() {

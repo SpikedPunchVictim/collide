@@ -20,16 +20,33 @@ fn schema_stdout() -> String {
     String::from_utf8(output.stdout).expect("stdout should be UTF-8")
 }
 
-/// The `points` section: one point per line, indented two spaces.
-fn listed_points(text: &str) -> Vec<String> {
+/// The lines of a section that starts with `name` and ends at a blank line, without the header.
+fn section_lines(text: &str, name: &str) -> Vec<String> {
+    let header = format!("{name}\n");
     let section = text
         .split("\n\n")
-        .find(|s| s.starts_with("points\n"))
-        .expect("a points section");
+        .find(|s| s.starts_with(&header))
+        .unwrap_or_else(|| panic!("a {name} section"));
     section
         .lines()
         .skip(1)
         .map(|line| line.trim().to_string())
+        .collect()
+}
+
+/// The `points` section: each point's name, then its stage, as `  <name>  stage <id>`.
+fn listed_points(text: &str) -> Vec<String> {
+    section_lines(text, "points")
+        .iter()
+        .map(|line| line.split_whitespace().next().unwrap().to_string())
+        .collect()
+}
+
+/// The `events` section, in the same form as the points.
+fn listed_events(text: &str) -> Vec<String> {
+    section_lines(text, "events")
+        .iter()
+        .map(|line| line.split_whitespace().next().unwrap().to_string())
         .collect()
 }
 
@@ -80,12 +97,65 @@ fn schema_lists_the_points_in_catalogue_order() {
     assert_eq!(
         listed_points(&schema_stdout()),
         [
+            "run.before_start",
+            "run.after_end",
+            "run.before_integrate",
+            "run.after_integrate",
+            "workspace.after_create",
+            "workspace.before_remove",
+            "phase.before_start",
+            "phase.after_end",
             "task.before_status",
             "task.after_status",
             "task.before_op",
             "task.after_op",
             "task.before_move",
-            "task.after_move"
+            "task.after_move",
+            "experiment.before_arm",
+            "experiment.after_arm"
+        ]
+    );
+}
+
+#[test]
+fn schema_lists_each_point_and_event_with_its_stage() {
+    let text = schema_stdout();
+    for line in [
+        "  run.before_start  stage 7",
+        "  run.before_integrate  stage 8",
+        "  task.before_move  stage 12",
+        "  experiment.after_arm  stage 15",
+        "  permission.requested  stage 3b",
+        "  task.changed  stage 4b",
+        "  step.outcome  stage 8",
+    ] {
+        assert!(text.lines().any(|l| l == line), "{line} in\n{text}");
+    }
+}
+
+#[test]
+fn schema_lists_the_events_in_catalogue_order() {
+    assert_eq!(
+        listed_events(&schema_stdout()),
+        [
+            "run.transition",
+            "phase.transition",
+            "gate.verdict",
+            "permission.requested",
+            "permission.answered",
+            "ask_human.asked",
+            "ask_human.answered",
+            "budget.exceeded",
+            "task.changed",
+            "task.renamed",
+            "task.removed",
+            "task.invalid",
+            "task.written",
+            "workspace.transition",
+            "metric.reported",
+            "experiment.transition",
+            "step.intent",
+            "step.outcome"
         ]
     );
 }
@@ -186,7 +256,10 @@ fn schema_lists_the_provider_and_observer_protocol_types() {
     );
     assert_eq!(keys(&types, "TaskInvalid"), ["checkout", "path", "reason"]);
     assert_eq!(keys(&types, "TaskRemoved"), ["cause", "checkout", "key"]);
-    assert_eq!(keys(&types, "ObserverEvent"), ["event", "payload", "seq"]);
+    assert_eq!(
+        keys(&types, "Event"),
+        ["actor", "body", "experiment", "seq", "wall_ms"]
+    );
     assert_eq!(keys(&types, "ObserverAck"), ["seq"]);
 }
 
@@ -276,7 +349,7 @@ fn schema_lists_types_in_sorted_order() {
     let in_text: Vec<&str> = text
         .lines()
         .filter(|line| line.starts_with("  ") && !line.starts_with("    "))
-        .skip(listed_points(&text).len())
+        .skip(listed_points(&text).len() + listed_events(&text).len())
         .map(str::trim)
         .collect();
     assert_eq!(in_text, names);
