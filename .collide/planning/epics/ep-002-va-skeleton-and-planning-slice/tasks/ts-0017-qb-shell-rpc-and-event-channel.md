@@ -46,3 +46,4 @@ Write first: the fake-owner round trip; the event subscription; the `ui_tools.*`
   - (8) `run.preview` uses `RunStartParams` because `RunPreviewParams` is a type alias in `core` with no schema.
   - (9) The endpoint is built with an empty tool manifest, the unbound port 0, `KeychainTokens` and `SystemClocks` (both stubbed), until Stage 6.
 - Not done by design: the socket, the token file and the handshake (Stage 3c); the daemon's notices onto the channel (Stage 3c); the ask's token, its endpoint and its registration (Stage 6b); the HTTP listener and the calls of `expire` and `window_gone` (Stage 6b); the webview's CSP and Tauri capability set (Stage 6a); a reconnect in the client (Stage 6a); the item's `status`, `links` and `owners`.
+- Owner decisions (2026-11-15): the recommendations above are accepted as built.

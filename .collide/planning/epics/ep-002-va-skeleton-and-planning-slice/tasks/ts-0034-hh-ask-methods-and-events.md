@@ -51,3 +51,4 @@ Write first: round-trip tests; the two `ask.start` shapes; a type-level test tha
   - The daemon's handling of the methods, the cancel when the connection drops, the shell's addition of the endpoint and token, and the refusals and probe run: Stage 6b.
   - The Claude launch line, the ACP ask profile and the ask box that reads these events: Stage 6b.
   - A TypeScript test of the generated types in the app: Stage 6b, with the ask box.
+- Owner decisions (2026-11-15): the recommendations above are accepted as built.
