@@ -1,7 +1,7 @@
 ---
 id: ts-0055-cr
 kind: task
-status: ready
+status: active
 title: "Built-in git worktree workspace and the disk floor"
 owners: []
 links:
