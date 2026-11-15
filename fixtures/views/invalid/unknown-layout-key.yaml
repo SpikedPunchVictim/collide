@@ -1,0 +1,2 @@
+name: MVP
+layout: { default: board, sortBy: id }

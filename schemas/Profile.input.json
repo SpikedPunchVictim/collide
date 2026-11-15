@@ -1,0 +1,121 @@
+{
+  "$defs": {
+    "ProfilePacks": {
+      "additionalProperties": false,
+      "description": "`packs: { on: [...], off: [...] }`: packs this profile switches on and off. A repo profile switches repo\npacks and a user profile user packs.",
+      "properties": {
+        "off": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RoleConfig": {
+      "description": "`config: user | none`: which settings the agent tool reads (0.3, Context options).",
+      "enum": [
+        "user",
+        "none"
+      ],
+      "type": "string"
+    },
+    "RoleOptions": {
+      "additionalProperties": false,
+      "description": "A role's context options (0.3), as a profile overrides them.",
+      "properties": {
+        "bash_output_max": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "compact_at": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mcp_output_max": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "config": {
+      "additionalProperties": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "description": "Pack settings: pack name, then key, then value. A pack's schema checks each value.",
+      "type": "object"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "launch": {
+      "additionalProperties": true,
+      "description": "Launch parameters (`maxRounds`, ...). The workflow declares which exist.",
+      "type": "object"
+    },
+    "models": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Model alias to model name. The model source and account stay the user's.",
+      "type": "object"
+    },
+    "packs": {
+      "$ref": "#/$defs/ProfilePacks"
+    },
+    "roles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RoleOptions"
+      },
+      "description": "Context options by role, as `pack/role`.",
+      "type": "object"
+    },
+    "workflow": {
+      "description": "The default workflow under this profile, as `pack/workflow`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "Profile",
+  "type": "object"
+}

@@ -1,0 +1,10 @@
+# The example profile of 0.7, Profiles.
+description: small bug fixes, one review round, a cheaper strong model
+packs: { off: [codemap] }                    # a repo profile switches repo packs; a user profile, user packs
+workflow: collide/review                     # the default workflow under this profile
+launch: { maxRounds: 1 }
+models: { strong: sonnet }                   # alias → model name; the model source and account stay the user's
+roles:
+  collide/builder: { compact_at: 120000, config: none }   # context options (0.3)
+config:
+  orchard: { lanePool: 1 }

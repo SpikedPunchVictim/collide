@@ -171,6 +171,23 @@
       ],
       "type": "object"
     },
+    "Closure": {
+      "additionalProperties": false,
+      "description": "`closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal.",
+      "properties": {
+        "follow": {
+          "$ref": "#/$defs/Follow"
+        },
+        "goal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal",
+        "follow"
+      ],
+      "type": "object"
+    },
     "Decision": {
       "additionalProperties": false,
       "description": "A decision: a hook that returns one token per task, and the target each token goes to (0.7, `then:`).\n`tokens:` is optional; when it is there it declares the tokens the script may return, and `on:` must map\nexactly those. Without it, the keys of `on:` are the declared tokens.",
@@ -275,6 +292,13 @@
       },
       "type": "object"
     },
+    "Follow": {
+      "description": "`closure:` follows one kind of edge, from a goal task: the prototype board's run order.",
+      "enum": [
+        "depends_on"
+      ],
+      "type": "string"
+    },
     "HumanPhase": {
       "additionalProperties": false,
       "description": "A `human` phase: a Queue item where a person picks one of the tokens of `on:`. `human` is the text the item\nshows; `show` lists what the person should read (0.7, `show:`).",
@@ -342,6 +366,46 @@
       },
       "type": "object"
     },
+    "Layout": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LayoutKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "groupBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LayoutKind": {
+      "description": "How the Field lays a view out.",
+      "enum": [
+        "board",
+        "run-order"
+      ],
+      "type": "string"
+    },
     "OnCold": {
       "description": "`on_cold:` of an agent phase (0.3): what a phase does when its session's cache has expired.",
       "oneOf": [
@@ -378,6 +442,74 @@
         "$ref": "#/$defs/Phase"
       },
       "description": "Phase names to phases, in declaration order.",
+      "type": "object"
+    },
+    "Profile": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "Pack settings: pack name, then key, then value. A pack's schema checks each value.",
+          "type": "object"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "launch": {
+          "additionalProperties": true,
+          "description": "Launch parameters (`maxRounds`, ...). The workflow declares which exist.",
+          "type": "object"
+        },
+        "models": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Model alias to model name. The model source and account stay the user's.",
+          "type": "object"
+        },
+        "packs": {
+          "$ref": "#/$defs/ProfilePacks"
+        },
+        "roles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RoleOptions"
+          },
+          "description": "Context options by role, as `pack/role`.",
+          "type": "object"
+        },
+        "workflow": {
+          "description": "The default workflow under this profile, as `pack/workflow`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProfilePacks": {
+      "additionalProperties": false,
+      "description": "`packs: { on: [...], off: [...] }`: packs this profile switches on and off. A repo profile switches repo\npacks and a user profile user packs.",
+      "properties": {
+        "off": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "Prompt": {
@@ -419,6 +551,55 @@
       "required": [
         "tools"
       ],
+      "type": "object"
+    },
+    "RoleConfig": {
+      "description": "`config: user | none`: which settings the agent tool reads (0.3, Context options).",
+      "enum": [
+        "user",
+        "none"
+      ],
+      "type": "string"
+    },
+    "RoleOptions": {
+      "additionalProperties": false,
+      "description": "A role's context options (0.3), as a profile overrides them.",
+      "properties": {
+        "bash_output_max": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "compact_at": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mcp_output_max": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "Sandbox": {
@@ -494,6 +675,30 @@
       ],
       "type": "object"
     },
+    "Sort": {
+      "additionalProperties": false,
+      "description": "`layout.sort` (0.11): a sort key and a direction. `by` is a field the surface can sort on (the Field's `id`,\n`title`, `epic`, `labels` and `status`; Tracks adds more), which the surface checks.",
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "dir": {
+          "$ref": "#/$defs/SortDir"
+        }
+      },
+      "required": [
+        "by",
+        "dir"
+      ],
+      "type": "object"
+    },
+    "SortDir": {
+      "enum": [
+        "asc",
+        "desc"
+      ],
+      "type": "string"
+    },
     "Target": {
       "anyOf": [
         {
@@ -525,6 +730,77 @@
           "type": "string"
         },
         "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "View": {
+      "additionalProperties": false,
+      "properties": {
+        "closure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Closure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exclude": {
+          "description": "Task keys taken out of the view, after the other three are joined.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "include": {
+          "description": "Task keys such as `plan:T-01-042`, hand-picked into the view.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Layout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "profile": {
+          "description": "The profile runs launched from this view get (0.7, Profiles).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queue": {
+          "description": "Feeds a Queue lane (0.10, Planning sources).",
+          "type": "boolean"
+        },
+        "where": {
+          "description": "CEL over one task, as text (0.10). Its length is capped at [`MAX_CEL_SOURCE_BYTES`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow": {
+          "description": "The default workflow for runs launched from this view, as `pack/workflow`.",
           "type": [
             "string",
             "null"
@@ -683,6 +959,13 @@
       "default": {},
       "type": "object"
     },
+    "profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Profile"
+      },
+      "description": "Named profiles, which cover only this pack's own settings and workflows (0.7, Profiles).",
+      "type": "object"
+    },
     "providers": {
       "additionalProperties": {
         "$ref": "#/$defs/ProviderEntry"
@@ -698,6 +981,13 @@
           "type": "null"
         }
       ]
+    },
+    "views": {
+      "additionalProperties": {
+        "$ref": "#/$defs/View"
+      },
+      "description": "Named views a board may adopt by name (0.7, Keys added for planning).",
+      "type": "object"
     },
     "workflows": {
       "additionalProperties": {

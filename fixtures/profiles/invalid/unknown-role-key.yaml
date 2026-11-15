@@ -1,0 +1,2 @@
+roles:
+  collide/builder: { compact_at: 120000, tool_output_max: 1000 }

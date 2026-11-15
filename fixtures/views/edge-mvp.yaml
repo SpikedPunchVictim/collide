@@ -1,0 +1,10 @@
+# The example view of 0.10, with the `layout.sort` key that 0.11 adds.
+name: MVP
+where: '"plan:E-07" in collections || "mvp" in labels'   # CEL
+include: [plan:T-01-042, github:acme/edge#212]
+exclude: [plan:T-01-043]
+closure: { goal: plan:T-01-042, follow: depends_on }
+workflow: orchard/loop                                    # default for runs launched from this view
+profile: small-fix
+queue: true
+layout: { default: board, groupBy: category, sort: { by: id, dir: asc } }

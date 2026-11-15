@@ -1,0 +1,7 @@
+# Parses. A user profile may not set `workflow`, `launch`, `models` or `roles`; Stage 4a refuses it by name.
+description: a user profile that reaches past its layer
+workflow: collide/review
+launch: { maxRounds: 1 }
+models: { strong: sonnet }
+roles:
+  collide/builder: { compact_at: 120000 }

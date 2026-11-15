@@ -1,0 +1,4 @@
+packs:
+  - source: git:github.com/org/ferry-pack//pack@v1.2
+    commit: 3f78685
+    tree: 89e6c98d92887913cadf06b2adb97f26cde4849b

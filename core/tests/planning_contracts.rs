@@ -329,7 +329,7 @@ fn a_pack_manifest_holds_points_and_checklists_and_both_are_optional() {
     assert_eq!(serde_json::to_value(&manifest).unwrap(), doc);
     let empty: PackManifest = serde_json::from_value(json!({})).unwrap();
     assert_eq!(empty, PackManifest::default());
-    assert!(serde_json::from_value::<PackManifest>(json!({ "views": {} })).is_err());
+    assert!(serde_json::from_value::<PackManifest>(json!({ "viewz": {} })).is_err());
 }
 
 #[test]
@@ -593,8 +593,10 @@ fn the_pack_keys_points_and_checklists_are_in_the_schema() {
             "checklists",
             "name",
             "points",
+            "profiles",
             "providers",
             "requires",
+            "views",
             "workflows"
         ])
     );

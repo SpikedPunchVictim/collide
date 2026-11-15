@@ -14,9 +14,11 @@ use crate::change::{Change, Rename, TaskPointPayload};
 use crate::events::Event;
 use crate::hook::{HookInput, HookResult};
 use crate::item::{KindDecl, LinkTypeDecl, PlanningFields};
+use crate::lock::{PackLock, UserPacks};
 use crate::observer::{ObserverAck, ObserverEvent};
 use crate::pack::{PackManifest, RunBudget};
 use crate::points::Point;
+use crate::profile::Profile;
 use crate::provider::{
     ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult, ListParams,
     ListResult, PreviewResult, SourceStale, Task, TaskChanged, TaskCollision, TaskInvalid,
@@ -24,6 +26,7 @@ use crate::provider::{
 };
 use crate::report::ReportLine;
 use crate::stage::Stage;
+use crate::view::View;
 use crate::workflow::{Adoption, Workflow};
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
@@ -101,10 +104,12 @@ pub fn registry() -> Registry {
     registry.add::<ListResult>();
     registry.add::<ObserverAck>();
     registry.add::<ObserverEvent>();
+    registry.add::<PackLock>();
     registry.add::<PackManifest>();
     registry.add::<Point>();
     registry.add::<PlanningFields>();
     registry.add::<PreviewResult>();
+    registry.add::<Profile>();
     registry.add::<ReportLine>();
     // `Rename` is also the body of the provider's `task.renamed` notification.
     registry.add::<Rename>();
@@ -117,6 +122,8 @@ pub fn registry() -> Registry {
     registry.add::<TaskInvalid>();
     registry.add::<TaskPointPayload>();
     registry.add::<TaskRemoved>();
+    registry.add::<UserPacks>();
+    registry.add::<View>();
     registry.add::<WatchParams>();
     registry.add::<WatchResult>();
     registry.add::<Workflow>();

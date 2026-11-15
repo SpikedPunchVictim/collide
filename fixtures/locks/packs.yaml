@@ -1,0 +1,4 @@
+# `~/.config/collide/packs.yaml`: the user's packs, added with `collide pack add` (0.7).
+packs:
+  - source: git:github.com/org/ferry-pack//pack@v1.2
+  - source: dev:~/dev/ferry-pack

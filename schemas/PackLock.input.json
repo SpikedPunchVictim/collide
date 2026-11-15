@@ -1,0 +1,43 @@
+{
+  "$defs": {
+    "LockEntry": {
+      "additionalProperties": false,
+      "description": "One pinned pack. `source` is the same text `board.yaml` (or `packs.yaml`) lists the pack by.",
+      "properties": {
+        "commit": {
+          "description": "The commit the source resolved to: 40 hex characters (SHA-1) or 64 (SHA-256).",
+          "type": "string"
+        },
+        "source": {
+          "description": "`<scheme>:<rest>`, as above. Today a `git:` source.",
+          "pattern": "^[a-z][a-z0-9+.-]*:.+$",
+          "type": "string"
+        },
+        "tree": {
+          "description": "The git tree id at the pack's path in that commit, as git computes it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "commit",
+        "tree"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`.collide/packs.lock`, and the user's `packs.lock`: every pinned pack, one entry per source.",
+  "properties": {
+    "packs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/LockEntry"
+      },
+      "type": "array"
+    }
+  },
+  "title": "PackLock",
+  "type": "object"
+}

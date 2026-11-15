@@ -1,0 +1,3 @@
+# Parses. A user's pack is never in a repo's snapshot.
+packs:
+  - source: repo:.collide/packs/orchard

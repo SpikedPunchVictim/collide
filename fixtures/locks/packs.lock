@@ -1,0 +1,8 @@
+# `.collide/packs.lock`: each `git:` pack pinned by its source, commit and tree id (0.7).
+packs:
+  - source: git:github.com/org/ferry-pack//pack@v1.2
+    commit: 3f786850e387550fdab836ed7e6dc881de23001b
+    tree: 89e6c98d92887913cadf06b2adb97f26cde4849b
+  - source: git:~/dev/ferry-pack//pack@main
+    commit: 2b6c05a7cd0b9a4c3e0a6d8d6b1f0b6e9a4d7c11
+    tree: a7d3f0e1b2c4958677aa01b2c3d4e5f60718293a

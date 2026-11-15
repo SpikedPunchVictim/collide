@@ -2,10 +2,13 @@
 //! the built-in packs need to load (`apiVersion`, `name`, `requires.tools`, `providers`). `workflows:` holds the
 //! workflow types of [`crate::workflow`]. This is the start of the manifest type: `ts-0012-ua` adds the other
 //! keys beside these, makes the identity keys required and checks them (and runs the workflow checks over each
-//! entry of `workflows:`), and `views:` comes with the view type in `ts-0026-es`.
+//! entry of `workflows:`). `views:` and `profiles:` hold the types of [`crate::view`] and [`crate::profile`]
+//! (`ts-0026-es`).
 
 use crate::item::Category;
 use crate::points::DerivedPoint;
+use crate::profile::Profile;
+use crate::view::View;
 use crate::workflow::Workflow;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -86,4 +89,10 @@ pub struct PackManifest {
     pub checklists: BTreeMap<String, ChecklistTemplate>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub workflows: BTreeMap<String, Workflow>,
+    /// Named views a board may adopt by name (0.7, Keys added for planning).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub views: BTreeMap<String, View>,
+    /// Named profiles, which cover only this pack's own settings and workflows (0.7, Profiles).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub profiles: BTreeMap<String, Profile>,
 }

@@ -1,0 +1,33 @@
+{
+  "$defs": {
+    "UserPackEntry": {
+      "additionalProperties": false,
+      "description": "One pack the user added.",
+      "properties": {
+        "source": {
+          "description": "`<scheme>:<rest>`: a `git:` or `dev:` source.",
+          "pattern": "^[a-z][a-z0-9+.-]*:.+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`~/.config/collide/packs.yaml`: the user's packs, in the order they load after the board's.",
+  "properties": {
+    "packs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/UserPackEntry"
+      },
+      "type": "array"
+    }
+  },
+  "title": "UserPacks",
+  "type": "object"
+}

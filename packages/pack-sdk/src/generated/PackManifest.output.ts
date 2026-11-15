@@ -4,6 +4,19 @@
  * The category every source status maps to, so views and columns work across sources (0.10).
  */
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
+/**
+ * `config: user | none`: which settings the agent tool reads (0.3, Context options).
+ */
+export type RoleConfig = 'user' | 'none'
+/**
+ * `closure:` follows one kind of edge, from a goal task: the prototype board's run order.
+ */
+export type Follow = 'depends_on'
+/**
+ * How the Field lays a view out.
+ */
+export type LayoutKind = 'board' | 'run-order'
+export type SortDir = 'asc' | 'desc'
 export type Phase = AgentPhase | ScriptPhase | WaitPhase | HumanPhase
 /**
  * A prompt: the name of one of the pack's prompts, or an earlier phase's artifact (`{ artifact: brief/x.md }`).
@@ -32,10 +45,22 @@ export interface PackManifest {
   points: {
     [k: string]: DerivedPoint
   }
+  /**
+   * Named profiles, which cover only this pack's own settings and workflows (0.7, Profiles).
+   */
+  profiles?: {
+    [k: string]: Profile
+  }
   providers?: {
     [k: string]: ProviderEntry
   }
   requires?: Requires | null
+  /**
+   * Named views a board may adopt by name (0.7, Keys added for planning).
+   */
+  views?: {
+    [k: string]: View
+  }
   workflows?: {
     [k: string]: Workflow
   }
@@ -66,6 +91,57 @@ export interface DerivedPoint {
   on: string
   when?: string | null
 }
+export interface Profile {
+  /**
+   * Pack settings: pack name, then key, then value. A pack's schema checks each value.
+   */
+  config?: {
+    [k: string]: {
+      [k: string]: unknown
+    }
+  }
+  description?: string | null
+  /**
+   * Launch parameters (`maxRounds`, ...). The workflow declares which exist.
+   */
+  launch?: {
+    [k: string]: unknown
+  }
+  /**
+   * Model alias to model name. The model source and account stay the user's.
+   */
+  models?: {
+    [k: string]: string
+  }
+  packs?: ProfilePacks
+  /**
+   * Context options by role, as `pack/role`.
+   */
+  roles?: {
+    [k: string]: RoleOptions
+  }
+  /**
+   * The default workflow under this profile, as `pack/workflow`.
+   */
+  workflow?: string | null
+}
+/**
+ * `packs: { on: [...], off: [...] }`: packs this profile switches on and off. A repo profile switches repo
+ * packs and a user profile user packs.
+ */
+export interface ProfilePacks {
+  off?: string[]
+  on?: string[]
+}
+/**
+ * A role's context options (0.3), as a profile overrides them.
+ */
+export interface RoleOptions {
+  bash_output_max?: number | null
+  compact_at?: number | null
+  config?: RoleConfig | null
+  mcp_output_max?: number | null
+}
 /**
  * One entry of `providers:`: the script that starts the provider, relative to the pack directory.
  */
@@ -85,6 +161,55 @@ export interface Requires {
 export interface ToolRequirement {
   name: string
   version?: string | null
+}
+export interface View {
+  closure?: Closure | null
+  /**
+   * Task keys taken out of the view, after the other three are joined.
+   */
+  exclude?: string[]
+  /**
+   * Task keys such as `plan:T-01-042`, hand-picked into the view.
+   */
+  include?: string[]
+  layout?: Layout | null
+  name: string
+  /**
+   * The profile runs launched from this view get (0.7, Profiles).
+   */
+  profile?: string | null
+  /**
+   * Feeds a Queue lane (0.10, Planning sources).
+   */
+  queue?: boolean
+  /**
+   * CEL over one task, as text (0.10). Its length is capped at [`MAX_CEL_SOURCE_BYTES`].
+   */
+  where?: string | null
+  /**
+   * The default workflow for runs launched from this view, as `pack/workflow`.
+   */
+  workflow?: string | null
+}
+/**
+ * `closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal.
+ */
+export interface Closure {
+  follow: Follow
+  goal: string
+}
+export interface Layout {
+  default?: LayoutKind | null
+  groupBy?: string | null
+  sort?: Sort | null
+}
+/**
+ * `layout.sort` (0.11): a sort key and a direction. `by` is a field the surface can sort on (the Field's `id`,
+ * `title`, `epic`, `labels` and `status`; Tracks adds more), which the surface checks.
+ */
+export interface Sort {
+  by: string
+  dir: SortDir
 }
 /**
  * One entry of `workflows:`.

@@ -196,8 +196,10 @@ fn schema_lists_the_pack_keys_points_and_checklists() {
             "checklists",
             "name",
             "points",
+            "profiles",
             "providers",
             "requires",
+            "views",
             "workflows"
         ]
     );

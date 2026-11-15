@@ -1,0 +1,5 @@
+# What a user profile may set: user packs and `overridable` keys (0.7, Profiles).
+description: one lane on this laptop
+packs: { on: [codemap] }
+config:
+  orchard: { lanePool: 1 }
