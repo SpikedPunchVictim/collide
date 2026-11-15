@@ -1,0 +1,129 @@
+{
+  "$defs": {
+    "Level1": {
+      "additionalProperties": false,
+      "properties": {
+        "level2": {
+          "$ref": "#/$defs/Level2"
+        }
+      },
+      "required": [
+        "level2"
+      ],
+      "type": "object"
+    },
+    "Level2": {
+      "additionalProperties": false,
+      "properties": {
+        "level3": {
+          "$ref": "#/$defs/Level3"
+        }
+      },
+      "required": [
+        "level3"
+      ],
+      "type": "object"
+    },
+    "Level3": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "Step": {
+      "description": "An internally tagged enum. `Wait {}` is an empty struct variant, never a unit variant, because serde does not\nenforce `deny_unknown_fields` on a unit variant of an internally tagged enum.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "agent",
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "readOnly": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "prompt",
+            "readOnly"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "wait",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "budgetBytes": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "labels": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "level1": {
+      "$ref": "#/$defs/Level1"
+    },
+    "name": {
+      "type": "string"
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retries": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "retries",
+    "budgetBytes",
+    "labels",
+    "steps",
+    "level1"
+  ],
+  "title": "Sample",
+  "type": "object"
+}

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "gen": "cargo run --quiet --package collide-core --example gen_schemas && pnpm --filter @collide/pack-sdk gen",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   }

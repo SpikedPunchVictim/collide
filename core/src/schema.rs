@@ -1,0 +1,72 @@
+//! The contract schemas. Every contract type is written once, in Rust, with serde and `schemars` derives. This
+//! module turns the types into JSON Schema, and `pnpm gen` writes the schemas to `schemas/` and then makes the
+//! TypeScript in `packages/pack-sdk` from them (0.6).
+//!
+//! Rules for a contract type, so that the schema rejects what serde rejects:
+//! - derive `Serialize`, `Deserialize` and `JsonSchema`;
+//! - put `#[serde(deny_unknown_fields)]` on every struct and on every tagged enum, so each one gets
+//!   `additionalProperties: false`;
+//! - write a tagged variant with no fields as `Wait {}`, never `Wait`: serde does not enforce
+//!   `deny_unknown_fields` on a unit variant of an internally tagged enum;
+//! - to add a type, add one `registry.add::<T>()` line to [`registry`].
+
+use schemars::JsonSchema;
+use schemars::generate::SchemaSettings;
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+/// JSON Schema files, by file name. Each type added gets two: `<Name>.input.json` for what a user writes
+/// (`Deserialize`, so defaulted fields are optional) and `<Name>.output.json` for what Collide emits
+/// (`Serialize`, so every field is present).
+#[derive(Debug, Default)]
+pub struct Registry {
+    files: BTreeMap<String, Value>,
+}
+
+impl Registry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds the input and output schema of `T`, named after `T`. Panics if `T`'s name is already there.
+    pub fn add<T: JsonSchema>(&mut self) {
+        let name = T::schema_name();
+        self.insert(
+            format!("{name}.input.json"),
+            schema_for::<T>(SchemaSettings::draft2020_12().for_deserialize()),
+        );
+        self.insert(
+            format!("{name}.output.json"),
+            schema_for::<T>(SchemaSettings::draft2020_12().for_serialize()),
+        );
+    }
+
+    fn insert(&mut self, file: String, schema: Value) {
+        let previous = self.files.insert(file.clone(), schema);
+        assert!(previous.is_none(), "{file} is already in the registry");
+    }
+
+    /// The text of each schema file, by file name: pretty-printed JSON with a final newline. Names come out in
+    /// sorted order, and so do the keys inside each schema, so the text is the same on every run.
+    pub fn render(&self) -> BTreeMap<String, String> {
+        let pretty = |schema: &Value| {
+            let mut text = serde_json::to_string_pretty(schema).expect("a schema is JSON");
+            text.push('\n');
+            text
+        };
+        self.files
+            .iter()
+            .map(|(file, schema)| (file.clone(), pretty(schema)))
+            .collect()
+    }
+}
+
+fn schema_for<T: JsonSchema>(settings: SchemaSettings) -> Value {
+    let schema = settings.into_generator().into_root_schema_for::<T>();
+    serde_json::to_value(schema).expect("a schema is JSON")
+}
+
+/// Every contract type, which `pnpm gen` writes to `schemas/`. Later items add their types here.
+pub fn registry() -> Registry {
+    Registry::new()
+}

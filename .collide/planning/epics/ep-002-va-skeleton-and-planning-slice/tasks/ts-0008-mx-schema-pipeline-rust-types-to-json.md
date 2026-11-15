@@ -1,7 +1,7 @@
 ---
 id: ts-0008-mx
 kind: task
-status: ready
+status: done
 title: "Schema pipeline: Rust types to JSON Schema to TypeScript"
 owners: []
 links:
@@ -31,3 +31,5 @@ Write first: schema generation test; round-trip tests; an unknown-key test at de
 - Area: `core` (the sample types, `schemars`), the Node build step, `packages/pack-sdk` (generated output).
 - The hardened YAML loader is `ts-0023-ch`, not this item.
 - Done when the criteria hold and the generator runs inside `cargo build` or one documented build command.
+- Rust-side document check (decided in this item): serde's `deny_unknown_fields`, with no JSON Schema validator crate. S5 found one gap, the unit variant of an internally tagged enum, and `Wait {}` closes it, so a validator would add a dependency and check nothing serde does not. The tests check each unknown-key case (top level, depth 3, tagged variant, `Wait {}`) against serde and check the schemas for `additionalProperties: false`.
+- Running it: `pnpm gen` runs `cargo run --example gen_schemas` in `core` (the real registry to `schemas/`, the sample types in `core/tests/fixtures/` to `core/tests/fixtures/schemas/`), then `packages/pack-sdk/scripts/gen.ts` (to `packages/pack-sdk/src/generated/` and `packages/pack-sdk/test/fixtures/generated/`). To add a contract, derive `Serialize`, `Deserialize` and `JsonSchema` with `deny_unknown_fields` and add one `registry.add::<T>()` line to `registry()` in `core/src/schema.rs`, then run `pnpm gen` and commit the output. The real registry starts empty: contracts are `ts-0012-ua`.

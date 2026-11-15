@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "An internally tagged enum. `Wait {}` is an empty struct variant, never a unit variant, because serde does not\nenforce `deny_unknown_fields` on a unit variant of an internally tagged enum.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "agent",
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "prompt",
+        "readOnly"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "wait",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Step"
+}
