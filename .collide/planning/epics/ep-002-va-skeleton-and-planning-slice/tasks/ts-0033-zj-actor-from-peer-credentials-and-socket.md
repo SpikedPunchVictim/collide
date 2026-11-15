@@ -1,7 +1,7 @@
 ---
 id: ts-0033-zj
 kind: task
-status: ready
+status: active
 title: "Actor from peer credentials and socket rules"
 owners: []
 links:
