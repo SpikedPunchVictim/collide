@@ -1,7 +1,7 @@
 ---
 id: ts-0026-es
 kind: task
-status: ready
+status: active
 title: "Views, profiles and the lock files"
 owners: []
 links:
