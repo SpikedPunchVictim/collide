@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: collide/plan
+providers:
+  plan: { script: src/main.ts }

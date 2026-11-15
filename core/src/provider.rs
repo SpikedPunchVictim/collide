@@ -152,6 +152,17 @@ pub struct Task {
     pub fields: BTreeMap<String, Value>,
 }
 
+impl Task {
+    /// The id of the epic this task is part of: the target of its `part-of` link, which the markdown provider
+    /// reports from the task's folder. An epic has none.
+    pub fn epic(&self) -> Option<&str> {
+        self.links
+            .iter()
+            .find(|link| link.link_type == "part-of")
+            .map(|link| link.to.as_str())
+    }
+}
+
 /// One ordered group of a collection, such as a slice of an epic: the keys of its tasks, in order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
