@@ -70,5 +70,11 @@
   "ui_tools: endpoint token store": "6b",
   "shell: daemon connection": "3c",
   "shell: daemon events": "3c",
-  "shell: ask token": "6b"
+  "shell: ask token": "6b",
+  "ui: launch": "9a",
+  "ui: queue answer": "9a",
+  "ui: review decision": "9a",
+  "ui: open item": "9a",
+  "ui: compare runs": "9c",
+  "ui: experiment start": "15"
 }
