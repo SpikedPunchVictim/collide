@@ -1,0 +1,120 @@
+{
+  "$defs": {
+    "StopSignal": {
+      "description": "A signal the daemon asks the shim to send to its child's process group (0.5, Stopping). The shim sends it; the\ndaemon never signals a child it does not own.",
+      "enum": [
+        "hup",
+        "term",
+        "kill"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A message from the daemon to the shim.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "The answer to a `Hello` that is accepted: the version spoken on this connection.",
+      "properties": {
+        "protocol": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "welcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The answer to a `Hello` that is not: why, naming the shim's version, the current and the previous.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "const": "refused",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Write `data`, as UTF-8, to the child's stdin: journal first, then the child.",
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "type": {
+          "const": "write",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Close the child's stdin.",
+      "properties": {
+        "type": {
+          "const": "close_stdin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Send the signal to the child's process group.",
+      "properties": {
+        "signal": {
+          "$ref": "#/$defs/StopSignal"
+        },
+        "type": {
+          "const": "signal",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "signal"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The daemon has the exit record. The shim may stop serving it.",
+      "properties": {
+        "type": {
+          "const": "ack_exit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "DaemonMessage"
+}

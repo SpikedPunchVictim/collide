@@ -32,6 +32,7 @@ use crate::provider::{
 use crate::report::ReportLine;
 use crate::section::{NearDuplicateGroup, SectionUse, Sections};
 use crate::settings::ConfigFile;
+use crate::shim::{DaemonMessage, ExitRecord, ShimMessage};
 use crate::span::Span;
 use crate::stage::Stage;
 use crate::state::{PhaseState, RunState, WorkspaceState};
@@ -106,7 +107,9 @@ pub fn registry() -> Registry {
     registry.add::<CollidePointer>();
     registry.add::<ConfigFile>();
     registry.add::<ContextRecord>();
+    registry.add::<DaemonMessage>();
     registry.add::<Event>();
+    registry.add::<ExitRecord>();
     registry.add::<Feature>();
     registry.add::<FeatureProblem>();
     registry.add::<GetParams>();
@@ -139,6 +142,7 @@ pub fn registry() -> Registry {
     registry.add::<SectionUse>();
     registry.add::<Sections>();
     registry.add::<SessionStart>();
+    registry.add::<ShimMessage>();
     registry.add::<SourceStale>();
     registry.add::<Span>();
     registry.add::<Stage>();

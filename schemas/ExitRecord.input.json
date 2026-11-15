@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "ExitEnd": {
+      "description": "How the child ended. Exactly one of the two is true of a reaped child, so the type holds one.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The child called `exit`. `code` is its exit status.",
+          "properties": {
+            "code": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": {
+              "const": "exited",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A signal ended the child. `signal` is its number.",
+          "properties": {
+            "signal": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": {
+              "const": "signaled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "signal"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`exit.json`: what the shim learned when it reaped its child with `wait4` (0.2; measured S3). The file holds this\none object as JSON. `protocol` is the shim's [`SHIM_PROTOCOL`], so a daemon reads a record a shim of the\nprevious version wrote.\n\nThe times are the child's own and its waited-for descendants' (`ru_utime` and `ru_stime`), in microseconds.\n`max_rss_bytes` is the largest resident set of any one process counted, in bytes: the shim converts `ru_maxrss`,\nwhich macOS gives in bytes and Linux in KiB. A descendant that was double-forked and orphaned is in neither\nnumber (measured S3).",
+  "properties": {
+    "cpu_system_us": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cpu_user_us": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "end": {
+      "$ref": "#/$defs/ExitEnd"
+    },
+    "max_rss_bytes": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "protocol": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "protocol",
+    "end",
+    "cpu_user_us",
+    "cpu_system_us",
+    "max_rss_bytes"
+  ],
+  "title": "ExitRecord",
+  "type": "object"
+}
