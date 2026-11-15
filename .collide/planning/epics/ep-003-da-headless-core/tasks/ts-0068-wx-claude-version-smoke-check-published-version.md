@@ -1,7 +1,7 @@
 ---
 id: ts-0068-wx
 kind: task
-status: active
+status: done
 title: "Claude version, smoke check, published version and canary"
 owners: []
 links:
