@@ -482,6 +482,7 @@ dependencies = [
  "collide-core",
  "libc",
  "rusqlite",
+ "serde",
  "serde_json",
 ]
 

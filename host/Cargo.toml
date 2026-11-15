@@ -7,6 +7,8 @@ publish = false
 [dependencies]
 collide-core = { path = "../core" }
 serde_json = "1"
+# The bounds of the link's framing (host/src/shim_link.rs): `core`'s messages are serde types, and `host` names the traits.
+serde = "1"
 # The store (host/src/store.rs). SQLite is built from source (`bundled`), so the daemon does not depend on the system's
 # copy. It belongs to `host` and never to `core` (the dependency check).
 rusqlite = { version = "0.42", features = ["bundled"] }

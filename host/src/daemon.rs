@@ -11,17 +11,19 @@
 //! 2. Records its login session, and restarts in a new one. Ending at logout is recorded as host shutdown, not as a
 //!    crash. (Not built yet: it is the daemon's own session to record, and no later item needs it before Stage 3b.)
 //! 3. Opens the store. A store that cannot be read is moved aside and reported ([`StoreError::Quarantined`]), a fresh
-//!    one is made, and the daemon keeps running with the report in `daemon.status`. It will **adopt existing shims**
-//!    ([`adopt_shims`], `ts-0057-ck`) here, before it binds the socket, so no client sees a run as gone while its
-//!    shim is alive.
+//!    one is made, and the daemon keeps running with the report in `daemon.status`. It **adopts existing shims**
+//!    ([`adopt_shims`], [`Phases::adopt`]) here, before it binds the socket, so no client sees a run as gone while its
+//!    shim is alive: the phases are settled from the event log, the shims' records and their processes, and a live
+//!    shim gets a watcher that reconnects to it.
 //! 4. Checks the socket's path and directory ([`crate::auth::prepare_daemon_socket`]), makes or reads the CLI's token
 //!    file, and binds ([`bind_socket`]). A socket another daemon answers on is not taken.
 //! 5. Starts the capture of the base environment on a thread of its own, so the socket answers at once and a login
 //!    shell that takes seconds does not delay the start ([`crate::base_env`]).
 //!
 //! Then it serves ([`Daemon`]): one thread accepts, and one thread serves each connection, so a slow or hostile
-//! client holds up only its own thread. The runtime is `std` threads and not tokio, because the plan's tokio is for
-//! reaping shims (`ts-0057-ck`) and nothing here waits on more than a socket.
+//! client holds up only its own thread. The runtime is `std` threads and not tokio: the plan's tokio was for reaping
+//! shims, and [`crate::phases`] does that with one blocked thread per shim the daemon started, which a handful of
+//! phases does not strain.
 //!
 //! ## The socket
 //!
@@ -72,12 +74,18 @@
 //! |---|---|---|
 //! | `daemon: entry` | [`run`], [`Daemon::start`] | the start sequence above, then the serve loop |
 //! | `daemon: socket server` | [`bind_socket`], [`Daemon`] | the bind, the handshake and the JSON-RPC loop, over [`crate::auth`]'s checks |
-//! | `daemon: adopt shims` | [`adopt_shims`] | reattach by pid and start time, read `exit.json` for the ones that ended |
+//! | `daemon: adopt shims` | [`adopt_shims`], [`Phases::adopt`] | scan `runs_dir`, classify each shim by `exit.json` and by pid plus start time, reattach, settle |
 
 use crate::auth::{self, Admitted, Session, StdFs, SystemProcessTree, UnixPeer};
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::clock::{Clock, Clocks, Reading, SystemClocks};
+use crate::phases::{
+    BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, Phases, PhasesConfig,
+    process_is_running, read_exit_json, read_identity,
+};
+use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
 use crate::store::{Store, StoreError};
+use collide_core::events::Event;
 use collide_core::owner::{
     DaemonRecaptureEnvironmentResult, DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method,
     OWNER_PROTOCOL, OwnerInitializeResult, Request, Response, Routed, RpcError, StoreHealth, code,
@@ -286,12 +294,15 @@ impl fmt::Display for SocketError {
 
 impl std::error::Error for SocketError {}
 
-/// An existing shim, as the daemon finds it at start: which run, which process, and either the exit record it left
-/// or the fact that it is still alive.
+/// An existing shim, as the daemon finds it at start: which phase, where its directory is, which process, and either
+/// the exit record it left or the fact that it is still alive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptedShim {
-    pub run: String,
-    pub pid: u32,
+    pub key: PhaseKey,
+    /// The phase's directory, `<runs_dir>/<run>/<phase>`.
+    pub dir: PathBuf,
+    /// The shim's pid and start time from `shim.json`, when it left one.
+    pub identity: Option<ChildIdentity>,
     pub state: AdoptedState,
 }
 
@@ -302,6 +313,9 @@ pub enum AdoptedState {
     Alive,
     /// The shim ended and left `exit.json`. The daemon takes the totals from it.
     Exited(ExitRecord),
+    /// `exit.json` is there and is not a record (cut, empty, or another protocol). The daemon moves it aside and the
+    /// phase is `lost`.
+    Damaged { reason: String },
     /// The shim is gone and left no `exit.json`: its phase is `lost` (0.2). When the child is still running, the
     /// daemon stops it as it marks the phase `lost`.
     Lost,
@@ -398,6 +412,15 @@ pub struct DaemonOptions {
     pub handshake_wait: Duration,
     /// The open-file limit asked for at start.
     pub min_open_files: u64,
+    /// The `collide` binary that runs `collide shim <run-dir>`. Without it the daemon starts no phase (it still adopts).
+    pub shim_exe: Option<PathBuf>,
+    /// What a shim needs to start the daemon again, written into each phase's `spec.json`. `None` makes shims that
+    /// never start one: the tests that run a shim without the full product.
+    pub daemon_start: Option<DaemonStart>,
+    /// The waits of the phases ([`PhaseOptions::default`]).
+    pub phases: PhaseOptions,
+    /// Called when a phase reaches a final state ([`PhaseEndHook`]).
+    pub on_phase_end: Option<PhaseEndHook>,
 }
 
 impl DaemonOptions {
@@ -411,6 +434,10 @@ impl DaemonOptions {
             log,
             handshake_wait: HANDSHAKE_WAIT,
             min_open_files: MIN_OPEN_FILES,
+            shim_exe: None,
+            daemon_start: None,
+            phases: PhaseOptions::default(),
+            on_phase_end: None,
         }
     }
 }
@@ -419,7 +446,7 @@ impl DaemonOptions {
 struct Shared {
     paths: DaemonPaths,
     token: String,
-    store: Store,
+    store: Arc<Store>,
     health: StoreHealth,
     warnings: Mutex<Vec<String>>,
     env: Mutex<Option<BaseEnvironment>>,
@@ -428,7 +455,8 @@ struct Shared {
     tree: SystemProcessTree,
     uid: u32,
     clocks: Arc<dyn Clocks + Send + Sync>,
-    log: DaemonLog,
+    log: Arc<DaemonLog>,
+    phases: Phases,
     handshake_wait: Duration,
     started_wall_ms: u64,
     started_uptime: Reading,
@@ -490,12 +518,16 @@ impl Daemon {
             log,
             handshake_wait,
             min_open_files,
+            shim_exe,
+            daemon_start,
+            phases: phase_options,
+            on_phase_end,
         } = options;
-        let log = DaemonLog {
+        let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
             failures: AtomicU64::new(0),
             clocks: clocks.clone(),
-        };
+        });
         log.line(&format!(
             "daemon {} starting, pid {}",
             env!("CARGO_PKG_VERSION"),
@@ -528,7 +560,35 @@ impl Daemon {
         }
 
         let (store, health) = open_store(&paths, &log, &mut warnings)?;
+        let store = Arc::new(store);
         let token = load_or_make_token(&paths.token_file)?;
+
+        // Adoption comes before the bind: a client that connects sees every phase in the state it is in.
+        let phases = Phases::new(PhasesConfig {
+            runs_dir: paths.runs_dir.clone(),
+            shim_exe,
+            daemon_start,
+            options: phase_options,
+            on_phase_end,
+            store: store.clone(),
+            clocks: clocks.clone(),
+            log: {
+                let log = log.clone();
+                Arc::new(move |text: &str| log.line(text))
+            },
+        })
+        .map_err(SocketError::Store)?;
+        match adopt_shims(&paths.runs_dir) {
+            Ok(found) => {
+                log.line(&format!("adopting {} shim directories", found.len()));
+                phases.adopt(found);
+            }
+            Err(error) => {
+                let text = format!("the runs could not be scanned for shims: {error}");
+                log.line(&text);
+                warnings.push(text);
+            }
+        }
         let listener =
             bind_socket(&paths).inspect_err(|e| log.line(&format!("cannot start: {e}")))?;
         log.line(&format!("listening on {}", paths.socket.display()));
@@ -549,6 +609,7 @@ impl Daemon {
             started_uptime: clocks.read(Clock::Uptime),
             clocks,
             log,
+            phases,
             handshake_wait,
             stop: AtomicBool::new(false),
             connections: AtomicUsize::new(0),
@@ -577,6 +638,16 @@ impl Daemon {
 
     pub fn paths(&self) -> &DaemonPaths {
         &self.shared.paths
+    }
+
+    /// The daemon's phases: start one, write to one, ask its state. Cloning it shares them.
+    pub fn phases(&self) -> Phases {
+        self.shared.phases.clone()
+    }
+
+    /// The events of the store after `seq`, oldest first.
+    pub fn events_since(&self, seq: u64) -> Result<Vec<Event>, StoreError> {
+        self.shared.store.events_since(seq)
     }
 
     /// The newest base environment, as a value a phase copies. `None` until the first capture ends.
@@ -616,6 +687,8 @@ impl Drop for Daemon {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.join();
+        // The shims go on: they belong to no daemon. Only the daemon's watchers of them end.
+        self.shared.phases.stop();
     }
 }
 
@@ -1073,13 +1146,23 @@ fn call(
                 uptime_secs: uptime.nanos.saturating_sub(shared.started_uptime.nanos)
                     / 1_000_000_000,
                 head_seq: shared.store.last_seq().unwrap_or(0),
-                live_runs: 0,
+                live_runs: u32::try_from(shared.phases.live()).unwrap_or(u32::MAX),
                 store: shared.health.clone(),
-                warnings: shared
-                    .warnings
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone(),
+                warnings: {
+                    let mut warnings = shared
+                        .warnings
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    warnings.extend(
+                        shared
+                            .phases
+                            .unresponsive()
+                            .into_iter()
+                            .map(|name| format!("the shim of phase {name} is not answering")),
+                    );
+                    warnings
+                },
             };
             Ok(serde_json::to_value(result).expect("a result is JSON"))
         }
@@ -1130,11 +1213,88 @@ pub fn run(options: DaemonOptions) -> Result<(), SocketError> {
     Ok(())
 }
 
-/// Finds every shim of an earlier daemon under `runs_dir`: reattaches by pid plus start time, and reads `exit.json`
-/// for the shims that ended while no daemon was running. It runs before the socket is bound.
+/// Finds every shim of an earlier daemon under `runs_dir`: each `<run>/<phase>` directory with a `spec.json` (what a
+/// shim is started from) is one. For each, `exit.json` is read first (a record, or a file that is not one), then the
+/// shim's own `shim.json` identity: the shim is alive when a process with that pid started at that time and is not a
+/// zombie. A shim that left no `shim.json` is alive when its socket accepts a connection. Anything else is gone with
+/// no record: `lost`. A directory that is not a phase of this daemon (a name [`PhaseKey`] refuses, or no `spec.json`)
+/// is left alone. It runs before the socket is bound.
 pub fn adopt_shims(runs_dir: &Path) -> Result<Vec<AdoptedShim>, SocketError> {
-    let _ = runs_dir;
-    todo!("daemon: adopt shims")
+    let io_error = |context: String| move |source| SocketError::Io { context, source };
+    let runs = match std::fs::read_dir(runs_dir) {
+        Ok(runs) => runs,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(io_error(format!("reading {}", runs_dir.display()))(e)),
+    };
+    let mut found = Vec::new();
+    for run in runs {
+        let run = run.map_err(io_error(format!("reading {}", runs_dir.display())))?;
+        let run_dir = run.path();
+        if !run_dir.is_dir() {
+            continue;
+        }
+        let Some(run_name) = run.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let phases = std::fs::read_dir(&run_dir)
+            .map_err(io_error(format!("reading {}", run_dir.display())))?;
+        for phase in phases {
+            let phase = phase.map_err(io_error(format!("reading {}", run_dir.display())))?;
+            let dir = phase.path();
+            let Some(phase_name) = phase.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            let Ok(key) = PhaseKey::new(&run_name, &phase_name) else {
+                continue;
+            };
+            if !dir.join(shim_files::SPEC).is_file() {
+                continue;
+            }
+            found.push(classify_shim(key, dir));
+        }
+    }
+    found.sort_by(|a, b| a.key.cmp(&b.key));
+    Ok(found)
+}
+
+/// Whether `spec.json` was written less than `age` ago.
+fn spec_is_younger_than(dir: &Path, age: Duration) -> bool {
+    std::fs::metadata(dir.join(shim_files::SPEC))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|elapsed| elapsed < age)
+}
+
+fn classify_shim(key: PhaseKey, dir: PathBuf) -> AdoptedShim {
+    let identity = read_identity(&dir.join(shim_files::SHIM));
+    let state = match read_exit_json(&dir) {
+        ExitJson::Record(record) => AdoptedState::Exited(record),
+        ExitJson::Damaged(reason) => AdoptedState::Damaged { reason },
+        ExitJson::Missing => {
+            let alive = match &identity {
+                Some(id) => process_is_running(id.pid, Some(id.started_unix_us)),
+                // No identity yet: a shim that is still starting has not written `shim.json` or bound its socket. It
+                // is alive when its socket answers, or when its `spec.json` is too young for it to have done either.
+                None => {
+                    UnixStream::connect(dir.join(shim_files::SOCKET_DIR).join(shim_files::SOCKET))
+                        .is_ok()
+                        || spec_is_younger_than(&dir, BIND_WAIT)
+                }
+            };
+            if alive {
+                AdoptedState::Alive
+            } else {
+                AdoptedState::Lost
+            }
+        }
+    };
+    AdoptedShim {
+        key,
+        dir,
+        identity,
+        state,
+    }
 }
 
 #[cfg(test)]

@@ -60,6 +60,7 @@ impl RunDir {
             cwd: self.0.clone(),
             run_dir: self.0.clone(),
             stdio: ChildStdio::Pipes,
+            daemon: None,
         }
     }
 
@@ -894,7 +895,12 @@ fn the_entry_runs_the_child_of_spec_json_and_writes_exit_json() {
         &dir,
         &dir.spec("import sys; print('from the child'); sys.exit(4)"),
     );
-    let code = shim::run(&[dir.path().display().to_string()]);
+    // No daemon is there to acknowledge the record, so the shim is told not to wait for one: the record is on disk.
+    let limits = Limits {
+        ack_wait: Duration::ZERO,
+        ..Limits::default()
+    };
+    let code = shim::run_with(&[dir.path().display().to_string()], limits);
     assert_eq!(
         code,
         exit_code::OK,

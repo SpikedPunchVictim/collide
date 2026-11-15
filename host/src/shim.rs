@@ -18,7 +18,9 @@
 //! 6. reaps the child with `wait4` ([`reap`]). An agent's exit is **never** taken from std's or tokio's own wait
 //!    calls, and a tokio `Child` is never dropped (measured S3). A test reads this file's source to keep that true;
 //! 7. writes `exit.json` atomically ([`write_exit_record`]): temp file, `fsync`, rename, `fsync` of the directory.
-//!    On a full disk it keeps the record in memory and serves it until the daemon acknowledges it ([`ExitKeeper`]).
+//!    On a full disk it keeps the record in memory and serves it until the daemon acknowledges it ([`ExitKeeper`]);
+//! 8. serves the daemon on its own socket while the child runs and until the exit record is acknowledged
+//!    ([`ShimLink`]), and when the child ends with no daemon connected, starts one ([`ShimSpec::daemon`]).
 //!
 //! A shim that dies without writing `exit.json` makes its phase `lost`, whatever the agent's stream said. That is the
 //! daemon's rule, so nothing here writes a record for a shim that did not finish.
@@ -31,6 +33,27 @@
 //! journal and `stdout.log` both hold. A PTY's output is not journaled: it is terminal bytes with no lines, and the
 //! ring keeps the end of it. Stderr is a log only. The journal itself has no cap: cutting it would break replay,
 //! and its growth is bounded by what the child writes, line by line.
+//!
+//! ## The daemon link
+//!
+//! The shim owns a socket, `shim/s` in a `0700` directory under its run directory, which follows the daemon's own rules
+//! (0.2, The socket): the directory's owner and mode are checked, the peer's uid must be the shim's, and there is no
+//! token, because only the daemon talks to it. The daemon connects and the shim speaks first (`Hello`); a connection
+//! is served on a thread of its own, so a daemon that says nothing, or is stopped, holds only its own thread.
+//!
+//! - `Write` is journaled and written to the child ([`Shim::write_to_child`]), and answered with `Wrote`. `CloseStdin`
+//!   and `Signal` have no success answer in the protocol; a failure is a `Failed`.
+//! - A first failure of a sink ([`Shim::problems`]) is sent once on each connection as `Failed`.
+//! - **A message that has not all arrived is not read.** The framing is [`crate::shim_link::FrameReader`]'s: a peer
+//!   that sends half a message and goes away is dropped with the half, and a peer that sends the rest later is read
+//!   whole. A damaged frame closes that connection and no other.
+//! - When the child is reaped the record is published ([`ShimLink::publish_exit`]): each connection is sent
+//!   `Exited`, a connection that comes later is sent it on arrival, and the shim serves it until a daemon sends
+//!   `AckExit` ([`ShimLink::wait_acknowledged`]). `exit.json` stays on disk for the daemon either way.
+//! - When the child ends and no daemon is connected, and the spec says how ([`DaemonStart`]), the shim starts the
+//!   daemon ([`crate::launch::ensure_daemon`]) so that a phase boundary is not missed while the app is closed
+//!   (0.2, Starting the daemon). It then waits for the acknowledgement for [`ACK_WAIT`]; when `exit.json` could not be
+//!   written it waits until it is acknowledged, because the record exists nowhere else.
 //!
 //! ## A failing disk
 //!
@@ -48,24 +71,32 @@
 //! | `shim: journal writer` | [`JournalWriter`] | one ordered file of records, journal first |
 //! | `shim: exit record` | [`write_exit_record`], [`ExitKeeper`] | the atomic `exit.json`, and the in-memory copy on a full disk |
 //! | `shim: pty ring` | [`PtyRing`] | the last 1 MiB of a PTY's output, and the replay on attach |
-//! | `shim: daemon link` | [`serve_daemon`] | the shim's socket: handshake, `Write`, `CloseStdin`, `Signal`, `AckExit` |
+//! | `shim: daemon link` | [`ShimLink`] | the shim's socket: handshake, `Write`, `CloseStdin`, `Signal`, `AckExit` |
 
+use crate::auth::{self, StdFs, UnixPeer};
 use crate::clock::{Clock, Clocks, SystemClocks};
+use crate::daemon::{DaemonPaths, ROOT_ENV};
+use crate::launch::{StartRequest, ensure_daemon};
+use crate::shim_link::{FrameReader, Next, send};
 use crate::sysproc;
 use collide_core::journal::{Direction, JournalRecord, MAX_RECORD_BYTES, encode_record};
-use collide_core::shim::{ExitEnd, ExitRecord, SHIM_PROTOCOL, ShimMessage, exit_record_bytes};
+use collide_core::shim::{
+    DaemonMessage, ExitEnd, ExitRecord, SHIM_PROTOCOL, ShimMessage, StopSignal, exit_record_bytes,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -85,6 +116,29 @@ pub const LOG_CAP_BYTES: u64 = 256 * 1024 * 1024;
 /// grandchild that kept a pipe open would otherwise hold the record back for ever.
 pub const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(2);
 
+/// How long the shim waits, after its child ended and `exit.json` is on disk, for a daemon to acknowledge the record.
+/// The plan sets none: the record is safe on disk, so the wait is only to give a daemon that is being started the
+/// time to take it (a start waits up to 15 s, and adoption follows).
+pub const ACK_WAIT: Duration = Duration::from_secs(60);
+
+/// How long a daemon has, after it connects, to answer the shim's `Hello` with `Welcome`. The plan sets none: a daemon
+/// that has connected answers at once, so this is for a peer that connects and says nothing.
+pub const HANDSHAKE_WAIT: Duration = Duration::from_secs(10);
+
+/// How often a link's threads look at whether the shim is ending, and so how long a read waits.
+const LINK_POLL: Duration = Duration::from_millis(50);
+
+/// How long a write to one daemon connection may block. A daemon that does not read is dropped, not waited for.
+const LINK_WRITE_WAIT: Duration = Duration::from_secs(5);
+
+/// How many daemon connections a shim serves at once: one daemon talks to it, and one that is about to take over.
+const MAX_LINK_CONNECTIONS: usize = 8;
+
+/// What a [`ShimMessage::Failed`] that reports a sink's failure starts with, as against one that answers a request. The
+/// protocol has one `Failed` for both, so the text tells them apart and the daemon does not pair a notice with a
+/// request.
+pub const PROBLEM_PREFIX: &str = "sink problem: ";
+
 /// The bytes a pump reads at once.
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 
@@ -96,8 +150,7 @@ pub mod exit_code {
     pub const FAILED: i32 = 1;
     /// The arguments or the spec were not understood.
     pub const USAGE: i32 = 2;
-    /// The child was reaped but `exit.json` could not be written. The record is in memory only, and until the daemon
-    /// link serves it (`shim: daemon link`) the shim has no one to give it to.
+    /// The child was reaped but `exit.json` could not be written, and no daemon acknowledged the record from memory.
     pub const RECORD_NOT_WRITTEN: i32 = 3;
 }
 
@@ -116,6 +169,11 @@ pub mod files {
     pub const SOCKET_DIR: &str = "shim";
     /// The shim's socket, inside [`SOCKET_DIR`]. Short, because the whole path is limited to 103 bytes (0.2).
     pub const SOCKET: &str = "s";
+    /// What the shim process itself writes to its standard output and error, when the daemon starts it.
+    pub const SHIM_LOG: &str = "shim.log";
+    /// The shim process's own pid and start time ([`super::ChildIdentity`] shaped), so a daemon that restarts finds the
+    /// shim by pid and start time and can tell a shim that ended from one that is only quiet.
+    pub const SHIM: &str = "shim.json";
 }
 
 /// The caps and waits of a shim. [`Limits::default`] is what a running shim uses; a test passes small ones.
@@ -127,6 +185,9 @@ pub struct Limits {
     pub log_bytes: u64,
     /// How long to wait for the pipes after the child is reaped.
     pub drain_after_exit: Duration,
+    /// How long the shim serves the exit record for a daemon to acknowledge it, once `exit.json` is on disk
+    /// ([`ACK_WAIT`]). A record that is only in memory is served for as long as it takes.
+    pub ack_wait: Duration,
 }
 
 impl Default for Limits {
@@ -135,6 +196,7 @@ impl Default for Limits {
             line_bytes: LINE_CAP_BYTES,
             log_bytes: LOG_CAP_BYTES,
             drain_after_exit: DRAIN_AFTER_EXIT,
+            ack_wait: ACK_WAIT,
         }
     }
 }
@@ -158,6 +220,15 @@ pub enum ChildStdio {
     Pty { rows: u16, cols: u16 },
 }
 
+/// How a shim starts the daemon when its child ends and no daemon is there to be told (0.2, Starting the daemon): the
+/// `collide-daemon` binary and the environment it is started with. The environment carries `COLLIDE_DAEMON_ROOT` or
+/// `HOME`, so the shim finds the same files the daemon that started it uses. A spec without it starts no daemon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonStart {
+    pub exe: PathBuf,
+    pub env: BTreeMap<String, String>,
+}
+
 /// What the daemon tells a shim to start: the child's command, environment and directory, and where the shim writes.
 /// The environment is complete: the shim adds nothing and removes nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +240,8 @@ pub struct ShimSpec {
     /// The run directory the files of [`files`] are in.
     pub run_dir: PathBuf,
     pub stdio: ChildStdio,
+    /// How to start the daemon when the child ends with none connected. `None` starts none.
+    pub daemon: Option<DaemonStart>,
 }
 
 impl ShimSpec {
@@ -178,14 +251,21 @@ impl ShimSpec {
             ChildStdio::Pipes => json!({ "type": "pipes" }),
             ChildStdio::Pty { rows, cols } => json!({ "type": "pty", "rows": rows, "cols": cols }),
         };
-        json!({
+        let mut spec = json!({
             "program": self.program,
             "args": self.args,
             "env": self.env,
             "cwd": self.cwd,
             "run_dir": self.run_dir,
             "stdio": stdio,
-        })
+        });
+        if let (Some(daemon), Some(object)) = (&self.daemon, spec.as_object_mut()) {
+            object.insert(
+                "daemon".to_string(),
+                json!({ "exe": daemon.exe, "env": daemon.env }),
+            );
+        }
+        spec
     }
 
     /// Reads what [`ShimSpec::to_json`] wrote. The error names the field that is missing or of the wrong kind.
@@ -241,6 +321,34 @@ impl ShimSpec {
             }
             _ => return Err(spec_error("`stdio.type` is not `pipes` or `pty`".into())),
         };
+        let daemon = match value.get("daemon") {
+            None | Some(Value::Null) => None,
+            Some(daemon) => {
+                let exe = daemon.get("exe").and_then(Value::as_str).ok_or_else(|| {
+                    spec_error("`daemon.exe` is missing or is not a string".into())
+                })?;
+                let env = daemon
+                    .get("env")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        spec_error("`daemon.env` is missing or is not an object".into())
+                    })?
+                    .iter()
+                    .map(|(name, value)| {
+                        value
+                            .as_str()
+                            .map(|value| (name.clone(), value.to_string()))
+                            .ok_or_else(|| {
+                                spec_error(format!("`daemon.env` value of {name} is not a string"))
+                            })
+                    })
+                    .collect::<Result<BTreeMap<_, _>, _>>()?;
+                Some(DaemonStart {
+                    exe: exe.into(),
+                    env,
+                })
+            }
+        };
         Ok(ShimSpec {
             program: text("program")?.into(),
             args,
@@ -248,6 +356,7 @@ impl ShimSpec {
             cwd: text("cwd")?.into(),
             run_dir: text("run_dir")?.into(),
             stdio,
+            daemon,
         })
     }
 }
@@ -318,13 +427,16 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The shim's `main`, for `collide shim <run-dir>`: reads `spec.json` from the run directory, starts the child,
-/// reaps it and writes `exit.json`. Returns the process exit code of the shim itself ([`exit_code`]), which is not
-/// the child's.
-///
-/// Serving the daemon while the child runs, and until `exit.json` is acknowledged, is [`serve_daemon`], which the
-/// next item adds. Until then the child's stdin stays open and nothing writes to it.
+/// The shim's `main`, for `collide shim <run-dir>`: reads `spec.json` from the run directory, starts the child, serves
+/// the daemon on the shim's socket, reaps the child, writes `exit.json` and serves the record until a daemon
+/// acknowledges it. Returns the process exit code of the shim itself ([`exit_code`]), which is not the child's.
 pub fn run(args: &[String]) -> i32 {
+    run_with(args, Limits::default())
+}
+
+/// [`run`] with the caps and waits chosen by the caller, which is how a test keeps the wait for an acknowledgement
+/// short.
+pub fn run_with(args: &[String], limits: Limits) -> i32 {
     let [run_dir] = args else {
         eprintln!("usage: collide shim <run-dir>");
         return exit_code::USAGE;
@@ -345,34 +457,108 @@ pub fn run(args: &[String]) -> i32 {
             return exit_code::USAGE;
         }
     };
-    run_spec(&spec, Limits::default())
+    run_spec(&spec, limits)
+}
+
+/// Writes the shim's own identity ([`files::SHIM`]). A shim that cannot is still a shim: the daemon then finds it by
+/// its socket alone.
+fn write_own_identity(run_dir: &Path) {
+    let pid = std::process::id();
+    let started_unix_us =
+        sysproc::start_time_us(pid).unwrap_or_else(|| SystemClocks.read(Clock::Wall).nanos / 1000);
+    let identity = ChildIdentity {
+        pid,
+        started_unix_us,
+    };
+    if let Err(error) = write_file_atomically(
+        run_dir,
+        files::SHIM,
+        identity.to_json().to_string().as_bytes(),
+        |file| file,
+    ) {
+        eprintln!("collide shim: its own identity was not written: {error}");
+    }
+}
+
+/// Starts the daemon the way a start does ([`ensure_daemon`]), with the files the spec's environment names. A failure
+/// is reported on the shim's own stderr and nothing more: the record is safe on disk, and the next daemon adopts it.
+fn start_daemon(start: &DaemonStart) {
+    let paths = match DaemonPaths::from_env(
+        start.env.get(ROOT_ENV).map(String::as_str),
+        start.env.get("HOME").map(String::as_str),
+    ) {
+        Ok(paths) => paths,
+        Err(message) => {
+            eprintln!("collide shim: the daemon was not started: {message}");
+            return;
+        }
+    };
+    let mut request = StartRequest::new(start.exe.clone(), &paths);
+    request.env = start.env.clone();
+    match ensure_daemon(&request) {
+        Ok(_) => {}
+        Err(error) => eprintln!("collide shim: the daemon was not started: {error}"),
+    }
 }
 
 fn run_spec(spec: &ShimSpec, limits: Limits) -> i32 {
+    write_own_identity(&spec.run_dir);
     let shim = match Shim::start(spec, limits) {
-        Ok(shim) => shim,
+        Ok(shim) => Arc::new(shim),
         Err(error) => {
             eprintln!("collide shim: {error}");
             return exit_code::FAILED;
         }
     };
-    match shim.finish() {
-        Ok(outcome) => {
-            for problem in &outcome.problems {
-                eprintln!("collide shim: {problem}");
-            }
-            match outcome.write_error {
-                None => exit_code::OK,
-                Some(error) => {
-                    eprintln!("collide shim: exit.json was not written: {error}");
-                    exit_code::RECORD_NOT_WRITTEN
-                }
-            }
+    // A link that cannot be made leaves the shim with no way to be reached, and still a shim: the child runs, the
+    // record is written, and the next daemon takes it from `exit.json`.
+    let link = match ShimLink::start(Arc::clone(&shim), &spec.run_dir, LinkOptions::default()) {
+        Ok(link) => Some(link),
+        Err(error) => {
+            eprintln!("collide shim: no daemon link: {error}");
+            None
         }
+    };
+    let outcome = match shim.finish() {
+        Ok(outcome) => outcome,
         Err(error) => {
             eprintln!("collide shim: {error}");
-            exit_code::FAILED
+            return exit_code::FAILED;
         }
+    };
+    for problem in &outcome.problems {
+        eprintln!("collide shim: {problem}");
+    }
+    let ShimOutcome {
+        keeper,
+        write_error,
+        ..
+    } = outcome;
+    if let Some(error) = &write_error {
+        eprintln!("collide shim: exit.json was not written: {error}");
+    }
+    let Some(link) = link else {
+        return if write_error.is_none() {
+            exit_code::OK
+        } else {
+            exit_code::RECORD_NOT_WRITTEN
+        };
+    };
+    link.publish_exit(keeper);
+    // A phase boundary must not wait for somebody to open the app: with no daemon connected, start one.
+    if link.connections() == 0
+        && let Some(start) = &spec.daemon
+    {
+        start_daemon(start);
+    }
+    // A record on disk is waited for a while; one in memory only is waited for as long as it takes.
+    let wait = write_error.is_none().then_some(limits.ack_wait);
+    let acknowledged = link.wait_acknowledged(wait);
+    drop(link);
+    if write_error.is_some() && !acknowledged {
+        exit_code::RECORD_NOT_WRITTEN
+    } else {
+        exit_code::OK
     }
 }
 
@@ -1108,7 +1294,10 @@ pub struct Shim {
     journal: SharedJournal,
     ring: Arc<Mutex<PtyRing>>,
     problems: Problems,
-    pumps: Vec<Pump>,
+    /// Behind a lock because a pump's channel is not `Sync`, and the shim is shared with the link's threads.
+    pumps: Mutex<Vec<Pump>>,
+    /// Set once [`reap`] has taken the child's exit, so a signal is not sent for a child that is gone.
+    reaped: AtomicBool,
 }
 
 impl Shim {
@@ -1186,7 +1375,8 @@ impl Shim {
                 journal,
                 ring,
                 problems,
-                pumps,
+                pumps: Mutex::new(pumps),
+                reaped: AtomicBool::new(false),
             }),
             Err(error) => {
                 kill_and_reap(pid);
@@ -1243,6 +1433,29 @@ impl Shim {
         }
     }
 
+    /// Sends `signal` to the child's process group. The child is a session leader (the shim made it one), so its group
+    /// is its pid, and the group is what is signalled: a pid alone could name something else once the child is gone,
+    /// and a group with no member left cannot. A child that has been reaped is refused.
+    pub fn signal_child(&self, signal: StopSignal) -> Result<(), ShimError> {
+        let fail = |source| write_error("signalling the child", source);
+        if self.reaped.load(Ordering::SeqCst) {
+            return Err(fail(io::Error::other("the child has ended")));
+        }
+        let number = match signal {
+            StopSignal::Hup => libc::SIGHUP,
+            StopSignal::Term => libc::SIGTERM,
+            StopSignal::Kill => libc::SIGKILL,
+        };
+        let group = libc::pid_t::try_from(self.identity.pid)
+            .map_err(|_| fail(io::Error::new(io::ErrorKind::InvalidInput, "not a pid")))?;
+        // SAFETY: `kill` takes two integers. A negative pid names the process group with that id, which is the
+        // child's own group.
+        if unsafe { libc::kill(-group, number) } == -1 {
+            return Err(fail(io::Error::last_os_error()));
+        }
+        Ok(())
+    }
+
     /// What the PTY ring holds, for the replay on attach. Empty for a pipe child.
     pub fn ring_snapshot(&self) -> Vec<u8> {
         locked(&self.ring).snapshot()
@@ -1260,10 +1473,11 @@ impl Shim {
     /// Waits for the child with [`reap`], lets the pumps drain what is left in the pipes (for at most
     /// [`Limits::drain_after_exit`]), and writes `exit.json`, so the journal and the logs are complete before the
     /// record that says the child is done. An error is a `wait4` that failed; a failed `exit.json` is in the outcome.
-    pub fn finish(self) -> Result<ShimOutcome, ShimError> {
+    pub fn finish(&self) -> Result<ShimOutcome, ShimError> {
         let record = reap(self.identity.pid)?;
+        self.reaped.store(true, Ordering::SeqCst);
         let deadline = Instant::now() + self.drain_after_exit;
-        for pump in &self.pumps {
+        for pump in locked(&self.pumps).iter() {
             let wait = deadline.saturating_duration_since(Instant::now());
             // A pump that ended and one that panicked both disconnect the channel; only a timeout means it is still
             // reading, and then the record does not wait for it.
@@ -1306,13 +1520,383 @@ impl ChildInput {
     }
 }
 
-/// Serves the daemon on the shim's socket: the handshake (the shim's [`ShimMessage::Hello`], answered by
-/// [`collide_core::shim::answer_hello`]), then each [`collide_core::shim::DaemonMessage`] until the exit record is
-/// acknowledged. The socket's directory is mode
-/// `0700` under the run directory and its peer's uid is checked, with no token (0.2).
-pub fn serve_daemon(run_dir: &Path, child: ChildIdentity) -> Result<(), ShimError> {
-    let _ = (run_dir, child);
-    todo!("shim: daemon link")
+// ---- the daemon link --------------------------------------------------------------------------------------------
+
+/// What a [`ShimLink`] is made with. [`LinkOptions::default`] is what a running shim uses; a test passes its own.
+#[derive(Debug, Clone, Copy)]
+pub struct LinkOptions {
+    /// The uid a connecting peer must have: the shim's own, because the daemon is the same user's.
+    pub uid: u32,
+    /// How long a read on a connection waits before the thread looks at whether it should end.
+    pub poll: Duration,
+    /// How long a connection has, after the `Hello`, to answer with `Welcome`.
+    pub handshake_wait: Duration,
+    /// How long a write to a connection may block.
+    pub write_wait: Duration,
+}
+
+impl Default for LinkOptions {
+    fn default() -> Self {
+        LinkOptions {
+            uid: sysproc::daemon_uid(),
+            poll: LINK_POLL,
+            handshake_wait: HANDSHAKE_WAIT,
+            write_wait: LINK_WRITE_WAIT,
+        }
+    }
+}
+
+/// What the link's threads share.
+struct LinkShared {
+    shim: Arc<Shim>,
+    options: LinkOptions,
+    stopping: AtomicBool,
+    /// Threads serving a connection.
+    open: AtomicUsize,
+    /// Connections that have passed the handshake.
+    welcomed: AtomicUsize,
+    /// The record, once the child is reaped, until a daemon acknowledges it.
+    exit: Mutex<Option<ExitKeeper>>,
+    acknowledged: Condvar,
+}
+
+impl LinkShared {
+    fn pending_exit(&self) -> Option<ShimMessage> {
+        locked(&self.exit)
+            .as_ref()
+            .and_then(ExitKeeper::pending_message)
+    }
+
+    /// A daemon has the record. Only a record that was published can be acknowledged.
+    fn acknowledge(&self) -> bool {
+        let mut exit = locked(&self.exit);
+        match exit.as_mut() {
+            Some(keeper) => {
+                keeper.acknowledge();
+                self.acknowledged.notify_all();
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// Counts a thread in `counter` for as long as the guard lives.
+struct Counted<'a>(&'a AtomicUsize);
+
+impl<'a> Counted<'a> {
+    fn new(counter: &'a AtomicUsize) -> Counted<'a> {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Counted(counter)
+    }
+}
+
+impl Drop for Counted<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The shim's socket and the threads that serve it (`shim: daemon link`): one accepts, and one serves each
+/// connection, so a daemon that says nothing or does not read holds only its own thread. The socket is `shim/s` in a
+/// directory of mode `0700` under the run directory, checked as the daemon's own is ([`auth::prepare_shim_socket`]),
+/// and a peer whose uid is not [`LinkOptions::uid`] is closed before anything is said. Dropping the link stops the
+/// threads and removes the socket and its directory.
+pub struct ShimLink {
+    shared: Arc<LinkShared>,
+    accept: Option<JoinHandle<()>>,
+    socket: PathBuf,
+}
+
+impl ShimLink {
+    /// Checks the socket's path and directory, binds, and starts accepting.
+    pub fn start(
+        shim: Arc<Shim>,
+        run_dir: &Path,
+        options: LinkOptions,
+    ) -> Result<ShimLink, ShimError> {
+        let socket =
+            auth::prepare_shim_socket(&StdFs, sysproc::daemon_uid(), run_dir).map_err(|error| {
+                write_error(
+                    format!("the shim's socket in {}", run_dir.display()),
+                    io::Error::other(error.to_string()),
+                )
+            })?;
+        let bind = |what: &str, source| write_error(format!("{what} {}", socket.display()), source);
+        // A socket file left by a shim that died is this directory's own: nobody else serves it.
+        match fs::remove_file(&socket) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => return Err(bind("removing the old socket", source)),
+        }
+        let listener =
+            UnixListener::bind(&socket).map_err(|source| bind("binding the socket", source))?;
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))
+            .map_err(|source| bind("setting the mode of the socket", source))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|source| bind("making the listener non-blocking", source))?;
+        let shared = Arc::new(LinkShared {
+            shim,
+            options,
+            stopping: AtomicBool::new(false),
+            open: AtomicUsize::new(0),
+            welcomed: AtomicUsize::new(0),
+            exit: Mutex::new(None),
+            acknowledged: Condvar::new(),
+        });
+        let serving = Arc::clone(&shared);
+        let accept = thread::Builder::new()
+            .name("shim-link-accept".to_string())
+            .spawn(move || accept_connections(&serving, &listener))
+            .map_err(|source| bind("starting the accept thread for", source))?;
+        Ok(ShimLink {
+            shared,
+            accept: Some(accept),
+            socket,
+        })
+    }
+
+    /// The socket's path.
+    pub fn socket(&self) -> &Path {
+        &self.socket
+    }
+
+    /// How many daemon connections have passed the handshake and are open.
+    pub fn connections(&self) -> usize {
+        self.shared.welcomed.load(Ordering::SeqCst)
+    }
+
+    /// Makes the exit record available: each connection is sent it, one that comes later is sent it on arrival, and
+    /// every one is sent it again until a daemon acknowledges it.
+    pub fn publish_exit(&self, keeper: ExitKeeper) {
+        *locked(&self.shared.exit) = Some(keeper);
+    }
+
+    /// Waits until a daemon has acknowledged the published record. `None` waits for as long as it takes. Returns
+    /// whether it was acknowledged.
+    pub fn wait_acknowledged(&self, within: Option<Duration>) -> bool {
+        let until = within.map(|within| Instant::now() + within);
+        let mut exit = locked(&self.shared.exit);
+        loop {
+            if exit
+                .as_ref()
+                .is_some_and(|keeper| keeper.pending_message().is_none())
+            {
+                return true;
+            }
+            let slice = match until {
+                Some(until) => {
+                    let left = until.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return false;
+                    }
+                    left.min(LINK_POLL)
+                }
+                None => LINK_POLL,
+            };
+            exit = self
+                .shared
+                .acknowledged
+                .wait_timeout(exit, slice)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+}
+
+impl Drop for ShimLink {
+    fn drop(&mut self) {
+        self.shared.stopping.store(true, Ordering::SeqCst);
+        if let Some(accept) = self.accept.take() {
+            let _ = accept.join();
+        }
+        let _ = fs::remove_file(&self.socket);
+        if let Some(dir) = self.socket.parent() {
+            let _ = fs::remove_dir(dir);
+        }
+    }
+}
+
+/// Accepts until the link stops, a thread for each connection.
+fn accept_connections(shared: &Arc<LinkShared>, listener: &UnixListener) {
+    while !shared.stopping.load(Ordering::SeqCst) {
+        let mut poll = libc::pollfd {
+            fd: listener.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let wait_ms = i32::try_from(shared.options.poll.as_millis()).unwrap_or(i32::MAX);
+        // SAFETY: `poll` points at one `pollfd` that lives for the call, and the count says so.
+        let ready = unsafe { libc::poll(&mut poll, 1, wait_ms) };
+        if ready <= 0 {
+            continue;
+        }
+        match listener.accept() {
+            Ok((stream, _)) => {
+                if shared.open.load(Ordering::SeqCst) >= MAX_LINK_CONNECTIONS {
+                    eprintln!(
+                        "collide shim: a connection was refused: {MAX_LINK_CONNECTIONS} are open"
+                    );
+                    continue;
+                }
+                let serving = Arc::clone(shared);
+                let started = thread::Builder::new()
+                    .name("shim-link-connection".to_string())
+                    .spawn(move || serve_connection(&serving, stream));
+                if let Err(error) = started {
+                    eprintln!("collide shim: could not start a connection's thread: {error}");
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) => {
+                eprintln!("collide shim: accept failed: {error}");
+                thread::sleep(shared.options.poll);
+            }
+        }
+    }
+}
+
+/// One daemon connection: the uid check, the shim's `Hello`, the daemon's `Welcome`, then each message until the
+/// connection ends or the link stops. Everything is written by this thread, so a frame is never interleaved with
+/// another.
+fn serve_connection(shared: &LinkShared, stream: UnixStream) {
+    let _open = Counted::new(&shared.open);
+    if let Err(refused) = auth::admit_shim(shared.options.uid, &UnixPeer { stream: &stream }) {
+        eprintln!("collide shim: a connection was refused: {refused}");
+        return;
+    }
+    let setup = stream
+        .set_nonblocking(false)
+        .and_then(|()| stream.set_write_timeout(Some(shared.options.write_wait)))
+        .and_then(|()| stream.try_clone());
+    let mut writer = match setup {
+        Ok(writer) => writer,
+        Err(error) => {
+            eprintln!("collide shim: a connection could not be set up: {error}");
+            return;
+        }
+    };
+    let mut reader = FrameReader::new(stream, shared.options.poll);
+    if send(
+        &mut writer,
+        &ShimMessage::Hello {
+            protocol: SHIM_PROTOCOL,
+        },
+    )
+    .is_err()
+    {
+        return;
+    }
+    if !await_welcome(shared, &mut reader) {
+        return;
+    }
+    let _welcomed = Counted::new(&shared.welcomed);
+    let mut exit_sent = false;
+    let mut problems_sent: Vec<String> = Vec::new();
+    loop {
+        if !exit_sent && let Some(message) = shared.pending_exit() {
+            if send(&mut writer, &message).is_err() {
+                return;
+            }
+            exit_sent = true;
+        }
+        for problem in shared.shim.problems() {
+            if !problems_sent.contains(&problem) {
+                let notice = ShimMessage::Failed {
+                    message: format!("{PROBLEM_PREFIX}{problem}"),
+                };
+                if send(&mut writer, &notice).is_err() {
+                    return;
+                }
+                problems_sent.push(problem);
+            }
+        }
+        match reader.read_next::<DaemonMessage>() {
+            Ok(Next::Message(message)) => {
+                if !serve_message(shared, &mut writer, message) {
+                    return;
+                }
+            }
+            Ok(Next::Idle) => {
+                if shared.stopping.load(Ordering::SeqCst) {
+                    return;
+                }
+            }
+            Ok(Next::Closed { dropped }) => {
+                if dropped > 0 {
+                    eprintln!(
+                        "collide shim: a daemon went away in the middle of a message; its {dropped} bytes were dropped"
+                    );
+                }
+                return;
+            }
+            Err(error) => {
+                eprintln!("collide shim: a connection was closed: {error}");
+                return;
+            }
+        }
+    }
+}
+
+/// Waits for the daemon's `Welcome`. Anything else, a close, or no answer in [`LinkOptions::handshake_wait`] ends the
+/// connection.
+fn await_welcome(shared: &LinkShared, reader: &mut FrameReader) -> bool {
+    let until = Instant::now() + shared.options.handshake_wait;
+    loop {
+        match reader.read_next::<DaemonMessage>() {
+            Ok(Next::Message(DaemonMessage::Welcome { protocol })) if protocol == SHIM_PROTOCOL => {
+                return true;
+            }
+            Ok(Next::Message(DaemonMessage::Refused { message })) => {
+                eprintln!("collide shim: a daemon refused this shim: {message}");
+                return false;
+            }
+            Ok(Next::Message(other)) => {
+                eprintln!(
+                    "collide shim: a connection's first message was {other:?}, not a welcome"
+                );
+                return false;
+            }
+            Ok(Next::Idle) => {
+                if shared.stopping.load(Ordering::SeqCst) || Instant::now() >= until {
+                    return false;
+                }
+            }
+            Ok(Next::Closed { .. }) | Err(_) => return false,
+        }
+    }
+}
+
+/// Does what one message asks. `false` ends the connection.
+fn serve_message(shared: &LinkShared, writer: &mut UnixStream, message: DaemonMessage) -> bool {
+    let failed = |error: ShimError| ShimMessage::Failed {
+        message: error.to_string(),
+    };
+    let answer = match message {
+        DaemonMessage::Write { data } => Some(match shared.shim.write_to_child(data.as_bytes()) {
+            Ok(seq) => ShimMessage::Wrote { seq },
+            Err(error) => failed(error),
+        }),
+        DaemonMessage::CloseStdin {} => shared.shim.close_stdin().err().map(failed),
+        DaemonMessage::Signal { signal } => shared.shim.signal_child(signal).err().map(failed),
+        DaemonMessage::AckExit {} => {
+            if !shared.acknowledge() {
+                eprintln!(
+                    "collide shim: an acknowledgement came before the child ended, and was ignored"
+                );
+            }
+            None
+        }
+        DaemonMessage::Welcome { .. } | DaemonMessage::Refused { .. } => {
+            eprintln!("collide shim: a second handshake message closed a connection");
+            return false;
+        }
+    };
+    match answer {
+        Some(answer) => send(writer, &answer).is_ok(),
+        None => true,
+    }
 }
 
 #[cfg(test)]
@@ -1535,6 +2119,7 @@ mod tests {
             cwd: "/tmp".into(),
             run_dir: "/r".into(),
             stdio,
+            daemon: None,
         }
     }
 
@@ -1544,6 +2129,16 @@ mod tests {
             let spec = spec(stdio);
             assert_eq!(ShimSpec::from_json(&spec.to_json()).unwrap(), spec);
         }
+    }
+
+    #[test]
+    fn a_spec_that_starts_the_daemon_survives_its_json() {
+        let mut with = spec(ChildStdio::Pipes);
+        with.daemon = Some(DaemonStart {
+            exe: "/bin/collide-daemon".into(),
+            env: BTreeMap::from([("COLLIDE_DAEMON_ROOT".to_string(), "/r".to_string())]),
+        });
+        assert_eq!(ShimSpec::from_json(&with.to_json()).unwrap(), with);
     }
 
     #[test]

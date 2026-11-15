@@ -11,6 +11,7 @@
 
 use collide_host::daemon::{DaemonOptions, DaemonPaths, ROOT_ENV, run};
 use collide_host::launch::{StartKind, StartRequest, ensure_daemon};
+use collide_host::shim::DaemonStart;
 use std::process::ExitCode;
 
 fn fail(message: &str) -> ExitCode {
@@ -37,7 +38,18 @@ fn main() -> ExitCode {
         None => {
             // A login shell's path when the environment names none: macOS's default shell.
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-            let options = DaemonOptions::new(paths, shell, Box::new(std::io::stderr()));
+            let mut options = DaemonOptions::new(paths, shell, Box::new(std::io::stderr()));
+            let exe = std::env::current_exe().and_then(std::fs::canonicalize);
+            // The shim is `collide shim`, the binary next to this one; a shim that finds no daemon starts this one,
+            // with the same root and home, so it finds the same files.
+            if let Ok(exe) = exe {
+                options.shim_exe = exe.parent().map(|dir| dir.join("collide"));
+                let env = ["COLLIDE_DAEMON_ROOT", "HOME", "SHELL"]
+                    .into_iter()
+                    .filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?)))
+                    .collect();
+                options.daemon_start = Some(DaemonStart { exe, env });
+            }
             match run(options) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => fail(&error.to_string()),

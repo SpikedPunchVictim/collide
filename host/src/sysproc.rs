@@ -27,6 +27,19 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     imp::peer_uid(stream)
 }
 
+/// Whether the process is stopped (`SIGSTOP`, or a job-control stop), read from its status. `None` when it cannot be
+/// looked up. A shim that is stopped answers nothing, which the daemon reports as unresponsive without sending it
+/// anything.
+pub fn is_stopped(pid: u32) -> Option<bool> {
+    imp::is_stopped(pid)
+}
+
+/// Whether the process has ended and has not been waited for (a zombie), read from its status. `None` when it cannot
+/// be looked up, which macOS may also answer for a zombie. A zombie is not running, whatever `kill(pid, 0)` says of it.
+pub fn is_zombie(pid: u32) -> Option<bool> {
+    imp::is_zombie(pid)
+}
+
 /// The pid of the process on the other end of `stream`, as it was when it connected.
 pub fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
     imp::peer_pid(stream)
@@ -171,6 +184,20 @@ mod imp {
         (parent != 0 && parent != info.pbi_pid).then_some(parent)
     }
 
+    /// `SSTOP` of `<sys/proc.h>`: the status of a stopped process.
+    const SSTOP: u32 = 4;
+
+    pub fn is_stopped(pid: u32) -> Option<bool> {
+        Some(bsd_info(pid)?.pbi_status == SSTOP)
+    }
+
+    /// `SZOMB` of `<sys/proc.h>`: the status of a process that ended and was not waited for.
+    const SZOMB: u32 = 5;
+
+    pub fn is_zombie(pid: u32) -> Option<bool> {
+        Some(bsd_info(pid)?.pbi_status == SZOMB)
+    }
+
     pub fn start_time_us(pid: u32) -> Option<u64> {
         let info = bsd_info(pid)?;
         info.pbi_start_tvsec
@@ -266,6 +293,14 @@ mod imp {
     }
 
     pub fn parent_pid(_: u32) -> Option<u32> {
+        None
+    }
+
+    pub fn is_stopped(_: u32) -> Option<bool> {
+        None
+    }
+
+    pub fn is_zombie(_: u32) -> Option<bool> {
         None
     }
 
@@ -410,5 +445,34 @@ mod tests {
     #[test]
     fn a_pid_that_is_not_there_has_no_start_time() {
         assert_eq!(start_time_us(u32::MAX), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_stopped_child_is_stopped_and_an_unreaped_one_is_not_live() {
+        use std::process::Command;
+        use std::time::{Duration, Instant};
+        // A child this test starts, so signalling it touches nothing else; it is waited for at the end.
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = child.id();
+        let wait_for = |what: &str, done: &dyn Fn() -> bool| {
+            let until = Instant::now() + Duration::from_secs(5);
+            while !done() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(done(), "timed out waiting for {what}");
+        };
+        assert_eq!(is_stopped(pid), Some(false));
+        assert_eq!(is_zombie(pid), Some(false));
+        // SAFETY: `kill` takes two integers, and the pid is the child started above, not yet waited for.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+        wait_for("the child to stop", &|| is_stopped(pid) == Some(true));
+        // SAFETY: as above.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        // The kernel may answer `Some(true)` for a zombie or give no record at all; either way it is not live.
+        wait_for("the child to stop being live", &|| {
+            is_zombie(pid) != Some(false)
+        });
+        child.wait().unwrap();
     }
 }

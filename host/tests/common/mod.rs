@@ -167,3 +167,123 @@ fn open_up(dir: &Path) {
         }
     }
 }
+
+// ---- processes the link tests start ------------------------------------------------------------------------------
+
+pub const PYTHON: &str = "/usr/bin/python3";
+
+/// Polls `done` every 20 ms for up to `within`, and panics naming `what` when it never holds.
+pub fn wait_until(what: &str, within: std::time::Duration, mut done: impl FnMut() -> bool) {
+    let until = std::time::Instant::now() + within;
+    while std::time::Instant::now() < until {
+        if done() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(done(), "timed out after {within:?} waiting for: {what}");
+}
+
+/// Whether the pid names a live process (a zombie counts: it has not been reaped).
+pub fn pid_alive(pid: u32) -> bool {
+    // SAFETY: signal 0 sends nothing; it only asks whether the pid exists.
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+/// Sends `signal` to `pid` only when the process there started at `started_us`, so a pid that was reused is never hit.
+pub fn signal_if_same(pid: u32, started_us: u64, signal: i32) {
+    if collide_host::sysproc::start_time_us(pid) == Some(started_us) {
+        // SAFETY: `kill` takes two integers; the pid was checked against the start time this test recorded.
+        unsafe { libc::kill(pid as libc::pid_t, signal) };
+    }
+}
+
+/// Stops the child of a shim that a test started, by the identity file the shim wrote (`child.json`): its process
+/// group first (the child is a session leader), then the pid, each only if the start time still matches.
+pub fn kill_child_of(run_dir: &Path) {
+    let Ok(text) = fs::read_to_string(run_dir.join("child.json")) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
+    let Some(identity) = collide_host::shim::ChildIdentity::from_json(&value) else {
+        return;
+    };
+    if collide_host::sysproc::start_time_us(identity.pid) == Some(identity.started_unix_us) {
+        // SAFETY: the pid's start time matched the one the shim recorded, so it is that child, and it is a session
+        // leader (the shim made it one), so its group id is its pid.
+        unsafe {
+            libc::kill(-(identity.pid as libc::pid_t), libc::SIGKILL);
+            libc::kill(identity.pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+}
+
+/// A `collide shim` process that a test started in a folder of its own. `Drop` continues it (in case a test stopped it),
+/// kills it, reaps it, and stops its child by `child.json`. It signals nothing else.
+pub struct ShimProc {
+    pub dir: PathBuf,
+    child: Option<std::process::Child>,
+}
+
+impl ShimProc {
+    /// Starts `collide shim <dir>` with an environment of the test's own (`HOME` and `COLLIDE_DAEMON_ROOT` in `root`).
+    /// `spec.json` is already in `dir`.
+    pub fn start(root: &TempRoot, dir: &Path) -> ShimProc {
+        let child = Command::new(env!("CARGO_BIN_EXE_collide"))
+            .arg("shim")
+            .arg(dir)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", root.path())
+            .env("COLLIDE_DAEMON_ROOT", root.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("collide shim starts");
+        ShimProc {
+            dir: dir.to_path_buf(),
+            child: Some(child),
+        }
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.as_ref().expect("not reaped").id()
+    }
+
+    /// The shim's exit status once it has ended, within `within`.
+    pub fn wait_exit(&mut self, within: std::time::Duration) -> Option<std::process::ExitStatus> {
+        let until = std::time::Instant::now() + within;
+        loop {
+            if let Some(status) = self.child.as_mut()?.try_wait().unwrap() {
+                return Some(status);
+            }
+            if std::time::Instant::now() >= until {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Sends `signal` to this shim.
+    pub fn signal(&self, signal: i32) {
+        // SAFETY: `kill` takes two integers; the pid is this test's own, not yet reaped child.
+        unsafe { libc::kill(self.pid() as libc::pid_t, signal) };
+    }
+}
+
+impl Drop for ShimProc {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            // SAFETY: the pid is this test's own child, which has not been reaped (`take` leaves nothing to reap twice).
+            unsafe {
+                libc::kill(child.id() as libc::pid_t, libc::SIGCONT);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        kill_child_of(&self.dir);
+    }
+}

@@ -5,6 +5,10 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest = args.get(1..).unwrap_or_default();
+    // The per-child shim (`collide shim <run-dir>`): the daemon starts it, and nobody types it, so it is not listed.
+    if args.first().map(String::as_str) == Some("shim") {
+        return ExitCode::from(u8::try_from(collide_host::shim::run(rest)).unwrap_or(1));
+    }
     if let Some(code) = args
         .first()
         .and_then(|name| commands::execute_stub(name, rest))
