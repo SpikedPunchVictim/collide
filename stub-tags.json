@@ -67,5 +67,8 @@
   "cli: report": "7",
   "cli: config": "4b",
   "cli: pack": "4b",
-  "ui_tools: endpoint token store": "6b"
+  "ui_tools: endpoint token store": "6b",
+  "shell: daemon connection": "3c",
+  "shell: daemon events": "3c",
+  "shell: ask token": "6b"
 }

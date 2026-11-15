@@ -186,3 +186,28 @@ fn every_ui_tools_tag_names_its_stage_and_counts_at_least_one_stub() {
         );
     }
 }
+
+/// The tags of the shell's `rpc` command and event channel (ts-0017-qb) and the stage that fills each one: the minimal
+/// shell of Stage 3c connects to the daemon and carries its notices to the window, and Stage 6b adds the ask token. Each
+/// must count at least one stub today.
+const SHELL_TAGS: [(&str, &str); 3] = [
+    ("shell: daemon connection", "3c"),
+    ("shell: daemon events", "3c"),
+    ("shell: ask token", "6b"),
+];
+
+#[test]
+fn every_shell_tag_names_its_stage_and_counts_at_least_one_stub() {
+    let report = stubs::check(&repo()).unwrap();
+    for (tag, stage) in SHELL_TAGS {
+        assert_eq!(
+            report.stages.get(tag).map(String::as_str),
+            Some(stage),
+            "tag \"{tag}\" is not registered under stage {stage}"
+        );
+        assert!(
+            report.counts.get(tag).copied().unwrap_or(0) >= 1,
+            "tag \"{tag}\" is registered but no stub carries it"
+        );
+    }
+}
