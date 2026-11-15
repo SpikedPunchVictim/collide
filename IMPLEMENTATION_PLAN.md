@@ -7,17 +7,19 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 20.** Revision 20 gives Tracks two layouts, List and Timeline, makes the free-space floor a
-setting, adds repo-only settings keys, and puts every file Collide writes on macOS in one folder (owner,
-2026-11-15). Revision 19 keeps the tab names Field, Tracks, Queue and Planning, each with a plain
+**Status: revision 21.** Revision 21 adds Up next, an ordered list of tasks and groups that start one after another,
+tells an agent about the group it works in, and loads a repository's own agent instructions from the run's worktree,
+with a warning when a run changes them (owner, 2026-11-15). Revision 20 gives Tracks two layouts, List and Timeline,
+makes the free-space floor a setting, adds repo-only settings keys, and puts every file Collide writes on macOS in
+one folder (owner, 2026-11-15). Revision 19 keeps the tab names Field, Tracks, Queue and Planning, each with a plain
 subtitle (owner, 2026-11-15). Revision 18 adds planning quality checks from the Field mockup: a Decision log, an
 Assumption ledger, a coverage map, a kill criterion for spikes, a red-team pass and a session budget meter (owner,
-2026-11-15). Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as
-engineers (owner, 2026-11-15). Revision 16 shows Claude's versions as two chips in place of a Queue warning (owner,
-2026-11-15). Revision 15 takes two findings from the tokensafe research, and revision 14 puts features
-in proposals, both from the owner's decisions of 2026-11-14 (Review log). R5 is applied (Review log; ledger at the end of the item `ts-0006-ze` in
-`.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the group-runs stage
-starts. The owner accepted revision 13 (2026-11-14); Stage 2 is in progress.
+2026-11-15). Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as engineers
+(owner, 2026-11-15). Revision 16 shows Claude's versions as two chips in place of a Queue warning (owner,
+2026-11-15). Revision 15 takes two findings from the tokensafe research, and revision 14 puts features in proposals,
+both from the owner's decisions of 2026-11-14 (Review log). R5 is applied (Review log; ledger at the end of the item
+`ts-0006-ze` in `.collide/planning/epics/ep-001-ef-spikes/tasks/`). S1–S9 and S11 are applied; S10 runs when the
+group-runs stage starts. The owner accepted revision 13 (2026-11-14); Stage 2 is in progress.
 
 Revision 18 (2026-11-15) adopts the planning checks the owner reviewed as ideas on the Field mockup (A). A proposal
 gains a Decision log, with the alternatives each decision passed on and its evidence, an Assumption ledger and a
@@ -776,11 +778,24 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       agents, `.mcp.json`). The user's own CLAUDE.md, hooks and plugins still load, and so does auto memory.
     - Plain `claude` in a worktree, as in a take-over, loads everything, including the main checkout's untracked
       `settings.local.json` and `.mcp.json` servers nobody approved (measured S1).
+    - **The repository's own instructions load from the worktree** (owner, 2026-11-15; revision 21). A phase reads
+      the repository's `CLAUDE.md` files and skills from its own worktree, as plain `claude` in that folder would, so
+      a team's setup works unchanged: the guides those files name and the scripts they say to run are paths in the
+      same checkout, at the worktree's root. Freezing `CLAUDE.md` at the line's commit would protect little, since
+      the guides it names are read from the worktree anyway, and an agent outside Collide can edit it too. What runs
+      code or grants access without the model asking still comes from the snapshot: settings and their hooks,
+      permissions, MCP servers and agent definitions.
+      - A phase that starts after its run changed an instruction file shows a warning that names the files, on the
+        run in Tracks and in the run record. The acknowledgement before `integrate` (below) is unchanged.
+      - A role may set `repo_instructions: none`, and experiment arms do (S1).
+      - Unmeasured: which launch line loads the worktree's instructions while settings, hooks and MCP config stay
+        from the snapshot. Stage 4a measures it before the change is built.
     - **Auto memory is off for every phase** (`autoMemoryEnabled: false` in the snapshot settings; owner,
       2026-11-13). It is shared by every worktree of a repo, keyed to the main checkout, so it would carry one run's
       notes into another. A role may turn it on.
-    - **Acknowledgement** (narrowed by the owner after S1, 2026-11-13). An edit to these paths cannot reach a later
-      automatic phase, because those phases load from the snapshot. It matters once it is about to reach the line's
+    - **Acknowledgement** (narrowed by the owner after S1, 2026-11-13). An edit to settings, hooks, MCP config or agent
+      definitions cannot reach a later automatic phase, because those phases load them from the snapshot; an edit to
+      an instruction file can, with the warning above (revision 21). It matters once it is about to reach the line's
       ref, and in a take-over. So the Queue asks for an acknowledgement before an `integrate` that carries such an
       edit, and before a take-over of a workspace whose range touches the paths.
 - **Context and cache** (owner, 2026-11-13; `docs/research/tokens-and-context.md`).
@@ -805,6 +820,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       100,000;
     - `config: user | none`, which picks `--setting-sources user` or `""`. Both keep `--strict-mcp-config`: with
       `""` alone, one of S9's five runs still listed the user's claude.ai connectors (measured S9);
+    - `repo_instructions: worktree | none` (default `worktree`), the repository's own instructions (above;
+      revision 21);
     - `bash_output_max`, in characters, which sets `BASH_MAX_OUTPUT_LENGTH` (default 30,000). Longer output is saved
       to a file that the model reads in parts (measured S9);
     - `mcp_output_max`, in tokens, which sets `MAX_MCP_OUTPUT_TOKENS` (default 25,000). A longer MCP result is
@@ -2432,6 +2449,9 @@ The names stay; the subtitles are the audience rule above applied to navigation.
 
     The toggle is per person and remembered. Both layouts show the same runs in the same order, so switching keeps
     one's place.
+  - **Up next** (owner, 2026-11-15; revision 21; ships in Stage 11). Below the live runs, in both layouts: the
+    tasks and groups waiting to start, in the person's order, each with what it waits on. The tab named Queue stays
+    "what needs you", so this list is never called a queue.
   - **The Timeline's real-time axis**, not equal-width phase columns (owner, 2026-11-13; from the Tracks-first
     mockup). A segment's width is its duration. The axis has:
     - a now line and the usage-limit reset line;
@@ -3914,6 +3934,10 @@ yet.
     name, resolved at launch only. `collide config get agents.<id>.<field>` shows the layer;
   - `collide config get <key>` shows the value and the layer it came from.
 - **Pack data:** one directory per pack per board, passed as `COLLIDE_PACK_DATA` (0.7).
+- **The repository's own instructions** (0.3; revision 21). First measure, with the fake and then once with the real
+  `claude`, a launch line that loads the worktree's `CLAUDE.md` files and skills while settings, hooks and MCP config
+  stay from the snapshot. Then build it, with the role key `repo_instructions` and the warning when a run changed an
+  instruction file.
 
 This sub-stage checks agent entries at load only. Launching an agent, and the secrets test at launch, are in 6b.
 
@@ -4799,6 +4823,25 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 - **A group from a lens** (owner, 2026-11-14; 0.11). Grouping tasks to run together is an option, and the in-app agent
   proposes the groups. A group on the Field's lens selects its tasks and opens the group-run preview above. The agent
   has no tool for it: a person presses Launch, and the lens stays as the agent made it.
+- **Up next** (owner, 2026-11-15; revision 21; 0.11). An ordered list of entries waiting to start, kept by the
+  daemon in the store, so it survives a restart.
+  - An entry is a task, or a group: an epic, a view or a hand-picked selection. A person adds entries in the order
+    they want (the Field: select, then Add to Up next; the CLI: `collide next add|list|move|remove`), and may
+    reorder or remove an entry until it starts. Adding is the person's Launch: the in-app agent may propose an
+    order, as it proposes groups, but has no tool to add one.
+  - The next entry starts once the one before it has landed (integrated, by the rule above), so each builds on the
+    last. A switch on the list lets independent entries overlap, up to the concurrency cap.
+  - A group is one entry. Its tasks run as a group run (above): in parallel under the cap, in the order their
+    `blocked-by` links give. The list moves on once every task of the group has landed.
+  - A run of an entry that fails, is stopped or is refused pauses the list and raises a Queue item. Nothing after
+    it starts until the person resumes, skips or removes that entry.
+- **What an agent is told about its group** (owner, 2026-11-15; revision 21). How a group is worked is the rule of
+  the applied packs and of the repository's own instructions (0.3), never Collide's: a team may already have rules
+  for how its agents treat a group of tasks. Collide hands the agent what those rules need, in the phase's brief and
+  as `COLLIDE_GROUP` beside the run's other context variables: the group's name and kind, the source's own handle
+  for it (an epic id, a collection), its tasks in order with their status, which of them this run is for, and the
+  branch and commit each earlier task landed as. A workflow may declare `group: per_task` (one run for each task,
+  the default) or `group: whole` (one run given the whole group), for a pack whose rules work on a group at once.
 - Syncing (0.4): how far each workspace's base is behind its line's ref (the conflict check before `integrate`
   ships in Stage 9); a pack's `sync` implementation, run as a `script` phase or before `integrate`.
 - The two integrate implementations:
@@ -6129,3 +6172,23 @@ which shows each tab with a subtitle, and kept them: "we can keep these with the
   Windows follow macOS.
 - **Choices made:** List is the default layout (the audience rule: the engineer's detail is one step away); the
   toggle is remembered per person; both layouts keep the same order; the setting's name and unit.
+
+**Revision 21, 2026-11-15 (owner).** Up next, groups, and a repository's own instructions.
+- **Up next:** "Another feature we should consider supporting is queuing up tasks. The user selects the tasks they
+  want, in the order they want, and the system should be able to queue them. We should also support queuing a group
+  of tasks too." The owner chose the name Up next (the Queue tab keeps its meaning), that the next entry starts once
+  the one before it has landed, that a group is one entry run as a group run, and that it ships in Stage 11.
+  Changed: 0.11 (Tracks) and Stage 11.
+- **Groups:** the applied packs decide how a group is treated; Collide sends the agent the right information, and
+  the agent applies the rules it gets from the repository. Changed: Stage 11.
+- **A repository's own instructions:** "Ideally, we work seamlessly with how the developers already work. Without
+  using collide, agents can already change the CLAUDE.md file. Maybe we should provide a warning for when the
+  CLAUDE.md file has changed as part of a task run." Changed: 0.3 (the tool's config paths, the acknowledgement and
+  the context options) and Stage 4a.
+- **Choices made:** a switch lets independent entries overlap; a failed, stopped or refused entry pauses the list
+  and raises a Queue item; entries are reordered or removed until they start; the list shows in Tracks under the live
+  runs in both layouts; `collide next` is the CLI; adding is the person's Launch, so the in-app agent has no tool to
+  add; `group: per_task | whole` on a workflow; the group context goes in the brief and `COLLIDE_GROUP`. Settings,
+  hooks, permissions, MCP servers and agent definitions still load from the snapshot, because they run code or grant
+  access without the model asking (S1); `repo_instructions: none` for a role and for experiment arms. Which launch
+  line does this is unmeasured, so Stage 4a measures it first.
