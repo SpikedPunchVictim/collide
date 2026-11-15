@@ -28,6 +28,13 @@ fn main() -> ExitCode {
             println!("{}\n\n{USAGE}\n\n{HELP}", commands::tree_text());
             return ExitCode::SUCCESS;
         }
+        Some("stop") => {
+            return ExitCode::from(collide_host::stop_cli::run(
+                rest,
+                &mut std::io::stdout().lock(),
+                &mut std::io::stderr().lock(),
+            ));
+        }
         Some("tasks") => task_cli::parse_tasks(rest),
         Some("task") => task_cli::parse_task(rest),
         Some("sections") => task_cli::parse_sections(rest),

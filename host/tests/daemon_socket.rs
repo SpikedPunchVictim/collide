@@ -824,3 +824,55 @@ fn two_requests_in_one_write_are_answered_in_order() {
     assert_eq!(client.read().unwrap()["id"], 10);
     assert_eq!(client.read().unwrap()["id"], 11);
 }
+
+/// A `launchctl` that only records what it is asked.
+#[derive(Debug, Default)]
+struct RecordingLaunchctl {
+    calls: Mutex<Vec<String>>,
+}
+
+impl collide_host::launch::Launchctl for RecordingLaunchctl {
+    fn bootstrap(&self, _domain: &str, _plist: &Path) -> io::Result<()> {
+        Err(io::Error::other("a daemon never bootstraps"))
+    }
+
+    fn bootout(&self, target: &str) -> io::Result<()> {
+        self.calls.lock().unwrap().push(format!("bootout {target}"));
+        Ok(())
+    }
+
+    fn process_of(&self, _target: &str) -> io::Result<Option<u32>> {
+        Ok(None)
+    }
+}
+
+#[test]
+fn stopping_the_daemon_boots_out_the_launchd_job_its_start_recorded() {
+    let root = TempRoot::new();
+    let paths = DaemonPaths::under(root.path());
+    let launchctl = Arc::new(RecordingLaunchctl::default());
+    let mut daemon_options = options(&root, Box::new(LogBuf::default()));
+    daemon_options.launchctl = Some(launchctl.clone());
+    let daemon = Daemon::start(daemon_options).expect("the daemon starts");
+    let label_file = paths.lock_file.parent().unwrap().join("launchd.label");
+    fs::write(&label_file, "dev.collide.test.daemon-1\n").unwrap();
+    daemon.stop();
+    // SAFETY: `getuid` takes no arguments and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    assert_eq!(
+        launchctl.calls.lock().unwrap().clone(),
+        vec![format!("bootout gui/{uid}/dev.collide.test.daemon-1")]
+    );
+    assert!(!label_file.exists(), "the record goes with the job");
+}
+
+#[test]
+fn a_daemon_with_no_launchctl_calls_none_and_keeps_the_record() {
+    let root = TempRoot::new();
+    let paths = DaemonPaths::under(root.path());
+    let (daemon, _log) = start(&root);
+    let label_file = paths.lock_file.parent().unwrap().join("launchd.label");
+    fs::write(&label_file, "dev.collide.test.daemon-2\n").unwrap();
+    daemon.stop();
+    assert!(label_file.exists());
+}

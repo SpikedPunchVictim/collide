@@ -48,8 +48,8 @@
 //! [`collide_core::owner::MAX_MESSAGE_BYTES`]. The first request of a connection is `initialize`: the uid is checked
 //! first, then the token, then the protocol version, and a connection that fails any of them is answered once and
 //! closed, so an unauthenticated peer learns no version. A connection that says nothing for [`HANDSHAKE_WAIT`] is
-//! closed. Only `daemon.status` and `daemon.recapture_environment` are served here; the other methods are other items'
-//! and answer `method not found`.
+//! closed. Only `daemon.status`, `daemon.recapture_environment` and `run.stop` are served here; the other methods are
+//! other items' and answer `method not found`.
 //!
 //! ## Who is asking
 //!
@@ -57,6 +57,14 @@
 //! `COLLIDE_RUN` makes a run's agent, the app's process makes the app, and anything else is the CLI from a terminal
 //! ([`crate::auth::Caller`]). The result is the `actor` recorded on every event, and only the app does the person-only
 //! operations ([`crate::auth::judge`]). This is a guardrail (0.1), not a boundary.
+//!
+//! ## Stopping a run, and stopping the daemon
+//!
+//! `run.stop` is [`Phases::stop_run`] ([`crate::stop`]): it answers when the stop is done, with the run's state, the
+//! number of processes signalled and the survivors. A run's agent may stop its own run and no other. When the daemon
+//! itself stops it ends its watchers and then boots out the launchd job its start recorded
+//! ([`crate::launch::boot_out_recorded_job`], through [`DaemonOptions::launchctl`]); that is the last thing it does,
+//! because booting the job out ends the process. The shims go on.
 //!
 //! ## The log
 //!
@@ -76,20 +84,22 @@
 //! | `daemon: socket server` | [`bind_socket`], [`Daemon`] | the bind, the handshake and the JSON-RPC loop, over [`crate::auth`]'s checks |
 //! | `daemon: adopt shims` | [`adopt_shims`], [`Phases::adopt`] | scan `runs_dir`, classify each shim by `exit.json` and by pid plus start time, reattach, settle |
 
-use crate::auth::{self, Admitted, Session, StdFs, SystemProcessTree, UnixPeer};
+use crate::auth::{self, Admitted, Caller, Session, StdFs, SystemProcessTree, UnixPeer};
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::clock::{Clock, Clocks, Reading, SystemClocks};
+use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::phases::{
-    BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, Phases, PhasesConfig,
+    BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, Phases, PhasesConfig, StopRunError,
     process_is_running, read_exit_json, read_identity,
 };
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
+use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
     DaemonRecaptureEnvironmentResult, DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method,
-    OWNER_PROTOCOL, OwnerInitializeResult, Request, Response, Routed, RpcError, StoreHealth, code,
-    encode_line, parse_request, route,
+    OWNER_PROTOCOL, OwnerInitializeResult, Request, Response, Routed, RpcError, RunStopParams,
+    RunStopResult, StoreHealth, Survivor, code, encode_line, parse_request, route,
 };
 use collide_core::shim::ExitRecord;
 use std::fmt;
@@ -421,6 +431,14 @@ pub struct DaemonOptions {
     pub phases: PhaseOptions,
     /// Called when a phase reaches a final state ([`PhaseEndHook`]).
     pub on_phase_end: Option<PhaseEndHook>,
+    /// The process table a stop reads and signals ([`SystemProcesses`]); a test passes one that cannot signal a process
+    /// it did not start.
+    pub processes: Arc<dyn Processes + Send + Sync>,
+    /// The workspace implementation's `cleanup` hook, run by a stop (Stage 7 makes it; `None` until then).
+    pub cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
+    /// The `launchctl` that boots out the daemon's recorded job when the daemon stops. `None`, which a daemon under an
+    /// overridden root gets ([`crate::launch::launchctl_from_env`]), calls no `launchctl`.
+    pub launchctl: Option<Arc<dyn Launchctl>>,
 }
 
 impl DaemonOptions {
@@ -438,6 +456,9 @@ impl DaemonOptions {
             daemon_start: None,
             phases: PhaseOptions::default(),
             on_phase_end: None,
+            processes: Arc::new(SystemProcesses),
+            cleanup: None,
+            launchctl: None,
         }
     }
 }
@@ -457,6 +478,7 @@ struct Shared {
     clocks: Arc<dyn Clocks + Send + Sync>,
     log: Arc<DaemonLog>,
     phases: Phases,
+    launchctl: Option<Arc<dyn Launchctl>>,
     handshake_wait: Duration,
     started_wall_ms: u64,
     started_uptime: Reading,
@@ -522,6 +544,9 @@ impl Daemon {
             daemon_start,
             phases: phase_options,
             on_phase_end,
+            processes,
+            cleanup,
+            launchctl,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -576,6 +601,8 @@ impl Daemon {
                 let log = log.clone();
                 Arc::new(move |text: &str| log.line(text))
             },
+            processes,
+            cleanup,
         })
         .map_err(SocketError::Store)?;
         match adopt_shims(&paths.runs_dir) {
@@ -610,6 +637,7 @@ impl Daemon {
             clocks,
             log,
             phases,
+            launchctl,
             handshake_wait,
             stop: AtomicBool::new(false),
             connections: AtomicUsize::new(0),
@@ -689,6 +717,20 @@ impl Drop for Daemon {
         self.join();
         // The shims go on: they belong to no daemon. Only the daemon's watchers of them end.
         self.shared.phases.stop();
+        // Last, because booting out the job ends this process: a stopped daemon leaves no loaded job behind.
+        if let Some(launchctl) = &self.shared.launchctl {
+            match boot_out_recorded_job(&self.shared.paths.lock_file, launchctl.as_ref()) {
+                Ok(Some(label)) => self
+                    .shared
+                    .log
+                    .line(&format!("booted out the launchd job {label}")),
+                Ok(None) => {}
+                Err(error) => self
+                    .shared
+                    .log
+                    .line(&format!("the launchd job could not be booted out: {error}")),
+            }
+        }
     }
 }
 
@@ -1122,7 +1164,7 @@ fn answer(shared: &Shared, session: &Session, request: Request) -> Response {
     let result = match route(true, &request) {
         Err(error) => Err(error),
         Ok(Routed::Initialize(_)) => unreachable!("route(true, ..) refuses a second initialize"),
-        Ok(Routed::Call(method)) => call(shared, session, method),
+        Ok(Routed::Call(method)) => call(shared, session, method, &request.params),
     };
     match result {
         Ok(value) => Response::success(id, value),
@@ -1132,8 +1174,9 @@ fn answer(shared: &Shared, session: &Session, request: Request) -> Response {
 
 fn call(
     shared: &Shared,
-    _session: &Session,
+    session: &Session,
     method: Method,
+    params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     match method {
         Method::DaemonStatus => {
@@ -1183,6 +1226,7 @@ fn call(
                     .expect("a result is JSON"),
             )
         }
+        Method::RunStop => run_stop(shared, session, params),
         other => Err(RpcError::new(
             code::METHOD_NOT_FOUND,
             format!(
@@ -1191,6 +1235,72 @@ fn call(
             ),
         )),
     }
+}
+
+/// `run.stop` (`collide stop`, 0.5): stops the run's processes in the order of [`crate::stop::ORDER`] and answers with
+/// the run's state, how many processes the first scan signalled, and the survivors. A survivor's `command` carries how
+/// it came to be listed (`found`, `recorded` or `suspect`). A run's agent may stop its own run and no other.
+fn run_stop(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: RunStopParams = serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("the params of run.stop are not readable: {e}"),
+        )
+    })?;
+    if let Caller::RunAgent { run } = session.caller()
+        && *run != params.run
+    {
+        return Err(RpcError::new(
+            code::NOT_PERMITTED,
+            format!("run {run} may not stop run {}", params.run),
+        ));
+    }
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let grace = params
+        .grace_secs
+        .map(|secs| Duration::from_secs(u64::from(secs)));
+    let report = shared
+        .phases
+        .stop_run(&params.run, grace)
+        .map_err(|error| match error {
+            StopRunError::Unknown(_) => RpcError::new(code::NOT_FOUND, error.to_string()),
+            StopRunError::Name(_) | StopRunError::Refused(_) => {
+                RpcError::new(code::INVALID_PARAMS, error.to_string())
+            }
+        })?;
+    let state = shared.phases.run_state(&params.run).ok_or_else(|| {
+        RpcError::new(
+            code::NOT_FOUND,
+            format!("the daemon has no run {:?}", params.run),
+        )
+    })?;
+    let result = RunStopResult {
+        state,
+        signalled: u32::try_from(report.signalled.len()).unwrap_or(u32::MAX),
+        survivors: report
+            .survivors
+            .iter()
+            .map(|s| Survivor {
+                pid: s.pid,
+                command: format!("{} ({})", s.command, s.kind.word()),
+            })
+            .collect(),
+    };
+    for problem in &report.problems {
+        shared
+            .log
+            .line(&format!("stop of run {}: {problem}", params.run));
+    }
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
 // ---- running ----------------------------------------------------------------------------------------------------

@@ -20,6 +20,11 @@
 //! A shim whose child exits while the daemon is down starts the daemon through the same entry point, so a phase
 //! boundary is not missed while the app is closed.
 //!
+//! **What the daemon's environment carries.** Both starts strip `COLLIDE_RUN`, `COLLIDE_RUN_START` and
+//! `COLLIDE_SPAN` ([`STRIPPED_ENV`]) and set `COLLIDE_RUNTIME=1`: a daemon started by the CLI from inside a run must
+//! not carry the run's id, or a stop of that run would find it. **When the daemon stops** it boots out the job its
+//! start recorded ([`boot_out_recorded_job`]).
+//!
 //! | tag | function | what it does |
 //! |---|---|---|
 //! | `daemon: lock file start` | [`ensure_daemon`] | the lock, the wait, the socket probe and the choice between 2 and 3 |
@@ -27,6 +32,7 @@
 //! | `daemon: setsid start` | [`start_with_setsid`] | the fallback start, with its warning |
 
 use crate::daemon::DaemonPaths;
+use crate::stop::RUNTIME_MARKER;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
@@ -356,6 +362,10 @@ const JOB_SETTLE: Duration = Duration::from_secs(3);
 /// How often the start asks launchd whether the job has a process, once [`JOB_SETTLE`] is over.
 const JOB_LOOK: Duration = Duration::from_millis(250);
 
+/// What a run's process carries that a daemon must not inherit (0.2): started by the CLI from inside a run, a daemon
+/// would otherwise carry the run's id and be found, and stopped, with the run. Both starts strip them.
+pub const STRIPPED_ENV: [&str; 3] = ["COLLIDE_RUN", "COLLIDE_RUN_START", "COLLIDE_SPAN"];
+
 /// The path to use when the starter's own `PATH` is not set: the system's.
 const FALLBACK_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
@@ -609,6 +619,10 @@ pub fn launchd_job(
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| FALLBACK_PATH.to_string());
     let mut env: BTreeMap<String, String> = request.env.clone();
+    for name in STRIPPED_ENV {
+        env.remove(name);
+    }
+    env.insert(RUNTIME_MARKER.to_string(), "1".to_string());
     env.insert("USER".to_string(), user);
     env.insert("HOME".to_string(), home);
     env.insert("PATH".to_string(), path);
@@ -690,6 +704,47 @@ fn start_launchd_job(
     })
 }
 
+/// Boots out the launchd job the last start recorded in [`LABEL_FILE`] (the file next to `lock_file`), and removes the
+/// record. Returns the label it booted out, or `None` when no job is recorded. A job that is not loaded any more is
+/// the usual answer for a daemon that was not started by launchd, and is not an error; any other failure of
+/// `launchctl` is returned, with the record kept so a later stop can try again.
+///
+/// The daemon calls this as its last act when it stops (`launchctl bootout` ends the job's process, which is the
+/// daemon), so a stopped daemon leaves no loaded job behind.
+pub fn boot_out_recorded_job(
+    lock_file: &Path,
+    launchctl: &dyn Launchctl,
+) -> io::Result<Option<String>> {
+    let Some(dir) = lock_file.parent() else {
+        return Ok(None);
+    };
+    let label_file = dir.join(LABEL_FILE);
+    let label = match fs::read_to_string(&label_file) {
+        Ok(text) => text.trim().to_string(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if label.is_empty() {
+        let _ = fs::remove_file(&label_file);
+        return Ok(None);
+    }
+    let target = format!("gui/{}/{label}", current_uid());
+    match launchctl.bootout(&target) {
+        Ok(()) => {}
+        // `launchctl` answers a job it does not have with "No such process" (3) or an input/output error (5); the
+        // record is then litter and goes.
+        Err(_) if !is_loaded(launchctl, &target) => {}
+        Err(error) => return Err(error),
+    }
+    let _ = fs::remove_file(&label_file);
+    Ok(Some(label))
+}
+
+/// Whether launchd still has the job: `print` of a job that is not loaded fails.
+fn is_loaded(launchctl: &dyn Launchctl, target: &str) -> bool {
+    launchctl.process_of(target).is_ok()
+}
+
 /// Starts the daemon detached with `setsid`, outside the launcher's coalition only in the sense that it has a session
 /// of its own. Its input is `/dev/null` and its output is appended to [`StartRequest::log_file`]. Returns the pid.
 ///
@@ -711,6 +766,11 @@ pub fn start_with_setsid(request: &StartRequest) -> io::Result<u32> {
         .stdout(log.try_clone()?)
         .stderr(log)
         .envs(&request.env);
+    // The daemon is runtime, never part of a run, whoever started it.
+    for name in STRIPPED_ENV {
+        command.env_remove(name);
+    }
+    command.env(RUNTIME_MARKER, "1");
     // SAFETY: `setsid` takes no arguments and is async-signal-safe, which `pre_exec` requires. The daemon becomes the
     // leader of a session with no controlling terminal, so closing the starter's terminal does not hang it up.
     unsafe {
@@ -727,6 +787,7 @@ pub fn start_with_setsid(request: &StartRequest) -> io::Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn a_start_waits_fifteen_seconds() {
@@ -1118,6 +1179,132 @@ mod tests {
         assert!(launchctl_from_env(Some("/tmp/root"), Some("/bin/launchctl")).is_some());
         assert!(launchctl_from_env(None, Some("/x/fake")).is_some());
         assert!(launchctl_from_env(Some("/tmp/root"), Some("")).is_none());
+    }
+
+    /// A `launchctl` whose bootout fails, and which says whether the job is still loaded.
+    #[derive(Debug)]
+    struct Refusing {
+        still_loaded: bool,
+    }
+
+    impl Launchctl for Refusing {
+        fn bootstrap(&self, _domain: &str, _plist: &Path) -> io::Result<()> {
+            Err(io::Error::other("not used"))
+        }
+
+        fn bootout(&self, _target: &str) -> io::Result<()> {
+            Err(io::Error::other("Boot-out failed: 5: Input/output error"))
+        }
+
+        fn process_of(&self, _target: &str) -> io::Result<Option<u32>> {
+            if self.still_loaded {
+                Ok(Some(1))
+            } else {
+                Err(io::Error::other("Could not find service"))
+            }
+        }
+    }
+
+    #[test]
+    fn the_recorded_job_is_booted_out_and_its_record_removed() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let run = request.lock_file.parent().unwrap();
+        fs::write(run.join(LABEL_FILE), "dev.collide.test.unit.rec-1\n").unwrap();
+        let fake = Fake::default();
+        let booted = boot_out_recorded_job(&request.lock_file, &fake).unwrap();
+        assert_eq!(booted.as_deref(), Some("dev.collide.test.unit.rec-1"));
+        assert_eq!(
+            fake.calls.lock().unwrap().clone(),
+            vec![format!(
+                "bootout gui/{}/dev.collide.test.unit.rec-1",
+                current_uid()
+            )]
+        );
+        assert!(!run.join(LABEL_FILE).exists());
+    }
+
+    #[test]
+    fn no_record_means_no_call_to_launchctl() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let fake = Fake::default();
+        assert_eq!(
+            boot_out_recorded_job(&request.lock_file, &fake).unwrap(),
+            None
+        );
+        assert!(fake.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_job_that_is_not_loaded_is_not_an_error_and_its_record_goes() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let run = request.lock_file.parent().unwrap();
+        fs::write(run.join(LABEL_FILE), "dev.collide.test.unit.gone-1").unwrap();
+        let refusing = Refusing {
+            still_loaded: false,
+        };
+        assert!(
+            boot_out_recorded_job(&request.lock_file, &refusing)
+                .unwrap()
+                .is_some()
+        );
+        assert!(!run.join(LABEL_FILE).exists());
+    }
+
+    #[test]
+    fn a_job_that_is_still_loaded_after_a_failed_bootout_is_an_error_and_its_record_stays() {
+        let dir = Dir::new();
+        let request = request_in(&dir);
+        let run = request.lock_file.parent().unwrap();
+        fs::write(run.join(LABEL_FILE), "dev.collide.test.unit.stuck-1").unwrap();
+        let refusing = Refusing { still_loaded: true };
+        assert!(boot_out_recorded_job(&request.lock_file, &refusing).is_err());
+        assert!(run.join(LABEL_FILE).exists());
+    }
+
+    #[test]
+    fn the_launchd_job_carries_the_runtime_marker_and_no_run_variables() {
+        let dir = Dir::new();
+        let mut request = request_in(&dir);
+        for name in STRIPPED_ENV {
+            request.env.insert(name.to_string(), "x".to_string());
+        }
+        let lookup = env_of(&[("USER", "x"), ("HOME", "/h")]);
+        let job =
+            launchd_job(&request, "dev.collide.test.unit.env-1".to_string(), &lookup).unwrap();
+        for name in STRIPPED_ENV {
+            assert!(!job.env.contains_key(name), "{name}");
+        }
+        assert_eq!(job.env.get(RUNTIME_MARKER).map(String::as_str), Some("1"));
+    }
+
+    #[test]
+    fn a_setsid_start_strips_the_run_variables_and_sets_the_runtime_marker() {
+        let dir = Dir::new();
+        let out = dir.0.join("env.out");
+        let exe = dir.0.join("collide-daemon");
+        fs::write(&exe, format!("#!/bin/sh\nenv > '{}'\n", out.display())).unwrap();
+        fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut request = StartRequest::new(exe, &DaemonPaths::under(&dir.0));
+        for name in STRIPPED_ENV {
+            request.env.insert(name.to_string(), "x".to_string());
+        }
+        let pid = start_with_setsid(&request).unwrap();
+        let until = Instant::now() + Duration::from_secs(10);
+        while reap_if_ended(pid).is_none() {
+            assert!(Instant::now() < until, "the script did not end");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let text = fs::read_to_string(&out).unwrap();
+        for name in STRIPPED_ENV {
+            assert!(
+                !text.lines().any(|l| l.starts_with(&format!("{name}="))),
+                "{name} in {text}"
+            );
+        }
+        assert!(text.lines().any(|l| l == "COLLIDE_RUNTIME=1"), "{text}");
     }
 
     #[test]

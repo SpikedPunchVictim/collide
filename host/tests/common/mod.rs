@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+pub mod procs;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -238,6 +240,8 @@ impl ShimProc {
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", root.path())
             .env("COLLIDE_DAEMON_ROOT", root.path())
+            // What a daemon gives each shim it starts: a stop never sweeps a runtime process.
+            .env("COLLIDE_RUNTIME", "1")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

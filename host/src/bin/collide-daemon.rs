@@ -42,6 +42,11 @@ fn main() -> ExitCode {
             // A login shell's path when the environment names none: macOS's default shell.
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
             let mut options = DaemonOptions::new(paths, shell, Box::new(std::io::stderr()));
+            // A daemon under an overridden root boots out no job unless `COLLIDE_LAUNCHCTL` names the program.
+            options.launchctl = launchctl_from_env(
+                std::env::var(ROOT_ENV).ok().as_deref(),
+                std::env::var(LAUNCHCTL_ENV).ok().as_deref(),
+            );
             let exe = std::env::current_exe().and_then(std::fs::canonicalize);
             // The shim is `collide shim`, the binary next to this one; a shim that finds no daemon starts this one,
             // with the same root and home, so it finds the same files.

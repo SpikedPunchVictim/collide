@@ -12,7 +12,7 @@
 //! | tag | command | what fills it in |
 //! |---|---|---|
 //! | `cli: run` | `collide run` | one Claude phase on a task file, in a new worktree |
-//! | `cli: stop` | `collide stop` | the stop of 0.5 ([`crate::stop`]) through the daemon |
+//! | `cli: stop` | `collide stop` | built: [`crate::stop_cli`], the stop of 0.5 ([`crate::stop`]) through the daemon |
 //! | `cli: report` | `collide report` | report files for shell scripts (`span`, `metric`) |
 //! | `cli: config` | `collide config` | `get` and `set` over the settings layers (`set --secret` is the keychain's) |
 //! | `cli: pack` | `collide pack` | `add`, `link`, `enable`, `disable` and `list`; `update` and `test` come with Stage 12 |
@@ -66,11 +66,7 @@ pub const COMMANDS: [Command; 9] = [
     Command {
         name: "stop",
         summary: "stop a run: its processes, in order, then a report of the survivors",
-        build: Build::NotBuilt(Stub {
-            tag: "cli: stop",
-            stage: "3a",
-            handler: stop,
-        }),
+        build: Build::Built,
     },
     Command {
         name: "tasks",
@@ -208,12 +204,6 @@ pub fn run(args: &[String]) -> u8 {
     todo!("cli: run")
 }
 
-/// `collide stop`: stops a run's processes in the order of [`crate::stop::ORDER`] (Stage 3a).
-pub fn stop(args: &[String]) -> u8 {
-    let _ = args;
-    todo!("cli: stop")
-}
-
 /// `collide report span|metric`: writes a line to the file named by the hook's report variable, and needs no socket or
 /// token (Stage 7).
 pub fn report(args: &[String]) -> u8 {
@@ -296,7 +286,7 @@ mod tests {
 
     #[test]
     fn the_built_commands_are_not_run_as_stubs() {
-        for name in ["tasks", "task", "schema", "sections", "nonsense"] {
+        for name in ["stop", "tasks", "task", "schema", "sections", "nonsense"] {
             assert_eq!(execute_stub(name, &[]), None, "{name}");
         }
     }

@@ -20,13 +20,15 @@ use collide_host::phases::{
     Health, LinkError, PhaseEnd, PhaseKey, PhaseOptions, PhaseSpec, Phases,
 };
 use collide_host::shim::{ChildStdio, files};
+use collide_host::stop::SurvivorKind;
+use common::procs::{Guarded, Owned};
 use common::{PYTHON, TempRoot, kill_child_of, signal_if_same, wait_until};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const WAIT_STDIN: &str = "import sys; sys.stdin.read()";
 const ECHO: &str = "import sys\nfor line in sys.stdin:\n    print('echo:' + line.strip())";
@@ -69,6 +71,15 @@ fn quick() -> PhaseOptions {
     }
 }
 
+/// The guard of a test's daemon: it signals a pid only when `child.json` under the test's own runs directory names it,
+/// or the pid is below such a child.
+fn guard_of(root: &TempRoot, owned: Vec<Arc<Owned>>) -> Arc<Guarded> {
+    Arc::new(Guarded::under(
+        DaemonPaths::under(root.path()).runs_dir,
+        owned,
+    ))
+}
+
 fn options(root: &TempRoot, log: &LogBuf) -> DaemonOptions {
     let mut options = DaemonOptions::new(
         DaemonPaths::under(root.path()),
@@ -82,6 +93,7 @@ fn options(root: &TempRoot, log: &LogBuf) -> DaemonOptions {
     };
     options.shim_exe = Some(PathBuf::from(env!("CARGO_BIN_EXE_collide")));
     options.phases = quick();
+    options.processes = guard_of(root, Vec::new());
     options
 }
 
@@ -91,8 +103,22 @@ fn start(root: &TempRoot) -> (Daemon, LogBuf) {
     (daemon, log)
 }
 
+/// A key whose run id no other process on the machine carries: a stop finds processes by their run id, so a test never
+/// uses a bare `r1`.
 fn key(run: &str, phase: &str) -> PhaseKey {
-    PhaseKey::new(run, phase).expect("a good name")
+    PhaseKey::new(&unique_run(run), phase).expect("a good name")
+}
+
+fn unique_run(name: &str) -> String {
+    static PREFIX: OnceLock<String> = OnceLock::new();
+    let prefix = PREFIX.get_or_init(|| {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("test-{}-{nanos}", std::process::id())
+    });
+    format!("{prefix}-{name}")
 }
 
 fn python(script: &str, cwd: &Path) -> PhaseSpec {
@@ -306,7 +332,7 @@ fn a_phase_whose_socket_path_is_too_long_is_refused_before_anything_starts() {
     let root = TempRoot::new();
     let (daemon, _log) = start(&root);
     let phases = daemon.phases().clone();
-    let k = key(&"r".repeat(60), &"p".repeat(60));
+    let k = PhaseKey::new(&"r".repeat(60), &"p".repeat(60)).unwrap();
     let error = phases
         .start_phase(&k, &python(WAIT_STDIN, root.path()))
         .expect_err("a path over 103 bytes");
@@ -330,7 +356,7 @@ fn a_phase_that_is_already_there_is_not_started_again() {
     let error = phases
         .start_phase(&k, &python(WAIT_STDIN, root.path()))
         .expect_err("the name is taken");
-    assert!(error.to_string().contains("r1/p1"), "{error}");
+    assert!(error.to_string().contains(&k.to_string()), "{error}");
     phases.close_stdin(&k).unwrap();
     wait_state(&phases, &k, "the phase ends", ended);
 }
@@ -419,7 +445,8 @@ fn a_shim_that_died_while_the_daemon_was_down_makes_its_phase_lost_when_a_daemon
 fn a_damaged_exit_json_is_moved_aside_and_the_phase_is_lost() {
     let root = TempRoot::new();
     let paths = DaemonPaths::under(root.path());
-    let dir = paths.runs_dir.join("r1").join("p1");
+    let k = key("r1", "p1");
+    let dir = paths.runs_dir.join(&k.run).join(&k.phase);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join(files::SPEC), "{}").unwrap();
     fs::write(
@@ -428,7 +455,6 @@ fn a_damaged_exit_json_is_moved_aside_and_the_phase_is_lost() {
     )
     .unwrap();
     let (daemon, log) = start(&root);
-    let k = key("r1", "p1");
     assert!(daemon.phases().state(&k).as_ref().is_some_and(lost));
     assert!(
         !dir.join(files::EXIT_RECORD).exists(),
@@ -643,7 +669,7 @@ fn a_stopped_shim_is_reported_unresponsive_and_a_second_run_is_not_stalled() {
         || matches!(phases.health(&stalled), Some(Health::Unresponsive { .. })),
     );
     assert!(matches!(phases.health(&other), Some(Health::Responsive)));
-    assert_eq!(phases.unresponsive(), vec!["r1/p1".to_string()]);
+    assert_eq!(phases.unresponsive(), vec![stalled.to_string()]);
     assert!(
         phases.state(&stalled).as_ref().is_some_and(running),
         "unresponsive is not lost"
@@ -702,6 +728,284 @@ fn a_stopped_shim_is_unresponsive_to_a_daemon_that_adopts_it_and_the_daemon_stil
     wait_until("it answers again", Duration::from_secs(15), || {
         matches!(phases.health(&k), Some(Health::Responsive))
     });
+    phases.close_stdin(&k).unwrap();
+    wait_state(&phases, &k, "the phase ends", ended);
+}
+
+// ---- the stop of 0.5: a lost phase's child, and a run -----------------------------------------------------------
+//
+// SAFETY of these tests: the run id of each is unique to the test, the daemon's process table is a `Guarded` that
+// panics before it signals a pid the test did not record (and logs the refusal, which each test asserts is empty),
+// every child has a cleared environment but `PATH` and `COLLIDE_RUN`, and a guard kills what is left by pid and
+// start time.
+
+/// Kills what a test recorded when the test ends, however it ends.
+struct KillOnDrop(Arc<Owned>);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        self.0.kill_all();
+    }
+}
+
+/// A daemon whose phases stop through `guard`, with a lost-phase grace short enough for a test.
+fn start_guarded(root: &TempRoot, guard: &Arc<Guarded>) -> (Daemon, LogBuf) {
+    let log = LogBuf::default();
+    let mut options = options(root, &log);
+    options.processes = guard.clone();
+    options.phases.lost_grace = Duration::from_millis(300);
+    (Daemon::start(options).expect("the daemon starts"), log)
+}
+
+/// A phase whose child is the hostile tree of `common::procs::HOSTILE`, carrying `run` as its run id.
+fn hostile_spec(root: &TempRoot, run: &str) -> (PhaseSpec, PathBuf) {
+    hostile_spec_of(root, run, common::procs::HOSTILE)
+}
+
+fn hostile_spec_of(root: &TempRoot, run: &str, source: &str) -> (PhaseSpec, PathBuf) {
+    let script = root.join(&format!("{run}.py"));
+    fs::write(&script, source).unwrap();
+    let pidfile = root.join(&format!("{run}.pids"));
+    fs::write(&pidfile, "").unwrap();
+    let spec = PhaseSpec {
+        program: PYTHON.into(),
+        args: vec![
+            script.to_str().unwrap().into(),
+            pidfile.to_str().unwrap().into(),
+        ],
+        env: BTreeMap::from([
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("COLLIDE_RUN".to_string(), run.to_string()),
+        ]),
+        cwd: root.path().to_path_buf(),
+        stdio: ChildStdio::Pipes,
+    };
+    (spec, pidfile)
+}
+
+/// Waits for the hostile tree to write its three pids, records them as the test's, and returns them.
+fn recorded_hostile_pids(pidfile: &Path, owned: &Owned) -> Vec<u32> {
+    let tags = ["root", "setsid", "orphan"];
+    wait_until(
+        "the hostile tree writes its pids",
+        Duration::from_secs(20),
+        || common::procs::read_pids(&pidfile.to_path_buf(), &tags).is_some(),
+    );
+    let pids = common::procs::read_pids(&pidfile.to_path_buf(), &tags).unwrap();
+    for pid in pids.values() {
+        owned.add(*pid);
+    }
+    pids.values().copied().collect()
+}
+
+/// The pid the fixture's root wrote as `root`.
+fn pids_root(pidfile: &Path) -> u32 {
+    common::procs::read_pids(&pidfile.to_path_buf(), &["root"]).expect("the root wrote its pid")["root"]
+}
+
+fn gone_by_ps(pids: &[u32]) {
+    wait_until(
+        &format!("ps lists none of {pids:?}"),
+        Duration::from_secs(20),
+        || common::procs::listed_by_ps(pids).is_empty(),
+    );
+}
+
+#[test]
+fn a_killed_shim_has_its_hostile_child_stopped_as_its_phase_turns_lost() {
+    let root = TempRoot::new();
+    let owned = Arc::new(Owned::default());
+    let _kill = KillOnDrop(owned.clone());
+    let guard = guard_of(&root, vec![owned.clone()]);
+    let (daemon, log) = start_guarded(&root, &guard);
+    let phases = daemon.phases();
+    let k = key("hostile", "p1");
+    // The child reads its stdin to the end and ignores hangup and terminate, so it is a child that ignores EOF.
+    let (spec, pidfile) = hostile_spec_of(&root, &k.run, &common::procs::hostile_reading_stdin());
+    let mut cleanup = Cleanup::new();
+    phases.start_phase(&k, &spec).unwrap();
+    cleanup.track(&phases, daemon.paths(), &k);
+    let pids = recorded_hostile_pids(&pidfile, &owned);
+    wait_state(&phases, &k, "running", running);
+    assert!(
+        common::procs::read_pids(&pidfile, &["eof"]).is_none(),
+        "no EOF yet: the shim is alive and holds the child's stdin"
+    );
+
+    let shim = phases.shim_pid(&k).unwrap();
+    // SAFETY: `kill` takes two integers; the pid is the shim this test's daemon started.
+    unsafe { libc::kill(shim as libc::pid_t, libc::SIGKILL) };
+    wait_state(&phases, &k, "the phase is lost", lost);
+    gone_by_ps(&pids);
+    guard.assert_nothing_refused();
+    // The child saw the end of its input, and kept running: it wrote `eof` after the shim died and was still alive to
+    // write it, so what ended it was the stop, not the EOF.
+    let seen = common::procs::read_pids(&pidfile, &["eof"]).expect("the child saw EOF");
+    assert_eq!(seen["eof"], pids_root(&pidfile), "the root wrote it");
+    wait_until("the stop is logged", Duration::from_secs(10), || {
+        log.text().contains("the stop of its lost child")
+    });
+}
+
+#[test]
+fn a_lost_phase_does_not_stop_the_live_phase_of_the_same_run() {
+    let root = TempRoot::new();
+    let owned = Arc::new(Owned::default());
+    let _kill = KillOnDrop(owned.clone());
+    let guard = guard_of(&root, vec![owned.clone()]);
+    let (daemon, _log) = start_guarded(&root, &guard);
+    let phases = daemon.phases();
+    let lost_key = key("same", "p1");
+    let live_key = key("same", "p2");
+    let (spec, pidfile) = hostile_spec(&root, &lost_key.run);
+    let mut cleanup = Cleanup::new();
+    phases.start_phase(&lost_key, &spec).unwrap();
+    cleanup.track(&phases, daemon.paths(), &lost_key);
+    // The second phase of the same run carries the same run id: the marker scan would reach it.
+    let mut sibling = python(WAIT_STDIN, root.path());
+    sibling
+        .env
+        .insert("COLLIDE_RUN".to_string(), lost_key.run.clone());
+    phases.start_phase(&live_key, &sibling).unwrap();
+    cleanup.track(&phases, daemon.paths(), &live_key);
+    let pids = recorded_hostile_pids(&pidfile, &owned);
+    wait_state(&phases, &live_key, "running", running);
+
+    let shim = phases.shim_pid(&lost_key).unwrap();
+    // SAFETY: as above.
+    unsafe { libc::kill(shim as libc::pid_t, libc::SIGKILL) };
+    wait_state(&phases, &lost_key, "the phase is lost", lost);
+    // With the marker scan off the stop reaches the child and what is below it: the root and its setsid child. The
+    // double-forked orphan has parent pid 1 and is found only by the marker, so it stays until the test's guard ends it.
+    let below_the_child =
+        common::procs::read_pids(&pidfile, &["root", "setsid", "orphan"]).unwrap();
+    gone_by_ps(&[below_the_child["root"], below_the_child["setsid"]]);
+    let _ = pids;
+    guard.assert_nothing_refused();
+    assert!(
+        phases.state(&live_key).as_ref().is_some_and(running),
+        "the other phase of the run goes on"
+    );
+    phases.close_stdin(&live_key).unwrap();
+    wait_state(&phases, &live_key, "the other phase ends", ended);
+}
+
+#[test]
+fn stopping_a_run_leaves_zero_processes_and_the_phase_stopped() {
+    let root = TempRoot::new();
+    let owned = Arc::new(Owned::default());
+    let _kill = KillOnDrop(owned.clone());
+    let guard = guard_of(&root, vec![owned.clone()]);
+    let (daemon, _log) = start_guarded(&root, &guard);
+    let phases = daemon.phases();
+    let k = key("stopme", "p1");
+    let (spec, pidfile) = hostile_spec(&root, &k.run);
+    let mut cleanup = Cleanup::new();
+    phases.start_phase(&k, &spec).unwrap();
+    cleanup.track(&phases, daemon.paths(), &k);
+    let pids = recorded_hostile_pids(&pidfile, &owned);
+    wait_state(&phases, &k, "running", running);
+
+    let report = phases
+        .stop_run(&k.run, Some(Duration::from_millis(300)))
+        .expect("the run is known");
+    guard.assert_nothing_refused();
+    gone_by_ps(&pids);
+    let mut signalled = report.signalled.clone();
+    signalled.sort();
+    let mut wanted = pids.clone();
+    wanted.sort();
+    assert_eq!(signalled, wanted, "the first scan found the whole tree");
+    // What else runs on the machine is not the test's to judge: suspects are machine-wide, and a stop's report may
+    // list some that are not the test's. What must hold is that nothing of the tree is a survivor.
+    let unexpected: Vec<_> = report
+        .survivors
+        .iter()
+        .filter(|s| s.kind != SurvivorKind::Suspect || pids.contains(&s.pid))
+        .collect();
+    assert!(unexpected.is_empty(), "{:?}", report.survivors);
+    assert!(
+        phases
+            .state(&k)
+            .as_ref()
+            .is_some_and(|s| matches!(s, PhaseState::Stopped {})),
+        "{:?}",
+        phases.state(&k)
+    );
+    assert!(matches!(
+        phases.run_state(&k.run),
+        Some(collide_core::state::RunState::Stopped {})
+    ));
+    let moves = transitions(&daemon, &k);
+    assert_eq!(moves.last().unwrap().1, PhaseState::Stopped {}, "{moves:?}");
+}
+
+#[test]
+fn stopping_a_run_that_is_not_known_signals_nothing() {
+    let root = TempRoot::new();
+    let guard = guard_of(&root, Vec::new());
+    let (daemon, _log) = start_guarded(&root, &guard);
+    let error = daemon
+        .phases()
+        .stop_run(&unique_run("nobody"), Some(Duration::from_millis(100)))
+        .expect_err("no such run");
+    assert!(error.to_string().contains("no run"), "{error}");
+    assert!(daemon.phases().stop_run("", None).is_err());
+    guard.assert_nothing_refused();
+}
+
+#[test]
+fn stopping_one_run_leaves_another_runs_process_running() {
+    let root = TempRoot::new();
+    let owned = Arc::new(Owned::default());
+    let _kill = KillOnDrop(owned.clone());
+    let guard = guard_of(&root, vec![owned.clone()]);
+    let (daemon, _log) = start_guarded(&root, &guard);
+    let phases = daemon.phases();
+    let stopped = key("first", "p1");
+    let other = key("second", "p1");
+    let (spec, pidfile) = hostile_spec(&root, &stopped.run);
+    let mut cleanup = Cleanup::new();
+    phases.start_phase(&stopped, &spec).unwrap();
+    cleanup.track(&phases, daemon.paths(), &stopped);
+    let mut bystander = python(WAIT_STDIN, root.path());
+    bystander
+        .env
+        .insert("COLLIDE_RUN".to_string(), other.run.clone());
+    phases.start_phase(&other, &bystander).unwrap();
+    cleanup.track(&phases, daemon.paths(), &other);
+    let pids = recorded_hostile_pids(&pidfile, &owned);
+    wait_state(&phases, &other, "running", running);
+
+    phases
+        .stop_run(&stopped.run, Some(Duration::from_millis(300)))
+        .unwrap();
+    gone_by_ps(&pids);
+    guard.assert_nothing_refused();
+    assert!(
+        phases.state(&other).as_ref().is_some_and(running),
+        "the other run was not stopped"
+    );
+    phases.close_stdin(&other).unwrap();
+    wait_state(&phases, &other, "the other run ends by itself", ended);
+}
+
+#[test]
+fn a_shim_the_daemon_starts_carries_the_runtime_marker_so_a_stop_never_sweeps_it() {
+    let root = TempRoot::new();
+    let (daemon, _log) = start(&root);
+    let phases = daemon.phases();
+    let k = key("marked", "p1");
+    let mut cleanup = Cleanup::new();
+    phases
+        .start_phase(&k, &python(WAIT_STDIN, root.path()))
+        .unwrap();
+    cleanup.track(&phases, daemon.paths(), &k);
+    let shim = phases.shim_pid(&k).unwrap();
+    assert_eq!(
+        collide_host::sysproc::env_vars_of(shim, &["COLLIDE_RUNTIME", "COLLIDE_RUN"]),
+        collide_host::sysproc::EnvRead::Read(vec![Some("1".to_string()), None])
+    );
     phases.close_stdin(&k).unwrap();
     wait_state(&phases, &k, "the phase ends", ended);
 }

@@ -1,6 +1,6 @@
 //! The command tree of `collide` (ts-0041-xf): `--help` lists it, and a command that is not built yet exits with a
 //! message that names its tag and stage, not a panic backtrace. The built commands (`schema`, `tasks`, `task`,
-//! `sections`) are tested in their own files.
+//! `sections`, `stop`) are tested in their own files.
 
 use serde_json::Value;
 use std::path::Path;
@@ -13,10 +13,9 @@ const TREE: [&str; 9] = [
     "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "sections",
 ];
 
-/// The commands whose handler is a tagged stub, with the tag and stage that fills each.
-const STUBBED: [(&str, &str, &str); 5] = [
+/// The commands whose handler is a tagged stub (`stop` is built: `tests/stop_command.rs`), with the tag and stage that fills each.
+const STUBBED: [(&str, &str, &str); 4] = [
     ("run", "cli: run", "3b"),
-    ("stop", "cli: stop", "3a"),
     ("report", "cli: report", "7"),
     ("config", "cli: config", "4b"),
     ("pack", "cli: pack", "4b"),

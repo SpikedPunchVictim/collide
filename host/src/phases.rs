@@ -33,7 +33,7 @@
 //! first ([`Phases::new`]), so a phase the daemon had already settled is settled again by nothing, and a change is
 //! recorded only when there is one. A live shim gets a watcher, which connects on its own thread, so a shim that is
 //! stopped never delays the bind. A phase whose shim is gone with no record is `lost`, whatever the agent's stream
-//! said (0.2), and its child, if it still runs, is stopped by the identity in `child.json`.
+//! said (0.2), and its child, if it still runs, is stopped ([`Phases::stop_run`]'s order, below).
 //!
 //! ## States
 //!
@@ -43,6 +43,21 @@
 //! `claude -p` that finished its work does. Each change is one `phase.transition` event in the store, written before
 //! the shim is told the record is held ([`DaemonMessage::AckExit`]), so a daemon that dies between the two repeats
 //! nothing: it reads the event, and the shim sends the record again to the next one.
+//!
+//! ## Stopping
+//!
+//! [`Phases::stop_run`] stops a run: it marks each phase of the run that is not final, finds the tree (each phase's
+//! child by `child.json`, and the processes carrying `COLLIDE_RUN=<run>`), and stops it in the order of
+//! [`crate::stop::ORDER`]. A marked phase whose exit arrives is `stopped`, not `ended` or `failed`. The shim is never
+//! part of the tree: it carries `COLLIDE_RUNTIME=1` from the moment the daemon starts it, so it outlives the stop,
+//! reaps its child and writes `exit.json`.
+//!
+//! The child of a phase that turns `lost` goes through the same order, on a thread of its own, with the grace of
+//! [`PhaseOptions::lost_grace`]: a lost phase's child used to get an immediate SIGKILL, which gave a child that traps
+//! SIGTERM no chance to clean up and reached nothing below it. The roots are the child by `child.json`; the marker scan
+//! is added only when no other phase of the run is live, because it would stop that phase too. A double-forked
+//! orphan of a lost phase whose run has another live phase is therefore not found (it has no marker the scan may
+//! use), which is the price of not stopping the live phase.
 //!
 //! ## An unresponsive shim
 //!
@@ -63,12 +78,16 @@ use crate::shim::{
     ChildIdentity, ChildStdio, DaemonStart, PROBLEM_PREFIX, ShimSpec, files as shim_files,
 };
 use crate::shim_link::{Next, ShimConnection, connect_shim, send};
+use crate::stop::{
+    Cleanup, Processes, RUNTIME_MARKER, Root, StopReport, StopRequest, read_detached, stop_tree,
+};
 use crate::store::{Store, StoreError};
 use crate::sysproc;
 use collide_core::change::{Actor, ActorKind};
 use collide_core::events::{Event, EventBody};
+use collide_core::non_empty::NonEmpty;
 use collide_core::shim::{DaemonMessage, ExitEnd, ExitRecord, ShimMessage};
-use collide_core::state::PhaseState;
+use collide_core::state::{PhaseState, RunState};
 use collide_core::transition::{PhaseEnding, TransitionError, phase_ending, phase_transition};
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -97,6 +116,14 @@ pub const UNRESPONSIVE_AFTER: Duration = Duration::from_secs(5);
 /// binds its socket within milliseconds of starting.
 pub const BIND_WAIT: Duration = Duration::from_secs(5);
 
+/// How long the child of a lost phase gets between SIGTERM and SIGKILL (the stop of [`crate::stop`]). The shim that
+/// would pass an interrupt is gone, and nobody waits, so this is shorter than the 60 s a hook gets.
+pub const LOST_GRACE: Duration = Duration::from_secs(10);
+
+/// How long [`Phases::stop_run`] waits, after the processes are gone, for each phase to settle: the shim reports the
+/// child's exit and the watcher records it.
+pub const STOP_SETTLE_WAIT: Duration = Duration::from_secs(10);
+
 /// The longest a run's or a phase's name may be, in bytes. Names make directory names, and the socket path has to fit
 /// the limit of a macOS socket path.
 pub const MAX_NAME_BYTES: usize = 64;
@@ -112,6 +139,8 @@ pub struct PhaseOptions {
     pub bind_wait: Duration,
     /// How often a watcher looks at its shim and at whether the daemon is stopping.
     pub poll: Duration,
+    /// The grace of the stop of a lost phase's child ([`LOST_GRACE`]).
+    pub lost_grace: Duration,
 }
 
 impl Default for PhaseOptions {
@@ -121,6 +150,7 @@ impl Default for PhaseOptions {
             unresponsive_after: UNRESPONSIVE_AFTER,
             bind_wait: BIND_WAIT,
             poll: Duration::from_millis(50),
+            lost_grace: LOST_GRACE,
         }
     }
 }
@@ -279,6 +309,29 @@ impl fmt::Display for PhaseError {
 
 impl std::error::Error for PhaseError {}
 
+/// Why [`Phases::stop_run`] stopped nothing.
+#[derive(Debug)]
+pub enum StopRunError {
+    /// The run's name is not a usable one.
+    Name(PhaseError),
+    /// The daemon has no phase of that run.
+    Unknown(String),
+    /// The stop refused the request or could not read the process table.
+    Refused(io::Error),
+}
+
+impl fmt::Display for StopRunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StopRunError::Name(error) => write!(f, "{error}"),
+            StopRunError::Unknown(run) => write!(f, "the daemon has no run {run:?}"),
+            StopRunError::Refused(error) => write!(f, "the stop did not run: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for StopRunError {}
+
 /// What a [`Phases`] is made of: where the runs are, how a shim is started, and how the daemon reports.
 pub struct PhasesConfig {
     pub runs_dir: PathBuf,
@@ -292,6 +345,11 @@ pub struct PhasesConfig {
     pub store: Arc<Store>,
     pub clocks: Arc<dyn Clocks + Send + Sync>,
     pub log: Arc<dyn Fn(&str) + Send + Sync>,
+    /// The process table a stop reads and signals ([`crate::stop::SystemProcesses`] in a running daemon).
+    pub processes: Arc<dyn Processes + Send + Sync>,
+    /// The workspace implementation's `cleanup` hook, which a stop runs after SIGKILL. `None` until the hook executor
+    /// exists (Stage 7).
+    pub cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
 }
 
 /// A lock that a panicking thread poisoned is still a lock.
@@ -347,6 +405,8 @@ struct EntryState {
     acknowledged: bool,
     /// A watcher runs for this phase.
     watching: bool,
+    /// A stop of the run asked for this phase to end: its exit settles it `stopped` and not `ended` or `failed`.
+    stop_requested: bool,
 }
 
 struct Entry {
@@ -413,10 +473,14 @@ struct PhasesShared {
     store: Arc<Store>,
     clocks: Arc<dyn Clocks + Send + Sync>,
     log: Arc<dyn Fn(&str) + Send + Sync>,
+    processes: Arc<dyn Processes + Send + Sync>,
+    cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
     table: Mutex<HashMap<PhaseKey, Arc<Entry>>>,
     /// Held to take the next event number and write the event, so two threads never take the same one.
     events: Mutex<()>,
     watchers: Mutex<Vec<JoinHandle<()>>>,
+    /// The threads that stop the children of lost phases; [`Phases::stop`] waits for them.
+    stoppers: Mutex<Vec<JoinHandle<()>>>,
     stopping: AtomicBool,
 }
 
@@ -446,6 +510,8 @@ impl Phases {
             store,
             clocks,
             log,
+            processes,
+            cleanup,
         } = config;
         let mut last: HashMap<PhaseKey, PhaseState> = HashMap::new();
         for event in store.events_since(0)? {
@@ -477,19 +543,28 @@ impl Phases {
                 store,
                 clocks,
                 log,
+                processes,
+                cleanup,
                 table: Mutex::new(table),
                 events: Mutex::new(()),
                 watchers: Mutex::new(Vec::new()),
+                stoppers: Mutex::new(Vec::new()),
                 stopping: AtomicBool::new(false),
             }),
         })
     }
 
-    /// Stops the watchers, which end within a poll, and waits for them. The shims go on: they belong to no daemon.
+    /// Stops the watchers, which end within a poll, and waits for them, and for any stop of a lost phase's child that
+    /// is running (it ends within [`PhaseOptions::lost_grace`] and the settle of [`crate::stop`]). The shims go on:
+    /// they belong to no daemon.
     pub fn stop(&self) {
         self.shared.stopping.store(true, Ordering::SeqCst);
         let handles = std::mem::take(&mut *locked(&self.shared.watchers));
         for handle in handles {
+            let _ = handle.join();
+        }
+        let stoppers = std::mem::take(&mut *locked(&self.shared.stoppers));
+        for handle in stoppers {
             let _ = handle.join();
         }
     }
@@ -754,6 +829,9 @@ impl Phases {
         if let Some(start) = &self.shared.daemon_start {
             command.envs(&start.env);
         }
+        // A shim is runtime: a stop never sweeps it, because it must outlive the stop to reap its child and write
+        // `exit.json`. The marker is in the environment at exec, which is what a scan reads.
+        command.env(RUNTIME_MARKER, "1");
         // SAFETY: the closure runs between fork and exec and calls only `setsid`, which is async-signal-safe and
         // allocates nothing.
         unsafe {
@@ -1014,11 +1092,16 @@ impl Phases {
         {
             self.log(&format!("phase {}: {error}", entry.key));
         }
-        let to = phase_ending(&PhaseEnding {
-            exit_recorded: true,
-            result_seen: exit.end == ExitEnd::Exited { code: 0 },
-            volume_full: false,
-        });
+        // A phase a stop was asked to end is `stopped`, whatever its exit was: the person asked for it.
+        let to = if locked(&entry.inner).stop_requested {
+            PhaseState::Stopped {}
+        } else {
+            phase_ending(&PhaseEnding {
+                exit_recorded: true,
+                result_seen: exit.end == ExitEnd::Exited { code: 0 },
+                volume_full: false,
+            })
+        };
         match self.advance(entry, to, Some(exit)) {
             Ok(advanced) => advanced,
             Err(error) => {
@@ -1071,14 +1154,200 @@ impl Phases {
                 "phase {} is lost: its shim ended without writing exit.json",
                 entry.key
             ));
-            if let Some(stopped) = stop_orphan(&entry.dir) {
-                self.log(&format!(
-                    "phase {}: its child {stopped} was still running and was stopped",
-                    entry.key
-                ));
-            }
+            self.stop_lost_child(entry);
         }
         changed
+    }
+
+    /// Stops what a lost phase's child left running, in the order of [`crate::stop::ORDER`] and over the child's whole
+    /// tree, on a thread of its own: the grace is seconds, and the watcher or the adoption that noticed must go on.
+    /// The roots are the child by `child.json` (its pid and start time, so a reused pid is never signalled). The
+    /// marker scan runs only when no other phase of the run is live, because it would reach that phase too.
+    fn stop_lost_child(&self, entry: &Arc<Entry>) {
+        let Some(identity) = read_identity(&entry.dir.join(shim_files::CHILD)) else {
+            return;
+        };
+        let other_phase_live = locked(&self.shared.table).values().any(|other| {
+            other.key.run == entry.key.run
+                && other.key != entry.key
+                && !is_final(&locked(&other.inner).state)
+        });
+        let mut request = StopRequest::new(entry.key.run.clone());
+        request.roots = vec![Root {
+            pid: identity.pid,
+            started_us: identity.started_unix_us,
+        }];
+        request.by_marker = !other_phase_live;
+        request.run_start_us = self.run_start_us(&entry.key.run);
+        request.grace = self.shared.options.lost_grace;
+        request.poll = self.shared.options.poll;
+        request.detached = self.detached_of(&entry.key.run).unwrap_or_default();
+        let phases = self.clone();
+        let key = entry.key.clone();
+        let spawned = thread::Builder::new()
+            .name(format!("collide-stop-{key}"))
+            .spawn(move || {
+                match stop_tree(
+                    phases.shared.processes.as_ref(),
+                    &request,
+                    phases.cleanup_hook(),
+                ) {
+                    Ok(report) => phases.log(&format!(
+                        "phase {key}: the stop of its lost child signalled {} process(es), killed {}, and left {} alive",
+                        report.signalled.len(),
+                        report.killed.len(),
+                        report.survivors.len()
+                    )),
+                    Err(error) => phases.log(&format!(
+                        "phase {key}: its lost child could not be stopped: {error}"
+                    )),
+                }
+            });
+        match spawned {
+            Ok(handle) => locked(&self.shared.stoppers).push(handle),
+            Err(error) => self.log(&format!(
+                "phase {}: the thread that stops its lost child could not start: {error}",
+                entry.key
+            )),
+        }
+    }
+
+    fn cleanup_hook(&self) -> Option<&dyn Cleanup> {
+        self.shared
+            .cleanup
+            .as_ref()
+            .map(|hook| hook.as_ref() as &dyn Cleanup)
+    }
+
+    /// The records the run's hooks made of what they detached.
+    fn detached_of(&self, run: &str) -> io::Result<Vec<crate::stop::Detached>> {
+        read_detached(&self.shared.runs_dir.join(run))
+    }
+
+    /// When the run began, for the scan: the earliest `spec.json` of its phases, in microseconds since the epoch. A
+    /// process older than that cannot be the run's.
+    fn run_start_us(&self, run: &str) -> Option<u64> {
+        let entries: Vec<Arc<Entry>> = locked(&self.shared.table)
+            .values()
+            .filter(|e| e.key.run == run)
+            .cloned()
+            .collect();
+        entries
+            .iter()
+            .filter_map(|e| {
+                let modified = fs::metadata(e.dir.join(shim_files::SPEC))
+                    .ok()?
+                    .modified()
+                    .ok()?;
+                let since = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+                u64::try_from(since.as_micros()).ok()
+            })
+            .min()
+    }
+
+    // ---- stopping a run --------------------------------------------------------------------------------------
+
+    /// Stops a run: every phase of it that is not final is marked, so that its exit settles it `stopped`; then the
+    /// tree is found and stopped in the order of [`crate::stop::ORDER`] ([`stop_tree`]), with the run's id as the
+    /// marker and each phase's child (by `child.json`) as a root; and each marked phase is waited for until it
+    /// settles. `grace` is the time between SIGTERM and SIGKILL ([`crate::stop::DEFAULT_GRACE`] when `None`). It blocks
+    /// for as long as that, so a caller serves it on a thread of its own.
+    ///
+    /// A run the daemon does not know is an error and nothing is signalled. A run whose phases are all final is
+    /// swept too: what a finished run left running is what a stop is for.
+    pub fn stop_run(&self, run: &str, grace: Option<Duration>) -> Result<StopReport, StopRunError> {
+        check_name("run", run).map_err(StopRunError::Name)?;
+        let entries: Vec<Arc<Entry>> = locked(&self.shared.table)
+            .values()
+            .filter(|e| e.key.run == run)
+            .cloned()
+            .collect();
+        if entries.is_empty() {
+            return Err(StopRunError::Unknown(run.to_string()));
+        }
+        let mut request = StopRequest::new(run);
+        request.run_start_us = self.run_start_us(run);
+        request.poll = self.shared.options.poll;
+        if let Some(grace) = grace {
+            request.grace = grace;
+        }
+        let mut problems = Vec::new();
+        match self.detached_of(run) {
+            Ok(detached) => request.detached = detached,
+            Err(error) => problems.push(format!("the record of detached processes: {error}")),
+        }
+        let mut marked = Vec::new();
+        for entry in &entries {
+            {
+                let mut state = locked(&entry.inner);
+                if !is_final(&state.state) {
+                    state.stop_requested = true;
+                    marked.push(entry.clone());
+                }
+            }
+            if let Some(identity) = read_identity(&entry.dir.join(shim_files::CHILD)) {
+                request.roots.push(Root {
+                    pid: identity.pid,
+                    started_us: identity.started_unix_us,
+                });
+            }
+        }
+        self.log(&format!(
+            "run {run}: stopping {} phase(s), grace {} s",
+            marked.len(),
+            request.grace.as_secs_f64()
+        ));
+        let mut report = stop_tree(
+            self.shared.processes.as_ref(),
+            &request,
+            self.cleanup_hook(),
+        )
+        .map_err(StopRunError::Refused)?;
+        let until = Instant::now() + STOP_SETTLE_WAIT;
+        for entry in &marked {
+            while !is_final(&locked(&entry.inner).state) && Instant::now() < until {
+                thread::sleep(self.shared.options.poll);
+            }
+            if !is_final(&locked(&entry.inner).state) {
+                problems.push(format!("phase {} did not settle", entry.key));
+            }
+        }
+        report.problems.extend(problems);
+        self.log(&format!(
+            "run {run}: stopped; {} signalled, {} killed, {} left alive",
+            report.signalled.len(),
+            report.killed.len(),
+            report.survivors.len()
+        ));
+        Ok(report)
+    }
+
+    /// The run's state as its phases give it, until the run machine is the daemon's (Stage 4): `running` while a
+    /// phase is not final; else `stopped` if a phase was stopped, `failed` if one failed or was lost, and `ended`
+    /// otherwise. `None` for a run with no phases.
+    pub fn run_state(&self, run: &str) -> Option<RunState> {
+        let states: Vec<PhaseState> = locked(&self.shared.table)
+            .values()
+            .filter(|e| e.key.run == run)
+            .map(|e| locked(&e.inner).state.clone())
+            .collect();
+        if states.is_empty() {
+            return None;
+        }
+        Some(if states.iter().any(|s| !is_final(s)) {
+            RunState::Running {}
+        } else if states.iter().any(|s| matches!(s, PhaseState::Stopped {})) {
+            RunState::Stopped {}
+        } else if states
+            .iter()
+            .any(|s| matches!(s, PhaseState::Failed { .. } | PhaseState::Lost {}))
+        {
+            RunState::Failed {}
+        } else {
+            RunState::Ended {
+                outcome: NonEmpty::new("every phase ended").expect("the text is not empty"),
+            }
+        })
     }
 
     // ---- health ----------------------------------------------------------------------------------------------
@@ -1352,6 +1621,7 @@ impl EntryState {
             health: Health::Responsive,
             acknowledged: false,
             watching: false,
+            stop_requested: false,
         }
     }
 }
@@ -1400,23 +1670,6 @@ pub fn move_damaged_exit(dir: &Path, wall_ms: u64) -> io::Result<PathBuf> {
 pub fn read_identity(path: &Path) -> Option<ChildIdentity> {
     let text = fs::read_to_string(path).ok()?;
     ChildIdentity::from_json(&serde_json::from_str(&text).ok()?)
-}
-
-/// Stops the child of a phase whose shim is gone, by `child.json`: its process group, then the pid, each only when the
-/// start time still matches, so a pid that was reused is never signalled. Returns the pid it stopped.
-pub fn stop_orphan(dir: &Path) -> Option<u32> {
-    let identity = read_identity(&dir.join(shim_files::CHILD))?;
-    if !process_is_running(identity.pid, Some(identity.started_unix_us)) {
-        return None;
-    }
-    let pid = libc::pid_t::try_from(identity.pid).ok()?;
-    // SAFETY: `kill` takes two integers. The pid's start time matched the one the shim recorded for its child, so it
-    // is that child, and the child is a session leader (the shim made it one), so its group id is its pid.
-    unsafe {
-        libc::kill(-pid, libc::SIGKILL);
-        libc::kill(pid, libc::SIGKILL);
-    }
-    Some(identity.pid)
 }
 
 #[cfg(test)]
