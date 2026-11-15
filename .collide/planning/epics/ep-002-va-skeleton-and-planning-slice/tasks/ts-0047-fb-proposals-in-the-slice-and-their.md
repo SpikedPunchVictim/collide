@@ -1,7 +1,7 @@
 ---
 id: ts-0047-fb
 kind: task
-status: active
+status: done
 title: "Proposals in the slice and their Features part"
 owners: []
 links:
