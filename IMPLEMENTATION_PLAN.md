@@ -2029,7 +2029,7 @@ Why the plan adapter parses files itself:
   result is true to what is on disk.
 - **The planning slice checks out the main checkout's shared root by default** (R5; `--checkout` names another). A
   write there leaves an uncommitted file. `--commit` commits that one file and nothing else, as a stopgap until the
-  `record` hook exists (Stage 8). A claim (`owners`) is refused when the file already shows an owner, unless the
+  `record` hook exists (Stage 7). A claim (`owners`) is refused when the file already shows an owner, unless the
   claimant is that owner.
 - **Launch reads each task at the run's line ref, not the working tree.** A task with unrecorded edits must be
   recorded before launch. The run preview shows its status at that ref, and refuses a task that is not launchable
@@ -2128,7 +2128,7 @@ layout: { default: board, groupBy: category }
       remotes). It keeps creation order and is the short handle. It may repeat after two branches merge;
     - the suffix makes the id unique, so a merge never renumbers a file or rewrites a link. `collide task 12`
       resolves when one item has that number; otherwise it lists the matches and asks for `12-ua`;
-    - **a collision of whole ids is possible** (R5): 20 letters make 400 suffixes per number. The suffix is drawn
+    - **a collision of whole ids is possible** (R5): 23 letters make 529 suffixes per number. The suffix is drawn
       from a seeded generator, a test pins that, and a second test forces a collision and checks that the draw is
       repeated until the id is free among every ref Collide can see. If two branches still create the same id, the
       second file is a `task.invalid`, and **`collide task reid <id>`** gives it a new suffix, rewrites the links that
@@ -4481,7 +4481,10 @@ Planning: the merge cases, one per row of the merge table; verify verdicts; `wai
   - a lint/test gate on `task.before_status: review`.
 - Standalone codemap pack: a `workspace.after_create` chain hook, composed with another pack's workspace
   implementation.
-- `collide pack test`: fixture repo + fake adapter + `tsc --noEmit`.
+- `collide pack test`: fixture repo + fake adapter + `tsc --noEmit`. Owner, 2026-11-14 (backlog): users need an easy
+  way to test their packs without going through the UI, so this is a first-class CLI path for pack authors, usable
+  in CI, and is scoped from that ask when this stage is split into items. Stage 10's tests already run the Orchard
+  pack's `pack test` with fakes, so the basic command may have to land by Stage 10; settle it when Stage 10 is split.
 - `collide pack update <name> [--to <ref>]`, and update trust: show a diff of the changed pack (manifest, workflow
   graph, hooks), board config, settings or views before re-approving.
 - Observers per 0.4: delivery, acknowledgement, restart, the disabled-observer Queue item, and a fixture observer
