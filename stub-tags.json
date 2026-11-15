@@ -66,5 +66,6 @@
   "cli: stop": "3a",
   "cli: report": "7",
   "cli: config": "4b",
-  "cli: pack": "4b"
+  "cli: pack": "4b",
+  "ui_tools: endpoint token store": "6b"
 }

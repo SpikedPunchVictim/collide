@@ -1,0 +1,51 @@
+{
+  "$defs": {
+    "ToolContent": {
+      "description": "One piece of a tool's answer. MCP has more kinds; the five tools answer in text.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ui_tools.reply` params: the window's answer to the [`UiToolsRequest`] with this `requestId`, in the shape of an MCP\ntool result. `isError` is true when the tool refused the call; the text then says what to do (0.9). A reply to a\nrequest the shell has dropped is ignored.",
+  "properties": {
+    "content": {
+      "items": {
+        "$ref": "#/$defs/ToolContent"
+      },
+      "type": "array"
+    },
+    "isError": {
+      "default": false,
+      "type": "boolean"
+    },
+    "requestId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestId",
+    "content",
+    "isError"
+  ],
+  "title": "UiToolsReplyParams",
+  "type": "object"
+}

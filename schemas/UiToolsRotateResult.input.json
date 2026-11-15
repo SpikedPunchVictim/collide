@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ui_tools.rotate` result: the new endpoint token. The old one stops working at once.",
+  "properties": {
+    "token": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "token"
+  ],
+  "title": "UiToolsRotateResult",
+  "type": "object"
+}

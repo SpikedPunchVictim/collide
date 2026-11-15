@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`ui_tools.token` result: the endpoint token (0.2), for Settings to show.",
+  "properties": {
+    "token": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "token"
+  ],
+  "title": "UiToolsTokenResult",
+  "type": "object"
+}

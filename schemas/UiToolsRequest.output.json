@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The event `ui_tools.request` (0.2): an agent's `tools/call`, for the window to run against its own state and answer\nwith `ui_tools.reply`. No field holds a token.",
+  "properties": {
+    "caller": {
+      "description": "The ask's id, or [`EXTERNAL_CALLER`].",
+      "type": "string"
+    },
+    "deadline": {
+      "description": "When the shell gives up and answers the agent that the window did not answer: Unix milliseconds on the wall\nclock, so the window can skip a request it cannot answer in time. The shell's own timeout runs on the uptime\nclock (0.2, Clocks) and does not depend on this value.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "message": {
+      "description": "The `tools/call` message as the agent sent it. It is untrusted (0.9)."
+    },
+    "requestId": {
+      "description": "Names this request in the window's `ui_tools.reply`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestId",
+    "caller",
+    "deadline",
+    "message"
+  ],
+  "title": "UiToolsRequest",
+  "type": "object"
+}

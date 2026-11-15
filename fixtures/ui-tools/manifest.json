@@ -1,0 +1,68 @@
+[
+  {
+    "name": "query",
+    "description": "Reads one page of the tasks or runs the window holds. Changes nothing on screen.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "subject": { "enum": ["tasks", "runs"] },
+        "filter": { "type": "object" },
+        "fields": { "type": "array", "items": { "type": "string" } },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "cursor": { "type": "string" }
+      },
+      "required": ["subject"]
+    },
+    "annotations": { "readOnlyHint": true }
+  },
+  {
+    "name": "set_view",
+    "description": "Sets the filter, sort, grouping or window of a surface's view.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "surface": { "enum": ["field", "tracks"] },
+        "title": { "type": "string" },
+        "filter": { "type": "object" }
+      },
+      "required": ["surface", "title"]
+    }
+  },
+  {
+    "name": "show_groups",
+    "description": "Draws a lens: named groups of ids, each with its reason.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "surface": { "enum": ["field", "tracks"] },
+        "title": { "type": "string" },
+        "groups": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["surface", "title", "groups"]
+    }
+  },
+  {
+    "name": "highlight",
+    "description": "Marks ids on a surface and filters nothing.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "surface": { "enum": ["field", "tracks"] },
+        "ids": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["surface", "ids"]
+    }
+  },
+  {
+    "name": "open",
+    "description": "Opens a surface, and one item on it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "surface": { "enum": ["field", "tracks", "queue", "experiments"] },
+        "id": { "type": "string" }
+      },
+      "required": ["surface"]
+    }
+  }
+]

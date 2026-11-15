@@ -1,0 +1,51 @@
+{
+  "$defs": {
+    "ToolAnnotations": {
+      "additionalProperties": false,
+      "description": "MCP's tool annotations, of which the manifest takes one.",
+      "properties": {
+        "readOnlyHint": {
+          "description": "True for a tool that changes nothing on screen. The shell does not count its calls against\n[`MAX_SCREEN_CHANGING_CALLS`].",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One tool of the manifest: what MCP's `tools/list` returns for it.",
+  "properties": {
+    "annotations": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolAnnotations"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "inputSchema": {
+      "description": "A JSON Schema for the tool's arguments, whose `type` is `object` ([`ToolManifest::check`]).",
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "description",
+    "inputSchema"
+  ],
+  "title": "ToolDefinition",
+  "type": "object"
+}

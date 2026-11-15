@@ -37,6 +37,7 @@ use crate::shim::{DaemonMessage, ExitRecord, ShimMessage};
 use crate::span::Span;
 use crate::stage::Stage;
 use crate::state::{PhaseState, RunState, WorkspaceState};
+use crate::ui_tools;
 use crate::view::View;
 use crate::workflow::{Adoption, Workflow};
 use schemars::JsonSchema;
@@ -236,5 +237,14 @@ pub fn registry() -> Registry {
     registry.add::<owner::WorkspaceRemoveResult>();
     registry.add::<owner::WorkspaceResumeParams>();
     registry.add::<owner::WorkspaceResumeResult>();
+    // The shell's `ui_tools.*` contract (ts-0035-re): the window's three methods, the request event and the manifest.
+    registry.add::<ui_tools::UiToolsReplyParams>();
+    registry.add::<ui_tools::UiToolsTokenParams>();
+    registry.add::<ui_tools::UiToolsTokenResult>();
+    registry.add::<ui_tools::UiToolsRotateParams>();
+    registry.add::<ui_tools::UiToolsRotateResult>();
+    registry.add::<ui_tools::UiToolsRequest>();
+    registry.add::<ui_tools::ToolDefinition>();
+    registry.add::<ui_tools::ToolManifest>();
     registry
 }

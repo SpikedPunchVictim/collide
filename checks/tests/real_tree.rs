@@ -166,3 +166,23 @@ fn every_adapter_executor_supervisor_sampler_and_cli_tag_names_its_stage_and_cou
         );
     }
 }
+
+/// The tag of the `ui_tools` request handler (ts-0035-re) and the stage that fills it: the endpoint token's place in the
+/// OS keychain is Stage 6b, with the listener. It must count at least one stub today.
+const UI_TOOLS_TAGS: [(&str, &str); 1] = [("ui_tools: endpoint token store", "6b")];
+
+#[test]
+fn every_ui_tools_tag_names_its_stage_and_counts_at_least_one_stub() {
+    let report = stubs::check(&repo()).unwrap();
+    for (tag, stage) in UI_TOOLS_TAGS {
+        assert_eq!(
+            report.stages.get(tag).map(String::as_str),
+            Some(stage),
+            "tag \"{tag}\" is not registered under stage {stage}"
+        );
+        assert!(
+            report.counts.get(tag).copied().unwrap_or(0) >= 1,
+            "tag \"{tag}\" is registered but no stub carries it"
+        );
+    }
+}
