@@ -1,7 +1,7 @@
 ---
 id: ts-0042-vn
 kind: task
-status: ready
+status: active
 title: "UI reducer and agent tool actions"
 owners: []
 links:
