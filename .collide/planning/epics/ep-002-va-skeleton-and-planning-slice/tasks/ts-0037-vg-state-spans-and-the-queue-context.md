@@ -1,7 +1,7 @@
 ---
 id: ts-0037-vg
 kind: task
-status: active
+status: done
 title: "State, spans and the Queue context record"
 owners: []
 links:
