@@ -1,7 +1,7 @@
 ---
 id: ts-0067-kw
 kind: task
-status: ready
+status: active
 title: "Always-recorded metrics: spans, sleep, usage and fingerprint"
 owners: []
 links:
