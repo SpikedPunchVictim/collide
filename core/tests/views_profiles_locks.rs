@@ -475,6 +475,20 @@ fn a_lock_with_no_packs_is_valid() {
 }
 
 #[test]
+fn the_lock_files_and_the_users_packs_round_trip_through_json() {
+    for path in ["locks/packs.lock", "locks/packs-npm-later.lock"] {
+        let lock: PackLock = load_yaml_file(&fixture(path)).unwrap();
+        let value = serde_json::to_value(&lock).unwrap();
+        let again: PackLock = serde_json::from_value(value).unwrap();
+        assert_eq!(again, lock, "{path}");
+    }
+    let packs: UserPacks = load_yaml_file(&fixture("locks/packs.yaml")).unwrap();
+    let value = serde_json::to_value(&packs).unwrap();
+    let again: UserPacks = serde_json::from_value(value).unwrap();
+    assert_eq!(again, packs);
+}
+
+#[test]
 fn a_lock_source_for_a_package_manager_validates_without_a_schema_change() {
     let lock: PackLock = load_yaml_file(&fixture("locks/packs-npm-later.lock")).unwrap();
     assert_eq!(check_lock(&lock), Ok(()));

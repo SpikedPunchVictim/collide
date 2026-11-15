@@ -3541,10 +3541,10 @@ Contracts: the journal and its replay; the `pending` poll; the `integrating` sta
 the manifest; the actor from peer credentials.
 Features (revision 14): the part's parser over good and malformed fixtures; the check at `proposed`; a feature link
 refused and taken; the derived state; the near-duplicate rule.
-**Status**: In progress; each item holds its own status. Items from revision 13: epic `ep-002-va` in
-`.collide/planning/epics/` (part L), `ts-0007` to `ts-0044`, each sized for one Sonnet agent (0.15). The planning
-slice's items are built first. Revision 14 adds `ts-0047-fb`, `ts-0048-pg` and `ts-0049-kn` (features), built after
-`ts-0037-vg`. It changes no other item.
+**Status**: Complete (2026-11-15). Every item of epic `ep-002-va` is done, and the epic with it: `ts-0007` to
+`ts-0044` from revision 13, and `ts-0047-fb`, `ts-0048-pg` and `ts-0049-kn` (features) from revision 14. Each success
+criterion and Tests entry was checked against a named test. The check added two things: a CI step that lists the
+catalogue points with their stages, and JSON round trips for the config and lock files.
 
 ## Stage 3: Headless core (CLI, no UI), and the thin loop
 

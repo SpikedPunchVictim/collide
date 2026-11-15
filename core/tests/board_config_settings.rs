@@ -399,6 +399,16 @@ fn an_empty_config_is_valid() {
 }
 
 #[test]
+fn both_config_files_round_trip_through_json() {
+    for path in ["config/config.yaml", "config/repo-config.yaml"] {
+        let file: ConfigFile = load_fixture(path);
+        let value = serde_json::to_value(&file).unwrap();
+        let again: ConfigFile = serde_json::from_value(value).unwrap();
+        assert_eq!(again, file, "{path}");
+    }
+}
+
+#[test]
 fn an_unknown_key_in_a_config_file_fails_naming_it() {
     let error = fixture_error::<ConfigFile>("config/invalid/unknown-key.yaml");
     assert!(error.contains("metrics"), "{error}");

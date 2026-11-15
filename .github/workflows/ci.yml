@@ -72,7 +72,10 @@ jobs:
       - name: cargo build
         run: cargo build --workspace
 
-      # The whole workspace, so the `collide schema` catalogue listing test runs and prints.
+      # Stage 2's criterion: CI lists each catalogue point with the stage that makes it fire.
+      - name: Catalogue points and their stages
+        run: ./target/debug/collide schema | grep -E '^  [a-z_]+\.[a-z_.]+  stage '
+
       - name: cargo test
         run: cargo test --workspace
 
