@@ -1,7 +1,7 @@
 ---
 id: ts-0064-hw
 kind: task
-status: ready
+status: active
 title: "Claude stream: usage, compaction, model time and limits"
 owners: []
 links:
