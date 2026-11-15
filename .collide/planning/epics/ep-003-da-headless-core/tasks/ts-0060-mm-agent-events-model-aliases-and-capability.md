@@ -1,7 +1,7 @@
 ---
 id: ts-0060-mm
 kind: task
-status: active
+status: done
 title: "Agent events, model aliases and capability refusal"
 owners: []
 links: []
