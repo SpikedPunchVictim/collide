@@ -1,7 +1,7 @@
 ---
 id: ts-0049-kn
 kind: task
-status: ready
+status: active
 title: "Sections: the near-duplicate rule and collide sections"
 owners: []
 links:
