@@ -1,7 +1,7 @@
 ---
 id: ts-0058-ad
 kind: task
-status: active
+status: done
 title: "launchd one-shot job for the daemon"
 owners: []
 links:
