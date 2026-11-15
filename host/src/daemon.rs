@@ -1,0 +1,247 @@
+//! `collide-daemon`'s own parts (0.2; Stage 3a): the entry point, the socket and its security, and the adoption of
+//! shims that outlived the last daemon. Starting the daemon is [`crate::launch`], its environment is
+//! [`crate::base_env`], its storage is [`crate::store`], its clocks are [`crate::clock`] and its telemetry receiver
+//! is [`crate::otlp`]. The binary's `main` is a placeholder until Stage 3a calls [`run`].
+//!
+//! ## What the daemon does at start, in this order
+//!
+//! 1. Raises its soft open-file limit ([`MIN_OPEN_FILES`]): launchd's default of 256 broke herdr at about 40 panes,
+//!    and the daemon tails three files per child.
+//! 2. Records its login session, and restarts in a new one. Ending at logout is recorded as host shutdown, not as a
+//!    crash.
+//! 3. Opens the store and **adopts existing shims** ([`adopt_shims`]) before it binds the socket, so no client sees a
+//!    run as gone while its shim is alive.
+//! 4. Checks the socket's directory and binds ([`bind_socket`]).
+//!
+//! ## The socket
+//!
+//! At a short fixed path, because an `AF_UNIX` path is limited to [`MAX_SOCKET_PATH_BYTES`] bytes on macOS (measured
+//! S3), and a longer path fails fast with a message naming the path and the limit ([`SocketError::PathTooLong`]).
+//!
+//! - Its directory is mode `0700` and the daemon checks the owner and mode at start, refusing to bind in a directory
+//!   that is not the user's or is open to others ([`check_socket_dir`]).
+//! - A connecting peer's uid must equal the daemon's (`getpeereid`), so a second local user never reaches the token
+//!   check ([`SocketError::ForeignUid`]).
+//! - The CLI's token is in a file of mode `0600` in that directory, made at the daemon's first start
+//!   ([`TOKEN_FILE_MODE`]). It is never put in an environment variable.
+//! - A shim's socket follows the same rules with no token, because only the daemon talks to it.
+//!
+//! ## Who is asking
+//!
+//! A peer's pid is read with `LOCAL_PEERPID`, and the daemon walks that process's parents looking for the markers:
+//! `COLLIDE_RUN` makes a run's agent, the app's process makes the app, and anything else is the CLI from a terminal
+//! ([`Caller`]). The result is the `actor` recorded on every event, and only the app does the person-only operations.
+//! This is a guardrail (0.1), not a boundary.
+//!
+//! | tag | function | what it does |
+//! |---|---|---|
+//! | `daemon: entry` | [`run`] | the start sequence above, then the serve loop |
+//! | `daemon: socket server` | [`bind_socket`], [`serve`] | the path limit, the bind, the handshake and the JSON-RPC loop |
+//! | `daemon: socket security` | [`check_socket_dir`], [`identify_caller`] | the `0700` directory and the actor from the peer |
+//! | `daemon: adopt shims` | [`adopt_shims`] | reattach by pid and start time, read `exit.json` for the ones that ended |
+
+use crate::clock::Clocks;
+use crate::store::Store;
+use collide_core::shim::ExitRecord;
+use std::fmt;
+use std::io;
+use std::path::{Path, PathBuf};
+
+/// The longest an `AF_UNIX` socket path may be on macOS, in bytes, without the terminating NUL (measured S3).
+pub const MAX_SOCKET_PATH_BYTES: usize = 103;
+
+/// The open-file soft limit the daemon raises itself to. The plan names launchd's 256 as too low and gives no target;
+/// this is room for the three files of each of about a hundred children.
+pub const MIN_OPEN_FILES: u64 = 4096;
+
+/// The mode of the CLI's token file (0.2).
+pub const TOKEN_FILE_MODE: u32 = 0o600;
+
+/// The mode of the socket's directory (0.2).
+pub const SOCKET_DIR_MODE: u32 = 0o700;
+
+/// Where the daemon's files are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonPaths {
+    /// The directory the socket and the token file are in, mode `0700`.
+    pub socket_dir: PathBuf,
+    pub socket: PathBuf,
+    /// The CLI's token, mode `0600`.
+    pub token_file: PathBuf,
+    /// The lock file that serializes starts ([`crate::launch`]).
+    pub lock_file: PathBuf,
+    /// The directory that holds one run directory for each run, which the shims write into.
+    pub runs_dir: PathBuf,
+    /// The store's directory ([`Store::open`]).
+    pub store_dir: PathBuf,
+}
+
+/// Why the daemon could not start or serve. Each message names the path or the limit.
+#[derive(Debug)]
+pub enum SocketError {
+    /// The socket path is over [`MAX_SOCKET_PATH_BYTES`].
+    PathTooLong {
+        path: PathBuf,
+        len: usize,
+    },
+    /// The directory is not the user's, or its mode lets others in.
+    UnsafeDir {
+        dir: PathBuf,
+        mode: u32,
+        owned_by_user: bool,
+    },
+    /// A peer's uid is not the daemon's.
+    ForeignUid {
+        uid: u32,
+    },
+    Io {
+        context: String,
+        source: io::Error,
+    },
+}
+
+impl fmt::Display for SocketError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SocketError::PathTooLong { path, len } => write!(
+                f,
+                "the socket path {} is {len} bytes, over the {MAX_SOCKET_PATH_BYTES}-byte limit of a macOS socket path",
+                path.display()
+            ),
+            SocketError::UnsafeDir {
+                dir,
+                mode,
+                owned_by_user,
+            } => write!(
+                f,
+                "the socket directory {} is mode {mode:o}{}, and must be {SOCKET_DIR_MODE:o} and the user's own",
+                dir.display(),
+                if *owned_by_user {
+                    ""
+                } else {
+                    " and owned by another user"
+                }
+            ),
+            SocketError::ForeignUid { uid } => {
+                write!(f, "a connection from uid {uid} is not the daemon's user")
+            }
+            SocketError::Io { context, source } => write!(f, "{context}: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for SocketError {}
+
+/// Who is on the other end of a connection (0.2, Who is asking).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Caller {
+    /// The app: its process is among the peer's parents.
+    App,
+    /// The CLI from a terminal: no marker was found.
+    Cli,
+    /// A run's agent: `COLLIDE_RUN` is in the peer's tree, and `run` is its value.
+    RunAgent { run: String },
+}
+
+/// An existing shim, as the daemon finds it at start: which run, which process, and either the exit record it left
+/// or the fact that it is still alive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdoptedShim {
+    pub run: String,
+    pub pid: u32,
+    pub state: AdoptedState,
+}
+
+/// What adoption found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdoptedState {
+    /// The pid is alive and its start time matches the one recorded, so it is the same shim.
+    Alive,
+    /// The shim ended and left `exit.json`. The daemon takes the totals from it.
+    Exited(ExitRecord),
+    /// The shim is gone and left no `exit.json`: its phase is `lost` (0.2). When the child is still running, the
+    /// daemon stops it as it marks the phase `lost`.
+    Lost,
+}
+
+/// Runs the daemon: the start sequence in the module doc, then [`serve`] until it is told to stop.
+pub fn run(paths: &DaemonPaths, clocks: &dyn Clocks) -> Result<(), SocketError> {
+    let _ = (paths, clocks);
+    todo!("daemon: entry")
+}
+
+/// Checks the length of `path` and of its directory's rules ([`check_socket_dir`]), and binds it. The listener is the
+/// std one's equivalent until Stage 3a picks the async runtime, which is why this returns the bound path and not a
+/// type of a crate.
+pub fn bind_socket(paths: &DaemonPaths) -> Result<PathBuf, SocketError> {
+    let _ = paths;
+    todo!("daemon: socket server")
+}
+
+/// Accepts connections on the bound socket: the version handshake, the per-client token, and the JSON-RPC loop. The
+/// methods themselves are other items'.
+pub fn serve(socket: &Path, store: &Store) -> Result<(), SocketError> {
+    let _ = (socket, store);
+    todo!("daemon: socket server")
+}
+
+/// Refuses a socket directory that is not the user's or whose mode is not [`SOCKET_DIR_MODE`], and makes the
+/// directory when it is not there.
+pub fn check_socket_dir(dir: &Path) -> Result<(), SocketError> {
+    let _ = dir;
+    todo!("daemon: socket security")
+}
+
+/// Reads who is asking from the peer's pid, by the walk of its parents above.
+pub fn identify_caller(peer_pid: u32) -> Result<Caller, SocketError> {
+    let _ = peer_pid;
+    todo!("daemon: socket security")
+}
+
+/// Finds every shim of an earlier daemon under `runs_dir`: reattaches by pid plus start time, and reads `exit.json`
+/// for the shims that ended while no daemon was running. It runs before the socket is bound.
+pub fn adopt_shims(runs_dir: &Path) -> Result<Vec<AdoptedShim>, SocketError> {
+    let _ = runs_dir;
+    todo!("daemon: adopt shims")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_socket_path_error_names_the_path_and_the_limit() {
+        let message = SocketError::PathTooLong {
+            path: PathBuf::from("/very/long/path.sock"),
+            len: 120,
+        }
+        .to_string();
+        assert!(message.contains("/very/long/path.sock"), "{message}");
+        assert!(message.contains("103"), "{message}");
+    }
+
+    #[test]
+    fn an_unsafe_directory_error_names_the_directory_and_both_modes() {
+        let message = SocketError::UnsafeDir {
+            dir: PathBuf::from("/tmp/collide"),
+            mode: 0o755,
+            owned_by_user: true,
+        }
+        .to_string();
+        assert!(
+            message.contains("/tmp/collide") && message.contains("755") && message.contains("700")
+        );
+    }
+
+    #[test]
+    fn the_token_file_is_private_to_the_user() {
+        assert_eq!(TOKEN_FILE_MODE, 0o600);
+        assert_eq!(SOCKET_DIR_MODE, 0o700);
+    }
+
+    #[test]
+    #[should_panic(expected = "daemon: socket security")]
+    fn the_socket_directory_check_is_a_stub_tagged_for_stage_3a() {
+        let _ = check_socket_dir(Path::new("/nonexistent"));
+    }
+}

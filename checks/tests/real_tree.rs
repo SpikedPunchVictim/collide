@@ -67,3 +67,49 @@ fn every_core_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
         );
     }
 }
+
+/// The tags of the `host` outlines (ts-0040-kd) and the stage that fills each one: the daemon, the shim, the store and
+/// the clocks are Stage 3a, the OTLP receiver is Stage 9b. Each must count at least one stub today.
+const HOST_OUTLINE_TAGS: [(&str, &str); 25] = [
+    ("daemon: entry", "3a"),
+    ("daemon: lock file start", "3a"),
+    ("daemon: launchd job", "3a"),
+    ("daemon: setsid start", "3a"),
+    ("daemon: base environment", "3a"),
+    ("daemon: socket server", "3a"),
+    ("daemon: socket security", "3a"),
+    ("daemon: adopt shims", "3a"),
+    ("shim: entry", "3a"),
+    ("shim: spawn child", "3a"),
+    ("shim: reap", "3a"),
+    ("shim: journal writer", "3a"),
+    ("shim: exit record", "3a"),
+    ("shim: pty ring", "3a"),
+    ("shim: daemon link", "3a"),
+    ("store: open and migrate", "3a"),
+    ("store: event log", "3a"),
+    ("store: quarantine", "3a"),
+    ("clock: system readings", "3a"),
+    ("clock: timer", "3a"),
+    ("clock: sleep gap", "3a"),
+    ("otlp: receiver", "9b"),
+    ("otlp: run token", "9b"),
+    ("otlp: request check", "9b"),
+    ("otlp: drop identity", "9b"),
+];
+
+#[test]
+fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
+    let report = stubs::check(&repo()).unwrap();
+    for (tag, stage) in HOST_OUTLINE_TAGS {
+        assert_eq!(
+            report.stages.get(tag).map(String::as_str),
+            Some(stage),
+            "tag \"{tag}\" is not registered under stage {stage}"
+        );
+        assert!(
+            report.counts[tag] >= 1,
+            "tag \"{tag}\" is registered but no stub carries it"
+        );
+    }
+}
