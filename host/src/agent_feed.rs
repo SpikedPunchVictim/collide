@@ -29,9 +29,11 @@
 use crate::shim::files;
 use crate::store::PhaseRecord;
 use collide_core::adapter::{AgentSession, ExitInfo, PhaseFailure, PhaseOutcome, Step};
-use collide_core::agent::{AgentEvent, Usage};
+use collide_core::agent::{AgentEvent, PermissionRequest, Usage, UsageScope};
 use collide_core::journal::{Direction, JournalEnd, read_journal_from};
+use collide_core::replay::replay_journal_bytes;
 use collide_core::shim::ExitRecord;
+use collide_core::state::PauseCause;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -50,19 +52,52 @@ pub struct Pumped {
     pub record_changed: bool,
     /// A problem to log: the journal could not be read or holds a damaged record.
     pub problem: Option<String>,
+    /// Permission requests the session was asked in this read, in order. The daemon puts each to the person.
+    pub requests: Vec<PermissionRequest>,
 }
 
-/// The text of a failure as the store keeps it.
-pub fn failure_text(cause: &PhaseFailure) -> &'static str {
-    match cause {
+/// Why a settled phase pauses and does not end or fail, and what the pause needs to be resumed (0.3, Usage limits).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pause {
+    /// `UsageLimit` for a limit, `AskHuman` for a budget that ran out.
+    pub cause: PauseCause,
+    /// A limit's reset time, in milliseconds since the epoch, when the stream gave one.
+    pub reset_at_ms: Option<u64>,
+    /// What the session had cost when the phase paused, in US dollars: a running total, which is the session's whole
+    /// cost and not this process's alone (S1: the total carries across `--resume`).
+    pub spent_usd: Option<f64>,
+}
+
+/// The permission requests a step reports, in order.
+fn requests_of(step: &Step) -> Vec<PermissionRequest> {
+    step.events
+        .iter()
+        .filter_map(|stamped| match &stamped.event {
+            AgentEvent::PermissionRequest { request } => Some(request.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The text of a failure as the store keeps it. An API error keeps its status (`api_500`), when the result had one.
+pub fn failure_text(cause: &PhaseFailure) -> String {
+    if let PhaseFailure::Api {
+        status: Some(status),
+    } = cause
+    {
+        return format!("api_{status}");
+    }
+    let text = match cause {
         PhaseFailure::EmptyTurn => "empty_turn",
         PhaseFailure::Refusal => "refusal",
         PhaseFailure::MaxTokens => "max_tokens",
         PhaseFailure::MaxTurns => "max_turns",
+        PhaseFailure::Budget => "budget",
         PhaseFailure::Blocked { .. } => "blocked",
         PhaseFailure::Api { .. } => "api",
         PhaseFailure::NoResult => "no_result",
-    }
+    };
+    text.to_string()
 }
 
 pub struct AgentFeed {
@@ -77,6 +112,12 @@ pub struct AgentFeed {
     damaged: bool,
     usage: Option<Usage>,
     report: Option<String>,
+    /// A turn has ended (in the stream read, or in a journal replayed).
+    turn_ended: bool,
+    /// The turn hit a usage limit, with the reset time when the stream gave one. A new turn clears it.
+    limited: Option<Option<u64>>,
+    /// The running total's cost, the last time the session gave one.
+    spent_usd: Option<f64>,
 }
 
 impl AgentFeed {
@@ -93,7 +134,82 @@ impl AgentFeed {
             damaged: false,
             usage: None,
             report: None,
+            turn_ended: false,
+            limited: None,
+            spent_usd: None,
         }
+    }
+
+    /// A feed for a phase whose shim outlived the daemon: the journal is replayed into `session`, so a request it was
+    /// asked and nobody answered is still pending ([`AgentFeed::pending_permissions`]), and reading goes on after the
+    /// last whole record. An error says why the journal could not be replayed.
+    pub fn rebuild(
+        mut session: Box<dyn AgentSession + Send>,
+        phase_dir: &Path,
+    ) -> Result<AgentFeed, String> {
+        let journal = phase_dir.join(files::JOURNAL);
+        let bytes = match fs::read(&journal) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(format!("reading {}: {error}", journal.display())),
+        };
+        let replayed = replay_journal_bytes(session.as_mut(), &bytes)
+            .map_err(|error| format!("replaying {}: {error}", journal.display()))?;
+        let mut feed = AgentFeed::new(session, phase_dir);
+        feed.offset = replayed.valid_len as u64;
+        feed.next_seq = replayed.records as u64;
+        feed.damaged = matches!(replayed.end, JournalEnd::Damaged { .. });
+        feed.take(&replayed.step);
+        Ok(feed)
+    }
+
+    /// The permission requests the session holds that nobody has answered.
+    pub fn pending_permissions(&self) -> Vec<PermissionRequest> {
+        self.session.pending_permissions()
+    }
+
+    /// The answer to a permission request: the bytes to write to the child, which the caller sends once it has let go
+    /// of the feed. Empty for a request the session does not hold.
+    pub fn answer(
+        &mut self,
+        request_id: &str,
+        reply: collide_core::agent::PermissionReply,
+    ) -> Step {
+        let step = self.session.answer(request_id, reply);
+        self.take(&step);
+        step
+    }
+
+    /// An interrupt for the child's turn: the bytes to write.
+    pub fn interrupt(&mut self) -> Step {
+        let step = self.session.cancel();
+        self.take(&step);
+        step
+    }
+
+    /// Why the phase pauses, once it has settled with `outcome`: a turn that hit a usage limit and failed, or one that
+    /// ran out of budget. `None` for any other end.
+    pub fn pause(&self, outcome: &PhaseOutcome) -> Option<Pause> {
+        let cause = match (outcome, self.limited) {
+            (
+                PhaseOutcome::Failed {
+                    cause: PhaseFailure::Budget,
+                },
+                _,
+            ) => PauseCause::AskHuman {},
+            (PhaseOutcome::Failed { .. }, Some(_)) => PauseCause::UsageLimit {},
+            _ => return None,
+        };
+        Some(Pause {
+            cause,
+            reset_at_ms: self.limited.flatten(),
+            spent_usd: self.spent_usd,
+        })
+    }
+
+    /// What the session had cost, as far as it has said.
+    pub fn spent_usd(&self) -> Option<f64> {
+        self.spent_usd
     }
 
     /// Asks for stdin to be closed after the first turn that ends: a run of one turn, whose Claude child waits for
@@ -112,6 +228,7 @@ impl AgentFeed {
 
     /// A user turn: the bytes to write, which the caller sends once it has let go of the feed.
     pub fn send_turn(&mut self, text: &str) -> Step {
+        self.limited = None;
         let step = self.session.send_turn(text);
         self.take(&step);
         step
@@ -121,7 +238,7 @@ impl AgentFeed {
     pub fn record(&self, failure: Option<&PhaseFailure>) -> PhaseRecord {
         PhaseRecord {
             usage: self.usage.clone(),
-            failure: failure.map(|cause| failure_text(cause).to_string()),
+            failure: failure.map(failure_text),
             report: self.report.clone(),
         }
     }
@@ -140,6 +257,7 @@ impl AgentFeed {
             }
         };
         if bytes.is_empty() {
+            self.ask_to_close(&mut pumped);
             return pumped;
         }
         let read = read_journal_from(&bytes, self.next_seq);
@@ -148,9 +266,8 @@ impl AgentFeed {
         for record in &read.records {
             if record.direction == Direction::Out {
                 let step = self.session.feed(&record.bytes, record.wall_ns);
-                if self.take(&step) {
-                    pumped.close_stdin = true;
-                }
+                self.take(&step);
+                pumped.requests.extend(requests_of(&step));
                 pumped.writes.extend(step.writes);
             }
         }
@@ -162,13 +279,7 @@ impl AgentFeed {
                 "the journal holds a record that cannot be read ({error}); the rest is not fed"
             ));
         }
-        if pumped.close_stdin {
-            if self.stdin_closed {
-                pumped.close_stdin = false;
-            } else {
-                self.stdin_closed = true;
-            }
-        }
+        self.ask_to_close(&mut pumped);
         pumped.record_changed = self.usage != usage_before || self.report != report_before;
         pumped
     }
@@ -195,18 +306,32 @@ impl AgentFeed {
         (finished.outcome, record, problem)
     }
 
-    /// Takes what a step reported. Returns whether a turn ended and the feed is to close stdin.
-    fn take(&mut self, step: &Step) -> bool {
-        let mut turn_ended = false;
+    /// Asks for stdin to be closed, once, when a turn has ended and the feed was made to close after one.
+    fn ask_to_close(&mut self, pumped: &mut Pumped) {
+        if self.close_after_turn && self.turn_ended && !self.stdin_closed {
+            self.stdin_closed = true;
+            pumped.close_stdin = true;
+        }
+    }
+
+    /// Takes what a step reported.
+    fn take(&mut self, step: &Step) {
         for stamped in &step.events {
             match &stamped.event {
-                AgentEvent::Usage { usage } => self.usage = Some(usage.clone()),
+                AgentEvent::Usage { usage } => {
+                    if usage.scope == UsageScope::RunningTotal
+                        && let Some(cost) = &usage.cost
+                    {
+                        self.spent_usd = Some(cost.amount);
+                    }
+                    self.usage = Some(usage.clone());
+                }
                 AgentEvent::FinalReport { text, .. } => self.report = Some(text.clone()),
-                AgentEvent::TurnEnd { .. } => turn_ended = true,
+                AgentEvent::TurnEnd { .. } => self.turn_ended = true,
+                AgentEvent::Limited { reset_at_ms } => self.limited = Some(*reset_at_ms),
                 _ => {}
             }
         }
-        turn_ended && self.close_after_turn
     }
 
     /// The journal's bytes from `offset` to its end. A journal that is not there yet reads as empty.
@@ -402,8 +527,9 @@ mod tests {
         assert_eq!(failure_text(&PhaseFailure::NoResult), "no_result");
         assert_eq!(
             failure_text(&PhaseFailure::Api { status: Some(529) }),
-            "api"
+            "api_529"
         );
+        assert_eq!(failure_text(&PhaseFailure::Api { status: None }), "api");
         assert_eq!(
             failure_text(&PhaseFailure::Blocked { reason: None }),
             "blocked"

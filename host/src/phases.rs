@@ -52,9 +52,21 @@
 //! the shim is told the record is held ([`DaemonMessage::AckExit`]), so a daemon that dies between the two repeats
 //! nothing: it reads the event, and the shim sends the record again to the next one.
 //!
+//! ## Permission requests, pauses and a restart
+//!
+//! A permission request in the stream becomes a Queue item ([`permission_item`]) and a `permission.requested` event;
+//! [`Phases::answer_permission`] writes the answer through the shim, takes the item and records `permission.answered`.
+//! A phase whose turn ended on a usage limit or on its budget is `paused` ([`Pause`]), and the end hook is not called:
+//! the pause hook is, and the run decides what happens next ([`crate::file_run`]). [`Phases::resume_agent_phase`]
+//! moves a paused phase's files into `attempt-<n>` and starts the same phase again. After a restart, a phase that
+//! was running gets its session back from the journal ([`FeedRebuilder`]), so a request that was pending is pending
+//! again and can be answered.
+//!
 //! ## Stopping
 //!
-//! [`Phases::stop_run`] stops a run: it marks each phase of the run that is not final, finds the tree (each phase's
+//! [`Phases::stop_run`] stops a run: a phase with an agent is sent `interrupt` first, then stdin is closed
+//! ([`PhaseOptions::interrupt_wait`], [`PhaseOptions::close_wait`]); a child that ended its turn needs no signal. Then it
+//! marks each phase of the run that is not final, finds the tree (each phase's
 //! child by `child.json`, and the processes carrying `COLLIDE_RUN=<run>`), and stops it in the order of
 //! [`crate::stop::ORDER`]. A marked phase whose exit arrives is `stopped`, not `ended` or `failed`. The shim is never
 //! part of the tree: it carries `COLLIDE_RUNTIME=1` from the moment the daemon starts it, so it outlives the stop,
@@ -79,11 +91,12 @@
 //! |---|---|---|
 //! | `daemon: adopt shims` | [`crate::daemon::adopt_shims`], [`Phases::adopt`] | scan, classify, reattach, settle, before the bind |
 
-use crate::agent_feed::AgentFeed;
+use crate::agent_feed::{AgentFeed, Pause};
 use crate::auth::check_socket_path;
 use crate::clock::{Clock, Clocks};
 use crate::daemon::{AdoptedShim, AdoptedState};
 use crate::disk::{DiskGuard, Floor, FreeSpace};
+use crate::queue::Queue;
 use crate::shim::{
     ChildIdentity, ChildStdio, DaemonStart, PROBLEM_PREFIX, ShimSpec, files as shim_files,
 };
@@ -94,9 +107,11 @@ use crate::stop::{
 use crate::store::{PhaseRecord, Store, StoreError};
 use crate::sysproc;
 use collide_core::adapter::{PhaseFailure, PhaseOutcome};
+use collide_core::agent::{PermissionReply, PermissionRequest};
 use collide_core::change::{Actor, ActorKind};
-use collide_core::events::{Event, EventBody};
+use collide_core::events::{Event, EventBody, PermissionAnswer};
 use collide_core::non_empty::NonEmpty;
+use collide_core::owner::{AnswerKind, QueueItem, QueueKind};
 use collide_core::shim::{DaemonMessage, ExitEnd, ExitRecord, ShimMessage};
 use collide_core::state::{PhaseState, RunState};
 use collide_core::transition::{PhaseEnding, TransitionError, phase_ending, phase_transition};
@@ -139,6 +154,13 @@ pub const STOP_SETTLE_WAIT: Duration = Duration::from_secs(10);
 /// the limit of a macOS socket path.
 pub const MAX_NAME_BYTES: usize = 64;
 
+/// How long a stop waits, after it asked an agent to interrupt its turn, for the phase to end by itself before it closes
+/// the agent's stdin (0.5, Stop: `interrupt`, then stdin, then the signals).
+pub const INTERRUPT_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a stop waits, after it closed the agent's stdin, before it signals the tree.
+pub const CLOSE_WAIT: Duration = Duration::from_secs(5);
+
 /// The waits of a [`Phases`]. [`PhaseOptions::default`] is what a running daemon uses; a test passes short ones.
 #[derive(Debug, Clone, Copy)]
 pub struct PhaseOptions {
@@ -152,6 +174,10 @@ pub struct PhaseOptions {
     pub poll: Duration,
     /// The grace of the stop of a lost phase's child ([`LOST_GRACE`]).
     pub lost_grace: Duration,
+    /// How long a stop waits for an agent to end after the interrupt ([`INTERRUPT_WAIT`]).
+    pub interrupt_wait: Duration,
+    /// How long a stop waits for an agent to end after its stdin was closed ([`CLOSE_WAIT`]).
+    pub close_wait: Duration,
 }
 
 impl Default for PhaseOptions {
@@ -162,6 +188,8 @@ impl Default for PhaseOptions {
             bind_wait: BIND_WAIT,
             poll: Duration::from_millis(50),
             lost_grace: LOST_GRACE,
+            interrupt_wait: INTERRUPT_WAIT,
+            close_wait: CLOSE_WAIT,
         }
     }
 }
@@ -241,6 +269,21 @@ pub struct PhaseEnd {
 /// thread that noticed: a watcher, or the thread that adopts shims at start.
 pub type PhaseEndHook = Box<dyn Fn(&Phases, &PhaseEnd) + Send + Sync>;
 
+/// A phase that settled into a pause: a usage limit, or a budget that ran out (0.3). Its shim is gone and its session
+/// can be resumed by [`Phases::resume_agent_phase`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhasePause {
+    pub key: PhaseKey,
+    pub pause: Pause,
+}
+
+/// Called when a phase pauses, with no lock held, on the thread that noticed.
+pub type PhasePauseHook = Box<dyn Fn(&Phases, &PhasePause) + Send + Sync>;
+
+/// Makes the feed of an agent phase the daemon did not start, from the phase's key and directory: the session is
+/// rebuilt from its journal. `None` for a phase that is not an agent phase, or whose journal cannot be replayed.
+pub type FeedRebuilder = Box<dyn Fn(&PhaseKey, &Path) -> Option<AgentFeed> + Send + Sync>;
+
 /// Whether a phase's shim answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Health {
@@ -297,6 +340,10 @@ pub enum PhaseError {
     },
     Store(StoreError),
     Transition(TransitionError),
+    /// The phase is not paused, so there is nothing to resume.
+    NotPaused(PhaseKey),
+    /// The phase's last attempt is still being watched: the shim has not finished.
+    Busy(PhaseKey),
 }
 
 impl fmt::Display for PhaseError {
@@ -314,6 +361,8 @@ impl fmt::Display for PhaseError {
             PhaseError::Io { context, source } => write!(f, "{context}: {source}"),
             PhaseError::Store(error) => write!(f, "recording the phase: {error}"),
             PhaseError::Transition(error) => write!(f, "{error}"),
+            PhaseError::NotPaused(key) => write!(f, "the phase {key} is not paused"),
+            PhaseError::Busy(key) => write!(f, "the last attempt of phase {key} has not finished"),
         }
     }
 }
@@ -364,6 +413,12 @@ pub struct PhasesConfig {
     /// Where free space is read from and the floor, for a phase that ends with no `result`: on a full volume it fails
     /// with cause `disk`, not `lost` or `failed` (0.2, Durability). `None` never calls a volume full.
     pub disk: Option<(Arc<dyn FreeSpace + Send + Sync>, Floor)>,
+    /// The Queue the phases put a permission request in, and take it out of when it is answered.
+    pub queue: Arc<Queue>,
+    /// Called when a phase pauses ([`PhasePauseHook`]).
+    pub on_phase_pause: Option<PhasePauseHook>,
+    /// Rebuilds the feed of an agent phase from its journal after a restart ([`FeedRebuilder`]).
+    pub rebuild_feed: Option<FeedRebuilder>,
 }
 
 /// A lock that a panicking thread poisoned is still a lock.
@@ -421,6 +476,8 @@ struct EntryState {
     watching: bool,
     /// A stop of the run asked for this phase to end: its exit settles it `stopped` and not `ended` or `failed`.
     stop_requested: bool,
+    /// Why the phase paused, while it is paused and the daemon that paused it is this one.
+    pause: Option<Pause>,
 }
 
 struct Entry {
@@ -438,6 +495,11 @@ impl Entry {
             .join(shim_files::SOCKET_DIR)
             .join(shim_files::SOCKET)
     }
+}
+
+/// A phase that will not be read from again: it ended, or it paused and its shim has finished.
+fn is_settled(state: &PhaseState) -> bool {
+    is_final(state) || matches!(state, PhaseState::Paused { .. })
 }
 
 fn is_final(state: &PhaseState) -> bool {
@@ -493,6 +555,8 @@ struct PhasesShared {
     processes: Arc<dyn Processes + Send + Sync>,
     cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
     disk: Option<(Arc<dyn FreeSpace + Send + Sync>, Floor)>,
+    queue: Arc<Queue>,
+    on_phase_pause: Option<PhasePauseHook>,
     table: Mutex<HashMap<PhaseKey, Arc<Entry>>>,
     /// Held to take the next event number and write the event, so two threads never take the same one.
     events: Mutex<()>,
@@ -515,6 +579,8 @@ const DISK_FAILURE: &str = "disk";
 struct Settled {
     outcome: PhaseOutcome,
     volume_full: bool,
+    /// The session paused instead of ending: a usage limit, or a budget that ran out.
+    pause: Option<Pause>,
 }
 
 /// What a change of state did.
@@ -540,6 +606,9 @@ impl Phases {
             processes,
             cleanup,
             disk,
+            queue,
+            on_phase_pause,
+            rebuild_feed,
         } = config;
         let mut last: HashMap<PhaseKey, PhaseState> = HashMap::new();
         for event in store.events_since(0)? {
@@ -549,15 +618,28 @@ impl Phases {
                 last.insert(key, to);
             }
         }
+        let now_ms = clocks.read(Clock::Wall).nanos / 1_000_000;
         let table = last
             .into_iter()
             .map(|(key, state)| {
                 let dir = runs_dir.join(&key.run).join(&key.phase);
+                // A phase that is running when the daemon starts gets its session back from its journal, so a request
+                // it was asked and nobody answered is still there to answer.
+                let feed = if is_settled(&state) {
+                    None
+                } else {
+                    rebuild_feed
+                        .as_ref()
+                        .and_then(|rebuild| rebuild(&key, &dir))
+                };
+                if let Some(feed) = &feed {
+                    keep_permission_items(&queue, &key, &feed.pending_permissions(), now_ms);
+                }
                 let entry = Arc::new(Entry {
                     key: key.clone(),
                     dir,
                     inner: Mutex::new(EntryState::new(state)),
-                    feed: None,
+                    feed: feed.map(Mutex::new),
                 });
                 (key, entry)
             })
@@ -575,6 +657,8 @@ impl Phases {
                 processes,
                 cleanup,
                 disk,
+                queue,
+                on_phase_pause,
                 table: Mutex::new(table),
                 events: Mutex::new(()),
                 watchers: Mutex::new(Vec::new()),
@@ -616,6 +700,11 @@ impl Phases {
     }
 
     // ---- what a caller asks ----------------------------------------------------------------------------------
+
+    /// Whether the daemon has a phase of the run.
+    pub fn has_run(&self, run: &str) -> bool {
+        locked(&self.shared.table).keys().any(|key| key.run == run)
+    }
 
     /// The phase's state, or `None` for a phase the daemon does not know.
     pub fn state(&self, key: &PhaseKey) -> Option<PhaseState> {
@@ -834,6 +923,12 @@ impl Phases {
                 });
             }
         }
+        self.write_spec(entry, spec)
+    }
+
+    /// Writes the phase's `spec.json`, which must not be there yet.
+    fn write_spec(&self, entry: &Arc<Entry>, spec: &PhaseSpec) -> Result<(), PhaseError> {
+        let io_error = |context: String| move |source| PhaseError::Io { context, source };
         let shim_spec = ShimSpec {
             program: spec.program.clone(),
             args: spec.args.clone(),
@@ -853,6 +948,72 @@ impl Phases {
         file.write_all(shim_spec.to_json().to_string().as_bytes())
             .and_then(|()| file.sync_all())
             .map_err(io_error(format!("writing {}", path.display())))
+    }
+
+    /// Starts the next attempt of an agent phase that paused (a usage limit, a budget): the phase goes `paused →
+    /// running` and a new shim runs `spec`, whose session is `feed`. The files of the attempt before are moved into
+    /// `attempt-<n>` in the phase's folder, so the new attempt has a journal and an `exit.json` of its own and the
+    /// phase's folder holds one live attempt. The caller sends the first turn with [`Phases::send_turn`].
+    ///
+    /// The phase must be paused, and only one caller gets to resume it: the move to `running` is recorded under the
+    /// phase's lock, so a second caller finds the phase running and is refused.
+    pub fn resume_agent_phase(
+        &self,
+        key: &PhaseKey,
+        spec: &PhaseSpec,
+        feed: AgentFeed,
+    ) -> Result<(), PhaseError> {
+        let shim_exe = self.shared.shim_exe.clone().ok_or(PhaseError::NoShimExe)?;
+        let old = self
+            .entry(key)
+            .ok_or_else(|| PhaseError::NotPaused(key.clone()))?;
+        let cause = match locked(&old.inner).state {
+            PhaseState::Paused { cause } => cause,
+            _ => return Err(PhaseError::NotPaused(key.clone())),
+        };
+        // The last attempt's watcher ends once its shim has been acknowledged; its shim ends with it.
+        let until = Instant::now() + self.shared.options.lost_grace;
+        while locked(&old.inner).watching && Instant::now() < until {
+            thread::sleep(self.shared.options.poll);
+        }
+        if locked(&old.inner).watching {
+            return Err(PhaseError::Busy(key.clone()));
+        }
+        let entry = {
+            let mut table = locked(&self.shared.table);
+            // Held across the check and the insert: the one that replaces the paused entry resumes it.
+            let current = table.get(key).cloned();
+            if !current.is_some_and(|current| Arc::ptr_eq(&current, &old)) {
+                return Err(PhaseError::NotPaused(key.clone()));
+            }
+            let entry = Arc::new(Entry {
+                key: key.clone(),
+                dir: old.dir.clone(),
+                inner: Mutex::new(EntryState::new(PhaseState::Paused { cause })),
+                feed: Some(Mutex::new(feed)),
+            });
+            table.insert(key.clone(), entry.clone());
+            entry
+        };
+        let started = archive_attempt(&entry.dir)
+            .map_err(|source| PhaseError::Io {
+                context: format!("moving the last attempt of {}", entry.dir.display()),
+                source,
+            })
+            .and_then(|()| self.write_spec(&entry, spec))
+            .and_then(|()| self.spawn_shim(&shim_exe, &entry));
+        if let Err(error) = started {
+            self.fail_to_start(&entry, &error);
+            return Err(error);
+        }
+        if let Err(error) = self.advance(&entry, PhaseState::Running {}, None) {
+            self.log(&format!(
+                "phase {key}: could not be recorded running: {error}"
+            ));
+        }
+        self.log(&format!("phase {key}: resumed with a new shim"));
+        self.watch(&entry);
+        Ok(())
     }
 
     /// Starts `collide shim <dir>` in a session of its own, so that neither a signal to the daemon's group nor a job
@@ -1046,8 +1207,28 @@ impl Phases {
         })
     }
 
-    /// Tells the end hook that the phase reached a final state. No lock is held while it runs.
+    /// Tells the end hook that the phase reached a final state, or the pause hook that it paused. No lock is held while
+    /// it runs.
     fn ended(&self, entry: &Arc<Entry>) {
+        let paused = {
+            let state = locked(&entry.inner);
+            match (&state.state, &state.pause) {
+                (PhaseState::Paused { .. }, Some(pause)) => Some(pause.clone()),
+                _ => None,
+            }
+        };
+        if let Some(pause) = paused {
+            if let Some(hook) = &self.shared.on_phase_pause {
+                hook(
+                    self,
+                    &PhasePause {
+                        key: entry.key.clone(),
+                        pause,
+                    },
+                );
+            }
+            return;
+        }
         let end = {
             let state = locked(&entry.inner);
             PhaseEnd {
@@ -1150,6 +1331,13 @@ impl Phases {
     /// Ends the phase with the shim's record: `ended` for a clean exit, `failed` otherwise (see the module doc for the
     /// `result`). A phase that is final already keeps its state and takes the record if it had none.
     fn settle_with_exit(&self, entry: &Arc<Entry>, exit: ExitRecord) -> Advanced {
+        // A phase that paused has settled its attempt: a shim that waits to be acknowledged only needs the ack.
+        if matches!(locked(&entry.inner).state, PhaseState::Paused { .. }) {
+            return Advanced {
+                changed: false,
+                durable: true,
+            };
+        }
         if matches!(locked(&entry.inner).state, PhaseState::Pending {})
             && let Err(error) = self.advance(entry, PhaseState::Running {}, None)
         {
@@ -1161,6 +1349,10 @@ impl Phases {
         // A phase a stop was asked to end is `stopped`, whatever its exit was: the person asked for it.
         let to = if locked(&entry.inner).stop_requested {
             PhaseState::Stopped {}
+        } else if let Some(pause) = outcome.as_ref().and_then(|settled| settled.pause.clone()) {
+            let cause = pause.cause;
+            locked(&entry.inner).pause = Some(pause);
+            PhaseState::Paused { cause }
         } else {
             match outcome {
                 Some(Settled {
@@ -1212,10 +1404,20 @@ impl Phases {
     /// is final already (its session settled once).
     fn settle_feed(&self, entry: &Arc<Entry>, exit: &ExitRecord) -> Option<Settled> {
         let feed = entry.feed.as_ref()?;
-        if is_final(&locked(&entry.inner).state) {
+        if is_settled(&locked(&entry.inner).state) {
             return None;
         }
-        let (outcome, mut record, problem) = locked(feed).settle(Some(exit.clone()));
+        let stop_requested = locked(&entry.inner).stop_requested;
+        let (outcome, mut record, problem, pause) = {
+            let mut feed = locked(feed);
+            let (outcome, record, problem) = feed.settle(Some(exit.clone()));
+            let pause = if stop_requested {
+                None
+            } else {
+                feed.pause(&outcome)
+            };
+            (outcome, record, problem, pause)
+        };
         if let Some(problem) = problem {
             self.log(&format!("phase {}: {problem}", entry.key));
         }
@@ -1226,6 +1428,10 @@ impl Phases {
                 cause: PhaseFailure::NoResult
             }
         ) && self.volume_full(entry);
+        // A pause is not a failure: the record says nothing was wrong with the phase.
+        if pause.is_some() {
+            record.failure = None;
+        }
         if volume_full {
             record.failure = Some(DISK_FAILURE.to_string());
         }
@@ -1233,6 +1439,7 @@ impl Phases {
         Some(Settled {
             outcome,
             volume_full,
+            pause,
         })
     }
 
@@ -1269,7 +1476,7 @@ impl Phases {
     /// stdin to close, and a record to store.
     fn pump_feed(&self, entry: &Arc<Entry>, link: &Arc<Link>) {
         let Some(feed) = &entry.feed else { return };
-        if is_final(&locked(&entry.inner).state) {
+        if is_settled(&locked(&entry.inner).state) {
             return;
         }
         let (pumped, record) = {
@@ -1309,6 +1516,91 @@ impl Phases {
         if let Some(record) = record {
             self.store_record(entry, &record);
         }
+        for request in &pumped.requests {
+            self.ask_permission(&entry.key, request);
+        }
+    }
+
+    /// Puts a permission request the agent asked to the person: a Queue item, and the event.
+    fn ask_permission(&self, key: &PhaseKey, request: &PermissionRequest) {
+        self.shared
+            .queue
+            .push(permission_item(key, request, self.now_ms()));
+        let written = self.append_event(
+            Actor {
+                kind: ActorKind::Agent,
+                run: Some(key.run.clone()),
+                phase: Some(key.phase.clone()),
+            },
+            EventBody::PermissionRequested {
+                run: key.run.clone(),
+                phase: key.phase.clone(),
+                request: request.id.clone(),
+                tool: request.tool.clone().unwrap_or_default(),
+            },
+        );
+        if let Err(error) = written {
+            self.log(&format!(
+                "phase {key}: the permission request was not recorded: {error}"
+            ));
+        }
+        self.log(&format!(
+            "phase {key}: asks permission ({})",
+            request.tool.as_deref().unwrap_or("a tool")
+        ));
+    }
+
+    /// Answers a permission request the phase's agent asked, and takes its Queue item out. The answer is written to the
+    /// child by the shim, which journals it first. A request the phase does not hold (answered already, or from before
+    /// a restart that could not rebuild the session) is refused with its reason.
+    pub fn answer_permission(
+        &self,
+        key: &PhaseKey,
+        request_id: &str,
+        reply: PermissionReply,
+    ) -> Result<(), String> {
+        let entry = self
+            .entry(key)
+            .ok_or_else(|| format!("the daemon has no phase {key}"))?;
+        let feed = entry
+            .feed
+            .as_ref()
+            .ok_or_else(|| format!("phase {key} has no session to answer"))?;
+        let answer = match &reply {
+            PermissionReply::Allow {} => PermissionAnswer::Allow,
+            PermissionReply::Deny { .. } => PermissionAnswer::Deny,
+            PermissionReply::Cancel {} => PermissionAnswer::Cancel,
+        };
+        let step = locked(feed).answer(request_id, reply);
+        if step.writes.is_empty() {
+            return Err(format!(
+                "phase {key} holds no request {request_id:?}: it was answered already"
+            ));
+        }
+        for bytes in step.writes {
+            self.write(key, &String::from_utf8_lossy(&bytes))
+                .map_err(|error| format!("the answer was not sent: {error}"))?;
+        }
+        self.shared.queue.take(&permission_item_id(key, request_id));
+        let written = self.append_event(
+            Actor {
+                kind: ActorKind::Person,
+                run: Some(key.run.clone()),
+                phase: Some(key.phase.clone()),
+            },
+            EventBody::PermissionAnswered {
+                run: key.run.clone(),
+                phase: key.phase.clone(),
+                request: request_id.to_string(),
+                answer,
+            },
+        );
+        if let Err(error) = written {
+            self.log(&format!(
+                "phase {key}: the permission answer was not recorded: {error}"
+            ));
+        }
+        Ok(())
     }
 
     /// Sends the phase's session a user turn and writes what it answers to the child, waiting for the shim's answer to
@@ -1332,7 +1624,7 @@ impl Phases {
     /// reported (0.2), and a child that still runs is stopped. A phase that never ran fails. Returns whether the
     /// phase reached a final state now.
     fn settle_gone(&self, entry: &Arc<Entry>) -> bool {
-        if is_final(&locked(&entry.inner).state) {
+        if is_settled(&locked(&entry.inner).state) {
             return false;
         }
         match read_exit_json(&entry.dir) {
@@ -1508,10 +1800,14 @@ impl Phases {
             Err(error) => problems.push(format!("the record of detached processes: {error}")),
         }
         let mut marked = Vec::new();
+        let mut paused = Vec::new();
         for entry in &entries {
             {
                 let mut state = locked(&entry.inner);
-                if !is_final(&state.state) {
+                if matches!(state.state, PhaseState::Paused { .. }) {
+                    // A paused phase has no child: stopping it is recording that it stopped.
+                    paused.push(entry.clone());
+                } else if !is_final(&state.state) {
                     state.stop_requested = true;
                     marked.push(entry.clone());
                 }
@@ -1525,9 +1821,17 @@ impl Phases {
         }
         self.log(&format!(
             "run {run}: stopping {} phase(s), grace {} s",
-            marked.len(),
+            marked.len() + paused.len(),
             request.grace.as_secs_f64()
         ));
+        for entry in &paused {
+            match self.advance(entry, PhaseState::Stopped {}, None) {
+                Ok(advanced) if advanced.changed => self.ended(entry),
+                Ok(_) => {}
+                Err(error) => problems.push(format!("phase {}: {error}", entry.key)),
+            }
+        }
+        self.interrupt_then_close(&marked);
         let mut report = stop_tree(
             self.shared.processes.as_ref(),
             &request,
@@ -1553,6 +1857,58 @@ impl Phases {
         Ok(report)
     }
 
+    /// The first two steps of a stop, for the agent phases among `marked` (0.5): an `interrupt` control request, and
+    /// when the phase has not ended after [`PhaseOptions::interrupt_wait`], the agent's stdin closed. An agent that
+    /// ends its turn on the interrupt closes its own stdin through the feed and exits, and the stop signals nothing.
+    /// A phase with no session goes straight to the signals.
+    fn interrupt_then_close(&self, marked: &[Arc<Entry>]) {
+        let agents: Vec<&Arc<Entry>> = marked.iter().filter(|e| e.feed.is_some()).collect();
+        for entry in &agents {
+            let Some(feed) = &entry.feed else { continue };
+            let step = locked(feed).interrupt();
+            for bytes in step.writes {
+                if let Err(error) = self.write(&entry.key, &String::from_utf8_lossy(&bytes)) {
+                    self.log(&format!(
+                        "phase {}: the interrupt was not sent: {error}",
+                        entry.key
+                    ));
+                }
+            }
+        }
+        self.wait_until_final(&agents, self.shared.options.interrupt_wait);
+        let open: Vec<&Arc<Entry>> = agents
+            .into_iter()
+            .filter(|e| !is_final(&locked(&e.inner).state))
+            .collect();
+        for entry in &open {
+            if let Err(error) = self.close_stdin(&entry.key) {
+                self.log(&format!(
+                    "phase {}: stdin was not closed: {error}",
+                    entry.key
+                ));
+            }
+        }
+        self.wait_until_final(&open, self.shared.options.close_wait);
+    }
+
+    /// Waits until every entry is final, or `wait` has passed on the uptime clock.
+    fn wait_until_final(&self, entries: &[&Arc<Entry>], wait: Duration) {
+        let started = self.shared.clocks.read(Clock::Uptime).nanos;
+        let limit = u64::try_from(wait.as_nanos()).unwrap_or(u64::MAX);
+        while entries.iter().any(|e| !is_final(&locked(&e.inner).state)) {
+            let waited = self
+                .shared
+                .clocks
+                .read(Clock::Uptime)
+                .nanos
+                .saturating_sub(started);
+            if waited >= limit {
+                return;
+            }
+            thread::sleep(self.shared.options.poll);
+        }
+    }
+
     /// The run's state as its phases give it, until the run machine is the daemon's (Stage 4): `running` while a
     /// phase is not final; else `stopped` if a phase was stopped, `failed` if one failed or was lost, and `ended`
     /// otherwise. `None` for a run with no phases.
@@ -1566,8 +1922,18 @@ impl Phases {
             // A run that has not started a phase (paused for disk before it did) has only its own record.
             return self.recorded_run_state(run);
         }
-        Some(if states.iter().any(|s| !is_final(s)) {
+        // A run whose live phases are all paused is paused, for the first cause given.
+        let pause = states.iter().find_map(|state| match state {
+            PhaseState::Paused { cause } => Some(*cause),
+            _ => None,
+        });
+        let running = states
+            .iter()
+            .any(|s| !is_final(s) && !matches!(s, PhaseState::Paused { .. }));
+        Some(if running {
             RunState::Running {}
+        } else if let Some(cause) = pause {
+            RunState::Paused { cause }
         } else if states.iter().any(|s| matches!(s, PhaseState::Stopped {})) {
             RunState::Stopped {}
         } else if states
@@ -1685,7 +2051,7 @@ impl Phases {
                     unreachable_since = None;
                     self.serve_link(entry, connection);
                     let state = locked(&entry.inner);
-                    if is_final(&state.state) && state.acknowledged {
+                    if is_settled(&state.state) && state.acknowledged {
                         return;
                     }
                 }
@@ -1723,7 +2089,7 @@ impl Phases {
                 }
                 return;
             }
-            if is_final(&locked(&entry.inner).state) && !entry.socket().exists() {
+            if is_settled(&locked(&entry.inner).state) && !entry.socket().exists() {
                 return;
             }
             thread::sleep(options.poll);
@@ -1810,7 +2176,7 @@ impl Phases {
                 if advanced.changed {
                     self.ended(entry);
                 }
-                let recorded = is_final(&locked(&entry.inner).state)
+                let recorded = is_settled(&locked(&entry.inner).state)
                     && (advanced.durable || !advanced.changed);
                 if recorded {
                     // The event is stored: the shim may stop serving the record.
@@ -1851,6 +2217,89 @@ impl Phases {
     }
 }
 
+/// Moves what the last attempt of a phase left in `dir` into `attempt-<n>` there, where `n` is the next number, so the
+/// folder is clean for the next attempt. The attempts' own folders stay.
+fn archive_attempt(dir: &Path) -> io::Result<()> {
+    let taken = |name: &std::ffi::OsStr| name.to_string_lossy().starts_with(ATTEMPT_PREFIX);
+    let mut next = 1;
+    let mut moving = Vec::new();
+    for item in fs::read_dir(dir)? {
+        let item = item?;
+        if taken(&item.file_name()) {
+            next += 1;
+        } else {
+            moving.push(item.path());
+        }
+    }
+    let target = dir.join(format!("{ATTEMPT_PREFIX}{next}"));
+    fs::DirBuilder::new().mode(0o700).create(&target)?;
+    for path in moving {
+        if let Some(name) = path.file_name() {
+            fs::rename(&path, target.join(name))?;
+        }
+    }
+    Ok(())
+}
+
+/// The folder of an earlier attempt of a phase, in the phase's folder: `attempt-1`, `attempt-2`.
+pub const ATTEMPT_PREFIX: &str = "attempt-";
+
+/// The id of the Queue item that holds a phase's permission request.
+pub fn permission_item_id(key: &PhaseKey, request_id: &str) -> String {
+    format!("{}-{}-perm-{request_id}", key.run, key.phase)
+}
+
+/// The Queue item for a permission request. It takes one answer, [`AnswerKind::Permission`], which is allow or deny:
+/// there is no "always" (0.3, Permissions). `untrusted_input` stays false because nothing in 3b tracks where the
+/// request's arguments came from.
+pub fn permission_item(key: &PhaseKey, request: &PermissionRequest, since_ms: u64) -> QueueItem {
+    QueueItem {
+        id: permission_item_id(key, &request.id),
+        kind: QueueKind::Permission,
+        run: Some(key.run.clone()),
+        phase: Some(key.phase.clone()),
+        task: None,
+        since_ms,
+        title: format!(
+            "The agent asks to use {}",
+            request.tool.as_deref().unwrap_or("a tool")
+        ),
+        permission: Some(request.clone()),
+        untrusted_input: false,
+        cache: None,
+        reset_ms: None,
+        show: Vec::new(),
+        answers: vec![AnswerKind::Permission],
+    }
+}
+
+/// Makes the Queue's permission items of a phase the requests the session holds: one that is missing is added and one
+/// the session no longer holds is taken out.
+fn keep_permission_items(
+    queue: &Queue,
+    key: &PhaseKey,
+    pending: &[PermissionRequest],
+    since_ms: u64,
+) {
+    let held: Vec<String> = pending
+        .iter()
+        .map(|request| permission_item_id(key, &request.id))
+        .collect();
+    for item in queue.list(Some(&key.run)) {
+        if item.kind == QueueKind::Permission
+            && item.phase.as_deref() == Some(key.phase.as_str())
+            && !held.contains(&item.id)
+        {
+            queue.take(&item.id);
+        }
+    }
+    for request in pending {
+        if queue.get(&permission_item_id(key, &request.id)).is_none() {
+            queue.push(permission_item(key, request, since_ms));
+        }
+    }
+}
+
 impl EntryState {
     fn new(state: PhaseState) -> EntryState {
         EntryState {
@@ -1864,6 +2313,7 @@ impl EntryState {
             acknowledged: false,
             watching: false,
             stop_requested: false,
+            pause: None,
         }
     }
 }
@@ -1969,6 +2419,36 @@ mod tests {
             fs::remove_file(path).unwrap();
         }
         fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_attempt_is_archived_into_the_next_numbered_folder_and_the_earlier_ones_stay() {
+        let dir =
+            std::env::temp_dir().join(format!("collide-phases-archive-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("journal"), "one").unwrap();
+        archive_attempt(&dir).unwrap();
+        assert!(!dir.join("journal").exists());
+        assert_eq!(
+            fs::read_to_string(dir.join("attempt-1/journal")).unwrap(),
+            "one"
+        );
+        fs::write(dir.join("journal"), "two").unwrap();
+        archive_attempt(&dir).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("attempt-2/journal")).unwrap(),
+            "two"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("attempt-1/journal")).unwrap(),
+            "one"
+        );
+        for path in [dir.join("attempt-1/journal"), dir.join("attempt-2/journal")] {
+            fs::remove_file(path).unwrap();
+        }
+        for path in [dir.join("attempt-1"), dir.join("attempt-2"), dir.clone()] {
+            fs::remove_dir(path).unwrap();
+        }
     }
 
     #[test]

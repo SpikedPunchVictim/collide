@@ -1098,13 +1098,9 @@ fn the_compaction_recording_is_an_empty_turn_with_no_report() {
 }
 
 #[test]
-fn the_error_recording_is_an_error_turn_with_no_report_and_exit_code_1() {
+fn the_error_recording_is_a_budget_turn_with_no_report_and_exit_code_1() {
     let mut played = play("error-result", assigned(), &["go"], answer_nothing);
-    assert!(named(&played).contains(&turn_end(
-        TurnEndReason::Error { status: None },
-        false,
-        false
-    )));
+    assert!(named(&played).contains(&turn_end(TurnEndReason::Budget {}, false, false)));
     assert!(
         !named(&played)
             .iter()
@@ -1117,7 +1113,7 @@ fn the_error_recording_is_an_error_turn_with_no_report_and_exit_code_1() {
     assert_eq!(
         played.session.finish(&played.exit).outcome,
         PhaseOutcome::Failed {
-            cause: PhaseFailure::Api { status: None }
+            cause: PhaseFailure::Budget
         }
     );
 }

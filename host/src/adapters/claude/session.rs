@@ -87,6 +87,8 @@ const HOOK_BLOCK_EXIT_CODE: i32 = 2;
 struct Pending {
     id: String,
     input: Option<Value>,
+    /// The request as it came, for a restart that asks the person again.
+    request: PermissionRequest,
 }
 
 /// A tool call that has been made and has no result yet. `tool` is what a hook's name is joined to.
@@ -442,6 +444,7 @@ impl ClaudeSession {
         self.pending.push(Pending {
             id: request.id.clone(),
             input: request.input.clone(),
+            request: request.clone(),
         });
         vec![stamped(
             Some(wall_ns),
@@ -911,6 +914,13 @@ impl AgentSession for ClaudeSession {
         written(write)
     }
 
+    fn pending_permissions(&self) -> Vec<PermissionRequest> {
+        self.pending
+            .iter()
+            .map(|pending| pending.request.clone())
+            .collect()
+    }
+
     fn cancel(&mut self) -> Step {
         let write = self.write(json!({
             "type": "control_request",
@@ -1214,6 +1224,7 @@ fn turn_end_reason(result: &Value, failed: bool) -> TurnEndReason {
     if failed {
         return match subtype(result) {
             Some("error_max_turns") => TurnEndReason::MaxTurns {},
+            Some("error_max_budget_usd") => TurnEndReason::Budget {},
             _ => TurnEndReason::Error {
                 status: result
                     .get("api_error_status")
@@ -1255,6 +1266,7 @@ fn outcome_of_turn(reason: &TurnEndReason) -> PhaseOutcome {
         TurnEndReason::EndTurn {} => PhaseOutcome::Ended,
         TurnEndReason::MaxTokens {} => failed(PhaseFailure::MaxTokens),
         TurnEndReason::MaxTurns {} => failed(PhaseFailure::MaxTurns),
+        TurnEndReason::Budget {} => failed(PhaseFailure::Budget),
         TurnEndReason::Refusal {} => failed(PhaseFailure::Refusal),
         TurnEndReason::Error { status } => failed(PhaseFailure::Api { status: *status }),
         TurnEndReason::Blocked { reason } => failed(PhaseFailure::Blocked {

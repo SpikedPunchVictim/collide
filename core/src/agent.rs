@@ -221,6 +221,8 @@ pub enum TurnEndReason {
     EndTurn {},
     MaxTokens {},
     MaxTurns {},
+    /// The role's budget ran out (Claude's `error_max_budget_usd`). The phase pauses rather than fails (0.3).
+    Budget {},
     Refusal {},
     Cancelled {},
     Error {

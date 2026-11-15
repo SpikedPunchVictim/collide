@@ -389,6 +389,7 @@ fn every_turn_end_reason_round_trips() {
     round_trip(TurnEndReason::EndTurn {}, json!({ "type": "end_turn" }));
     round_trip(TurnEndReason::MaxTokens {}, json!({ "type": "max_tokens" }));
     round_trip(TurnEndReason::MaxTurns {}, json!({ "type": "max_turns" }));
+    round_trip(TurnEndReason::Budget {}, json!({ "type": "budget" }));
     round_trip(TurnEndReason::Refusal {}, json!({ "type": "refusal" }));
     round_trip(TurnEndReason::Cancelled {}, json!({ "type": "cancelled" }));
     round_trip(

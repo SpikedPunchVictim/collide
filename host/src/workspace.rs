@@ -171,6 +171,21 @@ impl BuiltinWorkspace {
         }
     }
 
+    /// A workspace as an earlier daemon left it, read back from what that daemon stored: `state` is the state it was
+    /// in, and `git_dir` is the worktree's git directory when it was made. Nothing is checked against the disk here.
+    pub fn restored(
+        spec: WorkspaceSpec,
+        git_dir: Option<PathBuf>,
+        state: WorkspaceState,
+    ) -> BuiltinWorkspace {
+        BuiltinWorkspace {
+            spec,
+            git_dir,
+            state,
+            git: Git::default(),
+        }
+    }
+
     /// Adds to the environment of every git command this workspace runs. A test passes
     /// `GIT_CONFIG_GLOBAL=/dev/null` here so the user's own git configuration is never read.
     pub fn with_git_env(mut self, env: Vec<(String, String)>) -> BuiltinWorkspace {

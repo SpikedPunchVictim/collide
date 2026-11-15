@@ -18,7 +18,9 @@
 //! The one function here, [`refuse_unmet_capabilities`], is the rule that a role is refused for a capability the
 //! adapter cannot promise.
 
-use crate::agent::{AgentEvent, Capabilities, ModelRef, PermissionReply, SessionStart, Support};
+use crate::agent::{
+    AgentEvent, Capabilities, ModelRef, PermissionReply, PermissionRequest, SessionStart, Support,
+};
 use crate::journal::JournalRecord;
 use crate::pack::Role;
 use crate::shim::ExitRecord;
@@ -66,6 +68,8 @@ pub enum PhaseFailure {
     MaxTokens,
     /// A turn ended `max_turns`.
     MaxTurns,
+    /// A turn ended `budget`: the role's budget ran out. The daemon pauses the phase and asks (0.3).
+    Budget,
     /// A hook blocked the prompt, so the turn never ran. Carries the hook's reason when it gave one. The phase's Queue
     /// item shows it (0.3, The user's own tooling).
     Blocked { reason: Option<String> },
@@ -148,6 +152,13 @@ pub trait AgentSession {
     /// The answer to a permission request, by the request's id. Answering an id the session does not hold writes
     /// nothing.
     fn answer(&mut self, request_id: &str, reply: PermissionReply) -> Step;
+
+    /// The permission requests the session has been asked and has not answered, oldest first. The daemon reads them
+    /// after it rebuilt a session from the journal, so a request asked before a restart is put to the person again. A
+    /// session that holds none (an ACP session answers inside its own turn) has the default.
+    fn pending_permissions(&self) -> Vec<PermissionRequest> {
+        Vec::new()
+    }
 
     /// Asks the child to stop its turn. The session reports `Cancelled` itself when the turn ends, whatever the
     /// agent's own reason says (0.3).

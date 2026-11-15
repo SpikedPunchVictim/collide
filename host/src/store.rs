@@ -66,7 +66,7 @@ pub struct Migration {
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
 /// written with, and `line` is its JSON.
-pub const MIGRATIONS: [Migration; 2] = [
+pub const MIGRATIONS: [Migration; 3] = [
     Migration {
         version: 1,
         name: "events",
@@ -88,6 +88,19 @@ pub const MIGRATIONS: [Migration; 2] = [
               PRIMARY KEY (run, phase)
           )",
     },
+    Migration {
+        version: 3,
+        name: "run_contexts_and_queue_items",
+        sql: "CREATE TABLE run_contexts (
+              run  TEXT PRIMARY KEY,
+              json TEXT NOT NULL
+          );
+          CREATE TABLE queue_items (
+              id   TEXT PRIMARY KEY,
+              run  TEXT,
+              json TEXT NOT NULL
+          )",
+    },
 ];
 
 /// What the daemon keeps of a phase beyond its state events (ts-0065-kx): the last usage its session reported, why it
@@ -97,8 +110,8 @@ pub const MIGRATIONS: [Migration; 2] = [
 pub struct PhaseRecord {
     /// The last usage event of the phase's session, as it reported it.
     pub usage: Option<Usage>,
-    /// `no_result`, `refusal`, `max_tokens`, `max_turns`, `blocked`, `api` or `empty_turn`: what the session said
-    /// the failure was. Core's `PhaseState::Failed` carries only `disk`, so the cause is kept here.
+    /// `no_result`, `refusal`, `max_tokens`, `max_turns`, `budget`, `blocked`, `api` (`api_<status>` when the result
+    /// had a status) or `empty_turn`: what the session said the failure was. Core's `PhaseState::Failed` carries only `disk`, so the cause is kept here.
     pub failure: Option<String>,
     /// The text of the session's final report.
     pub report: Option<String>,
@@ -231,6 +244,80 @@ impl Store {
             )
             .map_err(|e| sql_error("writing a phase record", e))?;
         Ok(())
+    }
+
+    /// Keeps what a file-task run needs to go on after a restart (its params, its session, its workspace): `json` is
+    /// the daemon's own text. One row for each run, replaced by the next write.
+    pub fn set_run_context(&self, run: &str, json: &str) -> Result<(), StoreError> {
+        self.connect()?
+            .execute(
+                "INSERT INTO run_contexts (run, json) VALUES (?1, ?2)
+                 ON CONFLICT (run) DO UPDATE SET json = excluded.json",
+                params![run, json],
+            )
+            .map_err(|e| sql_error("writing a run's context", e))?;
+        Ok(())
+    }
+
+    /// Takes a run's context out. A run that has none is not an error.
+    pub fn delete_run_context(&self, run: &str) -> Result<(), StoreError> {
+        self.connect()?
+            .execute("DELETE FROM run_contexts WHERE run = ?1", params![run])
+            .map_err(|e| sql_error("deleting a run's context", e))?;
+        Ok(())
+    }
+
+    /// Every run's context as `(run, json)`, in the order the runs were first written.
+    pub fn run_contexts(&self) -> Result<Vec<(String, String)>, StoreError> {
+        self.pairs(
+            "SELECT run, json FROM run_contexts ORDER BY rowid",
+            "reading the runs' contexts",
+        )
+    }
+
+    /// Keeps a Queue item so a restart does not lose it. `json` is the item. Writing the same `id` again replaces it.
+    pub fn set_queue_item(
+        &self,
+        id: &str,
+        run: Option<&str>,
+        json: &str,
+    ) -> Result<(), StoreError> {
+        self.connect()?
+            .execute(
+                "INSERT INTO queue_items (id, run, json) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (id) DO UPDATE SET run = excluded.run, json = excluded.json",
+                params![id, run, json],
+            )
+            .map_err(|e| sql_error("writing a queue item", e))?;
+        Ok(())
+    }
+
+    /// Takes one Queue item out. An `id` that is not there is not an error.
+    pub fn delete_queue_item(&self, id: &str) -> Result<(), StoreError> {
+        self.connect()?
+            .execute("DELETE FROM queue_items WHERE id = ?1", params![id])
+            .map_err(|e| sql_error("deleting a queue item", e))?;
+        Ok(())
+    }
+
+    /// Every stored Queue item as `(id, json)`, in the order they were first written.
+    pub fn queue_items(&self) -> Result<Vec<(String, String)>, StoreError> {
+        self.pairs(
+            "SELECT id, json FROM queue_items ORDER BY rowid",
+            "reading the queue items",
+        )
+    }
+
+    fn pairs(&self, sql: &str, context: &str) -> Result<Vec<(String, String)>, StoreError> {
+        let conn = self.connect()?;
+        let mut statement = conn.prepare(sql).map_err(|e| sql_error(context, e))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| sql_error(context, e))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| sql_error(context, e))
     }
 
     /// The phase's record, or `None` for a phase that has none.

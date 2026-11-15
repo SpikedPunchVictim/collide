@@ -132,6 +132,9 @@ export type TurnEndReason =
       type: 'max_turns'
     }
   | {
+      type: 'budget'
+    }
+  | {
       type: 'refusal'
     }
   | {

@@ -259,14 +259,14 @@ fn a_budget_error_carries_its_cost_and_is_no_report() {
         tail,
         [
             total_cost(0.00353),
-            turn_end(TurnEndReason::Error { status: None }, false, false)
+            turn_end(TurnEndReason::Budget {}, false, false)
         ]
     );
     assert!(!all.iter().any(|e| matches!(e, AgentEvent::Limited { .. })));
     assert_eq!(
         played.session.finish(&played.exit).outcome,
         PhaseOutcome::Failed {
-            cause: PhaseFailure::Api { status: None }
+            cause: PhaseFailure::Budget
         }
     );
 }

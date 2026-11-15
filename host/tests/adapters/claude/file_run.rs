@@ -37,10 +37,10 @@ const FLOOR_HIGH: u64 = u64::MAX;
 const FLOOR_LOW: u64 = 0;
 
 /// Free space as a test sets it: the readings are returned in order and the last one repeats.
-struct FakeFree(Mutex<Vec<u64>>);
+pub(super) struct FakeFree(Mutex<Vec<u64>>);
 
 impl FakeFree {
-    fn new(readings: &[u64]) -> Arc<FakeFree> {
+    pub(super) fn new(readings: &[u64]) -> Arc<FakeFree> {
         Arc::new(FakeFree(Mutex::new(readings.to_vec())))
     }
 }
@@ -74,7 +74,7 @@ struct Fixture {
     task: PathBuf,
 }
 
-fn git(dir: &Path, args: &[&str]) {
+pub(super) fn git(dir: &Path, args: &[&str]) {
     let output = Command::new("git")
         .args([
             "-c",
@@ -363,6 +363,11 @@ fn a_file_task_phase_runs_in_a_new_worktree_and_ends_with_its_report() {
     assert_eq!(record.failure, None);
     let ended = fx.wait_run(&run, |state| matches!(state, RunState::Ended { .. }));
     assert!(matches!(ended, RunState::Ended { .. }));
+    // The run's state is read from its phases, so it is `ended` a moment before the end hook records the workspace
+    // idle: wait for that event.
+    wait_until("the workspace goes idle", Duration::from_secs(10), || {
+        state_of_workspace_events(&fx.events()).last() == Some(&WorkspaceState::Idle)
+    });
     assert_eq!(
         state_of_workspace_events(&fx.events()),
         [

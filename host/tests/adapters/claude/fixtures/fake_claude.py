@@ -14,6 +14,8 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
     {"dump_env": "path"}    write this process's environment to the file, as one JSON object
     {"grandchild_dump_env": "path"}
                             start a child that writes its own environment to the file, and wait for it
+    {"sleep": SECONDS}      do nothing for that long (a child that holds on until it is signalled)
+    {"touch": "path"}       create the file (a mark that the steps before it ran)
     {"exit": N}             exit with code N now
 
 `expect` is a subset match: every key in the expected object must be in the line, with a value that matches, and the
@@ -27,6 +29,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 EXIT_STEP_UNKNOWN = 96
 EXIT_MISMATCH = 97
@@ -93,6 +96,10 @@ def main():
                 [sys.executable, "-c", "import json, os, sys; json.dump(dict(os.environ), open(sys.argv[1], 'w'))", step["grandchild_dump_env"]],
                 check=True,
             )
+        elif "sleep" in step:
+            time.sleep(step["sleep"])
+        elif "touch" in step:
+            open(step["touch"], "w").close()
         elif "exit" in step:
             sys.stdout.flush()
             sys.exit(step["exit"])

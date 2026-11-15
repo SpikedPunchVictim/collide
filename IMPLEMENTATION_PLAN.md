@@ -579,8 +579,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     `quality`: `Exact`, `Partial` or `Unreported`. A total built from partial figures is shown as "at least" and never summed
     with exact ones (0.13).
   - **A turn ends with** `TurnEnd { reason, cancel_requested, empty }`. `reason` is `EndTurn`, `MaxTokens`,
-    `MaxTurns`, `Refusal`, `Cancelled`, `Error { status }` or `Blocked { reason }` (a prompt a hook refused). `empty`
-    is true when the turn gave no message, no tool
+    `MaxTurns`, `Refusal`, `Cancelled`, `Error { status }`, `Blocked { reason }` (a prompt a hook refused) or
+    `Budget` (the native budget ran out; the session is kept). `empty` is true when the turn gave no message, no tool
     call and zero or unreported usage. `FinalReport` carries `source`: `ResultField` (Claude) or `Reconstructed` (ACP:
     the message chunks after the last tool call).
   - **Capabilities.** Each is `Yes`, `No` or `Unknown` (a profile for an ACP agent that has not been probed). A role
@@ -634,7 +634,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     safeguard. A definition with a `tools:` list must name its MCP tools too, or they are hidden.
   - `--max-budget-usd` is a soft cap on this process's spend, checked after each model call, so it can overshoot
     by one call. A process over budget ends with `error_max_budget_usd` and refuses further turns; the phase goes
-    to `ask_human` with cause budget (measured S1).
+    to `ask_human` with cause budget (measured S1). Until Stage 4 has an engine to resume into, that is a
+    `paused: ask_human` run with a `budget_exceeded` Queue item that takes Stop; raising the cap comes with Stage 4.
   - Cost (`total_cost_usd`) adds up per session, across `--resume`. So the adapter passes the remaining budget on
     each resume, and a phase's cost is the last total its session reported (measured S1).
   - **A budget is native or host-enforced** (S7). Claude's flag above is `budget_native`. For an adapter whose
@@ -834,6 +835,9 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
   - The Queue shows the reset time. The phase resumes by session id when the limit resets, or when the user resumes
     it.
   - Paused time is a wait, not active time (0.13).
+  - A limit pause lasts at least 30 s on the continuous clock before its reset time resumes it, so a stale reset
+    cannot loop. A pause that an earlier daemon began is resumed by the next daemon at its reset time, with no CLI
+    connected.
   - **The reset time is a wall-clock time** (R5). The countdown shown to the person is computed from the wall clock,
     and the pause's own duration is measured on the continuous clock (the table in 0.2), so a laptop that sleeps
     through the reset resumes the phase when it wakes, and does not wait out the rest of a countdown.
@@ -1854,7 +1858,8 @@ Collide plays the lead, so it does all four, through the pack.
     session ids;
   - `start_head`, `end_head`, `dir` (a scratch directory outside the worktree);
   - sandbox workspaces, declared outputs, final reports, gate results, labels;
-  - `ask_human` events with their cause.
+  - `ask_human` events with their cause;
+  - a resumed phase keeps its key and directory, and the earlier attempt's files move to `attempt-<n>/`.
 - **History:** prompts and hooks see `history[]` (earlier phases: kind, round, heads, artifact paths, verdicts) and
   `round.base` / `round.head` / `chain.base`.
 - **Workspace:** a git checkout (`path`, `gitDir`; 0.1). It lives longer than any run, and keeps its workspace state

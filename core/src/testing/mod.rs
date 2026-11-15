@@ -73,6 +73,7 @@ pub(crate) fn outcome_of_turn(
         TurnEndReason::EndTurn {} => PhaseOutcome::Ended,
         TurnEndReason::MaxTokens {} => failed(PhaseFailure::MaxTokens),
         TurnEndReason::MaxTurns {} => failed(PhaseFailure::MaxTurns),
+        TurnEndReason::Budget {} => failed(PhaseFailure::Budget),
         TurnEndReason::Refusal {} => failed(PhaseFailure::Refusal),
         TurnEndReason::Error { status } => failed(PhaseFailure::Api { status: *status }),
         TurnEndReason::Blocked { reason } => failed(PhaseFailure::Blocked {

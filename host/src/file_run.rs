@@ -26,9 +26,24 @@
 //!
 //! ## What it does not do
 //!
-//! It stores no agent events (ts-0067), answers no permission request (ts-0066: a phase that asks hangs until it
-//! does), and has no resume for a run paused for disk (ts-0066 owns pause and resume). The Queue is in memory.
+//! It stores no agent events (ts-0067) and has no engine, so a budget that runs out is a Queue item that can only stop
+//! the run (there is no `ask_human` phase to resume into). The rest of the phase's life is below.
+//!
+//! ## Pauses, answers and a restart (ts-0066-zb)
+//!
+//! - A phase that settles on a usage limit (a `limited` event, a 429) or on its budget (`error_max_budget_usd`) is
+//!   `paused` and its shim is finished ([`FileRuns::on_phase_pause`]); the run is `paused` with the same cause and a
+//!   Queue item says what it waits for ([`crate::queue`]).
+//! - A limit has a timer ([`FileRuns::recover`], `arm_timer`): it reads the **wall** clock for the reset time, every
+//!   poll, so a machine that slept past it resumes on waking; the pause's length is the **continuous** clock's. It
+//!   resumes the session by its id with the budget it has left, in the phase's folder as a new attempt
+//!   ([`crate::phases::Phases::resume_agent_phase`]).
+//! - [`FileRuns::answer`] is `queue.answer`: allow or deny for a permission request, Resume, and Stop.
+//! - Each run's context is in the store ([`crate::store::Store::set_run_context`]), so a daemon that starts again goes
+//!   on with the runs it finds: it rebuilds a running phase's session from its journal, keeps its pending requests in
+//!   the Queue, and resumes a limit that reset while no daemon ran.
 
+use crate::adapters::claude::session::ClaudeSession;
 use crate::adapters::claude::{ClaudeAdapter, PROGRAM, capabilities, snapshot::snapshot_files};
 use crate::agent_feed::AgentFeed;
 use crate::base_env::BaseEnvironment;
@@ -36,27 +51,34 @@ use crate::builtin_roles::{BUILDER_DEFINITION, BUILDER_ROLE_NAME, builder_role};
 use crate::clock::{Clock, Clocks};
 use crate::disk::{Before, DiskError, DiskGuard, DiskPause, Floor, FreeSpace};
 use crate::models::load_user_models;
-use crate::phases::{PhaseEnd, PhaseKey, PhaseSpec, Phases};
+use crate::phases::{PhaseEnd, PhaseKey, PhasePause, PhaseSpec, Phases};
+use crate::queue::Queue;
 use crate::shim::ChildStdio;
-use crate::workspace::{BuiltinWorkspace, WorkspaceSpec};
+use crate::store::Store;
+use crate::workspace::{BuiltinWorkspace, WorkspaceError, WorkspaceSpec};
 use collide_core::adapter::{AgentAdapter, LaunchRequest, refuse_unmet_capabilities};
-use collide_core::agent::SessionStart;
+use collide_core::agent::{ModelRef, SessionStart};
 use collide_core::change::{Actor, ActorKind};
-use collide_core::events::EventBody;
+use collide_core::events::{BudgetScope, EventBody};
 use collide_core::hook::WorkspaceKind;
 use collide_core::non_empty::NonEmpty;
-use collide_core::owner::{LaunchProblem, QueueItem, QueueKind, RunStartFileParams};
+use collide_core::owner::{
+    AnswerKind, LaunchProblem, QueueAnswer, QueueAnswerResult, QueueItem, QueueKind,
+    RunStartFileParams,
+};
 use collide_core::resolve::resolve_model_alias;
-use collide_core::state::{PhaseState, RunState, WorkspaceState};
+use collide_core::state::{PauseCause, PhaseState, RunState, WorkspaceState};
 use collide_core::workflow::{AgentPhase, OnCold, Prompt};
+use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Read;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 /// The name of the one phase of a file-task run.
@@ -85,13 +107,94 @@ pub struct FileRunConfig {
     /// How long a run waits for the first capture of the base environment.
     pub capture_wait: Duration,
     pub log: Arc<dyn Fn(&str) + Send + Sync>,
+    /// Where a run's context is kept for a restart.
+    pub store: Arc<Store>,
+    /// The Queue the runs' pauses put their items in, and the answers take them out of.
+    pub queue: Arc<Queue>,
+    /// How a limit's timer waits between two looks at the wall clock (`thread::sleep` in a running daemon). A test
+    /// passes one that moves its clocks, as a sleeping machine does.
+    pub sleep: Arc<dyn Fn(Duration) + Send + Sync>,
+    /// How often a limit's timer looks at the wall clock.
+    pub limit_poll: Duration,
+    /// The least a run stays paused for a limit before the reset time resumes it, on the continuous clock.
+    pub limit_min_pause: Duration,
 }
 
-/// The file-task runs of a daemon, and the Queue items their pauses made.
+/// The text of the turn that goes first to a session that was resumed: the stream ended mid-work, and the tool waits for
+/// a user turn before it goes on (S1).
+pub const RESUME_TURN: &str = "Continue where you left off.";
+
+/// What a file-task run keeps in the store, so a restart can go on with it: what it was asked, the session of its agent,
+/// where its worktree is, and what the session has cost. It is the daemon's own text, not a wire type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RunContext {
+    run: String,
+    repo: String,
+    task_file: String,
+    alias: Option<String>,
+    budget_usd: Option<f64>,
+    task_text: String,
+    model: Option<ModelRef>,
+    /// The session's id, which the first attempt assigns and every later one resumes.
+    session_id: String,
+    /// How many attempts the phase has had after the first: `0` until it is resumed.
+    attempt: u32,
+    /// What the session had cost when the phase last paused, in US dollars. The tool counts a session's cost across
+    /// `--resume`, so this is the whole of it and never a sum of processes.
+    spent_usd: f64,
+    /// The run's state as the daemon last recorded it, which the next `run.transition` event is from.
+    run_state: RunState,
+    workspace_state: WorkspaceState,
+    workspace_path: String,
+    git_dir: Option<String>,
+    branch: String,
+    /// The `provisioning` event was written, so a launch that is tried again does not write it twice.
+    workspace_recorded: bool,
+}
+
+impl RunContext {
+    /// The first attempt assigns the session's id and every later one resumes it.
+    fn session_start(&self) -> SessionStart {
+        if self.attempt == 0 {
+            SessionStart::Assign {
+                uuid: self.session_id.clone(),
+            }
+        } else {
+            SessionStart::Resume {
+                id: self.session_id.clone(),
+            }
+        }
+    }
+
+    fn budget_left(&self) -> Option<f64> {
+        self.budget_usd.map(|budget| budget - self.spent_usd)
+    }
+}
+
+/// A run the daemon drives: its worktree and what it keeps of it. One lock for both, held while the run starts, resumes
+/// or ends, so the phase's end hook waits for a start that has not finished.
+struct Live {
+    workspace: BuiltinWorkspace,
+    ctx: RunContext,
+}
+
+/// Why [`FileRuns::answer`] did not answer an item.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AnswerError {
+    /// The Queue holds no such item.
+    NotFound(String),
+    /// The item does not take that kind of answer.
+    Invalid(String),
+}
+
+/// The file-task runs of a daemon: their pauses, their resumes and the Queue items the pauses made.
 pub struct FileRuns {
     config: FileRunConfig,
-    live: Mutex<HashMap<String, BuiltinWorkspace>>,
-    queue: Mutex<Vec<QueueItem>>,
+    live: Mutex<HashMap<String, Arc<Mutex<Live>>>>,
+    /// A cancel flag for each run that has a timer waiting for its limit's reset.
+    timers: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    timer_threads: Mutex<Vec<JoinHandle<()>>>,
+    closed: AtomicBool,
     counter: AtomicU64,
 }
 
@@ -118,23 +221,71 @@ impl From<LaunchProblem> for Halt {
     }
 }
 
+fn limit_item_id(run: &str) -> String {
+    format!("{run}-limit")
+}
+
+fn budget_item_id(run: &str) -> String {
+    format!("{run}-budget")
+}
+
+fn disk_item_id(run: &str) -> String {
+    format!("{run}-disk")
+}
+
+fn answer_kind(answer: &QueueAnswer) -> AnswerKind {
+    match answer {
+        QueueAnswer::Permission { .. } => AnswerKind::Permission,
+        QueueAnswer::Text { .. } => AnswerKind::Text,
+        QueueAnswer::Proceed {} => AnswerKind::Proceed,
+        QueueAnswer::Stop {} => AnswerKind::Stop,
+        QueueAnswer::Retry {} => AnswerKind::Retry,
+        QueueAnswer::RaiseCap { .. } => AnswerKind::RaiseCap,
+        QueueAnswer::Accept {} => AnswerKind::Accept,
+        QueueAnswer::Discard {} => AnswerKind::Discard,
+        QueueAnswer::Reprompt { .. } => AnswerKind::Reprompt,
+        QueueAnswer::Acknowledge {} => AnswerKind::Acknowledge,
+        QueueAnswer::Resume {} => AnswerKind::Resume,
+        QueueAnswer::Dismiss {} => AnswerKind::Dismiss,
+    }
+}
+
 impl FileRuns {
+    /// The runs of an earlier daemon are read back from the store, so the end of a phase that finished while no daemon
+    /// ran still ends its run. A context that cannot be read is logged and left out.
     pub fn new(config: FileRunConfig) -> FileRuns {
+        let mut live = HashMap::new();
+        match config.store.run_contexts() {
+            Ok(rows) => {
+                for (run, json) in rows {
+                    match serde_json::from_str::<RunContext>(&json) {
+                        Ok(ctx) => {
+                            let workspace = restored_workspace(&config, &ctx);
+                            live.insert(run, Arc::new(Mutex::new(Live { workspace, ctx })));
+                        }
+                        Err(error) => {
+                            (config.log)(&format!(
+                                "run {run}: its context is not readable: {error}"
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(error) => (config.log)(&format!("the runs' contexts could not be read: {error}")),
+        }
         FileRuns {
             config,
-            live: Mutex::new(HashMap::new()),
-            queue: Mutex::new(Vec::new()),
+            live: Mutex::new(live),
+            timers: Mutex::new(HashMap::new()),
+            timer_threads: Mutex::new(Vec::new()),
+            closed: AtomicBool::new(false),
             counter: AtomicU64::new(0),
         }
     }
 
-    /// The Queue items the runs made, those of `run` when it is given.
+    /// The Queue items, those of `run` when it is given.
     pub fn queue_items(&self, run: Option<&str>) -> Vec<QueueItem> {
-        locked(&self.queue)
-            .iter()
-            .filter(|item| run.is_none_or(|run| item.run.as_deref() == Some(run)))
-            .cloned()
-            .collect()
+        self.config.queue.list(run)
     }
 
     fn log(&self, text: &str) {
@@ -143,6 +294,19 @@ impl FileRuns {
 
     fn now_ms(&self) -> u64 {
         self.config.clocks.read(Clock::Wall).nanos / 1_000_000
+    }
+
+    fn live_of(&self, run: &str) -> Option<Arc<Mutex<Live>>> {
+        locked(&self.live).get(run).cloned()
+    }
+
+    /// Ends the timers: each stops within one poll, and this waits for them. The runs go on in their shims.
+    pub fn shutdown(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let handles = std::mem::take(&mut *locked(&self.timer_threads));
+        for handle in handles {
+            let _ = handle.join();
+        }
     }
 
     /// Starts a run. `Ok` is the run's id, for a run that is running and for one that is paused for disk; `Err` is every
@@ -162,43 +326,51 @@ impl FileRuns {
                 "the base environment was not captured in time, so no phase can start",
             )]);
         };
+        let session_id =
+            new_uuid().map_err(|error| vec![problem(format!("making a session id: {error}"))])?;
         let run = format!(
             "run-{}-{}",
             self.now_ms(),
             self.counter.fetch_add(1, Ordering::SeqCst)
         );
+        let workspace_path = self.config.workspaces_dir.join(&run);
+        let ctx = RunContext {
+            run: run.clone(),
+            repo: params.repo.clone(),
+            task_file: params.task_file.clone(),
+            alias: params.alias.clone(),
+            budget_usd: params.budget_usd,
+            task_text,
+            model,
+            session_id,
+            attempt: 0,
+            spent_usd: 0.0,
+            run_state: RunState::Running {},
+            workspace_state: WorkspaceState::Provisioning,
+            workspace_path: workspace_path.to_string_lossy().into_owned(),
+            git_dir: None,
+            branch: format!("collide/{run}"),
+            workspace_recorded: false,
+        };
         if let Err(error) = self.record_run(phases, &run, None, RunState::Running {}) {
             return Err(vec![problem(format!("recording the run: {error}"))]);
         }
-        let mut workspace = BuiltinWorkspace::new(WorkspaceSpec {
-            kind: WorkspaceKind::Task,
-            repo: PathBuf::from(&params.repo),
-            path: self.config.workspaces_dir.join(&run),
-            branch: format!("collide/{run}"),
-            base: "HEAD".to_string(),
-        })
-        .with_git_env(self.config.git_env.clone());
-        let halted = self.launch(
-            phases,
-            &run,
-            &mut workspace,
-            params,
-            &task_text,
-            model.as_ref(),
-            &base,
-        );
+        let workspace = restored_workspace(&self.config, &ctx);
+        let live = Arc::new(Mutex::new(Live { workspace, ctx }));
+        // In the table before the phase starts, so a phase that ends at once finds its run.
+        locked(&self.live).insert(run.clone(), live.clone());
+        let mut live = locked(&live);
+        let halted = self.launch(phases, &run, &mut live, &base);
+        self.sync(&mut live);
         match halted {
-            Ok(()) => {
-                locked(&self.live).insert(run.clone(), workspace);
-                Ok(run)
-            }
+            Ok(()) => Ok(run),
             Err(Halt::Disk(pause)) => {
-                self.pause_for_disk(phases, &run, &pause);
-                locked(&self.live).insert(run.clone(), workspace);
+                self.pause_for_disk(phases, &mut live, &pause);
                 Ok(run)
             }
             Err(Halt::Refused(problems)) => {
-                self.fail(phases, &run, &mut workspace);
+                self.fail(phases, &mut live);
+                locked(&self.live).remove(&run);
                 for each in &problems {
                     self.log(&format!("run {run}: did not start: {}", each.message));
                 }
@@ -212,7 +384,7 @@ impl FileRuns {
         &self,
         params: &RunStartFileParams,
         problems: &mut Vec<LaunchProblem>,
-    ) -> Option<(String, Option<collide_core::agent::ModelRef>)> {
+    ) -> Option<(String, Option<ModelRef>)> {
         if !Path::new(&params.repo).is_absolute() || !Path::new(&params.repo).is_dir() {
             problems.push(problem(format!(
                 "the repository {:?} is not a folder (give an absolute path)",
@@ -259,45 +431,75 @@ impl FileRuns {
         Some((text?, model))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Copies the workspace's state into the context and stores it.
+    fn sync(&self, live: &mut Live) {
+        live.ctx.workspace_state = live.workspace.state();
+        if let Some(location) = live.workspace.location() {
+            live.ctx.workspace_path = location.path;
+            live.ctx.git_dir = Some(location.git_dir);
+        }
+        self.save(&live.ctx);
+    }
+
+    fn save(&self, ctx: &RunContext) {
+        match serde_json::to_string(ctx) {
+            Ok(json) => {
+                if let Err(error) = self.config.store.set_run_context(&ctx.run, &json) {
+                    self.log(&format!(
+                        "run {}: its context was not stored: {error}",
+                        ctx.run
+                    ));
+                }
+            }
+            Err(error) => self.log(&format!(
+                "run {}: its context is not JSON: {error}",
+                ctx.run
+            )),
+        }
+    }
+
+    /// Makes the worktree if it is not made, starts the workspace's phase, and starts the agent. It is also what a
+    /// run that paused for disk does again when it is resumed: each step is skipped when the workspace is past it.
     fn launch(
         &self,
         phases: &Phases,
         run: &str,
-        workspace: &mut BuiltinWorkspace,
-        params: &RunStartFileParams,
-        task_text: &str,
-        model: Option<&collide_core::agent::ModelRef>,
+        live: &mut Live,
         base: &BaseEnvironment,
     ) -> Result<(), Halt> {
         let guard = DiskGuard::new(self.config.free_space.as_ref(), self.config.floor);
         let workspace_path = self.config.workspaces_dir.join(run);
-        self.disk_check(&guard, &workspace_path, Before::Workspace)?;
-        self.disk_check(&guard, &self.config.runs_dir, Before::Workspace)?;
-
-        self.record_workspace(phases, run, None, WorkspaceState::Provisioning);
-        workspace.provision(&guard).map_err(|error| match error {
-            crate::workspace::WorkspaceError::Disk(DiskError::Paused(pause)) => Halt::Disk(pause),
-            other => {
-                self.record_workspace(
-                    phases,
-                    run,
-                    Some(WorkspaceState::Provisioning),
-                    workspace.state(),
-                );
-                Halt::from(problem(format!("making the worktree: {other}")))
+        let Live { workspace, ctx } = live;
+        if workspace.state() == WorkspaceState::Provisioning {
+            self.disk_check(&guard, &workspace_path, Before::Workspace)?;
+            self.disk_check(&guard, &self.config.runs_dir, Before::Workspace)?;
+            if !ctx.workspace_recorded {
+                self.record_workspace(phases, run, None, WorkspaceState::Provisioning);
+                ctx.workspace_recorded = true;
             }
-        })?;
-        self.record_workspace(
-            phases,
-            run,
-            Some(WorkspaceState::Provisioning),
-            WorkspaceState::Ready,
-        );
+            workspace.provision(&guard).map_err(|error| match error {
+                WorkspaceError::Disk(DiskError::Paused(pause)) => Halt::Disk(pause),
+                other => {
+                    self.record_workspace(
+                        phases,
+                        run,
+                        Some(WorkspaceState::Provisioning),
+                        workspace.state(),
+                    );
+                    Halt::from(problem(format!("making the worktree: {other}")))
+                }
+            })?;
+            self.record_workspace(
+                phases,
+                run,
+                Some(WorkspaceState::Provisioning),
+                WorkspaceState::Ready,
+            );
+        }
 
         self.disk_check(&guard, &self.config.runs_dir, Before::Phase)?;
         workspace.start_phase(&guard).map_err(|error| match error {
-            crate::workspace::WorkspaceError::Disk(DiskError::Paused(pause)) => Halt::Disk(pause),
+            WorkspaceError::Disk(DiskError::Paused(pause)) => Halt::Disk(pause),
             other => Halt::from(problem(format!("starting the phase: {other}"))),
         })?;
         self.record_workspace(
@@ -306,12 +508,33 @@ impl FileRuns {
             Some(WorkspaceState::Ready),
             WorkspaceState::InUse,
         );
+        let first_turn = ctx.task_text.clone();
+        self.start_attempt(phases, run, workspace, ctx, base, &first_turn, false)
+    }
 
+    /// Starts the phase's agent: the first attempt (`resume` false) or a later one, which resumes the session.
+    /// `first_turn` is what the session is told first.
+    #[allow(clippy::too_many_arguments)]
+    fn start_attempt(
+        &self,
+        phases: &Phases,
+        run: &str,
+        workspace: &BuiltinWorkspace,
+        ctx: &RunContext,
+        base: &BaseEnvironment,
+        first_turn: &str,
+        resume: bool,
+    ) -> Result<(), Halt> {
         let location = workspace
             .location()
             .ok_or_else(|| problem("the worktree has no location"))?;
         let run_dir = self.config.runs_dir.join(run);
         let snapshot_dir = run_dir.join("snapshot");
+        let budget_left = if resume {
+            ctx.budget_left()
+        } else {
+            ctx.budget_usd
+        };
         let request = LaunchRequest {
             role_name: BUILDER_ROLE_NAME.to_string(),
             role: builder_role(),
@@ -328,15 +551,12 @@ impl FileRuns {
                 fanout: None,
                 then: None,
             },
-            model: model.cloned(),
-            session: SessionStart::Assign {
-                uuid: new_uuid()
-                    .map_err(|error| problem(format!("making a session id: {error}")))?,
-            },
+            model: ctx.model.clone(),
+            session: ctx.session_start(),
             cwd: PathBuf::from(&location.path),
             snapshot_dir: snapshot_dir.clone(),
-            prompt: task_text.to_string(),
-            budget_left_usd: params.budget_usd,
+            prompt: first_turn.to_string(),
+            budget_left_usd: budget_left,
         };
         write_snapshot(&request, &snapshot_dir)?;
         let adapter = ClaudeAdapter;
@@ -366,10 +586,13 @@ impl FileRuns {
             cwd: launch.cwd,
             stdio: ChildStdio::Pipes,
         };
-        phases
-            .start_agent_phase(&key, &spec, feed)
-            .map_err(|error| problem(format!("starting the phase: {error}")))?;
-        if let Err(error) = phases.send_turn(&key, task_text) {
+        let started = if resume {
+            phases.resume_agent_phase(&key, &spec, feed)
+        } else {
+            phases.start_agent_phase(&key, &spec, feed)
+        };
+        started.map_err(|error| problem(format!("starting the phase: {error}")))?;
+        if let Err(error) = phases.send_turn(&key, first_turn) {
             // A phase that was never told its task would wait for it for good.
             let _ = phases.stop_run(run, Some(Duration::from_secs(2)));
             return Err(problem(format!("sending the task to the phase: {error}")).into());
@@ -386,18 +609,15 @@ impl FileRuns {
         }
     }
 
-    fn pause_for_disk(&self, phases: &Phases, run: &str, pause: &DiskPause) {
+    fn pause_for_disk(&self, phases: &Phases, live: &mut Live, pause: &DiskPause) {
+        let run = live.ctx.run.clone();
         let item = pause.queue_item();
         self.log(&format!("run {run}: {}", item.title));
-        if let Err(error) =
-            self.record_run(phases, run, Some(RunState::Running {}), pause.run_state())
-        {
-            self.log(&format!("run {run}: the pause was not recorded: {error}"));
-        }
-        locked(&self.queue).push(QueueItem {
-            id: format!("{run}-disk"),
+        self.record_run_state(phases, live, pause.run_state());
+        self.config.queue.push(QueueItem {
+            id: disk_item_id(&run),
             kind: QueueKind::DiskFull,
-            run: Some(run.to_string()),
+            run: Some(run),
             phase: None,
             task: None,
             since_ms: self.now_ms(),
@@ -412,15 +632,12 @@ impl FileRuns {
     }
 
     /// A start that failed after the run was recorded: the workspace is released and the run is `failed`.
-    fn fail(&self, phases: &Phases, run: &str, workspace: &mut BuiltinWorkspace) {
-        if workspace.state() == WorkspaceState::InUse {
-            self.end_workspace_phase(phases, run, workspace);
+    fn fail(&self, phases: &Phases, live: &mut Live) {
+        if live.workspace.state() == WorkspaceState::InUse {
+            self.end_workspace_phase(phases, &live.ctx.run, &mut live.workspace);
         }
-        if let Err(error) =
-            self.record_run(phases, run, Some(RunState::Running {}), RunState::Failed {})
-        {
-            self.log(&format!("run {run}: the failure was not recorded: {error}"));
-        }
+        self.record_run_state(phases, live, RunState::Failed {});
+        self.config.store.delete_run_context(&live.ctx.run).ok();
     }
 
     fn end_workspace_phase(&self, phases: &Phases, run: &str, workspace: &mut BuiltinWorkspace) {
@@ -439,15 +656,19 @@ impl FileRuns {
     }
 
     /// The daemon's end hook ([`crate::phases::PhaseEndHook`]) for a file-task run's phase: the workspace goes idle and
-    /// the run ends as its phase did. A phase of another kind of run is none of this.
+    /// the run ends as its phase did, and what the run was waiting for is dropped (its timer, its Queue items). A phase
+    /// of another kind of run is none of this.
     pub fn on_phase_end(&self, phases: &Phases, end: &PhaseEnd) {
-        let Some(mut workspace) = locked(&self.live).remove(&end.key.run) else {
+        let run = &end.key.run;
+        let Some(live) = self.live_of(run) else {
             return;
         };
-        let run = &end.key.run;
-        if workspace.state() == WorkspaceState::InUse {
-            self.end_workspace_phase(phases, run, &mut workspace);
+        let mut live = locked(&live);
+        if live.workspace.state() == WorkspaceState::InUse {
+            self.end_workspace_phase(phases, run, &mut live.workspace);
         }
+        self.cancel_timer(run);
+        self.config.queue.clear_run(run, None);
         let to = match end.state {
             PhaseState::Ended {} => RunState::Ended {
                 outcome: NonEmpty::new("the phase ended").expect("the text is not empty"),
@@ -455,10 +676,388 @@ impl FileRuns {
             PhaseState::Stopped {} => RunState::Stopped {},
             _ => RunState::Failed {},
         };
-        if let Err(error) = self.record_run(phases, run, Some(RunState::Running {}), to) {
-            self.log(&format!("run {run}: its end was not recorded: {error}"));
+        self.record_run_state(phases, &mut live, to);
+        self.sync(&mut live);
+        // An ended run needs nothing from a restart.
+        if let Err(error) = self.config.store.delete_run_context(run) {
+            self.log(&format!("run {run}: its context was not deleted: {error}"));
         }
-        locked(&self.live).insert(run.clone(), workspace);
+    }
+
+    /// The daemon's pause hook ([`crate::phases::PhasePauseHook`]): the run is `paused` with the phase's cause and a
+    /// Queue item says what it waits for. A usage limit starts a timer for the reset time; a budget that ran out waits
+    /// for the person, who can only stop it in 3b.
+    pub fn on_phase_pause(self: &Arc<Self>, phases: &Phases, paused: &PhasePause) {
+        let run = &paused.key.run;
+        let Some(live) = self.live_of(run) else {
+            return;
+        };
+        let mut live = locked(&live);
+        if let Some(spent) = paused.pause.spent_usd {
+            live.ctx.spent_usd = spent;
+        }
+        let cause = paused.pause.cause;
+        self.record_run_state(phases, &mut live, RunState::Paused { cause });
+        self.sync(&mut live);
+        let since_ms = self.now_ms();
+        match cause {
+            PauseCause::UsageLimit => {
+                let reset_ms = paused.pause.reset_at_ms;
+                self.config.queue.push(QueueItem {
+                    id: limit_item_id(run),
+                    kind: QueueKind::UsageLimit,
+                    run: Some(run.clone()),
+                    phase: Some(paused.key.phase.clone()),
+                    task: None,
+                    since_ms,
+                    title: "The agent reached its usage limit".to_string(),
+                    permission: None,
+                    untrusted_input: false,
+                    cache: None,
+                    reset_ms,
+                    show: Vec::new(),
+                    answers: vec![AnswerKind::Resume, AnswerKind::Stop],
+                });
+                self.log(&format!(
+                    "run {run}: paused for a usage limit{}",
+                    reset_ms.map_or(String::new(), |ms| format!(", which resets at {ms} ms"))
+                ));
+                self.arm_timer(phases, run, reset_ms, self.config.limit_min_pause);
+            }
+            PauseCause::AskHuman => {
+                let item = budget_item_id(run);
+                self.append(
+                    phases,
+                    run,
+                    EventBody::BudgetExceeded {
+                        run: run.clone(),
+                        scope: BudgetScope::Phase,
+                    },
+                );
+                self.append(
+                    phases,
+                    run,
+                    EventBody::AskHumanAsked {
+                        run: run.clone(),
+                        cause: "budget".to_string(),
+                        queue_item: item.clone(),
+                    },
+                );
+                self.config.queue.push(QueueItem {
+                    id: item,
+                    kind: QueueKind::BudgetExceeded,
+                    run: Some(run.clone()),
+                    phase: Some(paused.key.phase.clone()),
+                    task: None,
+                    since_ms,
+                    title: "The phase used its whole budget".to_string(),
+                    permission: None,
+                    untrusted_input: false,
+                    cache: None,
+                    reset_ms: None,
+                    show: Vec::new(),
+                    answers: vec![AnswerKind::Stop],
+                });
+                self.log(&format!("run {run}: paused, its phase used its budget"));
+            }
+            PauseCause::Disk => {}
+        }
+    }
+
+    fn append(&self, phases: &Phases, run: &str, body: EventBody) {
+        let written = phases.append_event(
+            Actor {
+                kind: ActorKind::Workflow,
+                run: Some(run.to_string()),
+                phase: None,
+            },
+            body,
+        );
+        if let Err(error) = written {
+            self.log(&format!("run {run}: an event was not stored: {error}"));
+        }
+    }
+
+    /// After a start: the runs that were paused for a usage limit when the last daemon ended get their timers, which
+    /// resume them at the reset time or at once when it passed while no daemon ran. A pause that this start already
+    /// found (a phase that paused while no daemon ran) has its timer.
+    pub fn recover(self: &Arc<Self>, phases: &Phases) {
+        let runs: Vec<Arc<Mutex<Live>>> = locked(&self.live).values().cloned().collect();
+        for live in runs {
+            let (run, state) = {
+                let live = locked(&live);
+                (live.ctx.run.clone(), live.ctx.run_state.clone())
+            };
+            if state
+                == (RunState::Paused {
+                    cause: PauseCause::UsageLimit,
+                })
+                && !locked(&self.timers).contains_key(&run)
+            {
+                let reset_ms = self
+                    .config
+                    .queue
+                    .get(&limit_item_id(&run))
+                    .and_then(|item| item.reset_ms);
+                self.log(&format!("run {run}: still paused for a usage limit"));
+                self.arm_timer(phases, &run, reset_ms, Duration::ZERO);
+            }
+        }
+    }
+
+    /// Starts a thread that resumes the run when its limit has reset. A limit with no reset time has no timer: only the
+    /// person's Resume answer resumes it.
+    ///
+    /// The thread looks at the wall clock every [`FileRunConfig::limit_poll`], so a machine that slept past the reset
+    /// resumes on its first look after waking, and a clock set forward does too. It does not count down. The pause is
+    /// at least [`FileRunConfig::limit_min_pause`] long on the continuous clock, which keeps a reset time that is
+    /// already past from resuming into the same limit over and over. The length of the pause is read on the
+    /// continuous clock too, which keeps counting while the machine sleeps. A pause that an earlier daemon began has no
+    /// floor: it has already lasted.
+    fn arm_timer(
+        self: &Arc<Self>,
+        phases: &Phases,
+        run: &str,
+        reset_ms: Option<u64>,
+        floor: Duration,
+    ) {
+        let Some(reset_ms) = reset_ms else {
+            return;
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        locked(&self.timers).insert(run.to_string(), cancel.clone());
+        let runs = self.clone();
+        let phases = phases.clone();
+        let named = run.to_string();
+        let spawned = thread::Builder::new()
+            .name(format!("collide-limit-{run}"))
+            .spawn(move || runs.wait_for_reset(&phases, &named, reset_ms, floor, &cancel));
+        match spawned {
+            Ok(handle) => locked(&self.timer_threads).push(handle),
+            Err(error) => self.log(&format!(
+                "run {run}: the thread that waits for the reset could not start: {error}"
+            )),
+        }
+    }
+
+    fn wait_for_reset(
+        &self,
+        phases: &Phases,
+        run: &str,
+        reset_ms: u64,
+        floor: Duration,
+        cancel: &AtomicBool,
+    ) {
+        let paused_at = self.config.clocks.read(Clock::Continuous).nanos;
+        let floor = u64::try_from(floor.as_nanos()).unwrap_or(u64::MAX);
+        loop {
+            if self.closed.load(Ordering::SeqCst) || cancel.load(Ordering::SeqCst) {
+                return;
+            }
+            let paused_for = self
+                .config
+                .clocks
+                .read(Clock::Continuous)
+                .nanos
+                .saturating_sub(paused_at);
+            if self.now_ms() >= reset_ms && paused_for >= floor {
+                self.timers_forget(run);
+                if let Some(item) = self.config.queue.take(&limit_item_id(run)) {
+                    self.log(&format!(
+                        "run {run}: its limit reset after a pause of {} s; resuming",
+                        paused_for / 1_000_000_000
+                    ));
+                    if let Err(message) = self.resume_limit(phases, item) {
+                        self.log(&format!("run {run}: not resumed: {message}"));
+                    }
+                }
+                return;
+            }
+            (self.config.sleep)(self.config.limit_poll);
+        }
+    }
+
+    fn timers_forget(&self, run: &str) {
+        locked(&self.timers).remove(run);
+    }
+
+    fn cancel_timer(&self, run: &str) {
+        if let Some(cancel) = locked(&self.timers).remove(run) {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Resumes a run that paused for a usage limit: the run goes `running`, and the phase's session is resumed by its
+    /// id with the budget it has left. `item` is the limit's Queue item, taken out by the caller, so one resume acts.
+    /// A resume that could not start puts the run back to `paused` and the item back in the Queue.
+    fn resume_limit(&self, phases: &Phases, item: QueueItem) -> Result<(), String> {
+        let run = item.run.clone().unwrap_or_default();
+        self.cancel_timer(&run);
+        let restore = |message: String| {
+            self.config.queue.restore(item.clone());
+            message
+        };
+        let Some(live) = self.live_of(&run) else {
+            return Err(restore(format!("the daemon has no run {run:?}")));
+        };
+        let Some(base) = (self.config.base_env)(self.config.capture_wait) else {
+            return Err(restore(
+                "the base environment was not captured in time, so no phase can resume".to_string(),
+            ));
+        };
+        let mut live = locked(&live);
+        let paused = live.ctx.run_state.clone();
+        self.record_run_state(phases, &mut live, RunState::Running {});
+        live.ctx.attempt += 1;
+        let first_turn = RESUME_TURN;
+        let Live { workspace, ctx } = &mut *live;
+        let started = self.start_attempt(phases, &run, workspace, ctx, &base, first_turn, true);
+        if let Err(halt) = started {
+            let message = match halt {
+                Halt::Refused(problems) => problems
+                    .into_iter()
+                    .map(|each| each.message)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                Halt::Disk(pause) => pause.queue_item().title,
+            };
+            live.ctx.attempt -= 1;
+            self.record_run_state(phases, &mut live, paused);
+            self.sync(&mut live);
+            return Err(restore(message));
+        }
+        self.sync(&mut live);
+        self.log(&format!(
+            "run {run}: resumed (attempt {})",
+            live.ctx.attempt + 1
+        ));
+        Ok(())
+    }
+
+    /// Resumes a run that paused for disk: the start goes on from the step the floor stopped. A floor that is still
+    /// there pauses it again with a new item.
+    fn resume_disk(&self, phases: &Phases, item: QueueItem) -> Result<(), String> {
+        let run = item.run.clone().unwrap_or_default();
+        let restore = |message: String| {
+            self.config.queue.restore(item.clone());
+            message
+        };
+        let Some(live) = self.live_of(&run) else {
+            return Err(restore(format!("the daemon has no run {run:?}")));
+        };
+        let Some(base) = (self.config.base_env)(self.config.capture_wait) else {
+            return Err(restore(
+                "the base environment was not captured in time, so no phase can start".to_string(),
+            ));
+        };
+        let mut live = locked(&live);
+        self.record_run_state(phases, &mut live, RunState::Running {});
+        let halted = self.launch(phases, &run, &mut live, &base);
+        self.sync(&mut live);
+        match halted {
+            Ok(()) => Ok(()),
+            Err(Halt::Disk(pause)) => {
+                self.pause_for_disk(phases, &mut live, &pause);
+                Ok(())
+            }
+            Err(Halt::Refused(problems)) => {
+                self.fail(phases, &mut live);
+                Err(problems
+                    .into_iter()
+                    .map(|each| each.message)
+                    .collect::<Vec<_>>()
+                    .join("; "))
+            }
+        }
+    }
+
+    /// Stops a run that paused for disk before it had a phase: there is nothing to signal, so the run is recorded
+    /// `stopped` and its Queue items are dropped. `false` for any other run, which [`Phases::stop_run`] stops. The
+    /// worktree is left as it was (`provisioning` means none was made; `ready` can be removed).
+    pub fn stop_unstarted(&self, phases: &Phases, run: &str) -> bool {
+        let Some(live) = self.live_of(run) else {
+            return false;
+        };
+        let mut live = locked(&live);
+        if live.ctx.run_state
+            != (RunState::Paused {
+                cause: PauseCause::Disk,
+            })
+        {
+            return false;
+        }
+        self.record_run_state(phases, &mut live, RunState::Stopped {});
+        self.config.queue.clear_run(run, None);
+        if let Err(error) = self.config.store.delete_run_context(run) {
+            self.log(&format!("run {run}: its context was not deleted: {error}"));
+        }
+        true
+    }
+
+    /// Answers a Queue item, once: the item is taken out of the Queue before anything is done, so two answers never
+    /// both act. A permission request goes to the agent (allow or deny, never "always"); Resume resumes a run paused
+    /// for a limit or for disk; Stop stops the run. An answer that could not be carried out is `refused` with its
+    /// reason and the item stays.
+    pub fn answer(
+        self: &Arc<Self>,
+        phases: &Phases,
+        item_id: &str,
+        answer: &QueueAnswer,
+    ) -> Result<QueueAnswerResult, AnswerError> {
+        let item =
+            self.config.queue.get(item_id).ok_or_else(|| {
+                AnswerError::NotFound(format!("the Queue has no item {item_id:?}"))
+            })?;
+        let kind = answer_kind(answer);
+        if !item.answers.contains(&kind) {
+            return Err(AnswerError::Invalid(format!(
+                "item {item_id:?} takes {:?}, not {kind:?}",
+                item.answers
+            )));
+        }
+        let refused = |message: String| Ok(QueueAnswerResult::Refused { message });
+        let outcome = match answer {
+            QueueAnswer::Permission { reply } => {
+                let (Some(run), Some(phase), Some(request)) =
+                    (&item.run, &item.phase, &item.permission)
+                else {
+                    return refused(format!("item {item_id:?} holds no request"));
+                };
+                let key = PhaseKey::new(run, phase)
+                    .map_err(|error| AnswerError::Invalid(error.to_string()))?;
+                phases.answer_permission(&key, &request.id, reply.clone())
+            }
+            QueueAnswer::Resume {} => match self.config.queue.take(item_id) {
+                None => Err(format!("item {item_id:?} was answered already")),
+                Some(taken) if taken.kind == QueueKind::DiskFull => self.resume_disk(phases, taken),
+                Some(taken) => self.resume_limit(phases, taken),
+            },
+            QueueAnswer::Stop {} => {
+                let run = item.run.clone().unwrap_or_default();
+                if !phases.has_run(&run) && self.stop_unstarted(phases, &run) {
+                    Ok(())
+                } else {
+                    phases
+                        .stop_run(&run, None)
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                }
+            }
+            _ => Err(format!("an item of this kind does not take {kind:?} yet")),
+        };
+        match outcome {
+            Ok(()) => Ok(QueueAnswerResult::Done {}),
+            Err(message) => refused(message),
+        }
+    }
+
+    /// Records the run's move to `to`, from the state the context holds, and keeps `to` in the context.
+    fn record_run_state(&self, phases: &Phases, live: &mut Live, to: RunState) {
+        let run = live.ctx.run.clone();
+        let from = std::mem::replace(&mut live.ctx.run_state, to.clone());
+        if let Err(error) = self.record_run(phases, &run, Some(from), to) {
+            self.log(&format!("run {run}: a move was not recorded: {error}"));
+        }
     }
 
     fn record_run(
@@ -507,6 +1106,38 @@ impl FileRuns {
             ));
         }
     }
+
+    /// Rebuilds the feed of a phase the daemon did not start, from its journal ([`crate::phases::FeedRebuilder`]): the
+    /// session starts as the run's attempt did, so a permission request asked before a restart is pending again.
+    pub fn rebuild_feed(&self, key: &PhaseKey, dir: &Path) -> Option<AgentFeed> {
+        let live = self.live_of(&key.run)?;
+        let start = locked(&live).ctx.session_start();
+        match AgentFeed::rebuild(Box::new(ClaudeSession::new(start)), dir) {
+            Ok(feed) => Some(feed.close_after_turn()),
+            Err(error) => {
+                self.log(&format!(
+                    "phase {key}: its session could not be rebuilt from the journal: {error}"
+                ));
+                None
+            }
+        }
+    }
+}
+
+/// The workspace a context describes, as the daemon that stored it left it.
+fn restored_workspace(config: &FileRunConfig, ctx: &RunContext) -> BuiltinWorkspace {
+    BuiltinWorkspace::restored(
+        WorkspaceSpec {
+            kind: WorkspaceKind::Task,
+            repo: PathBuf::from(&ctx.repo),
+            path: PathBuf::from(&ctx.workspace_path),
+            branch: ctx.branch.clone(),
+            base: "HEAD".to_string(),
+        },
+        ctx.git_dir.as_ref().map(PathBuf::from),
+        ctx.workspace_state,
+    )
+    .with_git_env(config.git_env.clone())
 }
 
 /// What is added to the base environment after the adapter's strip, later over earlier: the role's own `env`, the

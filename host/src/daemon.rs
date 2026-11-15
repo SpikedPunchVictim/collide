@@ -8,8 +8,9 @@
 //!
 //! 1. Raises its soft open-file limit ([`MIN_OPEN_FILES`], [`raise_open_file_limit`]): launchd's default of 256 broke
 //!    herdr at about 40 panes, and the daemon tails three files per child.
-//! 2. Records its login session, and restarts in a new one. Ending at logout is recorded as host shutdown, not as a
-//!    crash. (Not built yet: it is the daemon's own session to record, and no later item needs it before Stage 3b.)
+//! 2. Records its login session ([`crate::login`]), and restarts in a new one. Ending at logout is recorded as host
+//!    shutdown, not as a crash: the daemon's end writes a marker beside the runs, and the next start reads it
+//!    ([`Daemon::previous_end`]) with the session it finds.
 //! 3. Opens the store. A store that cannot be read is moved aside and reported ([`StoreError::Quarantined`]), a fresh
 //!    one is made, and the daemon keeps running with the report in `daemon.status`. It **adopts existing shims**
 //!    ([`adopt_shims`], [`Phases::adopt`]) here, before it binds the socket, so no client sees a run as gone while its
@@ -49,7 +50,8 @@
 //! first, then the token, then the protocol version, and a connection that fails any of them is answered once and
 //! closed, so an unauthenticated peer learns no version. A connection that says nothing for [`HANDSHAKE_WAIT`] is
 //! closed. Only `daemon.status`, `daemon.recapture_environment`, `run.stop`, `run.start_file` (a task file run with
-//! the built-in builder role, [`crate::file_run`]) and `queue.list` (the in-memory queue) are served here; the other
+//! the built-in builder role, [`crate::file_run`]), `queue.list` and `queue.answer` (the stored Queue,
+//! [`crate::queue`]) are served here; the other
 //! methods are other items' and answer `method not found`.
 //!
 //! ## Who is asking
@@ -89,21 +91,23 @@ use crate::auth::{self, Admitted, Caller, Session, StdFs, SystemProcessTree, Uni
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::clock::{Clock, Clocks, Reading, SystemClocks};
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
-use crate::file_run::{FileRunConfig, FileRuns};
+use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
 use crate::launch::{Launchctl, boot_out_recorded_job};
+use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::phases::{
-    BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, Phases, PhasesConfig, StopRunError,
-    process_is_running, read_exit_json, read_identity,
+    BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, PhasePauseHook, Phases,
+    PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
 };
+use crate::queue::Queue;
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
     DaemonRecaptureEnvironmentResult, DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method,
-    OWNER_PROTOCOL, OwnerInitializeResult, QueueListParams, QueueListResult, Request, Response,
-    Routed, RpcError, RunStartFileParams, RunStartResult, RunStopParams, RunStopResult,
-    StoreHealth, Survivor, code, encode_line, parse_request, route,
+    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams, QueueListParams, QueueListResult,
+    Request, Response, Routed, RpcError, RunStartFileParams, RunStartResult, RunStopParams,
+    RunStopResult, StoreHealth, Survivor, code, encode_line, parse_request, route,
 };
 use collide_core::shim::ExitRecord;
 use std::fmt;
@@ -453,7 +457,23 @@ pub struct DaemonOptions {
     /// Added to the environment of every git command a file-task run's workspace runs. A test passes
     /// `GIT_CONFIG_GLOBAL=/dev/null` here.
     pub git_env: Vec<(String, String)>,
+    /// Where the daemon reads its login session ([`SystemLoginSession`]); a test passes one it can log out of.
+    pub login: Arc<dyn LoginSessions>,
+    /// How a usage limit's timer waits between two looks at the wall clock (`thread::sleep`). A test passes one that
+    /// moves its fake clocks, as a machine that sleeps does.
+    pub sleep: Arc<dyn Fn(Duration) + Send + Sync>,
+    /// How often a limit's timer looks at the wall clock.
+    pub limit_poll: Duration,
+    /// The least a run stays paused for a limit before its reset time resumes it, on the continuous clock.
+    pub limit_min_pause: Duration,
 }
+
+/// How often a limit's timer looks at the wall clock ([`DaemonOptions::limit_poll`]).
+pub const LIMIT_POLL: Duration = Duration::from_secs(1);
+
+/// The least a run stays paused for a limit ([`DaemonOptions::limit_min_pause`]): a reset time that is already past must
+/// not resume a run into the same limit again at once.
+pub const LIMIT_MIN_PAUSE: Duration = Duration::from_secs(30);
 
 impl DaemonOptions {
     pub fn new(paths: DaemonPaths, shell: String, log: Box<dyn Write + Send>) -> DaemonOptions {
@@ -478,6 +498,10 @@ impl DaemonOptions {
             free_space: Arc::new(SystemFreeSpace),
             floor: Floor::default(),
             git_env: Vec::new(),
+            login: Arc::new(SystemLoginSession),
+            sleep: Arc::new(std::thread::sleep),
+            limit_poll: LIMIT_POLL,
+            limit_min_pause: LIMIT_MIN_PAUSE,
         }
     }
 }
@@ -502,6 +526,9 @@ struct Shared {
     handshake_wait: Duration,
     started_wall_ms: u64,
     started_uptime: Reading,
+    login: Arc<dyn LoginSessions>,
+    /// How the daemon before this one ended ([`login::End`]).
+    previous_end: login::End,
     stop: AtomicBool,
     connections: AtomicUsize,
 }
@@ -572,6 +599,10 @@ impl Daemon {
             free_space,
             floor,
             git_env,
+            login,
+            sleep,
+            limit_poll,
+            limit_min_pause,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -584,6 +615,23 @@ impl Daemon {
             std::process::id()
         ));
         let mut warnings = Vec::new();
+
+        // The login session (step 2): how the last daemon ended, and this one's record.
+        let session_file = paths.runs_dir.with_file_name(login::FILE);
+        let previous_end = match login::begin(
+            &session_file,
+            login.as_ref(),
+            clocks.read(Clock::Wall).nanos / 1_000_000,
+        ) {
+            Ok(end) => {
+                log.line(end.describe());
+                end
+            }
+            Err(error) => {
+                log.line(&format!("the login session could not be recorded: {error}"));
+                login::End::First
+            }
+        };
 
         // Fail fast, before anything is made: the path's length, then the directory.
         auth::prepare_daemon_socket(&StdFs, auth::daemon_uid(), &paths)
@@ -612,6 +660,10 @@ impl Daemon {
         let (store, health) = open_store(&paths, &log, &mut warnings)?;
         let store = Arc::new(store);
         let token = load_or_make_token(&paths.token_file)?;
+        let queue = Arc::new(Queue::load(store.clone(), {
+            let log = log.clone();
+            Arc::new(move |text: &str| log.line(text))
+        }));
 
         // File-task runs (ts-0065-kx). They wait for the first capture of the base environment, which is in `env`, and
         // they end their run and release their workspace in the phase-end hook, ahead of the hook the options carry.
@@ -634,7 +686,18 @@ impl Daemon {
                 let log = log.clone();
                 Arc::new(move |text: &str| log.line(text))
             },
+            store: store.clone(),
+            queue: queue.clone(),
+            sleep,
+            limit_poll,
+            limit_min_pause,
         }));
+        let on_phase_pause: Option<PhasePauseHook> = {
+            let runs = file_runs.clone();
+            Some(Box::new(move |phases, paused| {
+                runs.on_phase_pause(phases, paused);
+            }))
+        };
         let on_phase_end: Option<PhaseEndHook> = {
             let runs = file_runs.clone();
             Some(Box::new(move |phases, end| {
@@ -660,6 +723,12 @@ impl Daemon {
             processes,
             cleanup,
             disk: Some((free_space.clone(), floor)),
+            queue,
+            on_phase_pause,
+            rebuild_feed: {
+                let runs = file_runs.clone();
+                Some(Box::new(move |key, dir| runs.rebuild_feed(key, dir)))
+            },
         })
         .map_err(SocketError::Store)?;
         match adopt_shims(&paths.runs_dir) {
@@ -673,6 +742,8 @@ impl Daemon {
                 warnings.push(text);
             }
         }
+        // A limit that reset while no daemon ran is resumed by this one, with no client connected.
+        file_runs.recover(&phases);
         let listener =
             bind_socket(&paths).inspect_err(|e| log.line(&format!("cannot start: {e}")))?;
         log.line(&format!("listening on {}", paths.socket.display()));
@@ -697,6 +768,8 @@ impl Daemon {
             phases,
             launchctl,
             handshake_wait,
+            login,
+            previous_end,
             stop: AtomicBool::new(false),
             connections: AtomicUsize::new(0),
         });
@@ -720,6 +793,11 @@ impl Daemon {
             shared,
             accept: Some(accept),
         })
+    }
+
+    /// How the daemon before this one ended: a stop, host shutdown at logout, or a crash.
+    pub fn previous_end(&self) -> login::End {
+        self.shared.previous_end
     }
 
     pub fn paths(&self) -> &DaemonPaths {
@@ -773,8 +851,21 @@ impl Drop for Daemon {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.join();
+        // The limit timers end first: one that is resuming a run needs the phases.
+        self.shared.file_runs.shutdown();
         // The shims go on: they belong to no daemon. Only the daemon's watchers of them end.
         self.shared.phases.stop();
+        // Whether the daemon ends because the login session does is the last thing it records.
+        match login::finish(
+            &self.shared.paths.runs_dir.with_file_name(login::FILE),
+            self.shared.login.as_ref(),
+        ) {
+            Ok(end) => self.shared.log.line(end.describe()),
+            Err(error) => self
+                .shared
+                .log
+                .line(&format!("the login session was not marked ended: {error}")),
+        }
         // Last, because booting out the job ends this process: a stopped daemon leaves no loaded job behind.
         if let Some(launchctl) = &self.shared.launchctl {
             match boot_out_recorded_job(&self.shared.paths.lock_file, launchctl.as_ref()) {
@@ -1287,6 +1378,7 @@ fn call(
         Method::RunStop => run_stop(shared, session, params),
         Method::RunStartFile => run_start_file(shared, session, params),
         Method::QueueList => queue_list(shared, params),
+        Method::QueueAnswer => queue_answer(shared, session, params),
         other => Err(RpcError::new(
             code::METHOD_NOT_FOUND,
             format!(
@@ -1368,6 +1460,41 @@ fn queue_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
     Ok(serde_json::to_value(QueueListResult { items }).expect("a result is JSON"))
 }
 
+/// `queue.answer`: answers one Queue item (a permission request, a usage limit's Resume, a Stop). Only a person does
+/// it: a run's agent that could answer its own permission request would make the request pointless.
+fn queue_answer(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: QueueAnswerParams = serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("the params of queue.answer are not readable: {e}"),
+        )
+    })?;
+    if let Caller::RunAgent { run } = session.caller() {
+        return Err(RpcError::new(
+            code::NOT_PERMITTED,
+            format!("the agent of run {run} may not answer the Queue"),
+        ));
+    }
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    match shared
+        .file_runs
+        .answer(&shared.phases, &params.item, &params.answer)
+    {
+        Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
+        Err(AnswerError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
+        Err(AnswerError::Invalid(message)) => Err(RpcError::new(code::INVALID_PARAMS, message)),
+    }
+}
+
 /// `run.stop` (`collide stop`, 0.5): stops the run's processes in the order of [`crate::stop::ORDER`] and answers with
 /// the run's state, how many processes the first scan signalled, and the survivors. A survivor's `command` carries how
 /// it came to be listed (`found`, `recorded` or `suspect`). A run's agent may stop its own run and no other.
@@ -1395,6 +1522,17 @@ fn run_stop(
             code::UNAVAILABLE,
             "the daemon is shutting down",
         ));
+    }
+    // A run that paused for disk before it had a phase has nothing to signal.
+    if !shared.phases.has_run(&params.run)
+        && shared.file_runs.stop_unstarted(&shared.phases, &params.run)
+    {
+        let result = RunStopResult {
+            state: collide_core::state::RunState::Stopped {},
+            signalled: 0,
+            survivors: Vec::new(),
+        };
+        return Ok(serde_json::to_value(result).expect("a result is JSON"));
     }
     let grace = params
         .grace_secs

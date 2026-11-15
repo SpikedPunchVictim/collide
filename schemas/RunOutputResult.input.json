@@ -576,6 +576,20 @@
         },
         {
           "additionalProperties": false,
+          "description": "The role's budget ran out (Claude's `error_max_budget_usd`). The phase pauses rather than fails (0.3).",
+          "properties": {
+            "type": {
+              "const": "budget",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "type": {
               "const": "refusal",
