@@ -1,7 +1,7 @@
 ---
 id: ts-0012-ua
 kind: task
-status: active
+status: done
 title: "pack.yaml contract"
 owners: []
 links:
