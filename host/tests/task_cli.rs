@@ -489,13 +489,15 @@ fn an_unknown_op_fails_listing_the_ops_the_provider_declares() {
         "{}",
         run.stderr
     );
-    for op in ["setStatus", "link", "claim", "unclaim"] {
+    for op in ["setStatus", "link", "claim", "unclaim", "reid"] {
         assert!(
             run.stderr.contains(&format!("\n  {op}")),
             "{op} in {}",
             run.stderr
         );
     }
+    // `create` starts from no item, so it is not offered for one.
+    assert!(!run.stderr.contains("\n  create"), "{}", run.stderr);
     assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
 }
 
@@ -523,6 +525,8 @@ fn a_wrong_command_line_prints_usage_and_exits_2() {
         vec!["tasks", "extra"],
         vec!["tasks", "--kind"],
         vec!["task"],
+        vec!["task", "reid"],
+        vec!["task", "create", "--seed"],
         vec!["task", "3", "setStatus", "--commit"],
         vec!["nonsense"],
     ] {
@@ -546,6 +550,13 @@ fn help_prints_the_usage_the_exit_codes_and_where_the_provider_is_found() {
         )
     );
     assert!(run.stdout.contains("COLLIDE_BUILTIN_PACKS"));
+    for line in [
+        "collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--json]",
+        "collide task reid <id> [seed=<number>] [--json]",
+        "Nothing is committed: review with git diff.",
+    ] {
+        assert!(run.stdout.contains(line), "{line} in {}", run.stdout);
+    }
 }
 
 #[test]
@@ -673,4 +684,312 @@ fn an_answer_that_is_not_a_list_result_is_reported() {
         "{}",
         run.stderr
     );
+}
+
+// Create and reid (ts-0030).
+
+const ALPHA_TASKS: &str = ".collide/planning/epics/ep-001-aa-alpha/tasks";
+
+fn commit_count(dir: &Path) -> usize {
+    git(dir, &["rev-list", "--count", "--all"])
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn create_writes_one_new_file_prints_it_and_commits_nothing() {
+    let (bundle, repo) = (bundle(), Repo::new("create"));
+    let commits = commit_count(&repo.dir);
+    let run = collide(
+        &repo,
+        &bundle,
+        &[
+            "task",
+            "create",
+            "Fresh item, for the test",
+            "epic=ep-001-aa",
+            "seed=1",
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let file = format!("{ALPHA_TASKS}/ts-0013-ra-fresh-item-for-the-test.md");
+    assert_eq!(
+        run.stdout,
+        format!(
+            "ok  created ep-001-aa / ts-0013-ra\n  title   Fresh item, for the test\n  file    {file}\n"
+        )
+    );
+    assert_eq!(
+        git(&repo.dir, &["status", "--porcelain"]),
+        format!("?? {file}\n")
+    );
+    assert_eq!(commit_count(&repo.dir), commits);
+    // The new item is listed, with its epic.
+    let shown = collide(&repo, &bundle, &["task", "13-ra"]);
+    assert_eq!(shown.code, 0, "{}", shown.stderr);
+    assert!(shown.stdout.starts_with("ep-001-aa / ts-0013-ra\n"));
+}
+
+#[test]
+fn create_takes_the_epic_by_a_short_form_and_makes_epics() {
+    let (bundle, repo) = (bundle(), Repo::new("create-epic"));
+    let task = collide(
+        &repo,
+        &bundle,
+        &["task", "create", "title=In beta", "epic=2", "seed=1"],
+    );
+    assert_eq!(task.code, 0, "{}", task.stderr);
+    assert!(
+        task.stdout
+            .starts_with("ok  created ep-002-bb / ts-0013-ra\n"),
+        "{}",
+        task.stdout
+    );
+    let epic = collide(
+        &repo,
+        &bundle,
+        &["task", "create", "Gamma epic", "kind=epic", "seed=1"],
+    );
+    assert_eq!(epic.code, 0, "{}", epic.stderr);
+    assert_eq!(
+        epic.stdout,
+        "ok  created ep-003-ra\n  title   Gamma epic\n  \
+         file    .collide/planning/epics/ep-003-ra-gamma-epic/epic.md\n"
+    );
+}
+
+#[test]
+fn create_with_json_prints_the_providers_result() {
+    let (bundle, repo) = (bundle(), Repo::new("create-json"));
+    let run = collide(
+        &repo,
+        &bundle,
+        &[
+            "task",
+            "create",
+            "Json item",
+            "epic=ep-001-aa",
+            "seed=1",
+            "--json",
+        ],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let result = json(&run);
+    assert_eq!(result["outcome"], "ok");
+    assert_eq!(result["task"]["id"], "ts-0013-ra");
+    assert_eq!(
+        result["files"],
+        serde_json::json!([format!("{ALPHA_TASKS}/ts-0013-ra-json-item.md")])
+    );
+}
+
+#[test]
+fn a_bad_create_is_refused_or_a_usage_error_and_writes_nothing() {
+    let (bundle, repo) = (bundle(), Repo::new("create-bad"));
+    let cases: [(&[&str], i32, &str); 7] = [
+        (&["task", "create"], 2, "needs title"),
+        (&["task", "create", "No epic"], 5, "a task needs epic"),
+        (
+            &["task", "create", "T", "epic=ep-009-zz"],
+            3,
+            "no item matches `ep-009-zz`",
+        ),
+        (
+            &["task", "create", "T", "epic=ts-1"],
+            2,
+            "is ts-0001-aa, which is not an epic",
+        ),
+        (
+            &["task", "create", "T", "epic=9"],
+            3,
+            "no item matches `ep-9`",
+        ),
+        (
+            &["task", "create", "T", "epic=ep-1", "speed=3"],
+            2,
+            "has no argument `speed`",
+        ),
+        (
+            &["task", "3", "create", "T"],
+            2,
+            "`create` makes a new item",
+        ),
+    ];
+    for (args, code, message) in cases {
+        let run = collide(&repo, &bundle, args);
+        assert_eq!(run.code, code, "{args:?}: {}", run.stderr);
+        assert!(run.stderr.contains(message), "{args:?}: {}", run.stderr);
+    }
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn two_branches_that_make_the_same_number_both_load_after_the_merge() {
+    let (bundle, repo) = (bundle(), Repo::new("same-number"));
+    let second = repo.dir.with_file_name("task-cli-same-number-second");
+    let _ = fs::remove_dir_all(&second);
+    git(
+        &repo.dir,
+        &[
+            "clone",
+            "-q",
+            repo.dir.to_str().unwrap(),
+            second.to_str().unwrap(),
+        ],
+    );
+    let second = Repo { dir: second };
+
+    // Neither clone has fetched from the other, so neither sees the other's item and both take number 13.
+    git(&repo.dir, &["checkout", "-q", "-b", "branch-a"]);
+    let a = collide(
+        &repo,
+        &bundle,
+        &["task", "create", "Made on a", "epic=ep-001-aa", "seed=1"],
+    );
+    assert_eq!(a.code, 0, "{}", a.stderr);
+    git(&repo.dir, &["add", "-A"]);
+    git(&repo.dir, &["commit", "-q", "-m", "a"]);
+    git(&second.dir, &["checkout", "-q", "-b", "branch-b"]);
+    let b = collide(
+        &second,
+        &bundle,
+        &["task", "create", "Made on b", "epic=ep-001-aa", "seed=2"],
+    );
+    assert_eq!(b.code, 0, "{}", b.stderr);
+    git(&second.dir, &["add", "-A"]);
+    git(&second.dir, &["commit", "-q", "-m", "b"]);
+    git(&second.dir, &["fetch", "-q", "origin"]);
+    git(
+        &second.dir,
+        &["merge", "-q", "--no-edit", "origin/branch-a"],
+    );
+
+    let line = |run: &Run| run.stdout.lines().next().unwrap().to_string();
+    let (id_a, id_b) = (
+        line(&a).replace("ok  created ep-001-aa / ", ""),
+        line(&b).replace("ok  created ep-001-aa / ", ""),
+    );
+    assert!(id_a.starts_with("ts-0013-") && id_b.starts_with("ts-0013-") && id_a != id_b);
+
+    let listed = collide(&second, &bundle, &["tasks", "--json"]);
+    assert_eq!(listed.code, 0, "{}", listed.stderr);
+    let document = json(&listed);
+    assert_eq!(document["invalid"], serde_json::json!([]));
+    let all = ids(&document);
+    assert!(all.contains(&id_a) && all.contains(&id_b), "{all:?}");
+    let twelve = collide(&second, &bundle, &["task", "13"]);
+    assert_eq!(twelve.code, 3);
+    assert!(
+        twelve.stderr.contains("`13` matches 2 items:")
+            && twelve.stderr.contains(&format!("ep-001-aa / {id_a}"))
+            && twelve.stderr.contains(&format!("ep-001-aa / {id_b}")),
+        "{}",
+        twelve.stderr
+    );
+}
+
+/// The fixture repository with a second file that has ts-0002-bb's id, committed. It sorts after the original, so
+/// the scan sets it aside as the task.invalid.
+fn repo_with_a_shared_id(name: &str) -> (Repo, String) {
+    let repo = Repo::new(name);
+    let second = format!("{ALPHA_TASKS}/ts-0002-bb-second.md");
+    let copy = format!("{ALPHA_TASKS}/ts-0002-bb-zcopy.md");
+    fs::copy(repo.dir.join(&second), repo.dir.join(&copy)).unwrap();
+    git(&repo.dir, &["add", "-A"]);
+    git(
+        &repo.dir,
+        &["commit", "-q", "-m", "a second file with the id"],
+    );
+    (repo, copy)
+}
+
+#[test]
+fn reid_on_a_shared_id_renames_the_second_file_rewrites_links_and_commits_nothing() {
+    let (bundle, (repo, copy)) = (bundle(), repo_with_a_shared_id("reid"));
+    let listed = collide(&repo, &bundle, &["tasks"]);
+    assert!(
+        listed.stderr.contains(&format!(
+            "collide: skipped {copy}: id \"ts-0002-bb\" is already used by {ALPHA_TASKS}/ts-0002-bb-second.md"
+        )),
+        "{}",
+        listed.stderr
+    );
+    let commits = commit_count(&repo.dir);
+
+    let run = collide(&repo, &bundle, &["task", "reid", "ts-0002-bb", "seed=1"]);
+
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let renamed = format!("{ALPHA_TASKS}/ts-0002-ra-zcopy.md");
+    let third = format!("{ALPHA_TASKS}/ts-0003-cc-third.md");
+    assert_eq!(
+        run.stdout,
+        format!(
+            "ok  ep-001-aa / ts-0002-ra\n  id      ts-0002-bb -> ts-0002-ra\n  \
+             file    {third}\n  file    {renamed}\n  removed {copy}\n\
+             nothing is committed; review the changes with git diff and git status\n"
+        )
+    );
+    assert_eq!(commit_count(&repo.dir), commits);
+    let status = git(&repo.dir, &["status", "--porcelain"]);
+    let mut lines: Vec<&str> = status.lines().collect();
+    lines.sort();
+    assert_eq!(
+        lines,
+        [
+            format!(" D {copy}"),
+            format!(" M {third}"),
+            format!("?? {renamed}")
+        ]
+    );
+    // Only the link's target changed in the one file that linked to it.
+    let diff = git(&repo.dir, &["diff", "-U0", "--", &third]);
+    let changed: Vec<&str> = diff
+        .lines()
+        .filter(|l| {
+            (l.starts_with('+') || l.starts_with('-'))
+                && !l.starts_with("+++")
+                && !l.starts_with("---")
+        })
+        .collect();
+    assert_eq!(
+        changed,
+        [
+            "-  - { type: blocked-by, to: ts-0002-bb }",
+            "+  - { type: blocked-by, to: ts-0002-ra }"
+        ]
+    );
+    // Nothing is skipped now, and the first file still has the old id.
+    let after = collide(&repo, &bundle, &["tasks", "--json"]);
+    assert_eq!(after.code, 0, "{}", after.stderr);
+    assert!(!after.stderr.contains("skipped"), "{}", after.stderr);
+    let document = json(&after);
+    assert_eq!(document["invalid"], serde_json::json!([]));
+    let all = ids(&document);
+    assert!(all.contains(&"ts-0002-bb".to_string()) && all.contains(&"ts-0002-ra".to_string()));
+}
+
+#[test]
+fn reid_is_the_same_as_the_id_followed_by_reid() {
+    let (bundle, (repo, _copy)) = (bundle(), repo_with_a_shared_id("reid-order"));
+    let run = collide(&repo, &bundle, &["task", "2", "reid", "seed=1", "--json"]);
+    // `2` is ambiguous with the epic `ep-002-bb`; the full id is not.
+    assert_eq!(run.code, 3, "{}", run.stderr);
+    let run = collide(
+        &repo,
+        &bundle,
+        &["task", "ts-0002-bb", "reid", "seed=1", "--json"],
+    );
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let result = json(&run);
+    assert_eq!(result["outcome"], "ok");
+    assert_eq!(result["task"]["id"], "ts-0002-ra");
+}
+
+#[test]
+fn reid_of_an_id_nobody_has_exits_3_and_writes_nothing() {
+    let (bundle, repo) = (bundle(), Repo::new("reid-none"));
+    let run = collide(&repo, &bundle, &["task", "reid", "ts-0099-zz"]);
+    assert_eq!(run.code, 3);
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
 }

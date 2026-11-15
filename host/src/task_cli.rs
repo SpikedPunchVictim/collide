@@ -13,10 +13,10 @@ use collide_core::item::OpDecl;
 use collide_core::provider::{ApplyParams, ApplyResult, InitializeParams, InitializeResult, Task};
 use collide_core::ready::readiness;
 use collide_core::short_id::{Lookup, resolve};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Exit codes. An op's outcome has its own: `ok` is 0, `conflict` 4 and `refused` 5.
 pub mod exit {
@@ -37,7 +37,9 @@ pub const USAGE: &str = "\
 usage:
   collide tasks [--ready] [--kind <kind>] [--json]
   collide task <id> [--json]
-  collide task <id> <op> [<value>] [name=value ...] [--json]";
+  collide task <id> <op> [<value>] [name=value ...] [--json]
+  collide task create <title> [epic=<epic>] [kind=task|epic] [seed=<number>] [--json]
+  collide task reid <id> [seed=<number>] [--json]";
 
 /// What `collide help` prints.
 pub const HELP: &str = "\
@@ -48,6 +50,14 @@ collide task <id> <op> ...: change one item with an op the provider declares (an
 
 <id> is the full id (ts-0012-ua) or a short form: 12, 0012, 12-ua, ts-12. A short form must match exactly one item;
 if it matches several they are listed with their epics, and you add the suffix.
+
+collide task create <title>: make an item in an epic (epic=ep-002-va, or a short form such as ep-2; kind=epic makes an
+  epic, which takes no epic=). The id is the next free number for the kind across every local branch, every fetched
+  remote branch and the working tree, with a two-letter suffix drawn from a seeded generator (seed=, random when left
+  out). The new file is written and nothing is committed.
+collide task reid <id>: give an item a new suffix and rewrite every link that names the old id, in every item file.
+  Where two files share one id, the second (the one `collide tasks` reports as skipped) is the one renamed; links meant
+  for the other file are rewritten too. Each file touched is printed. Nothing is committed: review with git diff.
 
 An op's words are name=value, or one bare value that sets the op's main property (setStatus active sets status).
 Lengths and patterns are checked by the provider.
@@ -101,9 +111,24 @@ pub struct TaskOptions {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct CreateOptions {
+    pub words: Vec<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ReidOptions {
+    pub id: String,
+    pub words: Vec<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Tasks(TasksOptions),
     Task(TaskOptions),
+    Create(CreateOptions),
+    Reid(ReidOptions),
 }
 
 /// Reads the words after `collide tasks`.
@@ -157,7 +182,34 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
             "`collide task` needs an id, such as 12 or ts-0012-ua",
         ));
     };
+    // `create` and `reid` are words of their own: neither is an id form, so they cannot be taken for one.
+    if id == "create" {
+        return Ok(Command::Create(CreateOptions {
+            words: plain.collect(),
+            json,
+        }));
+    }
+    if id == "reid" {
+        let Some(id) = plain.next() else {
+            return Err(CliError::usage(
+                "`collide task reid` needs an id, such as 12 or ts-0012-ua",
+            ));
+        };
+        return Ok(Command::Reid(ReidOptions {
+            id,
+            words: plain.collect(),
+            json,
+        }));
+    }
     let op = plain.next();
+    // `collide task <id> reid` is `collide task reid <id>`: it is not a write against one version of one file.
+    if op.as_deref() == Some("reid") {
+        return Ok(Command::Reid(ReidOptions {
+            id,
+            words: plain.collect(),
+            json,
+        }));
+    }
     Ok(Command::Task(TaskOptions {
         id,
         op,
@@ -170,6 +222,7 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
 struct Session {
     client: ProviderClient,
     init: InitializeResult,
+    root: PathBuf,
 }
 
 fn open(cwd: &Path) -> Result<Session, CliError> {
@@ -185,7 +238,7 @@ fn open(cwd: &Path) -> Result<Session, CliError> {
             root: root.display().to_string(),
         })
         .map_err(CliError::failed)?;
-    Ok(Session { client, init })
+    Ok(Session { client, init, root })
 }
 
 fn emit(out: &mut dyn Write, text: &str) -> Result<(), CliError> {
@@ -198,6 +251,8 @@ pub fn run(command: &Command, cwd: &Path, out: &mut dyn Write, err: &mut dyn Wri
     let result = match command {
         Command::Tasks(options) => run_tasks(options, cwd, out, err),
         Command::Task(options) => run_task(options, cwd, out, err),
+        Command::Create(options) => run_create(options, cwd, out, err),
+        Command::Reid(options) => run_reid(options, cwd, out, err),
     };
     match result {
         Ok(code) => code,
@@ -297,6 +352,25 @@ fn ambiguous_message(query: &str, matches: &[&Task]) -> String {
     text
 }
 
+/// The one item that `query` names, or the error that says why there is not one.
+fn lookup<'a>(tasks: &'a [Task], query: &str) -> Result<&'a Task, CliError> {
+    match resolve(tasks, query) {
+        Lookup::One(item) => Ok(item),
+        Lookup::Many(matches) => Err(CliError::new(exit::ID, ambiguous_message(query, &matches))),
+        Lookup::None => Err(CliError::new(
+            exit::ID,
+            format!(
+                "no item matches `{query}`: looked for the id `{query}` and for items with that number \
+                 (and suffix, if given) among the {} items under .collide/planning/epics/",
+                tasks.len()
+            ),
+        )),
+        Lookup::Malformed => Err(CliError::usage(format!(
+            "`{query}` is not an item id; use the full id (ts-0012-ua) or a short form (12, 12-ua, ts-12)"
+        ))),
+    }
+}
+
 fn run_task(
     options: &TaskOptions,
     cwd: &Path,
@@ -305,28 +379,7 @@ fn run_task(
 ) -> Result<u8, CliError> {
     let mut session = open(cwd)?;
     let (tasks, _invalid) = session.client.list_all().map_err(CliError::failed)?;
-    let query = &options.id;
-    let item = match resolve(&tasks, query) {
-        Lookup::One(item) => item,
-        Lookup::Many(matches) => {
-            return Err(CliError::new(exit::ID, ambiguous_message(query, &matches)));
-        }
-        Lookup::None => {
-            return Err(CliError::new(
-                exit::ID,
-                format!(
-                    "no item matches `{query}`: looked for the id `{query}` and for items with that number \
-                     (and suffix, if given) among the {} items under .collide/planning/epics/",
-                    tasks.len()
-                ),
-            ));
-        }
-        Lookup::Malformed => {
-            return Err(CliError::usage(format!(
-                "`{query}` is not an item id; use the full id (ts-0012-ua) or a short form (12, 12-ua, ts-12)"
-            )));
-        }
-    };
+    let item = lookup(&tasks, &options.id)?;
     let found = readiness(&tasks);
     let view = View::new(&tasks, &found);
     let current = session
@@ -349,7 +402,15 @@ fn run_task(
         return Ok(exit::OK);
     };
 
-    let ops = declared_ops(&session.init, current.kind.as_deref());
+    if op_name == "create" {
+        return Err(CliError::usage(
+            "`create` makes a new item and takes no id: collide task create <title> epic=<epic>",
+        ));
+    }
+    let ops: Vec<OpDecl> = declared_ops(&session.init, current.kind.as_deref())
+        .into_iter()
+        .filter(|op| op.name != "create")
+        .collect();
     let Some(op) = ops.iter().find(|op| &op.name == op_name) else {
         let mut message = format!(
             "unknown op `{op_name}` for {} ({}); the provider declares:",
@@ -471,4 +532,156 @@ fn ok_text(before: &Task, after: &Task, files: &[String]) -> String {
         text.push_str(&format!("  file    {file}\n"));
     }
     text
+}
+
+/// An op the provider declares for the whole repository (one that does not start from an item), or a failure.
+fn declared_op(session: &Session, name: &str) -> Result<OpDecl, CliError> {
+    declared_ops(&session.init, None)
+        .into_iter()
+        .find(|op| op.name == name)
+        .ok_or_else(|| CliError::failed(format!("the provider does not declare the op `{name}`")))
+}
+
+/// The full id of the epic that `query` names: a full id, or a short form (`2` and `ep-2` both mean `ep-002-xx`).
+/// A bare number means an epic here, since `epic=` can only name one.
+fn resolve_epic(tasks: &[Task], query: &str) -> Result<String, CliError> {
+    let query = if !query.is_empty() && query.chars().all(|c| c.is_ascii_digit()) {
+        format!("ep-{query}")
+    } else {
+        query.to_string()
+    };
+    let item = lookup(tasks, &query)?;
+    if item.kind.as_deref() != Some("epic") {
+        return Err(CliError::usage(format!(
+            "`{query}` is {}, which is not an epic; give an epic, such as ep-002-va or ep-2",
+            item.id
+        )));
+    }
+    Ok(item.id.clone())
+}
+
+/// Prints the outcome of an op that is not a write to one version of one item (`create`, `reid`).
+fn finish(
+    result: ApplyResult,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+    ok_text: impl FnOnce(&Task, &[String]) -> String,
+) -> Result<u8, CliError> {
+    if json {
+        emit(
+            out,
+            &format!(
+                "{}\n",
+                serde_json::to_string(&result).expect("a result is JSON")
+            ),
+        )?;
+    }
+    match result {
+        ApplyResult::Ok { task, files, .. } => {
+            if !json {
+                emit(out, &ok_text(&task, &files))?;
+            }
+            Ok(exit::OK)
+        }
+        ApplyResult::Conflict { current } => {
+            if !json {
+                let _ = writeln!(
+                    err,
+                    "collide: conflict: {} changed; nothing was written",
+                    View::heading(&current)
+                );
+            }
+            Ok(exit::CONFLICT)
+        }
+        ApplyResult::Refused { message } => {
+            if !json {
+                let _ = writeln!(err, "collide: refused: {message}");
+            }
+            Ok(exit::REFUSED)
+        }
+    }
+}
+
+fn run_create(
+    options: &CreateOptions,
+    cwd: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<u8, CliError> {
+    let mut session = open(cwd)?;
+    let op = declared_op(&session, "create")?;
+    let mut args = map_args(&op, &options.words).map_err(CliError::usage)?;
+    if let Some(Value::String(epic)) = args.get("epic").cloned() {
+        let (tasks, _invalid) = session.client.list_all().map_err(CliError::failed)?;
+        args.insert(
+            "epic".to_string(),
+            Value::String(resolve_epic(&tasks, &epic)?),
+        );
+    }
+    let result = session
+        .client
+        .apply(&ApplyParams {
+            op: op.name.clone(),
+            id: None,
+            args,
+            version: None,
+            checkout: None,
+        })
+        .map_err(CliError::failed)?;
+    finish(result, options.json, out, err, |task, files| {
+        let mut text = format!(
+            "ok  created {}\n  title   {}\n",
+            View::heading(task),
+            task.title
+        );
+        for file in files {
+            text.push_str(&format!("  file    {file}\n"));
+        }
+        text
+    })
+}
+
+fn run_reid(
+    options: &ReidOptions,
+    cwd: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<u8, CliError> {
+    let mut session = open(cwd)?;
+    let op = declared_op(&session, "reid")?;
+    let (tasks, _invalid) = session.client.list_all().map_err(CliError::failed)?;
+    let item = lookup(&tasks, &options.id)?;
+    let old_id = item.id.clone();
+    let args = map_args(&op, &options.words).map_err(CliError::usage)?;
+    // No version: the provider reads every file it rewrites under its lock. Where two files share the id, it
+    // renames the second, which `lookup` cannot name (the list holds only the first).
+    let result = session
+        .client
+        .apply(&ApplyParams {
+            op: op.name.clone(),
+            id: Some(old_id.clone()),
+            args,
+            version: None,
+            checkout: None,
+        })
+        .map_err(CliError::failed)?;
+    let root = session.root.clone();
+    finish(result, options.json, out, err, |task, files| {
+        let mut text = format!(
+            "ok  {}\n  id      {old_id} -> {}\n",
+            View::heading(task),
+            task.id
+        );
+        for file in files {
+            let label = if root.join(file).exists() {
+                "file   "
+            } else {
+                "removed"
+            };
+            text.push_str(&format!("  {label} {file}\n"));
+        }
+        text.push_str("nothing is committed; review the changes with git diff and git status\n");
+        text
+    })
 }

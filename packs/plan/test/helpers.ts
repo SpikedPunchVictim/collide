@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -156,4 +156,18 @@ export async function spawnProvider(root: string, env: Record<string, string> = 
       return exited
     },
   }
+}
+
+/** Runs git in `cwd` with no user or system configuration, a made-up identity, and no signing. */
+export const git = (cwd: string, ...args: string[]): string =>
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+  })
+
+/** Commits everything in `cwd`. */
+export function commitAll(cwd: string, message: string): void {
+  git(cwd, 'add', '-A')
+  git(cwd, 'commit', '--quiet', '-m', message)
 }

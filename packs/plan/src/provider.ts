@@ -8,6 +8,7 @@ import type {
   ListResultInput,
   ProviderHandlers,
 } from '@collide/pack-sdk'
+import { TITLE_MAX } from './create.ts'
 import { CATEGORIES, ID_PATTERN } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
@@ -19,7 +20,8 @@ const kind = (name: string): KindDeclInput => ({ name, statuses })
 const noExtraArgs = { additionalProperties: false }
 
 /**
- * The write ops, for both kinds. None has `movesTo`: a status write moves the item to the category its argument names,
+ * The write ops, for both kinds. `create` makes an item, so it is sent with no `id` and no `version`; `reid` is sent with
+ * an `id` and no `version`; the others change one item and need both. None has `movesTo`: a status write moves the item to the category its argument names,
  * which one fixed category cannot say, and `claim` records an owner without changing the status. `checkouts` is left
  * out (any), though only the main checkout is written until `ts-0031-xu`.
  */
@@ -42,6 +44,21 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
     args: { type: 'object', properties: { claimant: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['claimant'], ...noExtraArgs },
   },
   { name: 'unclaim', args: { type: 'object', properties: {}, ...noExtraArgs } },
+  {
+    name: 'create',
+    args: {
+      type: 'object',
+      properties: {
+        kind: { enum: ['task', 'epic'] },
+        epic: { type: 'string', pattern: '^ep-[0-9]{3,}-[a-z]{2}$' },
+        title: { type: 'string', minLength: 1, maxLength: TITLE_MAX },
+        seed: { type: 'integer' },
+      },
+      required: ['title'],
+      ...noExtraArgs,
+    },
+  },
+  { name: 'reid', args: { type: 'object', properties: { seed: { type: 'integer' } }, ...noExtraArgs } },
 ]
 
 /** `initialize`'s answer: kinds `task` and `epic`, the five categories as statuses, `blocked-by` as the one blocking link. */
@@ -57,7 +74,7 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
     { name: 'blocked-by', dir: 'out', blocking: true },
     { name: 'part-of', dir: 'out', blocking: false },
   ],
-  capabilities: { watch: false, create: false, collections: false, preview: false },
+  capabilities: { watch: false, create: true, collections: false, preview: false },
 }
 
 export interface PlanProviderOptions {

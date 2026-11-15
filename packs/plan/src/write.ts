@@ -1,39 +1,27 @@
-import { randomBytes } from 'node:crypto'
-import { open, readdir, readFile, rename, stat, unlink } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { mkdir, readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { ApplyParamsOutput, ApplyResultInput } from '@collide/pack-sdk'
+import { replaceFile } from './atomic.ts'
 import { addBlockedByLine, clearOwnersLine, setOwnerLine, setStatusLine } from './frontmatter-edit.ts'
 import type { Edit } from './frontmatter-edit.ts'
+import { checkCreate, CREATE, createLocked } from './create.ts'
+import type { IdHooks } from './ids.ts'
 import { CATEGORIES, ID_PATTERN, readItem } from './item.ts'
 import { LOCK_FILE, withLock } from './lock.ts'
 import type { LockOptions } from './lock.ts'
+import { CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
+import { checkReid, REID, reidLocked } from './reid.ts'
 import { findFence, parseFrontmatter, readItemFile, versionOf } from './read-file.ts'
 import { scanEpics, SHARED_ROOT, toTask } from './scan.ts'
 import type { FoundItem, Scan } from './scan.ts'
 
-/** The ending of a temp file's name. The scan reads only `.md` files, so it never opens one, and `.gitignore` lists it. */
-export const TEMP_SUFFIX = '.collide-tmp'
-
-/**
- * Test hook: when the environment variable `COLLIDE_FAILPOINT` equals the name of a failpoint, the process kills
- * itself with SIGKILL there. `before-rename` is the one failpoint: it fires after the temp file is written and
- * synced and before it is renamed over the item, so a test can check that a killed writer leaves the old file whole.
- * With the variable unset (every real run) nothing happens.
- */
-function failpoint(name: 'before-rename'): void {
-  if (process.env.COLLIDE_FAILPOINT !== name) return
-  process.kill(process.pid, 'SIGKILL')
-  // The signal can arrive a moment after `kill` returns; do not go on in the meantime.
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10_000)
-}
+export { TEMP_SUFFIX } from './atomic.ts'
 
 const SET_STATUS = 'setStatus'
 const LINK = 'link'
 const CLAIM = 'claim'
 const UNCLAIM = 'unclaim'
-
-const refused = (message: string): ApplyResultInput => ({ outcome: 'refused', message })
 
 type Frontmatter = Record<string, unknown>
 
@@ -49,16 +37,7 @@ interface OpSpec {
   prepare: (found: FoundItem, scan: Scan, args: Record<string, unknown>, frontmatter: Frontmatter) => Prepared
 }
 
-const stringArg = (args: Record<string, unknown>, name: string): string | null => (typeof args[name] === 'string' ? args[name] : null)
-
-/** Refuses an argument that the op does not declare, so a misspelled one is not silently dropped. */
-const onlyKeys = (args: Record<string, unknown>, allowed: string[]): string | null => {
-  const extra = Object.keys(args).find((key) => !allowed.includes(key))
-  return extra === undefined ? null : `unknown argument "${extra}"; this op takes ${allowed.length === 0 ? 'no arguments' : allowed.join(', ')}`
-}
-
 const idRegex = new RegExp(ID_PATTERN)
-const CONTROL = /[\u0000-\u001f\u007f]/
 
 const OPS: Record<string, OpSpec> = {
   [SET_STATUS]: {
@@ -121,49 +100,7 @@ const OPS: Record<string, OpSpec> = {
   },
 }
 
-export const OP_NAMES = Object.keys(OPS)
-
-/** Syncs a directory so that a rename in it survives a crash. Windows cannot open a directory, so it is skipped there. */
-async function syncDirectory(path: string): Promise<void> {
-  if (process.platform === 'win32') return
-  const handle = await open(path, 'r')
-  try {
-    await handle.sync()
-  } finally {
-    await handle.close()
-  }
-}
-
-/**
- * Replaces `path` with `content` so that a reader sees the old file or the new one and never half of either: the
- * content goes to a temp file beside it (same directory, so the rename stays on one file system), is synced, renamed
- * over the item, and the directory is synced. The file keeps its permission bits.
- */
-async function replaceFile(path: string, content: Buffer, mode: number): Promise<void> {
-  // Every temp file is made under the lock, which this writer holds, so one still here is what a killed writer left.
-  const mine = `.${basename(path)}.`
-  for (const name of await readdir(dirname(path))) {
-    if (name.startsWith(mine) && name.endsWith(TEMP_SUFFIX)) await unlink(join(dirname(path), name))
-  }
-  const temp = join(dirname(path), `.${basename(path)}.${process.pid}-${randomBytes(4).toString('hex')}${TEMP_SUFFIX}`)
-  const handle = await open(temp, 'wx', mode)
-  try {
-    try {
-      await handle.chmod(mode)
-      await handle.writeFile(content)
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
-    failpoint('before-rename')
-    await rename(temp, path)
-  } catch (error) {
-    // Best effort: the write failed and that error is the one to report, so a failed cleanup must not replace it.
-    await unlink(temp).catch(() => {})
-    throw error
-  }
-  await syncDirectory(dirname(path))
-}
+export const OP_NAMES = [...Object.keys(OPS), CREATE, REID]
 
 /** Reads the item back from disk, so the reply is what is on disk. */
 async function readBack(found: FoundItem, absolute: string): Promise<FoundItem> {
@@ -219,25 +156,44 @@ async function writeLocked(root: string, id: string, version: string, spec: OpSp
  * Protocol v0's `apply` for the markdown provider. The root is the main checkout; the shared root is
  * `<root>/.collide/planning`, and every write there holds that root's lock file. `version` is required: a write
  * must say which content it was made against. An op that would change nothing writes nothing and answers `ok` with
- * no `files` and no `items`.
+ * no `files` and no `items`. Two ops are not about one version of one item: `create` makes an item, so it takes no id
+ * and no version, and `reid` rewrites links in several files, each read under the lock, so it takes no version (it
+ * refuses one rather than ignore it). `hooks` are for tests.
  */
-export async function applyOp(root: string, params: ApplyParamsOutput, lock: LockOptions = {}): Promise<ApplyResultInput> {
+export async function applyOp(root: string, params: ApplyParamsOutput, lock: LockOptions = {}, hooks: IdHooks = {}): Promise<ApplyResultInput> {
   const { op, id, version, checkout } = params
   const spec = Object.hasOwn(OPS, op) ? OPS[op] : undefined
-  if (spec === undefined) return refused(`unknown op "${op}"; this provider has ${OP_NAMES.join(', ')}`)
+  if (spec === undefined && op !== CREATE && op !== REID) return refused(`unknown op "${op}"; this provider has ${OP_NAMES.join(', ')}`)
   if (checkout !== undefined && checkout !== null) return refused(`writes into another checkout are not supported yet (checkout "${checkout}"); leave checkout out to write to the main checkout`)
-  if (typeof id !== 'string' || id === '') return refused(`${op} needs the id of the item to change`)
-  if (typeof version !== 'string' || version === '') return refused(`${op} needs the version you last read: send it, so that a write over a newer file can be told from one over the file you saw`)
   const args = params.args ?? {}
-  const problem = spec.check(args)
+  const planning = join(root, SHARED_ROOT)
+
+  if (op === CREATE) {
+    if (id !== undefined && id !== null) return refused('create makes the id: leave id out')
+    if (version !== undefined && version !== null) return refused('create takes no version: it makes a new item')
+    const problem = checkCreate(args)
+    if (problem !== null) return refused(`create: ${problem}`)
+    await mkdir(planning, { recursive: true })
+    return withLock(join(planning, LOCK_FILE), () => createLocked(root, args, hooks), lock)
+  }
+
+  if (typeof id !== 'string' || id === '') return refused(`${op} needs the id of the item to change`)
+  if (op === REID) {
+    if (version !== undefined && version !== null) return refused('reid takes no version: it rewrites several files, each read under the lock')
+    const problem = checkReid(args)
+    if (problem !== null) return refused(`reid: ${problem}`)
+  } else if (typeof version !== 'string' || version === '') {
+    return refused(`${op} needs the version you last read: send it, so that a write over a newer file can be told from one over the file you saw`)
+  }
+  const problem = spec === undefined ? null : spec.check(args)
   if (problem !== null) return refused(`${op}: ${problem}`)
 
-  const planning = join(root, SHARED_ROOT)
   try {
     await stat(planning)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return refused(`there is no item ${id}`)
     throw error
   }
-  return withLock(join(planning, LOCK_FILE), () => writeLocked(root, id, version, spec, args), lock)
+  const work = spec === undefined ? () => reidLocked(root, id, args, hooks) : () => writeLocked(root, id, version as string, spec, args)
+  return withLock(join(planning, LOCK_FILE), work, lock)
 }

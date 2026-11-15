@@ -126,3 +126,49 @@ export function addBlockedByLine(text: string, to: string): Edit {
   all.splice(last + 1, 0, entry(indent))
   return join(all)
 }
+
+const ID_LINE = /^id:([ \t]+)(?:"([a-z0-9-]+)"|'([a-z0-9-]+)'|([a-z0-9-]+))([ \t]*(?:#.*)?)$/
+
+/** Changes the value on the `id:` line and nothing else on it. */
+export function setIdLine(text: string, id: string): Edit {
+  const all = splitLines(text)
+  const at = find(all, 'id')
+  if (typeof at !== 'number') return at
+  if (at === -1) return refuse('the frontmatter has no "id:" line')
+  const line = all[at] as string
+  const match = ID_LINE.exec(withoutEnding(line))
+  if (match === null) return unknownForm('id', line, 'id: ts-0012-ua, with the value on the same line')
+  const quote = match[2] !== undefined ? '"' : match[3] !== undefined ? "'" : ''
+  all[at] = `id:${match[1]}${quote}${id}${quote}${match[5]}${endingOf(line)}`
+  return join(all)
+}
+
+/** A top-level key starts in the first column; a list item, an indented line and a comment belong to the key above. */
+const TOP_LEVEL_KEY = /^[^\s#-]/
+
+/**
+ * Changes every `to: <from>` of the `links` lines to `to: <to>`: the target of a link, in a one-line entry, a block
+ * mapping or a flow list, quoted or not. Nothing else on those lines changes. A `links` key with no such target is
+ * refused. The caller parses the result and checks that only the targets changed, which catches a link in a form
+ * this does not match.
+ */
+export function replaceLinkTarget(text: string, from: string, to: string): Edit {
+  const all = splitLines(text)
+  const at = find(all, 'links')
+  if (typeof at !== 'number') return at
+  if (at === -1) return refuse('the frontmatter has no "links:" line')
+  let end = at + 1
+  while (end < all.length && !TOP_LEVEL_KEY.test(all[end] as string)) end++
+  const target = new RegExp(`(\\bto:[ \\t]*["']?)${from}(?=["']?(?:[ \\t]*[},#]|[ \\t]*\\r?\\n?$))`, 'g')
+  let changed = 0
+  for (let index = at; index < end; index++) {
+    const line = all[index] as string
+    const edited = line.replace(target, (_whole, lead: string) => {
+      changed++
+      return `${lead}${to}`
+    })
+    all[index] = edited
+  }
+  if (changed === 0) return refuse(`no link on the "links" lines has "to: ${from}" in a form the provider edits`)
+  return join(all)
+}

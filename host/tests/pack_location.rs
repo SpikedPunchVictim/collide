@@ -5,7 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 mod common;
-use common::scratch;
 
 /// A folder that is a bundle: it holds `plan/pack.yaml`.
 fn make_bundle(dir: &Path) {
@@ -13,9 +12,13 @@ fn make_bundle(dir: &Path) {
     fs::write(dir.join("plan/pack.yaml"), "name: collide/plan\n").unwrap();
 }
 
-/// A fresh scratch folder for one test.
+/// A fresh scratch folder for one test. It is outside the repository: the search walks every folder above the
+/// executable, and from `target/tmp` it would reach this checkout's own staged bundle after `pnpm build:packs`.
 fn fresh(name: &str) -> PathBuf {
-    let dir = scratch(&format!("pack-location-{name}"));
+    let dir = std::env::temp_dir().join(format!(
+        "collide-pack-location-{name}-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir

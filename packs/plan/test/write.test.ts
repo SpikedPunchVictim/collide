@@ -35,10 +35,10 @@ const git = (cwd: string, ...args: string[]): string =>
   })
 
 describe('initialize declares the write ops', () => {
-  test('setStatus, link, claim and unclaim, each with an argument schema, and no op that moves to one fixed category', async () => {
+  test('setStatus, link, claim, unclaim, create and reid, each with an argument schema, and no op that moves to one fixed category', async () => {
     const { result } = await call(standard(), 'initialize', { config: {} })
     const ops = result?.ops as Array<Record<string, any>>
-    expect(ops.map((op) => op.name)).toEqual(['setStatus', 'link', 'claim', 'unclaim'])
+    expect(ops.map((op) => op.name)).toEqual(['setStatus', 'link', 'claim', 'unclaim', 'create', 'reid'])
     expect(ops.every((op) => op.movesTo === undefined && op.args.type === 'object')).toBe(true)
     const five = ['ready', 'active', 'review', 'done', 'dropped']
     expect(ops[0]?.args).toMatchObject({

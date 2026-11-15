@@ -21,7 +21,7 @@ describe('initialize', () => {
     expect(result?.statuses).toEqual(categories)
     expect(result?.links.filter((link: any) => link.blocking)).toEqual([{ name: 'blocked-by', dir: 'out', blocking: true }])
     expect(result?.idPattern).toBe('^[a-z]{2}-[0-9]{3,}-[a-z]{2}$')
-    expect(result?.capabilities).toEqual({ watch: false, create: false, collections: false, preview: false })
+    expect(result?.capabilities).toEqual({ watch: false, create: true, collections: false, preview: false })
   })
 })
 

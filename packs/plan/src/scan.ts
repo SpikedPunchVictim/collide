@@ -43,9 +43,11 @@ async function entries(dir: string) {
 /**
  * Reads the items under `<cwd>/.collide/planning/epics/`: each epic folder's `epic.md` and the `.md` files directly in
  * its `tasks/` folder, and nothing else. Symbolic links are not followed. `spikes/`, `proposals/` and `questions/`
- * are never opened. The epic is the folder, so it is reported from the path and never from frontmatter.
+ * are never opened. The epic is the folder, so it is reported from the path and never from frontmatter. Every file
+ * that reads is returned, in scan order, including a second file with an id another file has (`scanEpics` sets that
+ * one aside); `invalid` holds the files that did not read.
  */
-export async function scanEpics(cwd: string, checkout: string | null = null): Promise<Scan> {
+export async function readEpicFiles(cwd: string, checkout: string | null = null): Promise<{ items: FoundItem[]; invalid: TaskInvalidOutput[] }> {
   const epicsDir = join(cwd, SHARED_ROOT, 'epics')
   const items: FoundItem[] = []
   const invalid: TaskInvalidOutput[] = []
@@ -74,7 +76,13 @@ export async function scanEpics(cwd: string, checkout: string | null = null): Pr
     }
   }
 
-  // Two files with one id: the first in path order is the item, the others are invalid.
+  return { items, invalid }
+}
+
+/** The items under `epics/` (see `readEpicFiles`). */
+export async function scanEpics(cwd: string, checkout: string | null = null): Promise<Scan> {
+  const { items, invalid } = await readEpicFiles(cwd, checkout)
+  // Two files with one id: the first in scan order is the item, the others are invalid.
   const seen = new Map<string, FoundItem>()
   const kept: FoundItem[] = []
   for (const found of items) {
