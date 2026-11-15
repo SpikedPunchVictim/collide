@@ -1,7 +1,7 @@
 ---
 id: ts-0036-xt
 kind: task
-status: ready
+status: active
 title: "Normalized agent events and capability table"
 owners: []
 links:
