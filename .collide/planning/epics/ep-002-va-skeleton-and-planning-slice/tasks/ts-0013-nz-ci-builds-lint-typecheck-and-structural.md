@@ -1,7 +1,7 @@
 ---
 id: ts-0013-nz
 kind: task
-status: ready
+status: active
 title: "CI: builds, lint, typecheck and structural checks"
 owners: []
 links:
