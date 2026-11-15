@@ -380,6 +380,7 @@ dependencies = [
 name = "collide-core"
 version = "0.0.0"
 dependencies = [
+ "collide-core",
  "schemars 1.2.3",
  "serde",
  "serde-saphyr",

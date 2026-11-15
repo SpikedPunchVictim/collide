@@ -33,6 +33,8 @@ pub mod short_id;
 pub mod span;
 pub mod stage;
 pub mod state;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod view;
 pub mod workflow;
 pub mod workflow_check;

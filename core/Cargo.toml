@@ -10,3 +10,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde-saphyr = { version = "=2.1.1", default-features = false, features = ["deserialize"] }
 serde_path_to_error = "0.1"
+
+[features]
+# The test doubles of `collide_core::testing` (0.15, Dependency injection). Off by default: no shipped crate needs them.
+# A feature adds no dependency. The crate's own tests get it through the dev-dependency below.
+testing = []
+
+[dev-dependencies]
+collide-core = { path = ".", features = ["testing"] }
