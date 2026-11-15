@@ -2,7 +2,7 @@
 id: ep-003-da
 alias: stage-3
 kind: epic
-status: ready
+status: active
 title: "Stage 3: Headless core"
 owners: []
 links: []
