@@ -2,7 +2,7 @@
 id: ep-002-va
 alias: stage-2
 kind: epic
-status: active
+status: done
 title: "Stage 2: Skeleton and planning slice"
 owners: []
 links: []
