@@ -1,7 +1,7 @@
 ---
 id: ts-0039-ps
 kind: task
-status: ready
+status: active
 title: "Session replay over the journal"
 owners: []
 links:
