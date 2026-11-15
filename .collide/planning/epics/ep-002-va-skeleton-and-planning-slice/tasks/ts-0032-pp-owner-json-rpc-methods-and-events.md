@@ -1,7 +1,7 @@
 ---
 id: ts-0032-pp
 kind: task
-status: ready
+status: active
 title: "Owner JSON-RPC: methods and events"
 owners: []
 links:
