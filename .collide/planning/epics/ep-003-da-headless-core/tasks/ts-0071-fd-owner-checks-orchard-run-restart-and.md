@@ -6,6 +6,7 @@ title: "Owner checks: Orchard run, restart and sleep test"
 owners: []
 links:
   - { type: blocked-by, to: ts-0070-mk }
+  - { type: blocked-by, to: ts-0073-ac }
 ---
 
 ## Goal

@@ -7,7 +7,9 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 19.** Revision 19 keeps the tab names Field, Tracks, Queue and Planning, each with a plain
+**Status: revision 20.** Revision 20 gives Tracks two layouts, List and Timeline, makes the free-space floor a
+setting, adds repo-only settings keys, and puts every file Collide writes on macOS in one folder (owner,
+2026-11-15). Revision 19 keeps the tab names Field, Tracks, Queue and Planning, each with a plain
 subtitle (owner, 2026-11-15). Revision 18 adds planning quality checks from the Field mockup: a Decision log, an
 Assumption ledger, a coverage map, a kill criterion for spikes, a red-team pass and a session budget meter (owner,
 2026-11-15). Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as
@@ -384,6 +386,12 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     ids (`TERM_SESSION_ID`, `ITERM_SESSION_ID`) and `XPC_SERVICE_NAME`/`XPC_FLAGS`.
 - **The socket** is at a short fixed path. AF_UNIX paths are limited to 103 bytes on macOS (measured S3); a longer
   path fails fast with a message naming the path and the limit.
+- **Where Collide's files live on macOS** (owner, 2026-11-15; revision 20). Everything Collide writes for itself is
+  under `~/Library/Application Support/Collide`: the socket, the token and the lock file in its `run/` folder, and the
+  store, the run folders and the daemon's log beside it. Settings a person edits are elsewhere: theirs in
+  `~/.config/collide/`, a repo's in its `.collide/` (0.7). Collide makes no folder of its own in the home directory.
+  The socket path fits the limit for a user name of up to 49 bytes. Linux and Windows get their
+  own locations when they are supported (Deferred).
   - **Its directory is mode `0700`, and the daemon checks the directory's owner and mode at start** and refuses to
     bind in one that is not the user's or is open to others (R5). A connecting peer's uid must equal the daemon's
     (`getpeereid`), so a second local user cannot even reach the token check.
@@ -418,7 +426,9 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   - state is saved without holding a lock that other work waits on;
   - a store or `exit.json` that cannot be read is moved aside and reported, never overwritten;
   - on a full disk the shim keeps its exit record in memory and serves it until the daemon acknowledges it;
-  - **free space is checked before a workspace is made and before each phase** (R5). Under a floor the run goes to
+  - **free space is checked before a workspace is made and before each phase** (R5). The floor is 5 GiB by default, Collide's
+    `disk.floor_gib` setting, `overridable` because it depends on the machine (owner, 2026-11-15; revision 20). Under
+    the floor the run goes to
     `paused: disk` with a Queue item, and nothing is started. The check reads both the workspace's volume and the
     run directory's; a volume that cannot be read refuses the start instead of pausing it. A phase that ends with no
     `result` on a full volume fails with cause `disk`, not `lost`;
@@ -1437,6 +1447,8 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   - Some keys are per user by nature and are refused in the repo file: secrets, trust entries, source accounts,
     personal views, and an agent's kind, command, arguments, model, environment, secrets, folders and tool kinds
     (below).
+  - Some keys describe the repo and are refused in the user's file and in a user profile: a pack marks them
+    `repoOnly: true`, as `collide/plan` does `layout` (owner, 2026-11-15; revision 20). The message names the key.
   - **Secrets** (`secret: true`) come only from the OS keychain, set in the UI or with `collide config set --secret`.
     A secret in either file is a load error. Hooks receive settings as `config` on stdin (0.5).
   - `.collide/config.yaml` loads from the line's snapshot and is in the trust hash, like `board.yaml` (0.9).
@@ -2407,8 +2419,18 @@ The names stay; the subtitles are the audience rule above applied to navigation.
   - Workspace provisioning is a segment with its own progress: orchard's takes minutes (worktree 230–330 s, map
     build about 1500 s, measured R1). Its progress comes from the pack's `progress` report lines (0.5).
   - Parallel runs stack, like a mixing desk or a CI pipeline view, so the whole fleet's state fits on one screen.
-  - **A real-time axis**, not equal-width phase columns (owner, 2026-11-13; from the Tracks-first mockup). A
-    segment's width is its duration. The axis has:
+  - **Two layouts, toggled inside Tracks** (owner, 2026-11-15; revision 20). Each is useful for a different
+    question, and each is a different starting point when the in-app agent reshapes the screen (The in-app agent,
+    below):
+    - **List:** each run is a row with its phases broken out in order as steps, the same width each, with the
+      current step named in words. It answers "where is each run?" at a glance, and it is the default, by the
+      audience rule above;
+    - **Timeline:** the real-time axis below. It answers "where did the time go?".
+
+    The toggle is per person and remembered. Both layouts show the same runs in the same order, so switching keeps
+    one's place.
+  - **The Timeline's real-time axis**, not equal-width phase columns (owner, 2026-11-13; from the Tracks-first
+    mockup). A segment's width is its duration. The axis has:
     - a now line and the usage-limit reset line;
     - wait time hatched apart from active time;
     - the projected remainder, dashed;
@@ -3871,8 +3893,9 @@ yet.
     applied as the top layer by `collide config get <key> --profile <name>`. A user profile that sets a key not
     marked `overridable` is refused, naming the key;
   - per-user-only keys refused in the repo file, naming the key;
+  - repo-only keys (`repoOnly: true`) refused in the user's file and in a user profile, naming the key;
   - secrets from the OS keychain only (`collide config set --secret`). A secret in either file is a load error;
-  - Collide's own settings through the same layers;
+  - Collide's own settings through the same layers, among them `disk.floor_gib` (default 5, `overridable`);
   - **agent entries** (0.7; owner, 2026-11-14): the `agents` and `ask` keys through the same layers, with the
     built-in Claude Code and haiku entry in the first layer. The repo's file may set only `budget_usd` and
     `timeout_s` (overridable); an entry's kind, command, arguments, model, environment, secrets, folders and tool
@@ -3889,7 +3912,8 @@ This sub-stage checks agent entries at load only. Launching an agent, and the se
 - An edited `pack.yaml`, hook, `board.yaml` or `config.yaml` on a branch is not used. A changed hash asks again.
 - A key set in both the user's file and `.collide/config.yaml` resolves to the repo's value, and `collide config get`
   names the repo as its layer.
-- A secret in either file fails the load and names the key. A source account in the repo file is refused.
+- A secret in either file fails the load and names the key. A source account in the repo file is refused. A
+  `repoOnly` key in the user's file is refused, naming the key.
 - In a fixture repo whose `.collide` file says `dir: tools/collide`, the board, views and settings load from
   `tools/collide/`.
 - A pack that commits `node_modules/@collide/pack-sdk`, or a symlink, is refused at load, and the message names the
@@ -5174,7 +5198,7 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 1. **Where the Orchard pack lives.** Settled in revision 9: the Orchard repo (`.collide/packs/orchard/`), with a fixture
    copy in the Collide repo for its tests (0.7). Either place is safe, because pack code loads from the base-ref
    snapshot, so the owner can still move it.
-2. **Platforms.** macOS first, then Linux?
+2. **Platforms.** Settled (owner, 2026-11-15): macOS first; Linux and Windows both follow, later (Deferred).
 3. **Distribution.** Signed and notarized builds plus the Tauri updater, or source-only at first.
 4. **Stage count.** Fifteen stages in four milestones, well beyond the usual 3–5.
    - R1 and R3 both found stages too large to land as small changes. The owner's additions (an early board,
@@ -6081,3 +6105,18 @@ which shows each tab with a subtitle, and kept them: "we can keep these with the
 - **Changed:** the status line; 0.11 (the tab names and their subtitles).
 - **Choices made:** the subtitles are the mockup's words; Planning is the `collide/plan` pack's Planning view, so
   its tab is there when that pack is enabled.
+
+**Revision 20, 2026-11-15 (owner).** Four answers in one message.
+- **Tracks:** "We have 2 different views for tracks: the straight view, with each track in a list with the stages
+  broken out, and a more detailed timeline view. I think we should keep both views, togglable from inside the Tracks
+  view." Changed: 0.11 (List and Timeline).
+- **The free-space floor:** 5 GiB stays the default and becomes the per-machine setting `disk.floor_gib`. Changed:
+  0.2 and Stage 4a.
+- **Repo-only keys:** the mirror of the per-user keys; project settings win over a person's, and some exist only in
+  the repo. Changed: 0.7 and Stage 4a.
+- **File locations:** the daemon's socket, token and lock move from `~/.collide/run` into
+  `~/Library/Application Support/Collide/run`, because `~/.collide` reads like a repo's `.collide/`. Changed: 0.2.
+  The code moves in `ts-0073-ac`, before the owner's checks in `ts-0071-fd`. Open question 2 is settled: Linux and
+  Windows follow macOS.
+- **Choices made:** List is the default layout (the audience rule: the engineer's detail is one step away); the
+  toggle is remembered per person; both layouts keep the same order; the setting's name and unit.
