@@ -1,7 +1,7 @@
 ---
 id: ts-0038-ng
 kind: task
-status: active
+status: done
 title: "Run-state rules: pending, integrating, intent and outcome"
 owners: []
 links:
