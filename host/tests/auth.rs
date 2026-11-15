@@ -740,6 +740,23 @@ mod real_files {
     }
 
     #[test]
+    fn the_home_socket_directory_is_made_0700_below_folders_that_were_not_there() {
+        let home = fresh("auth-dir-home");
+        let uid = own_uid(&home);
+        let paths = DaemonPaths::for_home(&home);
+        assert!(!paths.socket_dir.parent().unwrap().exists());
+        auth::check_socket_dir(&auth::StdFs, uid, &paths.socket_dir).unwrap();
+        let mode = fs::metadata(&paths.socket_dir)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
+        assert_eq!(mode, 0o700, "mode {mode:o}");
+        auth::check_socket_dir(&auth::StdFs, uid, &paths.socket_dir).unwrap();
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn the_real_directory_of_mode_0750_is_refused_and_a_foreign_uid_too() {
         let root = fresh("auth-dir-open");
         let uid = own_uid(&root);

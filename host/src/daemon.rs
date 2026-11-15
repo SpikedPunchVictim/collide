@@ -198,15 +198,16 @@ impl DaemonPaths {
         }
     }
 
-    /// The user's own locations, which a real daemon uses: the socket, the token and the lock file in `~/.collide/run`
-    /// (short, and not in a folder macOS cleans out), and the runs, the store and the log in
-    /// `~/Library/Application Support/Collide`.
+    /// The user's own locations, which a real daemon uses: everything in `~/Library/Application Support/Collide`, so
+    /// that Collide makes no folder of its own in the home directory. The socket, the token and the lock file are in
+    /// its `run` folder (short enough for [`MAX_SOCKET_PATH_BYTES`] for an ordinary home); the runs, the store and the
+    /// log are beside it.
     pub fn for_home(home: &Path) -> DaemonPaths {
-        let run = home.join(".collide").join("run");
         let data = home
             .join("Library")
             .join("Application Support")
             .join("Collide");
+        let run = data.join("run");
         DaemonPaths {
             socket: run.join("d.sock"),
             token_file: run.join("token"),
@@ -1908,14 +1909,68 @@ mod tests {
         let paths = DaemonPaths::from_env(Some("/tmp/x"), Some("/Users/someone")).unwrap();
         assert!(paths.socket.starts_with("/tmp/x"));
         let paths = DaemonPaths::from_env(None, Some("/Users/someone")).unwrap();
-        assert!(paths.socket.starts_with("/Users/someone/.collide/run"));
+        assert!(
+            paths
+                .socket
+                .starts_with("/Users/someone/Library/Application Support/Collide/run")
+        );
         assert!(DaemonPaths::from_env(None, None).is_err());
         assert!(DaemonPaths::from_env(Some(""), Some("")).is_err());
+    }
+
+    #[test]
+    fn a_home_gives_the_run_files_in_application_support_and_the_data_where_it_was() {
+        let paths = DaemonPaths::for_home(Path::new("/Users/someone"));
+        let support = "/Users/someone/Library/Application Support/Collide";
+        assert_eq!(paths.socket_dir, Path::new(support).join("run"));
+        assert_eq!(paths.socket, Path::new(support).join("run/d.sock"));
+        assert_eq!(paths.token_file, Path::new(support).join("run/token"));
+        assert_eq!(paths.lock_file, Path::new(support).join("run/lock"));
+        assert_eq!(paths.runs_dir, Path::new(support).join("runs"));
+        assert_eq!(paths.store_dir, Path::new(support).join("store"));
+        assert_eq!(paths.log_file, Path::new(support).join("daemon.log"));
+    }
+
+    #[test]
+    fn a_home_makes_no_folder_of_its_own() {
+        let paths = DaemonPaths::for_home(Path::new("/Users/someone"));
+        for path in [
+            &paths.socket_dir,
+            &paths.socket,
+            &paths.token_file,
+            &paths.lock_file,
+            &paths.runs_dir,
+            &paths.store_dir,
+            &paths.log_file,
+        ] {
+            assert!(
+                !path.to_string_lossy().contains("/.collide"),
+                "{}",
+                path.display()
+            );
+        }
     }
 
     #[test]
     fn the_default_socket_fits_for_an_ordinary_home() {
         let paths = DaemonPaths::for_home(Path::new("/Users/someone-with-a-longer-name"));
         assert!(paths.socket.as_os_str().len() <= MAX_SOCKET_PATH_BYTES);
+        assert!(crate::auth::check_socket_path(&paths.socket).is_ok());
+    }
+
+    #[test]
+    fn a_home_too_long_for_the_socket_fails_with_the_path_and_the_limit() {
+        let home = format!("/Users/{}", "a".repeat(80));
+        let paths = DaemonPaths::for_home(Path::new(&home));
+        let error = crate::auth::check_socket_path(&paths.socket).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains(&paths.socket.display().to_string()),
+            "{message}"
+        );
+        assert!(
+            message.contains(&MAX_SOCKET_PATH_BYTES.to_string()),
+            "{message}"
+        );
     }
 }

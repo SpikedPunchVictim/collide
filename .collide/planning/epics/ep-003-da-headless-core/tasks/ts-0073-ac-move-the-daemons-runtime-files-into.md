@@ -36,3 +36,25 @@ Write these first:
 - Must land before `ts-0071-fd`, whose owner checks run a real daemon in the real locations.
 - Area: `host` (`daemon.rs`, and any doc that names the old path).
 - The test rule: no test touches the real home, real launchd or a real daemon. Each test clears the environment (`env_clear()`) and sets `HOME` and `COLLIDE_DAEMON_ROOT` to a temp root, as `host/tests/common/mod.rs` `TempRoot` does.
+
+### Built
+
+- `host/src/daemon.rs`, `DaemonPaths::for_home`: the socket directory, `d.sock`, `token` and `lock` are now under `<home>/Library/Application Support/Collide/run`. `runs`, `store` and `daemon.log` stay in `<home>/Library/Application Support/Collide`. The doc comment of `for_home` says so. `DaemonPaths::under` is unchanged.
+- Tests, written first and seen failing:
+  - `host/src/daemon.rs`: `a_home_gives_the_run_files_in_application_support_and_the_data_where_it_was` (every path, for a made-up home); `a_home_makes_no_folder_of_its_own`; `the_default_socket_fits_for_an_ordinary_home` (now also runs `auth::check_socket_path`); `a_home_too_long_for_the_socket_fails_with_the_path_and_the_limit` (the message names the socket path and the limit); the `from_env` test now expects the new location.
+  - `host/tests/auth.rs`: `the_home_socket_directory_is_made_0700_below_folders_that_were_not_there` makes the socket directory of `for_home(<temp root>)` with `check_socket_dir` and `StdFs`, with the data folder missing, and checks mode `0700` and that a second check accepts it.
+- Read of the code: `launch.rs` (`StartRequest::new`, `ensure_running_from_cli`), `shim.rs` (`start_daemon`), `run_cli.rs`, `stop_cli.rs` and `bin/collide-daemon.rs` all take their paths from `DaemonPaths` (`from_env`, `under`, `for_home`), so the lock, the launchd job and the shim's start follow without a change of their own. The plist's log path is `DaemonPaths::log_file`, which did not move.
+- Search of tracked files (excluding `private/`): the only current-behavior mention of `~/.collide/run` was the `for_home` doc comment. The others are records and are left as they are: ts-0056-ag Notes (decision 2 and the owner decisions line), this item's own Goal and Notes, and IMPLEMENTATION_PLAN.md revision 20's description of the move.
+
+### Decisions for the owner
+
+1. **Mode of the Collide folder.** I chose to change nothing: `check_socket_dir` makes the socket directory with `DirBuilder::recursive` and mode `0700`, so when the daemon's first start makes `run` before anything else made the data folder, `~/Library/Application Support/Collide` is also `0700`. The alternative is to make the data folder first with the default mode. Recommendation: keep it; a folder only the user can open is what Collide wants, and nothing needs it open.
+
+- Owner decisions (2026-11-15): decision 1 taken (the Collide folder may be made `0700` by the daemon's first start). No plan change: revision 20 already describes the move.
+
+### Not done, by design
+
+- No migration, and no removal of a stale `~/.collide/run`.
+- No change to `DaemonPaths::under`, the store, the runs or the log.
+- No edit to IMPLEMENTATION_PLAN.md, no status change, no commit.
+- No check against a real daemon or the real home; that is ts-0071-fd.
