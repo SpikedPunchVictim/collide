@@ -68,16 +68,18 @@ fn every_core_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
     }
 }
 
-/// The tags of the `host` outlines (ts-0040-kd) and the stage that fills each one: the daemon, the shim, the store and
-/// the clocks are Stage 3a, the OTLP receiver is Stage 9b. Each must count at least one stub today.
-const HOST_OUTLINE_TAGS: [(&str, &str); 25] = [
+/// The tags of the `host` outlines (ts-0040-kd, with the real peer lookups of ts-0033-zj) and the stage that fills each
+/// one: the daemon, the peer and process lookups, the shim, the store and the clocks are Stage 3a, the OTLP receiver
+/// is Stage 9b. Each must count at least one stub today.
+const HOST_OUTLINE_TAGS: [(&str, &str); 26] = [
     ("daemon: entry", "3a"),
     ("daemon: lock file start", "3a"),
     ("daemon: launchd job", "3a"),
     ("daemon: setsid start", "3a"),
     ("daemon: base environment", "3a"),
     ("daemon: socket server", "3a"),
-    ("daemon: socket security", "3a"),
+    ("auth: peer credentials", "3a"),
+    ("auth: process tree", "3a"),
     ("daemon: adopt shims", "3a"),
     ("shim: entry", "3a"),
     ("shim: spawn child", "3a"),

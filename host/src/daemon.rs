@@ -11,7 +11,7 @@
 //!    crash.
 //! 3. Opens the store and **adopts existing shims** ([`adopt_shims`]) before it binds the socket, so no client sees a
 //!    run as gone while its shim is alive.
-//! 4. Checks the socket's directory and binds ([`bind_socket`]).
+//! 4. Checks the socket's path and directory ([`crate::auth::prepare_daemon_socket`]) and binds ([`bind_socket`]).
 //!
 //! ## The socket
 //!
@@ -19,25 +19,28 @@
 //! S3), and a longer path fails fast with a message naming the path and the limit ([`SocketError::PathTooLong`]).
 //!
 //! - Its directory is mode `0700` and the daemon checks the owner and mode at start, refusing to bind in a directory
-//!   that is not the user's or is open to others ([`check_socket_dir`]).
+//!   that is not the user's or is open to others ([`crate::auth::check_socket_dir`]).
 //! - A connecting peer's uid must equal the daemon's (`getpeereid`), so a second local user never reaches the token
-//!   check ([`SocketError::ForeignUid`]).
+//!   check ([`SocketError::ForeignUid`], [`crate::auth::admit`]).
 //! - The CLI's token is in a file of mode `0600` in that directory, made at the daemon's first start
-//!   ([`TOKEN_FILE_MODE`]). It is never put in an environment variable.
-//! - A shim's socket follows the same rules with no token, because only the daemon talks to it.
+//!   ([`TOKEN_FILE_MODE`], [`crate::auth::create_token_file`]). It is never put in an environment variable.
+//! - A shim's socket follows the same rules with no token, because only the daemon talks to it
+//!   ([`crate::auth::prepare_shim_socket`]).
+//!
+//! The rules themselves, and the actor, are [`crate::auth`]'s: pure code over traits. This module binds, accepts and
+//! serves, and calls them.
 //!
 //! ## Who is asking
 //!
 //! A peer's pid is read with `LOCAL_PEERPID`, and the daemon walks that process's parents looking for the markers:
 //! `COLLIDE_RUN` makes a run's agent, the app's process makes the app, and anything else is the CLI from a terminal
-//! ([`Caller`]). The result is the `actor` recorded on every event, and only the app does the person-only operations.
-//! This is a guardrail (0.1), not a boundary.
+//! ([`crate::auth::Caller`]). The result is the `actor` recorded on every event, and only the app does the person-only
+//! operations ([`crate::auth::judge`]). This is a guardrail (0.1), not a boundary.
 //!
 //! | tag | function | what it does |
 //! |---|---|---|
 //! | `daemon: entry` | [`run`] | the start sequence above, then the serve loop |
-//! | `daemon: socket server` | [`bind_socket`], [`serve`] | the path limit, the bind, the handshake and the JSON-RPC loop |
-//! | `daemon: socket security` | [`check_socket_dir`], [`identify_caller`] | the `0700` directory and the actor from the peer |
+//! | `daemon: socket server` | [`bind_socket`], [`serve`] | the bind, the handshake and the JSON-RPC loop, over [`crate::auth`]'s checks |
 //! | `daemon: adopt shims` | [`adopt_shims`] | reattach by pid and start time, read `exit.json` for the ones that ended |
 
 use crate::clock::Clocks;
@@ -84,15 +87,26 @@ pub enum SocketError {
         path: PathBuf,
         len: usize,
     },
-    /// The directory is not the user's, or its mode lets others in.
+    /// The directory is not the daemon's, or its mode lets others in (or is not `0700` at all).
     UnsafeDir {
         dir: PathBuf,
         mode: u32,
-        owned_by_user: bool,
+        owner_uid: u32,
+        daemon_uid: u32,
+    },
+    /// Where the socket's directory should be there is a file, or a link.
+    NotADirectory {
+        path: PathBuf,
+    },
+    /// The token file's mode is not [`TOKEN_FILE_MODE`], so it is not read.
+    UnsafeTokenFile {
+        path: PathBuf,
+        mode: u32,
     },
     /// A peer's uid is not the daemon's.
     ForeignUid {
         uid: u32,
+        daemon_uid: u32,
     },
     Io {
         context: String,
@@ -111,37 +125,33 @@ impl fmt::Display for SocketError {
             SocketError::UnsafeDir {
                 dir,
                 mode,
-                owned_by_user,
+                owner_uid,
+                daemon_uid,
             } => write!(
                 f,
-                "the socket directory {} is mode {mode:o}{}, and must be {SOCKET_DIR_MODE:o} and the user's own",
-                dir.display(),
-                if *owned_by_user {
-                    ""
-                } else {
-                    " and owned by another user"
-                }
+                "the socket directory {} is mode {mode:04o} and owned by uid {owner_uid}, and must be mode {SOCKET_DIR_MODE:04o} and owned by uid {daemon_uid}, the daemon's user",
+                dir.display()
             ),
-            SocketError::ForeignUid { uid } => {
-                write!(f, "a connection from uid {uid} is not the daemon's user")
-            }
+            SocketError::NotADirectory { path } => write!(
+                f,
+                "the socket directory {} is not a directory (a file or a link is there)",
+                path.display()
+            ),
+            SocketError::UnsafeTokenFile { path, mode } => write!(
+                f,
+                "the token file {} is mode {mode:04o}, and must be a file of mode {TOKEN_FILE_MODE:04o}, so it was not read",
+                path.display()
+            ),
+            SocketError::ForeignUid { uid, daemon_uid } => write!(
+                f,
+                "a connection from uid {uid} is refused: the daemon's user is uid {daemon_uid}"
+            ),
             SocketError::Io { context, source } => write!(f, "{context}: {source}"),
         }
     }
 }
 
 impl std::error::Error for SocketError {}
-
-/// Who is on the other end of a connection (0.2, Who is asking).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Caller {
-    /// The app: its process is among the peer's parents.
-    App,
-    /// The CLI from a terminal: no marker was found.
-    Cli,
-    /// A run's agent: `COLLIDE_RUN` is in the peer's tree, and `run` is its value.
-    RunAgent { run: String },
-}
 
 /// An existing shim, as the daemon finds it at start: which run, which process, and either the exit record it left
 /// or the fact that it is still alive.
@@ -170,7 +180,7 @@ pub fn run(paths: &DaemonPaths, clocks: &dyn Clocks) -> Result<(), SocketError> 
     todo!("daemon: entry")
 }
 
-/// Checks the length of `path` and of its directory's rules ([`check_socket_dir`]), and binds it. The listener is the
+/// Checks the socket's path and directory ([`crate::auth::prepare_daemon_socket`]), and binds it. The listener is the
 /// std one's equivalent until Stage 3a picks the async runtime, which is why this returns the bound path and not a
 /// type of a crate.
 pub fn bind_socket(paths: &DaemonPaths) -> Result<PathBuf, SocketError> {
@@ -183,19 +193,6 @@ pub fn bind_socket(paths: &DaemonPaths) -> Result<PathBuf, SocketError> {
 pub fn serve(socket: &Path, store: &Store) -> Result<(), SocketError> {
     let _ = (socket, store);
     todo!("daemon: socket server")
-}
-
-/// Refuses a socket directory that is not the user's or whose mode is not [`SOCKET_DIR_MODE`], and makes the
-/// directory when it is not there.
-pub fn check_socket_dir(dir: &Path) -> Result<(), SocketError> {
-    let _ = dir;
-    todo!("daemon: socket security")
-}
-
-/// Reads who is asking from the peer's pid, by the walk of its parents above.
-pub fn identify_caller(peer_pid: u32) -> Result<Caller, SocketError> {
-    let _ = peer_pid;
-    todo!("daemon: socket security")
 }
 
 /// Finds every shim of an earlier daemon under `runs_dir`: reattaches by pid plus start time, and reads `exit.json`
@@ -221,27 +218,22 @@ mod tests {
     }
 
     #[test]
-    fn an_unsafe_directory_error_names_the_directory_and_both_modes() {
+    fn an_unsafe_directory_error_names_the_directory_both_modes_and_both_owners() {
         let message = SocketError::UnsafeDir {
             dir: PathBuf::from("/tmp/collide"),
             mode: 0o755,
-            owned_by_user: true,
+            owner_uid: 0,
+            daemon_uid: 501,
         }
         .to_string();
-        assert!(
-            message.contains("/tmp/collide") && message.contains("755") && message.contains("700")
-        );
+        for part in ["/tmp/collide", "0755", "0700", "uid 0", "501"] {
+            assert!(message.contains(part), "{part} in {message}");
+        }
     }
 
     #[test]
     fn the_token_file_is_private_to_the_user() {
         assert_eq!(TOKEN_FILE_MODE, 0o600);
         assert_eq!(SOCKET_DIR_MODE, 0o700);
-    }
-
-    #[test]
-    #[should_panic(expected = "daemon: socket security")]
-    fn the_socket_directory_check_is_a_stub_tagged_for_stage_3a() {
-        let _ = check_socket_dir(Path::new("/nonexistent"));
     }
 }

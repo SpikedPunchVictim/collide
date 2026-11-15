@@ -53,6 +53,8 @@ pub mod files {
     pub const CHILD: &str = "child.json";
     /// The shim's socket directory, mode `0700` (0.2).
     pub const SOCKET_DIR: &str = "shim";
+    /// The shim's socket, inside [`SOCKET_DIR`]. Short, because the whole path is limited to 103 bytes (0.2).
+    pub const SOCKET: &str = "s";
 }
 
 /// How the child's stdin and output are connected.

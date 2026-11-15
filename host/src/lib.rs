@@ -1,4 +1,5 @@
 pub mod adapters;
+pub mod auth;
 pub mod base_env;
 pub mod builtin_packs;
 pub mod checkout;
