@@ -71,13 +71,8 @@ fn every_core_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags of the `host` outlines (ts-0040-kd) and the stage that fills each
 /// one: the daemon and the shim are Stage 3a, the OTLP receiver is Stage 9b.
 /// Each must count at least one stub today. A tag whose item has replaced its last stub moves to [`FILLED_TAGS`].
-const HOST_OUTLINE_TAGS: [(&str, &str); 12] = [
-    ("daemon: entry", "3a"),
-    ("daemon: lock file start", "3a"),
+const HOST_OUTLINE_TAGS: [(&str, &str); 7] = [
     ("daemon: launchd job", "3a"),
-    ("daemon: setsid start", "3a"),
-    ("daemon: base environment", "3a"),
-    ("daemon: socket server", "3a"),
     ("daemon: adopt shims", "3a"),
     ("shim: daemon link", "3a"),
     ("otlp: receiver", "9b"),
@@ -105,7 +100,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 14] = [
+const FILLED_TAGS: [(&str, &str, &str); 19] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -120,6 +115,11 @@ const FILLED_TAGS: [(&str, &str, &str); 14] = [
     ("shim: journal writer", "3a", "ts-0054-cy"),
     ("shim: exit record", "3a", "ts-0054-cy"),
     ("shim: pty ring", "3a", "ts-0054-cy"),
+    ("daemon: entry", "3a", "ts-0056-ag"),
+    ("daemon: socket server", "3a", "ts-0056-ag"),
+    ("daemon: lock file start", "3a", "ts-0056-ag"),
+    ("daemon: setsid start", "3a", "ts-0056-ag"),
+    ("daemon: base environment", "3a", "ts-0056-ag"),
 ];
 
 #[test]

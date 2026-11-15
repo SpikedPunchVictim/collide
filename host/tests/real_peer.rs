@@ -528,6 +528,7 @@ fn paths_in(short: &mut Short) -> DaemonPaths {
         lock_file: socket_dir.join("l"),
         runs_dir: socket_dir.join("runs"),
         store_dir: socket_dir.join("store"),
+        log_file: socket_dir.join("log"),
         socket_dir,
     }
 }

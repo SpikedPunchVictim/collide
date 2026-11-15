@@ -481,6 +481,7 @@ fn the_path_is_checked_before_the_directory_is_touched() {
         lock_file: PathBuf::from("/run/collide/lock"),
         runs_dir: PathBuf::from("/run/collide/runs"),
         store_dir: PathBuf::from("/run/collide/store"),
+        log_file: PathBuf::from("/run/collide/daemon.log"),
     };
     let fs = FakeFs::new();
     let error = auth::prepare_daemon_socket(&fs, DAEMON_UID, &paths).unwrap_err();
@@ -497,6 +498,7 @@ fn the_daemons_socket_is_prepared_when_path_and_directory_are_right() {
         lock_file: PathBuf::from("/run/collide/lock"),
         runs_dir: PathBuf::from("/run/collide/runs"),
         store_dir: PathBuf::from("/run/collide/store"),
+        log_file: PathBuf::from("/run/collide/daemon.log"),
     };
     let fs = FakeFs::new().dir("/run/collide", DAEMON_UID, 0o700);
     assert!(auth::prepare_daemon_socket(&fs, DAEMON_UID, &paths).is_ok());

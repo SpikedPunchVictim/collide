@@ -10,6 +10,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -104,5 +105,65 @@ impl std::ops::Deref for Bundle {
     type Target = Path;
     fn deref(&self) -> &Path {
         &self.0
+    }
+}
+
+static TEMP_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// A folder `/tmp/cdt-<pid>-<n>` that one test makes and owns, short enough for a socket path (limited to 103 bytes;
+/// `target/tmp` is longer). The daemon tests put every path the daemon uses below it, so none touches the user's own
+/// daemon files. `Drop` makes the folders below it writable again and removes the folder by its own path.
+pub struct TempRoot(PathBuf);
+
+impl TempRoot {
+    pub fn new() -> TempRoot {
+        let n = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = PathBuf::from(format!("/tmp/cdt-{}-{n}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        TempRoot(dir)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn join(&self, name: &str) -> PathBuf {
+        self.0.join(name)
+    }
+
+    /// Writes an executable script (mode 0755) and returns its path.
+    pub fn script(&self, name: &str, body: &str) -> PathBuf {
+        let path = self.0.join(name);
+        fs::write(&path, body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+}
+
+impl Drop for TempRoot {
+    fn drop(&mut self) {
+        assert!(
+            self.0.to_str().unwrap().starts_with("/tmp/cdt-"),
+            "a test folder"
+        );
+        open_up(&self.0);
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Gives back owner access to the folders below `dir`, so a test that made one unreadable still cleans up.
+fn open_up(dir: &Path) {
+    let Ok(meta) = fs::symlink_metadata(dir) else {
+        return;
+    };
+    if !meta.is_dir() {
+        return;
+    }
+    let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            open_up(&entry.path());
+        }
     }
 }
