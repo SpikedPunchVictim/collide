@@ -1,0 +1,280 @@
+{
+  "$defs": {
+    "Money": {
+      "additionalProperties": false,
+      "description": "An amount in a currency. Claude reports USD.",
+      "properties": {
+        "amount": {
+          "format": "double",
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "PauseCause": {
+      "description": "Why a run or a phase is paused (0.2, 0.3, 0.8). `ask_human` waits in the Queue, `usage_limit` waits for the\naccount's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).",
+      "enum": [
+        "ask_human",
+        "usage_limit",
+        "disk"
+      ],
+      "type": "string"
+    },
+    "RecordedCall": {
+      "additionalProperties": false,
+      "description": "One model call of a run's record, as `collide run` prints it. Each figure is absent when the agent did not report\nit: 0.13's missing is not zero, so an absent `cost` is \"not reported\" and never `$0`. `scope` says what the line is: a\n`turn`, a `compaction`, `other_calls`, or a `step` for a turn that was cut before its `result` (the tokens of the\nresponses it did get, which are `partial`: their output and cost are not known). `wall_ms` is Collide's own\nmeasure of the turn it sent, and is absent for a line that is not a turn it sent. `model_ms` is the agent's\n`duration_api_ms` as a difference of its running total.",
+      "properties": {
+        "cache_read": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_write": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Money"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quality": {
+          "$ref": "#/$defs/UsageQuality"
+        },
+        "scope": {
+          "$ref": "#/$defs/UsageScope"
+        },
+        "wall_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "RunState": {
+      "description": "Where a run is (0.8, Run). It ends `ended(<outcome>)`, `failed` or `stopped`; `outcome` is the `end` token the run\nreached (0.7, Outcomes and terminal states). `integrating` is a run whose `integrate` answered `pending`, so the\npull request is not merged yet (0.4).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "integrating",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "UsageQuality": {
+      "description": "How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as \"at\nleast\" and never summed with `exact` ones (0.13).",
+      "enum": [
+        "exact",
+        "partial",
+        "unreported"
+      ],
+      "type": "string"
+    },
+    "UsageScope": {
+      "description": "What a [`Usage`] event counts: one turn, one model step, the session so far, a compaction call, or another model call\noutside the turn's own (0.3, Usage).",
+      "oneOf": [
+        {
+          "enum": [
+            "turn",
+            "step",
+            "running_total"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "compaction",
+          "description": "The model call of a compaction. A turn's own usage leaves it out, so it is its own event, never added into a\n`Turn` (0.3, Usage; S9).",
+          "type": "string"
+        },
+        {
+          "const": "other_calls",
+          "description": "A model call that is neither the turn's own nor a compaction: a helper-model call, read as what the agent\nreports for the turn beyond the turn's own usage. Never added into a `Turn` either.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.record` result: what `collide run` prints at the end, and what it shows when it reattaches. `state` is the\nrun's state as the daemon last recorded it. `failure` is why a phase failed when its session could say (`no_result`,\n`budget`, `disk`, `api_500`, ...). `report` is the final report. `calls` are the model calls in the order they were\nrecorded. `wall_ms` is the run's length (absent while it has none to give), and `workspace` the worktree.",
+  "properties": {
+    "calls": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RecordedCall"
+      },
+      "type": "array"
+    },
+    "failure": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "report": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run": {
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/RunState"
+    },
+    "wall_ms": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "workspace": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "run",
+    "state"
+  ],
+  "title": "RunRecordResult",
+  "type": "object"
+}

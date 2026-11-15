@@ -27,6 +27,8 @@ pub mod pack_location;
 pub mod phases;
 pub mod provider_client;
 pub mod queue;
+pub mod run_cli;
+pub mod run_record;
 pub mod sampler;
 pub mod schema_list;
 pub mod section_view;

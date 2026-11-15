@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`run.record` params (`collide run`, ts-0069-bn).",
+  "properties": {
+    "run": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "run"
+  ],
+  "title": "RunRecordParams",
+  "type": "object"
+}

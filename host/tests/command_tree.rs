@@ -1,6 +1,6 @@
 //! The command tree of `collide` (ts-0041-xf): `--help` lists it, and a command that is not built yet exits with a
 //! message that names its tag and stage, not a panic backtrace. The built commands (`schema`, `tasks`, `task`,
-//! `sections`, `stop`) are tested in their own files.
+//! `sections`, `stop`, `run`) are tested in their own files.
 
 use serde_json::Value;
 use std::path::Path;
@@ -13,9 +13,9 @@ const TREE: [&str; 9] = [
     "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "sections",
 ];
 
-/// The commands whose handler is a tagged stub (`stop` is built: `tests/stop_command.rs`), with the tag and stage that fills each.
-const STUBBED: [(&str, &str, &str); 4] = [
-    ("run", "cli: run", "3b"),
+/// The commands whose handler is a tagged stub (`stop` is built: `tests/stop_command.rs`; `run` is built:
+/// `tests/adapters/claude/run_command.rs` and `run_process.rs`), with the tag and stage that fills each.
+const STUBBED: [(&str, &str, &str); 3] = [
     ("report", "cli: report", "7"),
     ("config", "cli: config", "4b"),
     ("pack", "cli: pack", "4b"),
@@ -56,9 +56,43 @@ fn help_keeps_the_text_of_the_built_commands() {
         "collide task <id> [--json]",
         "collide sections [--json]",
         "exit codes: 0 ok, 1 failed",
+        "collide run <task-file> [--budget <usd>] [--alias <name>]",
+        "collide run --resume <run>",
     ] {
         assert!(stdout.contains(kept), "{kept} in {stdout}");
     }
+}
+
+#[test]
+fn help_lists_every_exit_code_of_collide_run() {
+    let stdout = text(collide(&["--help"]).stdout);
+    for code in [
+        "0 the phase ended",
+        "1 failed to do its work",
+        "2 wrong command line",
+        "3 no such task file or run",
+        "5 the daemon refused to start the run",
+        "7 the run failed",
+        "8 the run was stopped",
+        "9 the run is waiting for a person",
+    ] {
+        assert!(stdout.contains(code), "{code} in {stdout}");
+    }
+    // The codes are the constants the command exits with.
+    use collide_host::task_cli::exit;
+    assert_eq!(
+        [
+            exit::OK,
+            exit::FAILED,
+            exit::USAGE,
+            exit::ID,
+            exit::REFUSED,
+            exit::RUN_FAILED,
+            exit::RUN_STOPPED,
+            exit::WAITING
+        ],
+        [0, 1, 2, 3, 5, 7, 8, 9]
+    );
 }
 
 #[test]

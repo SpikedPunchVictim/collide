@@ -8,14 +8,11 @@
 //! whether or not it left survivors: they are in the text. A run the daemon does not know exits [`exit::ID`].
 
 use crate::daemon::{DaemonPaths, ROOT_ENV};
-use crate::launch::{
-    FORWARDED_ENV, LAUNCHCTL_ENV, StartRequest, ensure_daemon, launchctl_from_env,
-};
+use crate::launch::ensure_running_from_cli;
 use crate::owner_client::{ClientError, OwnerClient};
 use crate::task_cli::exit;
 use collide_core::owner::{RunStopParams, RunStopResult, code};
 use std::io::Write;
-use std::path::PathBuf;
 
 pub const USAGE: &str = "usage: collide stop <run> [--grace <secs>]";
 
@@ -50,32 +47,6 @@ pub fn parse(args: &[String]) -> Result<StopArgs, String> {
         return Err("the run's id is empty".to_string());
     }
     Ok(StopArgs { run, grace_secs })
-}
-
-/// The `collide-daemon` next to this binary, canonical.
-fn daemon_exe() -> std::io::Result<PathBuf> {
-    let exe = std::fs::canonicalize(std::env::current_exe()?)?;
-    exe.parent()
-        .map(|dir| dir.join("collide-daemon"))
-        .ok_or_else(|| std::io::Error::other("the collide binary has no folder"))
-}
-
-/// Makes sure a daemon answers, as `collide-daemon start` does.
-fn ensure_running(paths: &DaemonPaths) -> Result<(), String> {
-    let exe = daemon_exe().map_err(|e| format!("cannot find collide-daemon: {e}"))?;
-    let mut request = StartRequest::new(exe, paths);
-    request.env = FORWARDED_ENV
-        .into_iter()
-        .chain([LAUNCHCTL_ENV])
-        .filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?)))
-        .collect();
-    request.launchctl = launchctl_from_env(
-        std::env::var(ROOT_ENV).ok().as_deref(),
-        std::env::var(LAUNCHCTL_ENV).ok().as_deref(),
-    );
-    ensure_daemon(&request)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
 }
 
 /// The report, as `collide stop` prints it.
@@ -118,7 +89,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> u8 {
             return exit::FAILED;
         }
     };
-    if let Err(message) = ensure_running(&paths) {
+    if let Err(message) = ensure_running_from_cli(&paths) {
         let _ = writeln!(
             err,
             "collide stop: the daemon is not running and did not start: {message}"

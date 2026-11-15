@@ -2,7 +2,7 @@
 //! Output, Review and the take-over of 0.11). The decisions of a run are Queue items (`queue.*`), and the run's own
 //! events come on the event channel.
 
-use crate::agent::AgentEvent;
+use crate::agent::{AgentEvent, Money, UsageQuality, UsageScope};
 use crate::hook::HookStatus;
 use crate::state::{PhaseState, RunState};
 use crate::workflow::PhaseKind;
@@ -360,6 +360,61 @@ pub struct RunStopResult {
     pub signalled: u32,
     #[serde(default)]
     pub survivors: Vec<Survivor>,
+}
+
+/// `run.record` params (`collide run`, ts-0069-bn).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunRecordParams {
+    pub run: String,
+}
+
+/// One model call of a run's record, as `collide run` prints it. Each figure is absent when the agent did not report
+/// it: 0.13's missing is not zero, so an absent `cost` is "not reported" and never `$0`. `scope` says what the line is: a
+/// `turn`, a `compaction`, `other_calls`, or a `step` for a turn that was cut before its `result` (the tokens of the
+/// responses it did get, which are `partial`: their output and cost are not known). `wall_ms` is Collide's own
+/// measure of the turn it sent, and is absent for a line that is not a turn it sent. `model_ms` is the agent's
+/// `duration_api_ms` as a difference of its running total.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedCall {
+    pub scope: UsageScope,
+    pub quality: UsageQuality,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Money>,
+}
+
+/// `run.record` result: what `collide run` prints at the end, and what it shows when it reattaches. `state` is the
+/// run's state as the daemon last recorded it. `failure` is why a phase failed when its session could say (`no_result`,
+/// `budget`, `disk`, `api_500`, ...). `report` is the final report. `calls` are the model calls in the order they were
+/// recorded. `wall_ms` is the run's length (absent while it has none to give), and `workspace` the worktree.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunRecordResult {
+    pub run: String,
+    pub state: RunState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_ms: Option<u64>,
+    #[serde(default)]
+    pub calls: Vec<RecordedCall>,
 }
 
 /// `run.diff` params: a run's diff for Review (0.11, Drill-down). With `path`, that file's patch is in the result.

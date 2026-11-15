@@ -28,6 +28,8 @@ mod pause;
 mod published;
 mod replay;
 mod results;
+mod run_command;
+mod run_process;
 mod session;
 mod settings_schema;
 mod snapshot;

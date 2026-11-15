@@ -31,7 +31,7 @@
 //! | `daemon: launchd job` | [`launchd_plist`], [`launchd_job`], [`Launchctl`] | the plist, its inputs made canonical, and the bootstrap, removed once the daemon runs |
 //! | `daemon: setsid start` | [`start_with_setsid`] | the fallback start, with its warning |
 
-use crate::daemon::DaemonPaths;
+use crate::daemon::{DaemonPaths, ROOT_ENV};
 use crate::stop::RUNTIME_MARKER;
 use std::collections::BTreeMap;
 use std::fs;
@@ -365,6 +365,34 @@ const JOB_LOOK: Duration = Duration::from_millis(250);
 /// What a run's process carries that a daemon must not inherit (0.2): started by the CLI from inside a run, a daemon
 /// would otherwise carry the run's id and be found, and stopped, with the run. Both starts strip them.
 pub const STRIPPED_ENV: [&str; 3] = ["COLLIDE_RUN", "COLLIDE_RUN_START", "COLLIDE_SPAN"];
+
+/// Makes sure a daemon answers, for a CLI command (`collide stop`, `collide run`): [`ensure_daemon`] with the
+/// `collide-daemon` that sits beside the running `collide`. What the start forwards ([`FORWARDED_ENV`],
+/// [`LAUNCHCTL_ENV`]) is read from this process's environment, and under `COLLIDE_DAEMON_ROOT` no launchd job is loaded
+/// ([`launchctl_from_env`]).
+pub fn ensure_running_from_cli(paths: &DaemonPaths) -> Result<(), String> {
+    let exe = std::fs::canonicalize(std::env::current_exe().map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+        .and_then(|exe| {
+            exe.parent()
+                .map(|dir| dir.join("collide-daemon"))
+                .ok_or_else(|| "the collide binary has no folder".to_string())
+        })
+        .map_err(|e| format!("cannot find collide-daemon: {e}"))?;
+    let mut request = StartRequest::new(exe, paths);
+    request.env = FORWARDED_ENV
+        .into_iter()
+        .chain([LAUNCHCTL_ENV])
+        .filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?)))
+        .collect();
+    request.launchctl = launchctl_from_env(
+        std::env::var(ROOT_ENV).ok().as_deref(),
+        std::env::var(LAUNCHCTL_ENV).ok().as_deref(),
+    );
+    ensure_daemon(&request)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
 
 /// The path to use when the starter's own `PATH` is not set: the system's.
 const FALLBACK_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";

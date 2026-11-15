@@ -44,7 +44,7 @@
 //! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions`, `daemon.subscribe` |
 //! | board | [`board`] | `board.list`, `board.open`, `board.init`, `board.trust` |
 //! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.preview`, `task.views`, `task.save_view`, `task.sections` |
-//! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
+//! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.record`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
 //! | queue | [`queue`] | `queue.list`, `queue.context`, `queue.answer` |
 //! | workspace | [`workspace`] | `workspace.list`, `workspace.remove`, `workspace.resume` |
 //! | config | [`config`] | `config.get`, `config.set`, `config.pack_list`, `config.pack_add`, `config.pack_link`, `config.pack_enable` |
@@ -588,6 +588,9 @@ methods! {
     RunGet, "run.get", Run,
         "0.11, one run with what it pinned at launch",
         RunGetParams, RunGetResult;
+    RunRecord, "run.record", Run,
+        "collide run: the record printed at a run's end and when the command reattaches (0.13, missing is not zero)",
+        RunRecordParams, RunRecordResult;
     RunStop, "run.stop", Run,
         "collide stop",
         RunStopParams, RunStopResult;

@@ -39,6 +39,13 @@ pub mod exit {
     pub const REFUSED: u8 = 5;
     /// The command is in the tree but not built yet; the message names its tag and stage (`crate::commands`).
     pub const NOT_BUILT: u8 = 6;
+    /// `collide run`: the run's phase failed (`crate::run_cli`).
+    pub const RUN_FAILED: u8 = 7;
+    /// `collide run`: the run was stopped.
+    pub const RUN_STOPPED: u8 = 8;
+    /// `collide run`: the run waits for a person and the command left it (a permission request with no answer, a full
+    /// disk, a budget that ran out).
+    pub const WAITING: u8 = 9;
 }
 
 pub const USAGE: &str = "\

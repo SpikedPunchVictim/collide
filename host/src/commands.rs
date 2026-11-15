@@ -11,7 +11,7 @@
 //!
 //! | tag | command | what fills it in |
 //! |---|---|---|
-//! | `cli: run` | `collide run` | one Claude phase on a task file, in a new worktree |
+//! | `cli: run` | `collide run` | built: [`crate::run_cli`], one Claude phase on a task file, in a new worktree |
 //! | `cli: stop` | `collide stop` | built: [`crate::stop_cli`], the stop of 0.5 ([`crate::stop`]) through the daemon |
 //! | `cli: report` | `collide report` | report files for shell scripts (`span`, `metric`) |
 //! | `cli: config` | `collide config` | `get` and `set` over the settings layers (`set --secret` is the keychain's) |
@@ -57,11 +57,7 @@ pub const COMMANDS: [Command; 9] = [
     Command {
         name: "run",
         summary: "start one agent phase on a task, in a new worktree, and record it",
-        build: Build::NotBuilt(Stub {
-            tag: "cli: run",
-            stage: "3b",
-            handler: run,
-        }),
+        build: Build::Built,
     },
     Command {
         name: "stop",
@@ -198,12 +194,6 @@ fn silence_panic_message_of(tag: &'static str) {
     }));
 }
 
-/// `collide run`: one agent phase on a task given as a file, in a new git worktree (Stage 3b).
-pub fn run(args: &[String]) -> u8 {
-    let _ = args;
-    todo!("cli: run")
-}
-
 /// `collide report span|metric`: writes a line to the file named by the hook's report variable, and needs no socket or
 /// token (Stage 7).
 pub fn report(args: &[String]) -> u8 {
@@ -286,7 +276,9 @@ mod tests {
 
     #[test]
     fn the_built_commands_are_not_run_as_stubs() {
-        for name in ["stop", "tasks", "task", "schema", "sections", "nonsense"] {
+        for name in [
+            "run", "stop", "tasks", "task", "schema", "sections", "nonsense",
+        ] {
             assert_eq!(execute_stub(name, &[]), None, "{name}");
         }
     }

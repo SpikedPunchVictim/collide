@@ -25,8 +25,21 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Some("help" | "--help" | "-h") => {
-            println!("{}\n\n{USAGE}\n\n{HELP}", commands::tree_text());
+            println!(
+                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}",
+                commands::tree_text(),
+                collide_host::run_cli::USAGE,
+                collide_host::run_cli::HELP
+            );
             return ExitCode::SUCCESS;
+        }
+        Some("run") => {
+            return ExitCode::from(collide_host::run_cli::run(
+                rest,
+                &mut std::io::stdin().lock(),
+                &mut std::io::stdout().lock(),
+                &mut std::io::stderr().lock(),
+            ));
         }
         Some("stop") => {
             return ExitCode::from(collide_host::stop_cli::run(

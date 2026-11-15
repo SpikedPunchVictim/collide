@@ -2011,6 +2011,29 @@ impl Phases {
         })
     }
 
+    /// The run's state for a reader that wants the run's record: [`Phases::run_state`], except that a run whose phases are
+    /// all final is `running` until the run's own end is recorded. The record (the report, the metrics) is whole by then,
+    /// and a reader that stops at the first `ended` would read it a moment too early.
+    pub fn settled_run_state(&self, run: &str) -> Option<RunState> {
+        let state = self.run_state(run)?;
+        if matches!(
+            state,
+            RunState::Ended { .. } | RunState::Failed {} | RunState::Stopped {}
+        ) {
+            return Some(
+                self.recorded_run_state(run)
+                    .filter(|recorded| {
+                        matches!(
+                            recorded,
+                            RunState::Ended { .. } | RunState::Failed {} | RunState::Stopped {}
+                        )
+                    })
+                    .unwrap_or(RunState::Running {}),
+            );
+        }
+        Some(state)
+    }
+
     /// The `to` of the run's last `run.transition` event.
     fn recorded_run_state(&self, run: &str) -> Option<RunState> {
         let events = self.shared.store.events_since(0).ok()?;

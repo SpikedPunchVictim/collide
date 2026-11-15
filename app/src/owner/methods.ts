@@ -39,6 +39,7 @@ export const OWNER_METHODS = {
   'run.start_file': call<G.RunStartFileParamsInput, G.RunStartResultOutput>(),
   'run.list': call<G.RunListParamsInput, G.RunListResultOutput>(),
   'run.get': call<G.RunGetParamsInput, G.RunGetResultOutput>(),
+  'run.record': call<G.RunRecordParamsInput, G.RunRecordResultOutput>(),
   'run.stop': call<G.RunStopParamsInput, G.RunStopResultOutput>(),
   'run.diff': call<G.RunDiffParamsInput, G.RunDiffResultOutput>(),
   'run.output': call<G.RunOutputParamsInput, G.RunOutputResultOutput>(),

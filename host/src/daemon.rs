@@ -110,8 +110,9 @@ use collide_core::events::Event;
 use collide_core::owner::{
     DaemonRecaptureEnvironmentResult, DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method,
     OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams, QueueListParams, QueueListResult,
-    Request, Response, Routed, RpcError, RunStartFileParams, RunStartResult, RunStopParams,
-    RunStopResult, StoreHealth, Survivor, code, encode_line, parse_request, route,
+    Request, Response, Routed, RpcError, RunRecordParams, RunRecordResult, RunStartFileParams,
+    RunStartResult, RunStopParams, RunStopResult, StoreHealth, Survivor, code, encode_line,
+    parse_request, route,
 };
 use collide_core::shim::ExitRecord;
 use std::fmt;
@@ -1487,6 +1488,7 @@ fn call(
         }
         Method::RunStop => run_stop(shared, session, params),
         Method::RunStartFile => run_start_file(shared, session, params),
+        Method::RunRecord => run_record(shared, params),
         Method::QueueList => queue_list(shared, params),
         Method::QueueAnswer => queue_answer(shared, session, params),
         other => Err(RpcError::new(
@@ -1549,6 +1551,55 @@ fn run_start_file(
     let result = match shared.file_runs.start(&shared.phases, &params) {
         Ok(run) => RunStartResult::Started { run },
         Err(problems) => RunStartResult::Refused { problems },
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `run.record` (`collide run`, ts-0069-bn): the run's state, its report and failure cause, and one line for each model
+/// call, read from the store. A run the daemon has never heard of is `NOT_FOUND`.
+fn run_record(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: RunRecordParams = serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("the params of run.record are not readable: {e}"),
+        )
+    })?;
+    let run = params.run;
+    let state = shared
+        .phases
+        .settled_run_state(&run)
+        .ok_or_else(|| RpcError::new(code::NOT_FOUND, format!("the daemon has no run {run:?}")))?;
+    let unreadable = |what: &str, error: crate::store::StoreError| {
+        RpcError::new(
+            code::INTERNAL_ERROR,
+            format!("the {what} of run {run} could not be read: {error}"),
+        )
+    };
+    let now_ns = shared.clocks.read(Clock::Continuous).nanos;
+    let spans = shared
+        .store
+        .spans(&run)
+        .map_err(|e| unreadable("spans", e))?;
+    let rows = shared
+        .store
+        .usage_rows(&run, None)
+        .map_err(|e| unreadable("usage", e))?;
+    let record = shared
+        .store
+        .phase_record(&run, crate::file_run::PHASE_NAME)
+        .map_err(|e| unreadable("phase record", e))?
+        .unwrap_or_default();
+    let result = RunRecordResult {
+        run: run.clone(),
+        state,
+        failure: record.failure,
+        report: record.report,
+        workspace: shared
+            .file_runs
+            .workspace_path(&run)
+            .map(|path| path.to_string_lossy().into_owned()),
+        wall_ms: crate::run_record::run_wall_ms(&spans, now_ns),
+        calls: crate::run_record::recorded_calls(&spans, &rows, now_ns),
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }

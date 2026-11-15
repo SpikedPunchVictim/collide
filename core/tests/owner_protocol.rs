@@ -288,6 +288,24 @@ fn samples() -> Vec<(Method, Value, Value)> {
             }),
         ),
         (
+            Method::RunRecord,
+            json!({ "run": "R-119" }),
+            json!({
+                "run": "R-119",
+                "state": { "state": "ended", "outcome": "the phase ended" },
+                "report": "Added a line to README.",
+                "workspace": "/data/workspaces/R-119",
+                "wall_ms": 3100,
+                "calls": [{
+                    "scope": "turn", "quality": "exact", "wall_ms": 3100, "model_ms": 2300,
+                    "input": 4, "output": 270, "cache_read": 46000, "cache_write": 38000,
+                    "cost": { "amount": 0.0084, "currency": "USD" }
+                }, {
+                    "scope": "compaction", "quality": "exact", "input": 1
+                }]
+            }),
+        ),
+        (
             Method::RunStop,
             json!({ "run": "R-118" }),
             json!({

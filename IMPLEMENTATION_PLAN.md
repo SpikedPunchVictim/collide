@@ -3689,6 +3689,15 @@ hook the test injects). The real launchd check runs only with `COLLIDE_REAL_LAUN
 - `collide run` on a file task: a new worktree, one Claude phase, the record. The run uses the built-in
   `collide/builder` role with the alias `fast` (a run may name another), and the three context variables are set
   after the strip, so they win over a role's `env:`.
+- `collide run <task-file> [--budget <usd>] [--alias <name>]` starts the daemon when none answers, prints the
+  `claude` version in use and the published one (only the one in use when `claude.check_published` is false), and
+  follows the phase. A permission request is asked on the terminal (y allows once, n denies; never an always option)
+  and answered with `queue.answer`; input that ends unanswered leaves the request in the Queue. At the end it prints
+  the record from `run.record`: state, report, and for each model call its wall time, model time, tokens and cost,
+  "not reported" for any value the agent did not give. `collide run --resume <run>` reattaches to a live run,
+  resumes a paused one with the Queue's Resume answer, and shows the record of one that is over; a `lost` phase is
+  not resumed by hand in 3b. Exit codes: 0 ended, 1 could not do its work, 2 wrong command line, 3 no such task file
+  or run, 5 refused, 7 failed, 8 stopped, 9 waiting for a person.
 
 **Success Criteria**:
 - A real run on the Orchard repo in a fresh worktree.

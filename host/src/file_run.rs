@@ -301,6 +301,14 @@ impl FileRuns {
         }
     }
 
+    /// The worktree of `run`, when it has been made: the folder the run's workspace is in. `None` for a name that is no
+    /// run's (the name is a path part, so a name that is not a plain one is refused here).
+    pub fn workspace_path(&self, run: &str) -> Option<PathBuf> {
+        PhaseKey::new(run, PHASE_NAME).ok()?;
+        let path = self.config.workspaces_dir.join(run);
+        path.is_dir().then_some(path)
+    }
+
     /// The Queue items, those of `run` when it is given.
     pub fn queue_items(&self, run: Option<&str>) -> Vec<QueueItem> {
         self.config.queue.list(run)
