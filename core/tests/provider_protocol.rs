@@ -620,7 +620,7 @@ fn event_line(seq: u64, body: Value) -> Value {
 fn an_observer_event_has_a_sequence_number_and_a_typed_body() {
     let event: ObserverEvent = round_trip(event_line(
         41,
-        json!({ "event": "run.transition", "run": "r-77", "from": null, "to": "running" }),
+        json!({ "event": "run.transition", "run": "r-77", "from": null, "to": { "state": "running" } }),
     ));
     assert_eq!(event.0.seq, 41);
     assert_eq!(event.0.body.name(), "run.transition");
@@ -630,7 +630,7 @@ fn an_observer_event_has_a_sequence_number_and_a_typed_body() {
 fn an_observer_event_with_an_unknown_key_or_a_missing_one_is_refused() {
     let doc = event_line(
         1,
-        json!({ "event": "run.transition", "run": "r-77", "from": null, "to": "running" }),
+        json!({ "event": "run.transition", "run": "r-77", "from": null, "to": { "state": "running" } }),
     );
     refused::<ObserverEvent>(with_extra(doc.clone()));
     for key in ["seq", "wall_ms", "actor", "body"] {

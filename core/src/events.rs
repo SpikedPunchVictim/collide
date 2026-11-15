@@ -2,7 +2,8 @@
 //! number, the wall clock, the actor, the experiment, and one [`EventBody`]. Observers receive the same lines
 //! (see [`crate::observer::ObserverEvent`]). Every event names the stage that makes it fire, through [`EventKind`].
 //!
-//! The states of runs, phases, workspaces and experiments are plain strings for now; `ts-0037-vg` types them.
+//! The states of runs, phases and workspaces are the types of [`crate::state`]. An experiment's state is still a plain
+//! string; the experiment stage types it.
 
 use crate::change::{Actor, Change, Rename};
 use crate::hook::{HookExperiment, HookStatus};
@@ -10,6 +11,7 @@ use crate::points::Point;
 use crate::provider::{TaskChanged, TaskInvalid, TaskRemoved};
 use crate::report::ReportLine;
 use crate::stage::Stage;
+use crate::state::{PhaseState, RunState, WorkspaceState};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -70,8 +72,8 @@ pub enum EventBody {
     #[serde(rename = "run.transition")]
     RunTransition {
         run: String,
-        from: Option<String>,
-        to: String,
+        from: Option<RunState>,
+        to: RunState,
     },
     /// The phase's log and transcript paths are carried, because a registry needs them (0.4). A `human` phase has no
     /// log, only agent phases have a transcript, and a phase entering its first state has neither yet, so both are
@@ -81,8 +83,8 @@ pub enum EventBody {
         run: String,
         phase: String,
         round: u32,
-        from: Option<String>,
-        to: String,
+        from: Option<PhaseState>,
+        to: PhaseState,
         log: Option<String>,
         transcript: Option<String>,
     },
@@ -150,8 +152,8 @@ pub enum EventBody {
     #[serde(rename = "workspace.transition")]
     WorkspaceTransition {
         workspace: String,
-        from: Option<String>,
-        to: String,
+        from: Option<WorkspaceState>,
+        to: WorkspaceState,
     },
     #[serde(rename = "metric.reported")]
     MetricReported { run: String, line: ReportLine },

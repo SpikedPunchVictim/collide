@@ -48,13 +48,13 @@ fn samples() -> Vec<(EventKind, Value)> {
     vec![
         (
             EventKind::RunTransition,
-            json!({ "event": "run.transition", "run": "r-77", "from": null, "to": "running" }),
+            json!({ "event": "run.transition", "run": "r-77", "from": null, "to": { "state": "running" } }),
         ),
         (
             EventKind::PhaseTransition,
             json!({
-                "event": "phase.transition", "run": "r-77", "phase": "build", "round": 1, "from": "running",
-                "to": "ended", "log": "logs/build.log", "transcript": "transcripts/build.jsonl"
+                "event": "phase.transition", "run": "r-77", "phase": "build", "round": 1, "from": { "state": "running" },
+                "to": { "state": "ended" }, "log": "logs/build.log", "transcript": "transcripts/build.jsonl"
             }),
         ),
         (
@@ -389,7 +389,7 @@ fn every_event_variant_round_trips_through_json_with_its_sequence_number() {
 fn an_event_carries_the_experiment_it_ran_in_or_null() {
     let mut doc = line(
         4,
-        json!({ "event": "run.transition", "run": "r-77", "from": "running", "to": "ended" }),
+        json!({ "event": "run.transition", "run": "r-77", "from": { "state": "running" }, "to": { "state": "ended", "outcome": "done" } }),
     );
     let outside: Event = serde_json::from_value(doc.clone()).unwrap();
     assert!(outside.experiment.is_none());
@@ -561,7 +561,7 @@ fn a_phase_entering_its_first_state_has_no_log_or_transcript_yet() {
         3,
         json!({
             "event": "phase.transition", "run": "r-77", "phase": "review", "round": 2, "from": null,
-            "to": "running", "log": null, "transcript": null
+            "to": { "state": "running" }, "log": null, "transcript": null
         }),
     );
     let parsed: Event = serde_json::from_value(doc.clone()).unwrap();
@@ -586,7 +586,7 @@ fn a_phase_round_is_a_number() {
         3,
         json!({
             "event": "phase.transition", "run": "r-77", "phase": "review", "round": "2", "from": null,
-            "to": "running", "log": null, "transcript": null
+            "to": { "state": "running" }, "log": null, "transcript": null
         }),
     );
     assert!(serde_json::from_value::<Event>(doc).is_err());

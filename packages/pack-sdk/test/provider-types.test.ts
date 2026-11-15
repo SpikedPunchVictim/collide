@@ -39,7 +39,7 @@ test('task.invalid and the observer lines carry their keys', () => {
     wall_ms: 1_700_000_000_000,
     actor: { kind: 'workflow', run: 'r-1' },
     experiment: null,
-    body: { event: 'run.transition', run: 'r-1', from: null, to: 'running' },
+    body: { event: 'run.transition', run: 'r-1', from: null, to: { state: 'running' } },
   }
   const ack: ObserverAckOutput = { seq: 1 }
   // @ts-expect-error an acknowledgement names a sequence number.

@@ -1,0 +1,79 @@
+{
+  "$defs": {
+    "Section": {
+      "description": "One section: filled with text, or marked as not available.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "const": "filled",
+              "type": "string"
+            },
+            "text": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "const": "not_available",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The six sections, in the order the view shows them.",
+  "properties": {
+    "agents_own_words": {
+      "$ref": "#/$defs/Section",
+      "description": "The call's description and the agent's last message before asking. Unverified."
+    },
+    "history": {
+      "$ref": "#/$defs/Section",
+      "description": "The same request in this run and this repo, and how it was answered."
+    },
+    "task": {
+      "$ref": "#/$defs/Section",
+      "description": "The task's title and body."
+    },
+    "what_it_would_do": {
+      "$ref": "#/$defs/Section",
+      "description": "An edit's diff, a command's reach, a fetch's domain, an MCP call's arguments."
+    },
+    "what_led_here": {
+      "$ref": "#/$defs/Section",
+      "description": "The phase and round, and what came before."
+    },
+    "why_it_asks": {
+      "$ref": "#/$defs/Section",
+      "description": "The rule that matched, a hook's `decision_reason`, a failed gate check, a budget or a limit."
+    }
+  },
+  "required": [
+    "why_it_asks",
+    "what_it_would_do",
+    "task",
+    "what_led_here",
+    "history",
+    "agents_own_words"
+  ],
+  "title": "ContextRecord",
+  "type": "object"
+}

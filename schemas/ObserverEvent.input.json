@@ -280,16 +280,20 @@
               "type": "string"
             },
             "from": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RunState"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "run": {
               "type": "string"
             },
             "to": {
-              "type": "string"
+              "$ref": "#/$defs/RunState"
             }
           },
           "required": [
@@ -308,9 +312,13 @@
               "type": "string"
             },
             "from": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PhaseState"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "log": {
@@ -331,7 +339,7 @@
               "type": "string"
             },
             "to": {
-              "type": "string"
+              "$ref": "#/$defs/PhaseState"
             },
             "transcript": {
               "type": [
@@ -649,13 +657,17 @@
               "type": "string"
             },
             "from": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceState"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "to": {
-              "type": "string"
+              "$ref": "#/$defs/WorkspaceState"
             },
             "workspace": {
               "type": "string"
@@ -774,6 +786,13 @@
         }
       ]
     },
+    "FailCause": {
+      "description": "Why a phase failed when the cause is known. A phase that ends with no `result` on a full volume fails with cause\n`disk`, not `lost` (0.2).",
+      "enum": [
+        "disk"
+      ],
+      "type": "string"
+    },
     "FieldDiff": {
       "anyOf": [
         {
@@ -859,6 +878,15 @@
       ],
       "type": "object"
     },
+    "PauseCause": {
+      "description": "Why a run or a phase is paused (0.2, 0.3, 0.8). `ask_human` waits in the Queue, `usage_limit` waits for the\naccount's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).",
+      "enum": [
+        "ask_human",
+        "usage_limit",
+        "disk"
+      ],
+      "type": "string"
+    },
     "PermissionAnswer": {
       "description": "The answer to a permission request (0.3, S7).",
       "enum": [
@@ -867,6 +895,117 @@
         "cancel"
       ],
       "type": "string"
+    },
+    "PhaseState": {
+      "description": "Where a phase is (0.8, Phase). A shim that dies without an `exit.json` makes its phase `lost`, whatever the agent's\nstream said (0.2).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FailCause"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "lost",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Point": {
       "description": "The point catalogue (0.4, Named points), in the table's order. Serialized as its dotted name. Adding a point is\na schema change: `Point.input.json` lists the names.",
@@ -1190,6 +1329,98 @@
         }
       ]
     },
+    "RunState": {
+      "description": "Where a run is (0.8, Run). It ends `ended(<outcome>)`, `failed` or `stopped`; `outcome` is the `end` token the run\nreached (0.7, Outcomes and terminal states). `integrating` is a run whose `integrate` answered `pending`, so the\npull request is not merged yet (0.4).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "integrating",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StepKind": {
       "description": "The side-effect steps that write an intent before and an outcome after (0.2): an integrate, a source op, an\n`after_integrate` hook and a remote write.",
       "enum": [
@@ -1329,6 +1560,19 @@
         "share",
         "integrate",
         "run"
+      ],
+      "type": "string"
+    },
+    "WorkspaceState": {
+      "description": "Where a workspace is (0.8, Workspace): `provisioning → ready → in_use → idle → removable → removed`, plus\n`failed`, which resumes through the `resume` hook.",
+      "enum": [
+        "provisioning",
+        "ready",
+        "in_use",
+        "idle",
+        "removable",
+        "removed",
+        "failed"
       ],
       "type": "string"
     }

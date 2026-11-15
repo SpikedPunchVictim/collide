@@ -15,6 +15,7 @@ use crate::agent::{
 };
 use crate::board::{Board, CollidePointer};
 use crate::change::{Change, Rename, TaskPointPayload};
+use crate::context::ContextRecord;
 use crate::events::Event;
 use crate::hook::{HookInput, HookResult};
 use crate::item::{KindDecl, LinkTypeDecl, PlanningFields};
@@ -30,7 +31,9 @@ use crate::provider::{
 };
 use crate::report::ReportLine;
 use crate::settings::ConfigFile;
+use crate::span::Span;
 use crate::stage::Stage;
+use crate::state::{PhaseState, RunState, WorkspaceState};
 use crate::view::View;
 use crate::workflow::{Adoption, Workflow};
 use schemars::JsonSchema;
@@ -101,6 +104,7 @@ pub fn registry() -> Registry {
     registry.add::<Change>();
     registry.add::<CollidePointer>();
     registry.add::<ConfigFile>();
+    registry.add::<ContextRecord>();
     registry.add::<Event>();
     registry.add::<GetParams>();
     registry.add::<GetResult>();
@@ -118,6 +122,7 @@ pub fn registry() -> Registry {
     registry.add::<PackManifest>();
     registry.add::<PermissionReply>();
     registry.add::<PermissionRequest>();
+    registry.add::<PhaseState>();
     registry.add::<Point>();
     registry.add::<PlanningFields>();
     registry.add::<PreviewResult>();
@@ -126,8 +131,10 @@ pub fn registry() -> Registry {
     // `Rename` is also the body of the provider's `task.renamed` notification.
     registry.add::<Rename>();
     registry.add::<RunBudget>();
+    registry.add::<RunState>();
     registry.add::<SessionStart>();
     registry.add::<SourceStale>();
+    registry.add::<Span>();
     registry.add::<Stage>();
     registry.add::<Task>();
     registry.add::<TaskChanged>();
@@ -141,5 +148,6 @@ pub fn registry() -> Registry {
     registry.add::<WatchParams>();
     registry.add::<WatchResult>();
     registry.add::<Workflow>();
+    registry.add::<WorkspaceState>();
     registry
 }

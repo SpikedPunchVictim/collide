@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "FailCause": {
+      "description": "Why a phase failed when the cause is known. A phase that ends with no `result` on a full volume fails with cause\n`disk`, not `lost` (0.2).",
+      "enum": [
+        "disk"
+      ],
+      "type": "string"
+    },
+    "PauseCause": {
+      "description": "Why a run or a phase is paused (0.2, 0.3, 0.8). `ask_human` waits in the Queue, `usage_limit` waits for the\naccount's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).",
+      "enum": [
+        "ask_human",
+        "usage_limit",
+        "disk"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Where a phase is (0.8, Phase). A shim that dies without an `exit.json` makes its phase `lost`, whatever the agent's\nstream said (0.2).",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "const": "pending",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "const": "running",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/PauseCause"
+        },
+        "state": {
+          "const": "paused",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "cause"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "const": "ended",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailCause"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "const": "failed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "cause"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "const": "stopped",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "const": "lost",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "PhaseState"
+}

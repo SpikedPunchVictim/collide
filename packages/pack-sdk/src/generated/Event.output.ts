@@ -7,18 +7,18 @@ export type ActorKind = 'person' | 'workflow' | 'agent'
 export type EventBody =
   | {
       event: 'run.transition'
-      from: string | null
+      from: RunState | null
       run: string
-      to: string
+      to: RunState
     }
   | {
       event: 'phase.transition'
-      from: string | null
+      from: PhaseState | null
       log: string | null
       phase: string
       round: number
       run: string
-      to: string
+      to: PhaseState
       transcript: string | null
     }
   | {
@@ -90,8 +90,8 @@ export type EventBody =
     }
   | {
       event: 'workspace.transition'
-      from: string | null
-      to: string
+      from: WorkspaceState | null
+      to: WorkspaceState
       workspace: string
     }
   | {
@@ -118,6 +118,70 @@ export type EventBody =
       result: StepResult
       step: string
     }
+/**
+ * Where a run is (0.8, Run). It ends `ended(<outcome>)`, `failed` or `stopped`; `outcome` is the `end` token the run
+ * reached (0.7, Outcomes and terminal states). `integrating` is a run whose `integrate` answered `pending`, so the
+ * pull request is not merged yet (0.4).
+ */
+export type RunState =
+  | {
+      state: 'running'
+    }
+  | {
+      cause: PauseCause
+      state: 'paused'
+    }
+  | {
+      state: 'integrating'
+    }
+  | {
+      outcome: string
+      state: 'ended'
+    }
+  | {
+      state: 'failed'
+    }
+  | {
+      state: 'stopped'
+    }
+/**
+ * Why a run or a phase is paused (0.2, 0.3, 0.8). `ask_human` waits in the Queue, `usage_limit` waits for the
+ * account's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).
+ */
+export type PauseCause = 'ask_human' | 'usage_limit' | 'disk'
+/**
+ * Where a phase is (0.8, Phase). A shim that dies without an `exit.json` makes its phase `lost`, whatever the agent's
+ * stream said (0.2).
+ */
+export type PhaseState =
+  | {
+      state: 'pending'
+    }
+  | {
+      state: 'running'
+    }
+  | {
+      cause: PauseCause
+      state: 'paused'
+    }
+  | {
+      state: 'ended'
+    }
+  | {
+      cause: FailCause | null
+      state: 'failed'
+    }
+  | {
+      state: 'stopped'
+    }
+  | {
+      state: 'lost'
+    }
+/**
+ * Why a phase failed when the cause is known. A phase that ends with no `result` on a full volume fails with cause
+ * `disk`, not `lost` (0.2).
+ */
+export type FailCause = 'disk'
 /**
  * The point catalogue (0.4, Named points), in the table's order. Serialized as its dotted name. Adding a point is
  * a schema change: `Point.input.json` lists the names.
@@ -181,6 +245,12 @@ export type RemovedCause = 'deleted' | 'transferred' | 'unknown'
  * The route of a write.
  */
 export type Via = 'ui' | 'workflow' | 'share' | 'integrate' | 'run'
+/**
+ * Where a workspace is (0.8, Workspace): `provisioning → ready → in_use → idle → removable → removed`, plus
+ * `failed`, which resumes through the `resume` hook.
+ */
+export type WorkspaceState =
+  'provisioning' | 'ready' | 'in_use' | 'idle' | 'removable' | 'removed' | 'failed'
 /**
  * One report line. Every line carries `v` and its timestamp `t`, because a time stamped at reading would be wrong
  * by the tailing lag. Each variant repeats `v` and `t`: serde cannot flatten them out of a tagged enum that denies

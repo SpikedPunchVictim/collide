@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One span. `id` is unique in its trace and `parent` is the `id` of the span that owns this one.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "The root: the trace is the run. It is the only span with no parent.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "run",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "phase",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "agent_turn",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "tool_call",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "hook",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "gate",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "provisioning",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "subprocess",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A wait that is not on the user: a `wait` phase, the concurrency cap, the line lock, a usage limit, machine\nsleep (0.13, Sources).",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "wait",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A wait on the user. `queue_item` is the Queue item it waited on, so \"where did this run wait\" is answerable\nfrom the spans.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "user_wait",
+          "type": "string"
+        },
+        "parent": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "queue_item": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "parent",
+        "queue_item"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Span"
+}

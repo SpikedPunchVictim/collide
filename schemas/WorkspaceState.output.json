@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Where a workspace is (0.8, Workspace): `provisioning → ready → in_use → idle → removable → removed`, plus\n`failed`, which resumes through the `resume` hook.",
+  "enum": [
+    "provisioning",
+    "ready",
+    "in_use",
+    "idle",
+    "removable",
+    "removed",
+    "failed"
+  ],
+  "title": "WorkspaceState",
+  "type": "string"
+}
