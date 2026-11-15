@@ -21,13 +21,13 @@ export type ReadResult =
 const fail = (reason: string): ReadResult => ({ ok: false, reason })
 
 /** Where the frontmatter block starts and ends in the head of a file, or why there is none. */
-type Fence = { ok: true; start: number; end: number; bodyStart: number } | { ok: false; reason: string }
+export type Fence = { ok: true; start: number; end: number; bodyStart: number } | { ok: false; reason: string }
 
 const lf = 0x0a
 const cr = 0x0d
 
 /** Finds the opening and closing `---` lines in `head`, which holds the first bytes of a file of `size` bytes. */
-function findFence(head: Buffer, size: number): Fence {
+export function findFence(head: Buffer, size: number): Fence {
   let start: number
   if (head.subarray(0, 4).equals(Buffer.from('---\n'))) start = 4
   else if (head.subarray(0, 5).equals(Buffer.from('---\r\n'))) start = 5
@@ -63,6 +63,9 @@ export function parseFrontmatter(text: string): { ok: true; value: Record<string
     return { ok: false, reason: `frontmatter is not valid YAML: ${error instanceof Error ? error.message : String(error)}` }
   }
 }
+
+/** A task's `version`: the sha256 of the file's whole content. */
+export const versionOf = (content: Buffer): string => createHash('sha256').update(content).digest('hex')
 
 const utf8 = new TextDecoder('utf-8', { fatal: true })
 
@@ -100,7 +103,7 @@ export async function readItemFile(path: string): Promise<ReadResult> {
 
     const parsed = parseFrontmatter(frontmatterText)
     if (!parsed.ok) return fail(parsed.reason)
-    return { ok: true, frontmatter: parsed.value, body, version: createHash('sha256').update(whole).digest('hex') }
+    return { ok: true, frontmatter: parsed.value, body, version: versionOf(whole) }
   } finally {
     await handle.close()
   }

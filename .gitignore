@@ -9,6 +9,10 @@ dist/
 .collide/planning/spikes/*/work/
 .collide/planning/spikes/*/out/
 
+# The planning provider's per-root write lock, its takeover claim and the temp file of a write that was killed
+.collide/planning/.write-lock*
+.collide/planning/**/*.collide-tmp
+
 # Local settings and secrets
 .env
 .env.*

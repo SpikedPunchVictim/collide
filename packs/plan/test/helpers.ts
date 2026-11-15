@@ -1,4 +1,6 @@
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -103,5 +105,55 @@ export async function callUninitialized(method: string, params: unknown = {}): P
     return await client.request(method, params)
   } finally {
     await client.close()
+  }
+}
+
+/** What `version` is for a file: the sha256 of its content. */
+export const fileVersion = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex')
+
+const main = join(import.meta.dirname, '..', 'src', 'main.ts')
+
+/**
+ * The provider as its own process (`node src/main.ts`), initialized for `root`. `env` is added to this process's
+ * environment. A request whose process exits before it answers rejects, so a killed writer is a value to test.
+ */
+export async function spawnProvider(root: string, env: Record<string, string> = {}) {
+  const child = spawn(process.execPath, [main], { cwd: tmpdir(), env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] })
+  const pending = new Map<number, { resolve: (message: Message) => void; reject: (error: Error) => void }>()
+  let buffer = ''
+  let nextId = 1
+  child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+    buffer += chunk
+    const parts = buffer.split('\n')
+    buffer = parts.pop() ?? ''
+    for (const part of parts) {
+      const message: Message = JSON.parse(part)
+      pending.get(message.id)?.resolve(message)
+      pending.delete(message.id)
+    }
+  })
+  child.stderr.resume()
+  const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
+    child.on('close', (code, signal) => {
+      pending.forEach(({ reject }) => reject(new Error(`the provider exited (code ${code}, signal ${signal}) before it answered`)))
+      resolve({ code, signal })
+    })
+  })
+  const request = async (method: string, params: unknown = {}): Promise<Message> => {
+    const id = nextId++
+    const reply = new Promise<Message>((resolve, reject) => pending.set(id, { resolve, reject }))
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+    const message = await reply
+    if (message.error !== undefined) throw new Error(`${method} failed: ${JSON.stringify(message.error)}`)
+    return message.result as Message
+  }
+  await request('initialize', { config: {}, root })
+  return {
+    request,
+    exited,
+    close: async () => {
+      child.stdin.end()
+      return exited
+    },
   }
 }

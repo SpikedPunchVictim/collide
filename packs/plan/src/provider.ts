@@ -11,9 +11,38 @@ import type {
 import { CATEGORIES, ID_PATTERN } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
+import { applyOp } from './write.ts'
 
 const statuses = CATEGORIES.map((name) => ({ name, category: name }))
 const kind = (name: string): KindDeclInput => ({ name, statuses })
+
+const noExtraArgs = { additionalProperties: false }
+
+/**
+ * The write ops, for both kinds. None has `movesTo`: a status write moves the item to the category its argument names,
+ * which one fixed category cannot say, and `claim` records an owner without changing the status. `checkouts` is left
+ * out (any), though only the main checkout is written until `ts-0031-xu`.
+ */
+const OPS: NonNullable<InitializeResultInput['ops']> = [
+  {
+    name: 'setStatus',
+    args: {
+      type: 'object',
+      properties: { status: { enum: [...CATEGORIES] }, category: { enum: [...CATEGORIES] } },
+      oneOf: [{ required: ['status'] }, { required: ['category'] }],
+      ...noExtraArgs,
+    },
+  },
+  {
+    name: 'link',
+    args: { type: 'object', properties: { to: { type: 'string', pattern: ID_PATTERN }, type: { enum: ['blocked-by'] } }, required: ['to'], ...noExtraArgs },
+  },
+  {
+    name: 'claim',
+    args: { type: 'object', properties: { claimant: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['claimant'], ...noExtraArgs },
+  },
+  { name: 'unclaim', args: { type: 'object', properties: {}, ...noExtraArgs } },
+]
 
 /** `initialize`'s answer: kinds `task` and `epic`, the five categories as statuses, `blocked-by` as the one blocking link. */
 export const INITIALIZE_RESULT: InitializeResultInput = {
@@ -23,6 +52,7 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
   statuses,
   categoryStatus: Object.fromEntries(CATEGORIES.map((name) => [name, name])),
   kinds: [kind('task'), kind('epic')],
+  ops: OPS,
   links: [
     { name: 'blocked-by', dir: 'out', blocking: true },
     { name: 'part-of', dir: 'out', blocking: false },
@@ -35,7 +65,7 @@ export interface PlanProviderOptions {
 }
 
 /**
- * Protocol v0's `initialize`, `list` and `get` for the markdown provider. The repository root comes from
+ * Protocol v0's `initialize`, `list`, `get` and `apply` for the markdown provider. The repository root comes from
  * `initialize`'s `root` and from nowhere else; until it has run, `list` and `get` fail.
  */
 export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
@@ -64,7 +94,10 @@ export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
       const found = (await scan(checkout ?? null)).items.find((candidate) => candidate.item.id === id)
       return found === undefined ? {} : { task: toTask(found, true) }
     },
-    apply: () => ({ outcome: 'refused', message: 'the markdown provider is read-only until its write ops land' }),
+    apply: (params) => {
+      if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')
+      return applyOp(root, params)
+    },
   }
 }
 

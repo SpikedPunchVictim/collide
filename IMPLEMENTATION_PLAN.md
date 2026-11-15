@@ -2030,10 +2030,13 @@ Why the plan adapter parses files itself:
     of the user's under `arch/` stays uncommitted.
   - Workflow ops (`on_start`, `on_end`) record automatically.
   - Edits made in the UI record when the user presses Record.
-- **Provider writes are safe against each other** (R5). The markdown provider takes an `flock` on a lock file in each
-  root for every write, and writes each file by temp file, `fsync` and rename, so a reader never sees half a file and
-  two writers never interleave. A test runs concurrent `setStatus` calls on one file and checks that every call's
-  result is true to what is on disk.
+- **Provider writes are safe against each other** (R5). The markdown provider takes a lock file in each root for every
+  write, and writes each file by temp file, `fsync` and rename, so a reader never sees half a file and two writers never
+  interleave. The lock file is created only when absent and is never seen without the writer's pid: the pid is written
+  to a temp file, which is hard-linked into place, and the link fails when the lock exists. A waiter retries for up to
+  15 s, and a lock whose pid is dead is taken over, never by two waiters at once (owner, 2026-11-14: Node has no
+  `flock`, and a native add-on was not taken). A test runs concurrent `setStatus` calls on one file and checks that
+  every call's result is true to what is on disk.
 - **The planning slice checks out the main checkout's shared root by default** (R5; `--checkout` names another). A
   write there leaves an uncommitted file. `--commit` commits that one file and nothing else, as a stopgap until the
   `record` hook exists (Stage 7). A claim (`owners`) is refused when the file already shows an owner, unless the
@@ -3257,8 +3260,8 @@ part L).
     membership from the folder, `blocked-by` links, and the ops `create`, `setStatus`, `link`, `claim` and
     `unclaim`. `create` writes into the epic's `tasks/` folder and takes the next number for the kind across every
     ref Collide can see (0.10);
-  - writes hold a per-root `flock` and are temp, `fsync` and rename (0.10; R5). They go to the main checkout's shared
-    root by default (`--checkout` names another), `--commit` makes a one-file commit until `record` exists, and
+  - writes hold the per-root lock file and are temp, `fsync` and rename (0.10; R5). They go to the main checkout's
+    shared root by default (`--checkout` names another), `--commit` makes a one-file commit until `record` exists, and
     `claim` refuses when an owner is shown (0.10);
   - provider protocol v0's `initialize`, `list`, `get` and `apply`, and a working `defineProvider` in
     `@collide/pack-sdk`;
@@ -3306,8 +3309,8 @@ part L).
   - `collide tasks` and `collide task <id>` print each item's epic beside its id, and each link's target with its
     epic (0.10, ids);
   - with two tasks numbered 12, `collide task 12` lists both and asks for the suffix;
-  - concurrent `setStatus` calls on one file all report what is on disk (the `flock` test), and a kill between the
-    temp write and the rename leaves the old file whole;
+  - concurrent `setStatus` calls on one file all report what is on disk (the lock test), a lock left by a dead
+    writer is taken over, and a kill between the temp write and the rename leaves the old file whole;
   - a claim on an item that shows an owner is refused;
   - from here on, Collide's own build tasks are read and updated through the CLI.
 
