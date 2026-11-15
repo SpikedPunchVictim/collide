@@ -1,7 +1,7 @@
 ---
 id: ts-0057-ck
 kind: task
-status: ready
+status: active
 title: "Daemon and shim link: framed messages, adopt, lost"
 owners: []
 links:
