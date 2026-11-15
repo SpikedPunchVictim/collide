@@ -1,7 +1,7 @@
 ---
 id: ts-0050-xc
 kind: task
-status: active
+status: done
 title: "Run, phase and workspace state machines"
 owners: []
 links: []
