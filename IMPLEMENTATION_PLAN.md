@@ -2132,6 +2132,11 @@ layout: { default: board, groupBy: category }
       remotes). It keeps creation order and is the short handle. It may repeat after two branches merge;
     - the suffix makes the id unique, so a merge never renumbers a file or rewrites a link. `collide task 12`
       resolves when one item has that number; otherwise it lists the matches and asks for `12-ua`;
+    - **the id never carries its epic** (owner, 2026-11-14). The folder is the epic, so a move between epics keeps
+      the id and every link to it. Wherever Collide prints an id (the task CLI, the board, a link's target), it
+      prints the item's epic beside it when the source reports one, as `ep-002-va / ts-0007-ga` or
+      `blocked-by ts-0009-cu (ep-002)`. An epic inside the id, as plan's ids have, was considered and not taken: a
+      move would rename the item, and a link made to it on another branch would break at the merge;
     - **a collision of whole ids is possible** (R5): 23 letters make 529 suffixes per number. The suffix is drawn
       from a seeded generator, a test pins that, and a second test forces a collision and checks that the draw is
       repeated until the id is free among every ref Collide can see. If two branches still create the same id, the
@@ -3295,6 +3300,8 @@ part L).
   - `collide tasks --ready` equals the ready list checked by hand;
   - `collide task <id> setStatus active` changes only that item's `status` line (`git diff`);
   - a task file moved into another epic's folder is listed under that epic, and its links are unchanged;
+  - `collide tasks` and `collide task <id>` print each item's epic beside its id, and each link's target with its
+    epic (0.10, ids);
   - with two tasks numbered 12, `collide task 12` lists both and asks for the suffix;
   - concurrent `setStatus` calls on one file all report what is on disk (the `flock` test), and a kill between the
     temp write and the rename leaves the old file whole;

@@ -171,6 +171,9 @@ An id is `<kind prefix>-<number>-<suffix>`, for example `ts-0012-ua` (0.10).
   a new suffix, rewrites the links that name it, and commits nothing.
 - **Aliases** such as `S5` are display labels. They are not unique and never targets of a link. Note that a spike's
   alias is not its folder number: `S8` is `sp-0010-bn`.
+- **The epic is not in the id** (owner, 2026-11-14). The folder is the epic, so moving an item between epics keeps
+  its id and every link to it. Collide prints the epic beside the id instead: `ep-002-va / ts-0007-ga`, and
+  `blocked-by ts-0009-cu (ep-002)` for a link (planned, Stage 2's CLI). Until then, the file's path shows it.
 
 By hand, until `create` exists: take the highest number for that kind across `git branch -a`, add one, and pick a
 two-letter suffix not in use. This follows the same rule; it is advice, not a plan rule.
@@ -273,7 +276,7 @@ None of these commands exists yet. They are the planned surface from Stage 2's "
 
 | Command | What it does |
 |---|---|
-| `collide tasks [--ready] [--kind <kind>] [--json]` | List items. `--ready` applies the ready rule. |
+| `collide tasks [--ready] [--kind <kind>] [--json]` | List items, each with its epic beside its id. `--ready` applies the ready rule. |
 | `collide task <id> [--json]` | Show one item. `<id>` may be the short form (`12` or `12-ua`) when it matches one item. |
 | `collide task <id> <op> ...` | Apply an op: `create`, `setStatus`, `link`, `claim`, `unclaim`. |
 | `collide task reid <id>` | Give an item a new suffix, rewrite links that name it, commit nothing. |
@@ -355,6 +358,9 @@ corrects says so, with a dated label on the corrected claim.
 
 ### 3.5 Writing rules
 
+- **Commit messages** name the epic and the item: `Add the provider protocols (ep-002/ts-0010)`, so
+  `git log --grep ep-002` finds an epic's commits. This is a repo convention; commits before 2026-11-14 name only
+  the item.
 - **Never cite line numbers.** Cite a plan section or stage name, or a file and a symbol. Lines move.
 - **Date owner decisions**: "owner, 2026-11-14".
 - **Label claims** as measured (and name the observation), inferred or unmeasured.
