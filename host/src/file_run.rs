@@ -44,13 +44,16 @@
 //!   poll, so a machine that slept past it resumes on waking; the pause's length is the **continuous** clock's. It
 //!   resumes the session by its id with the budget it has left, in the phase's folder as a new attempt
 //!   ([`crate::phases::Phases::resume_agent_phase`]).
-//! - [`FileRuns::answer`] is `queue.answer`: allow or deny for a permission request, Resume, and Stop.
+//! - [`FileRuns::answer`] is `queue.answer`: allow or deny for a permission request, Resume, and Stop, and for a
+//!   prompt run's review (`quick_run`): accept, re-prompt (`reprompt`) and discard (`discard`).
 //! - Each run's context is in the store ([`crate::store::Store::set_run_context`]), so a daemon that starts again goes
 //!   on with the runs it finds: it rebuilds a running phase's session from its journal, keeps its pending requests in
 //!   the Queue, and resumes a limit that reset while no daemon ran.
 
 mod accept;
+mod discard;
 pub mod quick_run;
+mod reprompt;
 
 use crate::adapters::claude::session::ClaudeSession;
 use crate::adapters::claude::user_config::{
@@ -179,9 +182,45 @@ struct RunContext {
     /// discard need the worktree, the branch and the session.
     #[serde(default)]
     quick: Option<QuickRun>,
+    /// The folder's name under the workspaces folder, and the `workspace` of the workspace's events: the id of the run
+    /// that made the worktree. `None` for a run that made its own. A re-prompt takes over the worktree of the run it
+    /// follows, and keeps that name, so the worktree is one workspace.
+    #[serde(default)]
+    workspace_name: Option<String>,
 }
 
 impl RunContext {
+    /// The workspace's name: the run's own id unless the run took over another run's worktree.
+    fn workspace_name(&self) -> &str {
+        self.workspace_name.as_deref().unwrap_or(&self.run)
+    }
+
+    /// The context of the run that takes `prior`'s place after a re-prompt: the same repository, model, session, branch
+    /// and worktree, a new run and `quick` record, and `task_text` as the first turn. It is the session's next attempt,
+    /// so it resumes the session by its id.
+    fn continuing(prior: &RunContext, run: &str, task_text: String, quick: QuickRun) -> RunContext {
+        RunContext {
+            run: run.to_string(),
+            repo: prior.repo.clone(),
+            task_file: None,
+            alias: prior.alias.clone(),
+            budget_usd: prior.budget_usd,
+            task_text,
+            model: prior.model.clone(),
+            session_id: prior.session_id.clone(),
+            attempt: prior.attempt + 1,
+            spent_usd: prior.spent_usd,
+            run_state: RunState::Running {},
+            workspace_state: prior.workspace_state,
+            workspace_path: prior.workspace_path.clone(),
+            git_dir: prior.git_dir.clone(),
+            branch: prior.branch.clone(),
+            workspace_recorded: true,
+            quick: Some(quick),
+            workspace_name: Some(prior.workspace_name().to_string()),
+        }
+    }
+
     /// The first attempt assigns the session's id and every later one resumes it.
     fn session_start(&self) -> SessionStart {
         if self.attempt == 0 {
@@ -263,6 +302,8 @@ struct Begin {
     task_text: String,
     model: Option<ModelRef>,
     quick: Option<QuickRun>,
+    /// The context of the run this one re-prompts: the new run takes over its worktree and resumes its session.
+    follows: Option<RunContext>,
 }
 
 fn limit_item_id(run: &str) -> String {
@@ -337,7 +378,12 @@ impl FileRuns {
     /// run's (the name is a path part, so a name that is not a plain one is refused here).
     pub fn workspace_path(&self, run: &str) -> Option<PathBuf> {
         PhaseKey::new(run, PHASE_NAME).ok()?;
-        let path = self.config.workspaces_dir.join(run);
+        // A run that took over another's worktree has that run's folder.
+        let name = self.live_of(run).map_or_else(
+            || run.to_string(),
+            |live| locked(&live).ctx.workspace_name().to_string(),
+        );
+        let path = self.config.workspaces_dir.join(name);
         path.is_dir().then_some(path)
     }
 
@@ -387,6 +433,7 @@ impl FileRuns {
             task_text,
             model,
             quick: None,
+            follows: None,
         };
         self.begin(phases, begin, &|_| Ok(()))
     }
@@ -413,24 +460,30 @@ impl FileRuns {
             self.counter.fetch_add(1, Ordering::SeqCst)
         );
         let workspace_path = self.config.workspaces_dir.join(&run);
-        let ctx = RunContext {
-            run: run.clone(),
-            repo: begin.repo,
-            task_file: begin.task_file,
-            alias: begin.alias,
-            budget_usd: begin.budget_usd,
-            task_text: begin.task_text,
-            model: begin.model,
-            session_id,
-            attempt: 0,
-            spent_usd: 0.0,
-            run_state: RunState::Running {},
-            workspace_state: WorkspaceState::Provisioning,
-            workspace_path: workspace_path.to_string_lossy().into_owned(),
-            git_dir: None,
-            branch: format!("collide/{run}"),
-            workspace_recorded: false,
-            quick: begin.quick,
+        let ctx = match (&begin.follows, &begin.quick) {
+            (Some(prior), Some(quick)) => {
+                RunContext::continuing(prior, &run, begin.task_text, quick.clone())
+            }
+            _ => RunContext {
+                run: run.clone(),
+                repo: begin.repo,
+                task_file: begin.task_file,
+                alias: begin.alias,
+                budget_usd: begin.budget_usd,
+                task_text: begin.task_text,
+                model: begin.model,
+                session_id,
+                attempt: 0,
+                spent_usd: 0.0,
+                run_state: RunState::Running {},
+                workspace_state: WorkspaceState::Provisioning,
+                workspace_path: workspace_path.to_string_lossy().into_owned(),
+                git_dir: None,
+                branch: format!("collide/{run}"),
+                workspace_recorded: false,
+                quick: begin.quick,
+                workspace_name: None,
+            },
         };
         if let Err(error) = self.record_run(phases, &run, None, RunState::Running {}) {
             return Err(vec![problem(format!("recording the run: {error}"))]);
@@ -563,13 +616,14 @@ impl FileRuns {
         base: &BaseEnvironment,
     ) -> Result<(), Halt> {
         let guard = DiskGuard::new(self.config.free_space.as_ref(), self.config.floor);
-        let workspace_path = self.config.workspaces_dir.join(run);
         let Live { workspace, ctx } = live;
+        let workspace_path = self.config.workspaces_dir.join(ctx.workspace_name());
+        let name = ctx.workspace_name().to_string();
         if workspace.state() == WorkspaceState::Provisioning {
             self.disk_check(&guard, &workspace_path, Before::Workspace)?;
             self.disk_check(&guard, &self.config.runs_dir, Before::Workspace)?;
             if !ctx.workspace_recorded {
-                self.record_workspace(phases, run, None, WorkspaceState::Provisioning);
+                self.record_workspace(phases, run, &name, None, WorkspaceState::Provisioning);
                 ctx.workspace_recorded = true;
             }
             workspace.provision(&guard).map_err(|error| match error {
@@ -578,6 +632,7 @@ impl FileRuns {
                     self.record_workspace(
                         phases,
                         run,
+                        &name,
                         Some(WorkspaceState::Provisioning),
                         workspace.state(),
                     );
@@ -587,20 +642,24 @@ impl FileRuns {
             self.record_workspace(
                 phases,
                 run,
+                &name,
                 Some(WorkspaceState::Provisioning),
                 WorkspaceState::Ready,
             );
         }
 
         self.disk_check(&guard, &self.config.runs_dir, Before::Phase)?;
+        let workspace_before = workspace.state();
         workspace.start_phase(&guard).map_err(|error| match error {
             WorkspaceError::Disk(DiskError::Paused(pause)) => Halt::Disk(pause),
             other => Halt::from(problem(format!("starting the phase: {other}"))),
         })?;
+        // A workspace that is `idle` (a worktree a re-prompt takes over) goes in use from there.
         self.record_workspace(
             phases,
             run,
-            Some(WorkspaceState::Ready),
+            &name,
+            Some(workspace_before),
             WorkspaceState::InUse,
         );
         let first_turn = ctx.task_text.clone();
@@ -829,14 +888,15 @@ impl FileRuns {
     /// A start that failed after the run was recorded: the workspace is released and the run is `failed`.
     fn fail(&self, phases: &Phases, live: &mut Live) {
         if live.workspace.state() == WorkspaceState::InUse {
-            self.end_workspace_phase(phases, &live.ctx.run, &mut live.workspace);
+            self.end_workspace_phase(phases, live);
         }
         self.record_run_state(phases, live, RunState::Failed {});
         self.config.store.delete_run_context(&live.ctx.run).ok();
     }
 
-    fn end_workspace_phase(&self, phases: &Phases, run: &str, workspace: &mut BuiltinWorkspace) {
-        match workspace.end_phase() {
+    fn end_workspace_phase(&self, phases: &Phases, live: &mut Live) {
+        let run = live.ctx.run.as_str();
+        match live.workspace.end_phase() {
             Ok(bytes) => {
                 self.log(&format!("run {run}: its worktree uses {bytes} bytes"));
                 self.config.metrics.workspace_bytes(run, PHASE_NAME, bytes);
@@ -848,6 +908,7 @@ impl FileRuns {
         self.record_workspace(
             phases,
             run,
+            live.ctx.workspace_name(),
             Some(WorkspaceState::InUse),
             WorkspaceState::Idle,
         );
@@ -863,7 +924,7 @@ impl FileRuns {
         };
         let mut live = locked(&live);
         if live.workspace.state() == WorkspaceState::InUse {
-            self.end_workspace_phase(phases, run, &mut live.workspace);
+            self.end_workspace_phase(phases, &mut live);
         }
         self.cancel_timer(run);
         self.config.queue.clear_run(run, None);
@@ -1031,6 +1092,7 @@ impl FileRuns {
             }
         }
         self.recover_accepts(phases);
+        self.recover_discards(phases);
     }
 
     /// Starts a thread that resumes the run when its limit has reset. A limit with no reset time has no timer: only the
@@ -1280,9 +1342,8 @@ impl FileRuns {
                 None => Err(format!("item {item_id:?} was answered already")),
             },
             QueueAnswer::Accept {} => return Ok(self.accept(phases, item_id)),
-            QueueAnswer::Reprompt { .. } | QueueAnswer::Discard {} => {
-                Err(format!("{kind:?} on a review is not built yet"))
-            }
+            QueueAnswer::Reprompt { prompt } => return Ok(self.reprompt(phases, item_id, prompt)),
+            QueueAnswer::Discard {} => return Ok(self.discard(phases, item_id)),
             _ => Err(format!("an item of this kind does not take {kind:?} yet")),
         };
         match outcome {
@@ -1329,10 +1390,13 @@ impl FileRuns {
         )
     }
 
+    /// Records a move of the workspace named `workspace`, made by `run`: the two are the same for a run that made its
+    /// worktree, and not for one that took it over.
     fn record_workspace(
         &self,
         phases: &Phases,
         run: &str,
+        workspace: &str,
         from: Option<WorkspaceState>,
         to: WorkspaceState,
     ) {
@@ -1343,7 +1407,7 @@ impl FileRuns {
                 phase: None,
             },
             EventBody::WorkspaceTransition {
-                workspace: run.to_string(),
+                workspace: workspace.to_string(),
                 from,
                 to,
             },

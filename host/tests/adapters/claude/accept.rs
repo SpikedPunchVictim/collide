@@ -29,7 +29,7 @@ use std::time::Duration;
 // ---- helpers ------------------------------------------------------------------------------------------------------
 
 /// What the agent does: writes `file` and commits it.
-fn adds(file: &str) -> Vec<Value> {
+pub(super) fn adds(file: &str) -> Vec<Value> {
     vec![
         write_file(file, "from the agent\n"),
         json!({"git_commit": format!("Add {file}")}),
@@ -37,7 +37,7 @@ fn adds(file: &str) -> Vec<Value> {
 }
 
 /// Runs git in `dir` as `git_out` does, and says whether it worked. For a command that is meant to stop half-way.
-fn git_stops(dir: &Path, args: &[&str]) -> bool {
+pub(super) fn git_stops(dir: &Path, args: &[&str]) -> bool {
     Command::new("git")
         .args([
             "-c",
@@ -61,23 +61,27 @@ fn git_stops(dir: &Path, args: &[&str]) -> bool {
 }
 
 /// Commits `file` with `text` on the branch the checkout is on.
-fn commit_file(dir: &Path, file: &str, text: &str, message: &str) {
+pub(super) fn commit_file(dir: &Path, file: &str, text: &str, message: &str) {
     fs::write(dir.join(file), text).unwrap();
     git_out(dir, &["add", "."]);
     git_out(dir, &["commit", "-q", "-m", message]);
 }
 
-struct Reviewed {
-    fx: Fixture,
-    board: String,
-    key: String,
-    run: String,
-    item: QueueItem,
+pub(super) struct Reviewed {
+    pub(super) fx: Fixture,
+    pub(super) board: String,
+    pub(super) key: String,
+    pub(super) run: String,
+    pub(super) item: QueueItem,
 }
 
 /// A run whose agent did `steps`, ended, with its `Review` item.
-fn reviewed(root: &TempRoot, steps: &[Value]) -> Reviewed {
-    let (mut fx, board, key) = quick(root, steps);
+pub(super) fn reviewed(root: &TempRoot, steps: &[Value]) -> Reviewed {
+    reviewed_in(quick(root, steps))
+}
+
+/// The run of the task of `quick_in`, started and ended, with its `Review` item.
+pub(super) fn reviewed_in((mut fx, board, key): (Fixture, String, String)) -> Reviewed {
     let run = started(&mut fx, &board, &key);
     let item = wait_item(&mut fx, &run, QueueKind::Review);
     wait_ended(&mut fx, &run);
@@ -91,12 +95,12 @@ fn reviewed(root: &TempRoot, steps: &[Value]) -> Reviewed {
 }
 
 impl Reviewed {
-    fn accept(&mut self) -> QueueAnswerResult {
+    pub(super) fn accept(&mut self) -> QueueAnswerResult {
         answer(&mut self.fx, &self.item, QueueAnswer::Accept {})
     }
 
     /// The message of a refused accept. The item is still in the Queue, and the run still has its worktree.
-    fn refused(&mut self) -> String {
+    pub(super) fn refused(&mut self) -> String {
         match self.accept() {
             QueueAnswerResult::Refused { message } => {
                 assert_eq!(
@@ -111,31 +115,31 @@ impl Reviewed {
         }
     }
 
-    fn merged(&mut self) -> String {
+    pub(super) fn merged(&mut self) -> String {
         match self.accept() {
             QueueAnswerResult::Merged { commit } => commit,
             other => panic!("the accept should merge, and gave {other:?}"),
         }
     }
 
-    fn branch(&self) -> String {
+    pub(super) fn branch(&self) -> String {
         format!("collide/{}", self.run)
     }
 
-    fn branch_head(&self) -> String {
+    pub(super) fn branch_head(&self) -> String {
         git_out(&self.fx.repo, &["rev-parse", &self.branch()])
     }
 
-    fn head(&self) -> String {
+    pub(super) fn head(&self) -> String {
         git_out(&self.fx.repo, &["rev-parse", "HEAD"])
     }
 
-    fn category(&mut self) -> Category {
+    pub(super) fn category(&mut self) -> Category {
         task(&mut self.fx, &self.board, &self.key).state.category
     }
 
     /// The worktree and the branch are gone, and git no longer lists the worktree.
-    fn assert_removed(&self) {
+    pub(super) fn assert_removed(&self) {
         assert!(!self.fx.workspace_dir(&self.run).exists());
         assert_eq!(
             git_out(&self.fx.repo, &["branch", "--list", &self.branch()]),
@@ -145,7 +149,7 @@ impl Reviewed {
     }
 }
 
-fn step_events(events: &[EventBody]) -> Vec<EventBody> {
+pub(super) fn step_events(events: &[EventBody]) -> Vec<EventBody> {
     events
         .iter()
         .filter(|body| {
@@ -158,7 +162,7 @@ fn step_events(events: &[EventBody]) -> Vec<EventBody> {
         .collect()
 }
 
-fn status(dir: &Path) -> String {
+pub(super) fn status(dir: &Path) -> String {
     git_out(dir, &["status", "--porcelain"])
 }
 
@@ -595,7 +599,7 @@ fn a_board_whose_root_is_a_linked_worktree_merges_into_the_branch_it_is_on() {
 
 // ---- a daemon killed between the intent and the outcome -----------------------------------------------------------
 
-fn actor(run: &str) -> Actor {
+pub(super) fn actor(run: &str) -> Actor {
     Actor {
         kind: ActorKind::Workflow,
         run: Some(run.to_string()),
@@ -605,7 +609,7 @@ fn actor(run: &str) -> Actor {
 
 /// Stops the daemon as a kill after the intent would leave it: the item is out of the Queue, the intent is in the log.
 /// With `outcome`, the outcome is written too, as a kill between the outcome and the removal leaves it.
-fn killed_after_intent(run: &mut Reviewed, outcome: Option<&str>) {
+pub(super) fn killed_after_intent(run: &mut Reviewed, outcome: Option<&str>) {
     run.fx.stop_daemon();
     let store = Store::open(&run.fx.paths().store_dir).unwrap();
     store.delete_queue_item(&run.item.id).unwrap();
@@ -711,6 +715,22 @@ fn after_a_kill_an_interrupted_merge_is_an_outcome_unknown_item_and_nothing_is_t
     run.item = back;
     run.merged();
     run.assert_removed();
+}
+
+/// A run whose accept a kill cut short in the middle of a merge in the checkout: the restarted daemon asks about the
+/// outcome, the person undoes the merge and dismisses the item, and the review item is back. Returns that item.
+pub(super) fn review_back_after_an_unknown_outcome(run: &mut Reviewed) -> QueueItem {
+    commit_file(&run.fx.repo, "b.txt", "later\n", "later");
+    assert!(git_stops(
+        &run.fx.repo,
+        &["merge", "--no-commit", "--no-ff", &run.branch()]
+    ));
+    killed_after_intent(run, None);
+    run.fx.start_daemon();
+    let unknown = wait_item(&mut run.fx, &run.run, QueueKind::OutcomeUnknown);
+    git_out(&run.fx.repo, &["merge", "--abort"]);
+    answer(&mut run.fx, &unknown, QueueAnswer::Dismiss {});
+    wait_item(&mut run.fx, &run.run, QueueKind::Review)
 }
 
 #[test]

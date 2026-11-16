@@ -25,6 +25,8 @@
 //! - **The context stays.** A prompt run's context is kept in the store after the run ends, because accept,
 //!   re-prompt and discard (ts-0079, ts-0080) need its worktree, branch, base and session. Accept (the `accept` module)
 //!   removes the worktree and keeps the context, with the workspace `removed`, so `run.get` still knows the run.
+//! - **Re-prompt and discard** are in the `reprompt` and `discard` modules: a re-prompt is a new run that takes over
+//!   this run's worktree, and a discard deletes the worktree and the branch.
 //! - **The diff.** [`FileRuns::diff`] is [`crate::run_diff`] between the recorded commit and the branch's head.
 
 use super::{Begin, FileRuns, Live, locked, problem};
@@ -63,6 +65,8 @@ pub struct QuickSequence {
     /// The category the task moves to when accept merges the run. In the engine this is the task source's operation
     /// that follows an `integrate` (0.4); the pack declares none yet, so it is written here.
     pub on_merged: Category,
+    /// The category the task moves to when the person discards the run's work.
+    pub on_discarded: Category,
 }
 
 pub const QUICK: QuickSequence = QuickSequence {
@@ -72,10 +76,22 @@ pub const QUICK: QuickSequence = QuickSequence {
     on_start: Category::Active,
     on_end: Category::Review,
     on_merged: Category::Done,
+    on_discarded: Category::Dropped,
 };
 
 /// The Review item's title for a run that is done.
 pub(super) const READY_TITLE: &str = "The agent finished and its changes are ready to review";
+
+/// The Review item's title for a run that was stopped.
+const STOPPED_TITLE: &str = "The run was stopped; re-prompt the agent or discard its work";
+
+/// The Review item's title for a run that failed, with the cause the phase recorded when there is one.
+fn failed_title(cause: Option<String>) -> String {
+    match cause {
+        Some(cause) => format!("The run failed ({cause}); re-prompt the agent or discard its work"),
+        None => "The run failed; re-prompt the agent or discard its work".to_string(),
+    }
+}
 
 /// The subject of the commit Collide makes of what the agent left uncommitted.
 pub const LEFTOVER_COMMIT: &str = "Commit what the agent left uncommitted";
@@ -89,6 +105,12 @@ pub(super) struct QuickRun {
     pub(super) task: String,
     pub(super) base_branch: String,
     pub(super) base_commit: String,
+    /// The run this one re-prompts, when it does: it took over that run's worktree and resumed its session.
+    #[serde(default)]
+    pub(super) follows: Option<String>,
+    /// The run a re-prompt of this one started, once it has started.
+    #[serde(default)]
+    pub(super) followed_by: Option<String>,
 }
 
 /// Why [`FileRuns::diff`] gave no diff.
@@ -199,7 +221,10 @@ impl FileRuns {
                 task: key?,
                 base_branch,
                 base_commit,
+                follows: None,
+                followed_by: None,
             }),
+            follows: None,
         })
     }
 
@@ -240,6 +265,21 @@ impl FileRuns {
 
     /// The scratch task `key` of `board`, when it is there and `ready`.
     fn ready_task(&self, board: &str, key: &str) -> Result<Task, LaunchProblem> {
+        let task = self.task_now(board, key)?;
+        if task.state.category != Category::Ready {
+            return Err(task_problem(
+                key,
+                format!(
+                    "{key} is {}, and only a ready task can be started",
+                    task.state.status
+                ),
+            ));
+        }
+        Ok(task)
+    }
+
+    /// The scratch task `key` of `board` as it is now, whatever its state.
+    pub(super) fn task_now(&self, board: &str, key: &str) -> Result<Task, LaunchProblem> {
         let (source, id) = scratch::split_id(key);
         if source != Some(scratch::SOURCE) {
             return Err(task_problem(
@@ -253,31 +293,27 @@ impl FileRuns {
                 checkout: None,
             })
             .map_err(|error| task_problem(key, format!("reading {key}: {error}")))?;
-        match found.task {
-            None => Err(task_problem(key, format!("the board has no task {key}"))),
-            Some(task) if task.state.category != Category::Ready => Err(task_problem(
-                key,
-                format!(
-                    "{key} is {}, and only a ready task can be started",
-                    task.state.status
-                ),
-            )),
-            Some(task) => Ok(task),
-        }
+        found
+            .task
+            .ok_or_else(|| task_problem(key, format!("the board has no task {key}")))
     }
 
     /// Once the run is recorded: links it to its board and task, and takes the task `active`. Under the claims lock,
-    /// the task is read again, so a task that another start took first is refused.
-    fn claim(
+    /// the task is read again, so a task that another start took first is refused. The run of a re-prompt takes a task
+    /// that is in review, and the person's answer is what claims it.
+    pub(super) fn claim(
         &self,
         phases: &crate::phases::Phases,
         run: &str,
         quick: &QuickRun,
     ) -> Result<(), Vec<LaunchProblem>> {
         let _claims = locked(&self.claims);
-        let task = self
-            .ready_task(&quick.board, &quick.task)
-            .map_err(|found| vec![found])?;
+        let task = if quick.follows.is_some() {
+            self.task_now(&quick.board, &quick.task)
+        } else {
+            self.ready_task(&quick.board, &quick.task)
+        }
+        .map_err(|found| vec![found])?;
         let launch = RunLaunch {
             board: Some(quick.board.clone()),
             tasks: vec![RunTaskRef {
@@ -364,20 +400,15 @@ impl FileRuns {
                 RunState::Ended {
                     outcome: NonEmpty::new("done").expect("the text is not empty"),
                 },
-                READY_TITLE,
+                READY_TITLE.to_string(),
             ),
             (RunState::Ended { .. }, Err(_)) => (
                 RunState::Failed {},
-                "Collide could not commit what the agent left; re-prompt the agent or discard its work",
+                "Collide could not commit what the agent left; re-prompt the agent or discard its work"
+                    .to_string(),
             ),
-            (RunState::Stopped {}, _) => (
-                RunState::Stopped {},
-                "The run was stopped; re-prompt the agent or discard its work",
-            ),
-            (other, _) => (
-                other,
-                "The run failed; re-prompt the agent or discard its work",
-            ),
+            (RunState::Stopped {}, _) => (RunState::Stopped {}, STOPPED_TITLE.to_string()),
+            (other, _) => (other, failed_title(self.failure_of(&run))),
         };
         if let Err(message) = self.move_task(phases, &quick, QUICK.on_end, &run) {
             self.log(&format!(
@@ -389,9 +420,31 @@ impl FileRuns {
             &run,
             &quick.task,
             matches!(to, RunState::Ended { .. }),
-            title,
+            &title,
         );
         to
+    }
+
+    /// The Review item's title for a run in `state`, as `finish_quick` words it when the run ends.
+    pub(super) fn review_title(&self, run: &str, state: &RunState) -> String {
+        match state {
+            RunState::Ended { .. } => READY_TITLE.to_string(),
+            RunState::Stopped {} => STOPPED_TITLE.to_string(),
+            _ => failed_title(self.failure_of(run)),
+        }
+    }
+
+    /// The cause the run's phase failed with, as the store has it.
+    fn failure_of(&self, run: &str) -> Option<String> {
+        match self.config.store.phase_record(run, super::PHASE_NAME) {
+            Ok(record) => record?.failure,
+            Err(error) => {
+                self.log(&format!(
+                    "run {run}: its phase's record was not read: {error}"
+                ));
+                None
+            }
+        }
     }
 
     /// Puts the run's `Review` item in the Queue: accept, re-prompt and discard for a run that is done, and re-prompt

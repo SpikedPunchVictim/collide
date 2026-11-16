@@ -288,21 +288,7 @@ impl FileRuns {
         live.workspace
             .set_base(&format!("refs/heads/{}", quick.base_branch));
         let removed = live.workspace.remove();
-        let after = live.workspace.state();
-        if after != before {
-            // `idle` and `ready` go through `removable`, which is two moves.
-            if after == WorkspaceState::Removed {
-                self.record_workspace(phases, &run, Some(before), WorkspaceState::Removable);
-                self.record_workspace(
-                    phases,
-                    &run,
-                    Some(WorkspaceState::Removable),
-                    WorkspaceState::Removed,
-                );
-            } else {
-                self.record_workspace(phases, &run, Some(before), after);
-            }
-        }
+        self.record_removal(phases, live, before);
         if let Err(error) = removed {
             self.log(&format!(
                 "run {run}: merged, but its worktree was not removed: {error}"
@@ -311,7 +297,35 @@ impl FileRuns {
         self.sync(live);
     }
 
-    fn write_event(&self, phases: &Phases, run: &str, body: EventBody) -> Result<(), String> {
+    /// Records the workspace's move from `before` to where a removal left it. `idle` and `ready` go through
+    /// `removable`, which is two moves.
+    pub(super) fn record_removal(&self, phases: &Phases, live: &Live, before: WorkspaceState) {
+        let run = &live.ctx.run;
+        let name = live.ctx.workspace_name();
+        let after = live.workspace.state();
+        if after == before {
+            return;
+        }
+        if after == WorkspaceState::Removed && before != WorkspaceState::Removable {
+            self.record_workspace(phases, run, name, Some(before), WorkspaceState::Removable);
+            self.record_workspace(
+                phases,
+                run,
+                name,
+                Some(WorkspaceState::Removable),
+                WorkspaceState::Removed,
+            );
+        } else {
+            self.record_workspace(phases, run, name, Some(before), after);
+        }
+    }
+
+    pub(super) fn write_event(
+        &self,
+        phases: &Phases,
+        run: &str,
+        body: EventBody,
+    ) -> Result<(), String> {
         phases
             .append_event(
                 Actor {
@@ -378,7 +392,11 @@ impl FileRuns {
             .values()
             .filter(|live| {
                 let live = locked(live);
-                live.ctx.quick.is_some()
+                // A run a re-prompt followed gave its worktree to the new run, which settles it.
+                live.ctx
+                    .quick
+                    .as_ref()
+                    .is_some_and(|quick| quick.followed_by.is_none())
                     && matches!(live.ctx.run_state, RunState::Ended { .. })
                     && live.ctx.workspace_state != WorkspaceState::Removed
             })

@@ -13,6 +13,7 @@
 //! | [`BuiltinWorkspace::start_phase`] | `ready` or `idle → in_use` | the floor, before each phase (0.2) |
 //! | [`BuiltinWorkspace::end_phase`] | `in_use → idle` | measures the disk it uses (0.13) |
 //! | [`BuiltinWorkspace::remove`] | `idle` or `ready → removable → removed` | the two refusals, then `git worktree remove` |
+//! | [`BuiltinWorkspace::discard`] | the same moves | no refusal: the folder, git's record of it, the branch |
 //!
 //! A pause for disk leaves the state as it was: nothing was made or started, and the call is tried again when space
 //! returns. A workspace that was made and never used (`ready`) is removed like an idle one: core's table has the move
@@ -33,6 +34,17 @@
 //!
 //! A worktree that is dirty and unmerged is called dirty. When removal goes ahead the branch Collide made is deleted
 //! with it (`git branch -D` is safe, since every change is in the base).
+//!
+//! ## Discard
+//!
+//! [`BuiltinWorkspace::discard`] is the removal of a person who has decided the work goes: it refuses only a workspace
+//! a run is using. It deletes the folder with everything in it (committed, uncommitted, untracked and ignored work),
+//! has git forget the worktree (`git worktree prune`), and deletes the branch. It deletes the folder itself, not
+//! through `git worktree remove`, because that command forgets the worktree before it deletes the folder, and a folder
+//! it could not delete (a file that is locked) would then be a worktree git no longer knows, which the same command
+//! cannot remove again. Here, the same call after the cause is gone finishes the job. The folder is deleted only for a
+//! worktree this workspace made: its git directory is one of the repository's `worktrees/<name>`. The branch's last
+//! commit is read first ([`BuiltinWorkspace::branch_head`]), so the caller can record it.
 //!
 //! The answers come from git's machine-readable output (`status --porcelain=v1 -z`, `rev-list --count`,
 //! `rev-parse`), run with `LC_ALL=C`, never from text meant for people.
@@ -423,6 +435,70 @@ impl BuiltinWorkspace {
         self.git
             .run(&self.spec.repo, &["branch", "-D", "--", &self.spec.branch])?;
         self.move_to(WorkspaceState::Removed)
+    }
+
+    /// Deletes the worktree and its branch whatever the worktree holds (see the module notes). `idle → removable →
+    /// removed`, as [`BuiltinWorkspace::remove`]. A workspace a run is using is refused. A failure leaves the state at
+    /// `removable`, and the same call is made again once its cause is gone.
+    pub fn discard(&mut self) -> Result<(), WorkspaceError> {
+        match self.state {
+            WorkspaceState::InUse => {
+                return Err(WorkspaceError::Refused {
+                    reason: RemoveRefusal::InUse,
+                    message: format!("{} is in use by a run", self.spec.path.display()),
+                });
+            }
+            WorkspaceState::Idle | WorkspaceState::Ready => {
+                self.check_move(WorkspaceState::Removable)?;
+                self.move_to(WorkspaceState::Removable)?;
+            }
+            _ => self.check_move(WorkspaceState::Removed)?,
+        }
+        self.delete_folder()?;
+        // Git forgets the worktree first: it does not delete a branch that a worktree has checked out.
+        self.git.run(&self.spec.repo, &["worktree", "prune"])?;
+        if self.branch_head()?.is_some() {
+            self.git
+                .run(&self.spec.repo, &["branch", "-D", "--", &self.spec.branch])?;
+        }
+        self.move_to(WorkspaceState::Removed)
+    }
+
+    /// The commit the workspace's branch points at, or `None` when the branch is not there (never made, or deleted).
+    pub fn branch_head(&self) -> Result<Option<String>, WorkspaceError> {
+        let pattern = format!("refs/heads/{}", self.spec.branch);
+        let found = self.git.text(
+            &self.spec.repo,
+            &["for-each-ref", "--format=%(objectname)", &pattern],
+        )?;
+        Ok(found.lines().next().map(str::to_string))
+    }
+
+    /// Deletes the worktree's folder, which is already gone for a worktree someone deleted by hand. Only a worktree
+    /// this workspace made is deleted: its git directory is `<repository>/.git/worktrees/<name>`, so a path that is a
+    /// checkout of its own is never removed.
+    fn delete_folder(&self) -> Result<(), WorkspaceError> {
+        let linked = self
+            .git_dir
+            .as_ref()
+            .and_then(|dir| dir.parent())
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "worktrees");
+        if !linked {
+            return Err(WorkspaceError::Io(io::Error::other(format!(
+                "{} is not a worktree this workspace made, so it is not deleted",
+                self.spec.path.display()
+            ))));
+        }
+        match fs::remove_dir_all(&self.spec.path) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                Err(WorkspaceError::Io(io::Error::new(
+                    error.kind(),
+                    format!("{} was not deleted: {error}", self.spec.path.display()),
+                )))
+            }
+            _ => Ok(()),
+        }
     }
 
     fn refuse_work(&self) -> Result<(), WorkspaceError> {

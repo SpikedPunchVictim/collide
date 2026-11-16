@@ -483,7 +483,8 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   above). The one other way in is the UI-tools endpoint below, which gives an agent five view-only tools and nothing
   else.
 - **A step with a side effect writes an intent before it and an outcome after it** (R5). The side-effect steps are an
-  integrate (a merge or a PR), a source op, an `after_integrate` hook and a remote write. The intent names the step
+  integrate (a merge or a PR), a source op, an `after_integrate` hook, a remote write, and a discard (the deletion of
+  a run's worktree and branch, with the branch's last commit in its events; ts-0080-tq). The intent names the step
   and what it will do; the outcome names the result. After a restart the engine finds an intent with no outcome and
   checks the world first, with the step's own check (is the branch merged, does the PR exist, is the label set), and
   never repeats the step blind. When the check cannot tell, the run waits in the Queue as "outcome unknown", for a

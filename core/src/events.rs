@@ -54,7 +54,8 @@ pub enum StepResult {
 }
 
 /// The side-effect steps that write an intent before and an outcome after (0.2): an integrate, a source op, an
-/// `after_integrate` hook and a remote write.
+/// `after_integrate` hook and a remote write, and a discard, which deletes a run's worktree and branch and keeps the
+/// branch's last commit in the step's events (ts-0080-tq).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StepKind {
@@ -62,6 +63,7 @@ pub enum StepKind {
     SourceOp,
     AfterIntegrateHook,
     RemoteWrite,
+    Discard,
 }
 
 /// What happened. Each variant is one event name, and `event` is the tag. Unknown keys are refused.

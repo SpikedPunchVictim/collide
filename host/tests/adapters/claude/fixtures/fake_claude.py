@@ -24,6 +24,9 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
                             write the text to the file, below this process's working folder (ts-0078-ye)
     {"git_commit": "message"}
                             stage everything in the working folder and commit it, as an agent does (ts-0078-ye)
+    {"git": ["merge", "--no-commit", "main"]}
+                            run git in the working folder, as `git_commit` does, and go on whatever it answers: a merge
+                            that stops on a conflict is the point of it (ts-0080-tq)
     {"exit": N}             exit with code N now
 
 `expect` is a subset match: every key in the expected object must be in the line, with a value that matches, and the
@@ -123,15 +126,26 @@ def write_file(path, text):
         out.write(text)
 
 
+IDENTITY = ["-c", "user.name=Fake Claude", "-c", "user.email=fake@example.invalid", "-c", "commit.gpgsign=false"]
+
+
 def git_commit(message):
     """Stages and commits everything, with an identity of its own and none of the user's or the system's git config."""
-    env = dict(os.environ, HOME="/nonexistent", GIT_CONFIG_GLOBAL="/dev/null")
-    env.update(GIT_CONFIG_SYSTEM="/dev/null", GIT_CONFIG_NOSYSTEM="1")
-    identity = ["-c", "user.name=Fake Claude", "-c", "user.email=fake@example.invalid", "-c", "commit.gpgsign=false"]
-    for args in (["add", "-A"], identity + ["commit", "-q", "-m", message]):
-        ran = subprocess.run(["git"] + args, env=env, capture_output=True, text=True)
+    for args in (["add", "-A"], IDENTITY + ["commit", "-q", "-m", message]):
+        ran = subprocess.run(["git"] + args, env=git_env(), capture_output=True, text=True)
         if ran.returncode != 0:
             stop(EXIT_STEP_UNKNOWN, "git %s failed: %s" % (" ".join(args), ran.stderr.strip()))
+
+
+def git_env():
+    env = dict(os.environ, HOME="/nonexistent", GIT_CONFIG_GLOBAL="/dev/null")
+    env.update(GIT_CONFIG_SYSTEM="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+    return env
+
+
+def git_run(args):
+    """Runs git with the arguments, with the identity of `git_commit`. Its exit code is not looked at."""
+    subprocess.run(["git"] + IDENTITY + args, env=git_env(), capture_output=True, text=True)
 
 
 def main():
@@ -167,6 +181,8 @@ def main():
             write_file(step["write_file"]["path"], step["write_file"]["text"])
         elif "git_commit" in step:
             git_commit(step["git_commit"])
+        elif "git" in step:
+            git_run(step["git"])
         elif "exit" in step:
             sys.stdout.flush()
             sys.exit(step["exit"])

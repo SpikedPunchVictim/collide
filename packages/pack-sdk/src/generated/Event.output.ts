@@ -313,9 +313,11 @@ export type ReportLine =
     }
 /**
  * The side-effect steps that write an intent before and an outcome after (0.2): an integrate, a source op, an
- * `after_integrate` hook and a remote write.
+ * `after_integrate` hook and a remote write, and a discard, which deletes a run's worktree and branch and keeps the
+ * branch's last commit in the step's events (ts-0080-tq).
  */
-export type StepKind = 'integrate' | 'source_op' | 'after_integrate_hook' | 'remote_write'
+export type StepKind =
+  'integrate' | 'source_op' | 'after_integrate_hook' | 'remote_write' | 'discard'
 /**
  * How a side-effect step ended. A merge that finds its change already at the target is `succeeded` (0.2).
  */

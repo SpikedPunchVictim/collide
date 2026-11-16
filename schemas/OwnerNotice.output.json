@@ -2093,12 +2093,13 @@
       "type": "object"
     },
     "StepKind": {
-      "description": "The side-effect steps that write an intent before and an outcome after (0.2): an integrate, a source op, an\n`after_integrate` hook and a remote write.",
+      "description": "The side-effect steps that write an intent before and an outcome after (0.2): an integrate, a source op, an\n`after_integrate` hook and a remote write, and a discard, which deletes a run's worktree and branch and keeps the\nbranch's last commit in the step's events (ts-0080-tq).",
       "enum": [
         "integrate",
         "source_op",
         "after_integrate_hook",
-        "remote_write"
+        "remote_write",
+        "discard"
       ],
       "type": "string"
     },

@@ -71,6 +71,8 @@ pub(super) struct Setup {
     pub(super) ignore_settings: bool,
     /// What the daemon is given as its source of the published version.
     pub(super) published: Option<collide_host::claude_versions::PublishedChoice>,
+    /// The recording a phase started with `--resume` plays (a re-prompt), in place of the one given to `Fixture::new`.
+    pub(super) resumed: Option<PathBuf>,
 }
 
 pub(super) struct Fixture {
@@ -160,6 +162,7 @@ impl Fixture {
             &BinarySpec {
                 smoke: setup.smoke.as_deref(),
                 pass_words: !setup.ignore_settings,
+                resumed: setup.resumed.as_deref(),
                 ..BinarySpec::new(
                     setup.version.as_deref().unwrap_or("2.1.325"),
                     recording_path,

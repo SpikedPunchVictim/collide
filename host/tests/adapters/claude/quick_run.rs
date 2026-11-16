@@ -62,7 +62,11 @@ pub(super) fn git_out(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn call<P: Serialize, R: DeserializeOwned>(fx: &mut Fixture, method: &str, params: &P) -> R {
+pub(super) fn call<P: Serialize, R: DeserializeOwned>(
+    fx: &mut Fixture,
+    method: &str,
+    params: &P,
+) -> R {
     fx.client
         .call(method, params, Some(Duration::from_secs(60)))
         .unwrap_or_else(|error| panic!("{method}: {error}"))
@@ -239,17 +243,27 @@ pub(super) fn diff(fx: &mut Fixture, run: &str, path: Option<&str>) -> RunDiffRe
 
 /// `report.jsonl` with `steps` after the turn it waits for, in `root`.
 pub(super) fn report_with(root: &TempRoot, steps: &[Value]) -> PathBuf {
+    report_named(root, "quick.jsonl", PROMPT_TURN, steps)
+}
+
+/// The turn of `PROMPT`, which `report.jsonl` waits for.
+pub(super) const PROMPT_TURN: &str = r#"{"expect":{"type":"user","message":{"role":"user"}}}"#;
+
+/// `report.jsonl` as `name` in `root`, with `turn` in place of the turn it waits for and `steps` after it.
+pub(super) fn report_named(root: &TempRoot, name: &str, turn: &str, steps: &[Value]) -> PathBuf {
     let text = fs::read_to_string(recording("report")).unwrap();
     let mut lines = Vec::new();
     let mut inserted = false;
     for line in text.lines() {
-        lines.push(line.to_string());
         if !inserted && line.starts_with("{\"expect\"") {
+            lines.push(turn.to_string());
             lines.extend(steps.iter().map(Value::to_string));
             inserted = true;
+        } else {
+            lines.push(line.to_string());
         }
     }
-    let path = root.join("quick.jsonl");
+    let path = root.join(name);
     fs::write(&path, lines.join("\n")).unwrap();
     path
 }
@@ -260,7 +274,11 @@ pub(super) fn write_file(path: &str, text: &str) -> Value {
 
 /// A fixture whose agent does `steps`, a board on its repository, and one scratch task with `PROMPT`.
 pub(super) fn quick(root: &TempRoot, steps: &[Value]) -> (Fixture, String, String) {
-    let mut fx = Fixture::new(&report_with(root, steps), Setup::default());
+    quick_in(Fixture::new(&report_with(root, steps), Setup::default()))
+}
+
+/// `fx`, a board on its repository, and one scratch task with `PROMPT`.
+pub(super) fn quick_in(mut fx: Fixture) -> (Fixture, String, String) {
     let repo = fx.repo.clone();
     // The identity of the merge commits that accept makes in the checkout: the daemon's git reads no global one.
     git_out(&repo, &["config", "user.name", "test"]);
@@ -889,28 +907,4 @@ fn a_board_whose_root_is_a_linked_worktree_runs_from_the_branch_it_is_on() {
         git_out(&tree, &["rev-parse", "--abbrev-ref", "HEAD"]),
         format!("collide/{run}")
     );
-}
-
-// ---- what is not built yet ----------------------------------------------------------------------------------------
-
-#[test]
-fn reprompt_and_discard_are_not_built_yet() {
-    let root = TempRoot::new();
-    let (mut fx, board, key) = quick(&root, &[]);
-    let run = started(&mut fx, &board, &key);
-    let item = wait_item(&mut fx, &run, QueueKind::Review);
-    for reply in [
-        QueueAnswer::Reprompt {
-            prompt: "again".to_string(),
-        },
-        QueueAnswer::Discard {},
-    ] {
-        match answer(&mut fx, &item, reply) {
-            QueueAnswerResult::Refused { message } => {
-                assert!(message.contains("not built yet"), "{message}")
-            }
-            other => panic!("should be refused: {other:?}"),
-        }
-    }
-    assert_eq!(fx.queue(&run), [item], "the item stays");
 }

@@ -445,16 +445,18 @@ fn step_kind(kind: StepKind) -> &'static str {
         StepKind::SourceOp => "source_op",
         StepKind::AfterIntegrateHook => "after_integrate_hook",
         StepKind::RemoteWrite => "remote_write",
+        StepKind::Discard => "discard",
     }
 }
 
 #[test]
-fn a_step_kind_is_one_of_the_four_side_effect_steps_of_the_plan() {
+fn a_step_kind_is_one_of_the_side_effect_steps_of_the_plan_and_a_discard() {
     for kind in [
         StepKind::Integrate,
         StepKind::SourceOp,
         StepKind::AfterIntegrateHook,
         StepKind::RemoteWrite,
+        StepKind::Discard,
     ] {
         assert_eq!(serde_json::to_value(kind).unwrap(), json!(step_kind(kind)));
     }

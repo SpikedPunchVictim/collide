@@ -249,6 +249,84 @@ fn removal_refuses_an_untracked_file_and_says_so() {
     assert!(fx.tree().join("notes.txt").exists());
 }
 
+// --- Discard: the removal that says it deletes work ---
+
+#[test]
+fn discard_removes_a_workspace_with_every_kind_of_work_in_it_and_deletes_its_branch() {
+    let (fx, mut ws) = idle_with_work("discard");
+    fs::write(fx.tree().join("README"), "changed\n").unwrap();
+    fs::write(fx.tree().join("staged.txt"), "staged\n").unwrap();
+    git(&fx.tree(), &["add", "staged.txt"]);
+    fs::write(fx.tree().join("untracked.txt"), "untracked\n").unwrap();
+    ws.discard().unwrap();
+    assert!(!fx.tree().exists());
+    assert!(!fx.worktrees().contains("ts-0001"));
+    assert_eq!(git(&fx.repo, &["branch", "--list", "collide/ts-0001"]), "");
+    assert_eq!(ws.state(), WorkspaceState::Removed);
+}
+
+#[test]
+fn discard_does_not_touch_the_repository_s_own_checkout() {
+    let (fx, mut ws) = idle_with_work("discard-checkout");
+    fs::write(fx.repo.join("README"), "my own edit\n").unwrap();
+    let head = git(&fx.repo, &["rev-parse", "HEAD"]);
+    ws.discard().unwrap();
+    assert_eq!(git(&fx.repo, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&fx.repo, &["status", "--porcelain"]), "M README");
+}
+
+#[test]
+fn a_workspace_that_was_never_used_is_discarded_through_removable() {
+    let fx = Fixture::new("discard-ready");
+    let free = FakeFree::new(u64::MAX);
+    let mut ws = fx.workspace();
+    ws.provision(&DiskGuard::new(&free, FLOOR)).unwrap();
+    ws.discard().unwrap();
+    assert!(!fx.tree().exists());
+    assert_eq!(ws.state(), WorkspaceState::Removed);
+}
+
+#[test]
+fn a_folder_that_is_gone_is_discarded_and_git_forgets_the_worktree() {
+    let (fx, mut ws) = idle_with_work("discard-gone");
+    fs::remove_dir_all(fx.tree()).unwrap();
+    ws.discard().unwrap();
+    assert!(!fx.worktrees().contains("ts-0001"));
+    assert_eq!(git(&fx.repo, &["branch", "--list", "collide/ts-0001"]), "");
+}
+
+#[test]
+fn a_workspace_a_run_is_using_is_not_discarded() {
+    let fx = Fixture::new("discard-in-use");
+    let free = FakeFree::new(u64::MAX);
+    let guard = DiskGuard::new(&free, FLOOR);
+    let mut ws = fx.workspace();
+    ws.provision(&guard).unwrap();
+    ws.start_phase(&guard).unwrap();
+    expect_refused(ws.discard(), RemoveRefusal::InUse);
+    assert!(fx.tree().exists());
+    assert_eq!(ws.state(), WorkspaceState::InUse);
+}
+
+#[test]
+fn discard_does_not_delete_a_folder_that_is_not_a_worktree_this_workspace_made() {
+    let fx = Fixture::new("discard-foreign");
+    fs::create_dir_all(fx.tree()).unwrap();
+    fs::write(fx.tree().join("mine.txt"), "mine\n").unwrap();
+    let mut ws = BuiltinWorkspace::restored(fx.spec(), None, WorkspaceState::Idle);
+    assert!(matches!(ws.discard(), Err(WorkspaceError::Io(_))));
+    assert!(fx.tree().join("mine.txt").is_file());
+}
+
+#[test]
+fn the_branch_head_is_the_commit_the_branch_points_at_and_none_once_it_is_deleted() {
+    let (fx, mut ws) = idle_with_work("branch-head");
+    let head = git(&fx.repo, &["rev-parse", "collide/ts-0001"]);
+    assert_eq!(ws.branch_head().unwrap(), Some(head));
+    ws.discard().unwrap();
+    assert_eq!(ws.branch_head().unwrap(), None);
+}
+
 #[test]
 fn removal_does_not_count_an_ignored_file() {
     let fx = Fixture::new("ignored");

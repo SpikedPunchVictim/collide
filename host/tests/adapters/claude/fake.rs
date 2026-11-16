@@ -361,6 +361,8 @@ pub struct BinarySpec<'a> {
     /// Whether the phase passes `claude`'s own words on to fake Claude (a wrapper that does not leaves the settings
     /// unread: `claude` ignoring them).
     pub pass_words: bool,
+    /// The recording a phase started with `--resume` plays, in place of `recording` (a re-prompt resumes the session).
+    pub resumed: Option<&'a std::path::Path>,
 }
 
 impl<'a> BinarySpec<'a> {
@@ -371,6 +373,7 @@ impl<'a> BinarySpec<'a> {
             smoke: None,
             emulate_hooks: true,
             pass_words: true,
+            resumed: None,
         }
     }
 }
@@ -400,8 +403,14 @@ impl ClaudeBinary {
                 play(smoke, "", " \"$@\"")
             )
         });
+        let resumed = spec.resumed.map_or(String::new(), |resumed| {
+            format!(
+                "case \" $* \" in *\" --resume \"*) {} ;; esac\n",
+                play(resumed, hooks, words)
+            )
+        });
         let script = format!(
-            "#!/bin/sh\necho \"$*\" >> {log}\nif [ \"$*\" = \"--version\" ]; then echo \"{version} (Claude Code)\"; exit 0; fi\n{smoke}{phase}\n",
+            "#!/bin/sh\necho \"$*\" >> {log}\nif [ \"$*\" = \"--version\" ]; then echo \"{version} (Claude Code)\"; exit 0; fi\n{smoke}{resumed}{phase}\n",
             log = log.display(),
             version = spec.version,
             phase = play(spec.recording, hooks, words),
