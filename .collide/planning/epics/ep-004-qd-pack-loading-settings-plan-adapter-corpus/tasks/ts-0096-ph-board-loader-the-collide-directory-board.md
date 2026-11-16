@@ -1,7 +1,7 @@
 ---
 id: ts-0096-ph
 kind: task
-status: ready
+status: active
 title: "Board loader: the Collide directory, board, lock and packs"
 owners: []
 links:
