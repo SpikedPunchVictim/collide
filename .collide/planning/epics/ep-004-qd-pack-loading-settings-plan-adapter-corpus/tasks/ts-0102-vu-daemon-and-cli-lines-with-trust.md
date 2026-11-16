@@ -117,6 +117,9 @@ Write these first, over fixture repositories, a temp `HOME` and a daemon in a te
 - The test rule: no test touches the real home, real launchd or a real daemon. Each test clears the environment
   (`env_clear()`) and sets `HOME` and `COLLIDE_DAEMON_ROOT` to a temp root, as `host/tests/common/mod.rs` `TempRoot`
   does. Settings files are fixtures, never the owner's own `settings.json`.
+- Carried from `ts-0097-kw` (decision 9 and Not done): remove a board's entries from `trust.yaml` when the board is
+  removed, and pass the mirror's path to `Trust::diff` so a `git:` pack's change shows its files, not "not in this
+  repository".
 - Stage 4a item (revision 23 scope, split 2026-11-16). Items of Stage 4a run one at a time, in id order, because
   they share `core`, `host` and the generated files.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they

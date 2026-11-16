@@ -1,11 +1,13 @@
 //! Git objects, read (ts-0094-av). Everything Stage 4a loads (a pack, `board.yaml`, `config.yaml`) is read from git
-//! objects at a ref, never from a working tree (0.6, 0.7). This module answers four questions about a repository:
+//! objects at a ref, never from a working tree (0.6, 0.7). This module answers these questions about a repository:
 //!
 //! - [`GitObjects::tree_at`]: the tree id of `<rev>:<path>`, which is a pack's pin;
 //! - [`GitObjects::list`]: the files in a tree, with their modes as git writes them;
 //! - [`GitObjects::read_blobs`] and [`GitObjects::blob_at`]: what files hold;
 //! - [`GitObjects::tree_of_folder`]: the id git would give a folder's files, for `dev:` packs and the materializer's
-//!   re-hash.
+//!   re-hash;
+//! - [`GitObjects::hash_object`], [`GitObjects::object_kind`], [`GitObjects::diff_tree`] and
+//!   [`GitObjects::diff_blobs`]: what the trust hash and its diff need (ts-0097-kw).
 //!
 //! The `repo` argument is a git directory: the `.git` of a checkout, or a bare mirror. Nothing here reads a working
 //! tree. Every call goes through [`GitObjects::command`], so one place decides how git is run: a cleared
@@ -87,6 +89,28 @@ pub struct TreeEntry {
     pub id: String,
     pub path: String,
     pub size: u64,
+}
+
+/// How a file differs between two trees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeChangeKind {
+    Added,
+    Deleted,
+    Modified,
+    /// A file that became a folder, a link or a submodule, or the other way round.
+    TypeChanged,
+}
+
+/// One file that differs between two trees. A mode is as git writes it, and `000000` for the side that has no file.
+/// An id is `None` for the side that has no file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeChange {
+    pub kind: TreeChangeKind,
+    pub path: String,
+    pub old_mode: String,
+    pub new_mode: String,
+    pub old_id: Option<String>,
+    pub new_id: Option<String>,
 }
 
 /// Why an object could not be read. Each variant names what it was about.
@@ -503,6 +527,133 @@ impl GitObjects {
             detail: format!("expected a tree id, got {id:?}"),
         })?;
         Ok(id)
+    }
+
+    /// The id git gives `bytes` as a file, in the object format of `repo` (SHA-1, or SHA-256 in a SHA-256
+    /// repository). Nothing is written, and no filter or attribute changes a byte. It is how the trust hash is made
+    /// (ts-0097-kw).
+    pub fn hash_object(&self, repo: &Path, bytes: &[u8]) -> Result<String, GitError> {
+        let mut command = self.command(repo);
+        command.args(["hash-object", "--no-filters", "--stdin"]);
+        let out = self.run_ok(command, "git hash-object", Some(bytes))?;
+        let id = String::from_utf8_lossy(&out).trim().to_string();
+        check_id("object id", &id).map_err(|_| GitError::BadReply {
+            command: "git hash-object".to_string(),
+            detail: format!("expected an object id, got {id:?}"),
+        })?;
+        Ok(id)
+    }
+
+    /// What kind of object `id` (a full hex id) is, or `None` when the repository does not have it, as after a prune.
+    pub fn object_kind(&self, repo: &Path, id: &str) -> Result<Option<ObjectKind>, GitError> {
+        check_id("object id", id)?;
+        let mut command = self.command(repo);
+        command.args(["cat-file", "--batch-check"]);
+        let input = format!("{id}\n");
+        let out = self.run_ok(command, "git cat-file", Some(input.as_bytes()))?;
+        let line = String::from_utf8_lossy(&out).trim_end().to_string();
+        let words: Vec<&str> = line.split(' ').collect();
+        let bad = || GitError::BadReply {
+            command: "git cat-file".to_string(),
+            detail: line.clone(),
+        };
+        match words.as_slice() {
+            [named, "missing"] if *named == id => Ok(None),
+            [named, kind, _size] if *named == id => {
+                ObjectKind::parse(kind).map(Some).ok_or_else(bad)
+            }
+            _ => Err(bad()),
+        }
+    }
+
+    /// The files that differ between the trees `old` and `new` (full hex ids), at every depth, sorted by path, from
+    /// `git diff-tree -r`. A rename is a deletion and an addition. The trees must be in `repo`.
+    pub fn diff_tree(
+        &self,
+        repo: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<Vec<TreeChange>, GitError> {
+        check_id("tree id", old)?;
+        check_id("tree id", new)?;
+        let mut command = self.command(repo);
+        command.args([
+            "diff-tree",
+            "-r",
+            "-z",
+            "--raw",
+            "--no-abbrev",
+            "--no-renames",
+            old,
+            new,
+        ]);
+        let out = self.run_ok(command, "git diff-tree", None)?;
+        let bad = |detail: String| GitError::BadReply {
+            command: "git diff-tree".to_string(),
+            detail,
+        };
+        let mut fields = out
+            .split(|byte| *byte == 0)
+            .filter(|field| !field.is_empty());
+        let mut changes = Vec::new();
+        while let Some(meta) = fields.next() {
+            let meta = String::from_utf8_lossy(meta).to_string();
+            let path = fields
+                .next()
+                .ok_or_else(|| bad(format!("no path after {meta:?}")))?;
+            let path = String::from_utf8(path.to_vec()).map_err(|_| GitError::NotUtf8 {
+                path: String::from_utf8_lossy(path).to_string(),
+            })?;
+            // `:<old mode> <new mode> <old id> <new id> <status>`
+            let words: Vec<&str> = meta.trim_start_matches(':').split(' ').collect();
+            let [old_mode, new_mode, old_id, new_id, status] = words.as_slice() else {
+                return Err(bad(meta.clone()));
+            };
+            let kind = match *status {
+                "A" => TreeChangeKind::Added,
+                "D" => TreeChangeKind::Deleted,
+                "M" => TreeChangeKind::Modified,
+                "T" => TreeChangeKind::TypeChanged,
+                _ => return Err(bad(meta.clone())),
+            };
+            // An absent side has the all-zero id.
+            let present = |id: &str| (!id.bytes().all(|byte| byte == b'0')).then(|| id.to_string());
+            let (old_id, new_id) = (present(old_id), present(new_id));
+            for id in old_id.iter().chain(new_id.iter()) {
+                check_id("object id", id).map_err(|_| bad(meta.clone()))?;
+            }
+            changes.push(TreeChange {
+                kind,
+                path,
+                old_mode: old_mode.to_string(),
+                new_mode: new_mode.to_string(),
+                old_id,
+                new_id,
+            });
+        }
+        changes.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(changes)
+    }
+
+    /// The text of `git diff` between the blobs `old` and `new` (full hex ids), with no context lines. No external
+    /// diff program and no text conversion runs, whatever the repository's config says. A binary pair gives git's
+    /// "Binary files differ" line.
+    pub fn diff_blobs(&self, repo: &Path, old: &str, new: &str) -> Result<String, GitError> {
+        check_id("object id", old)?;
+        check_id("object id", new)?;
+        let mut command = self.command(repo);
+        command.args([
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "-U0",
+            old,
+            new,
+        ]);
+        let out = self.run_ok(command, "git diff", None)?;
+        Ok(String::from_utf8_lossy(&out).to_string())
     }
 
     /// `git` for a repository: the one place that decides how git is run. The environment is cleared and these are

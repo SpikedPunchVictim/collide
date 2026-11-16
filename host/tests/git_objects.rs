@@ -5,6 +5,7 @@
 use collide_core::yaml::MAX_YAML_BYTES;
 use collide_host::git_objects::{
     GitError, GitObjects, MAX_BLOB_BYTES, MAX_TREE_BYTES, MAX_TREE_ENTRIES, ObjectKind,
+    TreeChangeKind,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -1180,4 +1181,155 @@ fn list_dir_refuses_a_folder_over_the_entry_cap() {
     let tree = repo.tree_of(&entries);
     let error = reader().list_dir(&repo.git_dir(), &tree).unwrap_err();
     assert!(matches!(error, GitError::TooManyEntries { .. }), "{error}");
+}
+
+// ---- hash_object, object_kind, diff_tree, diff_blobs (ts-0097-kw) ----
+
+#[test]
+fn hash_object_equals_git_hash_object_and_writes_nothing() {
+    let repo = nested();
+    let id = reader()
+        .hash_object(&repo.git_dir(), b"some text\0with a NUL\n")
+        .unwrap();
+    assert_eq!(
+        id,
+        repo.git_with_input(&["hash-object", "--stdin"], b"some text\0with a NUL\n")
+    );
+    // `git hash-object` without `-w` stores nothing, so the repository does not have the object.
+    assert_eq!(reader().object_kind(&repo.git_dir(), &id).unwrap(), None);
+}
+
+#[test]
+fn hash_object_of_nothing_is_the_empty_blob() {
+    let repo = nested();
+    assert_eq!(
+        reader().hash_object(&repo.git_dir(), b"").unwrap(),
+        "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    );
+}
+
+#[test]
+fn object_kind_tells_a_blob_a_tree_and_a_commit_and_a_missing_object() {
+    let repo = nested();
+    let git_dir = repo.git_dir();
+    let kind = |rev: &str| {
+        let id = repo.git(&["rev-parse", rev]);
+        reader().object_kind(&git_dir, &id).unwrap()
+    };
+    assert_eq!(kind("main:top.txt"), Some(ObjectKind::Blob));
+    assert_eq!(kind("main:a"), Some(ObjectKind::Tree));
+    assert_eq!(kind("main"), Some(ObjectKind::Commit));
+    let missing = "1234567890123456789012345678901234567890";
+    assert_eq!(reader().object_kind(&git_dir, missing).unwrap(), None);
+    assert!(matches!(
+        reader().object_kind(&git_dir, "main").unwrap_err(),
+        GitError::Refused { .. }
+    ));
+}
+
+#[test]
+fn diff_tree_lists_added_deleted_modified_and_type_changed_files_in_path_order() {
+    let repo = GitRepo::new();
+    repo.write("keep.txt", b"same\n");
+    repo.write("dir/edit.txt", b"one\n");
+    repo.write("dir/gone.txt", b"gone\n");
+    repo.write("flip", b"file\n");
+    let first = repo.commit_all("one");
+    repo.write("dir/edit.txt", b"two\n");
+    repo.remove("dir/gone.txt");
+    repo.write("dir/sub/new.txt", b"new\n");
+    repo.remove("flip");
+    repo.symlink("flip", "keep.txt");
+    let second = repo.commit_all("two");
+    let tree = |commit: &str| repo.git(&["rev-parse", &format!("{commit}^{{tree}}")]);
+
+    let changes = reader()
+        .diff_tree(&repo.git_dir(), &tree(&first), &tree(&second))
+        .unwrap();
+    let summary: Vec<(&str, TreeChangeKind)> = changes
+        .iter()
+        .map(|change| (change.path.as_str(), change.kind))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("dir/edit.txt", TreeChangeKind::Modified),
+            ("dir/gone.txt", TreeChangeKind::Deleted),
+            ("dir/sub/new.txt", TreeChangeKind::Added),
+            ("flip", TreeChangeKind::TypeChanged),
+        ]
+    );
+    let edit = &changes[0];
+    assert_eq!(
+        edit.old_id,
+        Some(repo.git(&["rev-parse", &format!("{first}:dir/edit.txt")]))
+    );
+    assert_eq!(
+        edit.new_id,
+        Some(repo.git(&["rev-parse", &format!("{second}:dir/edit.txt")]))
+    );
+    assert_eq!(
+        (changes[1].new_id.clone(), changes[1].new_mode.as_str()),
+        (None, "000000")
+    );
+    assert_eq!(
+        (changes[2].old_id.clone(), changes[2].old_mode.as_str()),
+        (None, "000000")
+    );
+    assert_eq!(changes[3].new_mode, "120000");
+}
+
+#[test]
+fn diff_tree_of_equal_trees_is_empty_and_of_a_missing_tree_is_an_error() {
+    let repo = nested();
+    let tree = repo.git(&["rev-parse", "main^{tree}"]);
+    assert!(
+        reader()
+            .diff_tree(&repo.git_dir(), &tree, &tree)
+            .unwrap()
+            .is_empty()
+    );
+    let missing = "1234567890123456789012345678901234567890";
+    assert!(reader().diff_tree(&repo.git_dir(), missing, &tree).is_err());
+    assert!(matches!(
+        reader()
+            .diff_tree(&repo.git_dir(), "main", &tree)
+            .unwrap_err(),
+        GitError::Refused { .. }
+    ));
+}
+
+#[test]
+fn diff_blobs_gives_the_changed_lines_with_no_context() {
+    let repo = GitRepo::new();
+    let old = repo.blob(b"a\nb\nc\nd\n");
+    let new = repo.blob(b"a\nB\nc\nd\ne\n");
+    let diff = reader().diff_blobs(&repo.git_dir(), &old, &new).unwrap();
+    assert!(diff.contains("\n-b\n+B\n"), "{diff}");
+    assert!(diff.contains("\n+e\n"), "{diff}");
+    assert!(!diff.contains("\n c\n"), "no context lines: {diff}");
+}
+
+#[test]
+fn diff_blobs_of_binary_files_says_so() {
+    let repo = GitRepo::new();
+    let old = repo.blob(b"\0\x01\x02");
+    let new = repo.blob(b"\0\x01\x03");
+    let diff = reader().diff_blobs(&repo.git_dir(), &old, &new).unwrap();
+    assert!(diff.contains("Binary files"), "{diff}");
+}
+
+#[test]
+fn diff_blobs_runs_no_external_diff_that_the_repository_config_names() {
+    let repo = GitRepo::new();
+    let marker = repo.root().join("external-ran");
+    let script = repo
+        .root()
+        .script("ext.sh", &format!("touch {}\nexit 0\n", marker.display()));
+    repo.git(&["config", "diff.external", &script.display().to_string()]);
+    let old = repo.blob(b"one\n");
+    let new = repo.blob(b"two\n");
+    let diff = reader().diff_blobs(&repo.git_dir(), &old, &new).unwrap();
+    assert!(diff.contains("+two"), "{diff}");
+    assert!(!marker.exists(), "the external diff program ran");
 }

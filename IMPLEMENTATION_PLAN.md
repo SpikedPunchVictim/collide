@@ -2128,7 +2128,10 @@ Collide plays the lead, so it does all four, through the pack.
     one, `board.yaml`, `config.yaml`, the views and the tree hashes of `protectedPaths`. It is asked again when that
     hash changes.
   - Each line has its own entry. A line whose packs or `protectedPaths` differ from the default line's shows the
-    difference before it is trusted (0.12).
+    difference before it is trusted (0.12). The entry holds the hash and the inputs it was made from, and trusting
+    a new hash replaces it, so going back to an older commit asks again. A `protectedPaths` glob is hashed at its
+    folder before the first wildcard, or at the root when it starts with one (ts-0097-kw; Stage 7's matcher may
+    narrow it).
   - The ref most worth testing is often one an agent wrote, and its dev CLI becomes that line's gate.
   - **Per pack source** (owner, 2026-11-13):
     - repo packs are covered by the repo's hash: a `repo:` pack by its tree id at the ref, a `git:` pack through the

@@ -40,6 +40,7 @@ pub mod state;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod transition;
+pub mod trust;
 pub mod ui_tools;
 pub mod version_range;
 pub mod view;
