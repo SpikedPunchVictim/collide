@@ -1,7 +1,7 @@
 ---
 id: ts-0078-ye
 kind: task
-status: active
+status: done
 title: "Daemon: a prompt run of collide/quick, up to review"
 owners: []
 links:
