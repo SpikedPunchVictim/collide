@@ -1,7 +1,7 @@
 ---
 id: ts-0100-pu
 kind: task
-status: ready
+status: active
 title: "Pack sources: git: URLs, the mirror and the fetch rules"
 owners: []
 links:
