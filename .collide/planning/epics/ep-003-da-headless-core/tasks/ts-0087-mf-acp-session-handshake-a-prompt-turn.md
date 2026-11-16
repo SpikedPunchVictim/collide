@@ -1,7 +1,7 @@
 ---
 id: ts-0087-mf
 kind: task
-status: active
+status: done
 title: "ACP session: handshake, a prompt turn and replay"
 owners: []
 links:
