@@ -1,7 +1,7 @@
 ---
 id: ts-0076-cw
 kind: task
-status: active
+status: done
 title: "Daemon event stream and run reads for the window"
 owners: []
 links:
