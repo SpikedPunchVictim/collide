@@ -1,7 +1,7 @@
 ---
 id: ts-0099-bw
 kind: task
-status: active
+status: done
 title: "Agent entries, secrets and the keychain port"
 owners: []
 links:
