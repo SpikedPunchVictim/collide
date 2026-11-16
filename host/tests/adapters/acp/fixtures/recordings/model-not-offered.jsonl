@@ -1,0 +1,7 @@
+# Built for the tests: an agent that offers two models and is asked for a third. The client must write nothing after
+# `session/new`: no model request and no prompt. The child then waits for its stdin to close, as an idle agent does
+# (S7), and exits 0. Ids, names and models are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"agentInfo":{"name":"fake-acp-agent","version":"0"},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"stand-in-model-a","options":[{"value":"stand-in-model-a","name":"Stand-in A"},{"value":"stand-in-model-b","name":"Stand-in B"}]}]}}}

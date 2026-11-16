@@ -4,8 +4,9 @@
 //!
 //! | tag | where | what it does |
 //! |---|---|---|
-//! | `acp: options` | [`options::AcpOptions`] | the session's own data: working folder, first prompt, MCP servers |
-//! | `acp: session` | [`session::AcpSession`] | the handshake, a prompt turn, the turn's end, replay from the journal |
+//! | `acp: options` | [`options::AcpOptions`] | the session's own data: folder, first prompt, MCP servers, model |
+//! | `acp: session` | [`session::AcpSession`] | the handshake, the model, a prompt turn, the turn's end, replay |
+//! | `acp: model` | `model` (private) | the models the agent lists, and the request that sets the one asked for |
 //! | `acp: profile` | [`profile::AcpProfile`] | one agent as data: program, strip list, config paths, claims |
 //! | `acp: probe` | [`probe::probe`], [`probe::Probed::merge_into`] | what an `initialize` response implies |
 //! | `acp: adapter` | [`AcpAdapter`] | capabilities, launch, a session from a request, config paths, take-over |
@@ -13,6 +14,7 @@
 //! Nothing here names an agent: [`AcpAdapter`] is built from a profile, and the profiles of this stage are a test's.
 //! The first real profile comes with Stage 6b.
 
+mod model;
 pub mod options;
 pub mod probe;
 pub mod profile;
@@ -116,10 +118,14 @@ impl AgentAdapter for AcpAdapter {
         })
     }
 
-    /// An [`session::AcpSession`] for the request's working folder and first prompt, with the adapter's servers.
+    /// An [`session::AcpSession`] for the request's working folder, first prompt and model, with the adapter's servers.
     fn session(&self, request: &LaunchRequest) -> Box<dyn AgentSession + Send> {
-        let options = AcpOptions::new(request.cwd.clone(), request.prompt.clone())
+        let mut options = AcpOptions::new(request.cwd.clone(), request.prompt.clone())
             .with_mcp_servers(self.mcp_servers.clone());
+        // The id is only data for a JSON-RPC body: the session checks it against the agent's own list.
+        if let Some(model) = &request.model {
+            options = options.with_model(model.adapter_id());
+        }
         Box::new(session::AcpSession::new(options))
     }
 

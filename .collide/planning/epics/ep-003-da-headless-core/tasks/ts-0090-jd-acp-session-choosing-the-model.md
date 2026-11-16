@@ -112,3 +112,147 @@ Write these first:
 - Owner decisions (2026-11-15, at the split): the decisions for the owner above, taken as recommended under the
   owner's delegation; the owner may change them before the item is built. The ACP protocol is written by hand: no ACP
   crate is added.
+
+### Built
+
+The ACP session now sets the model the request names, from either list form, and holds the first prompt until the
+agent has answered. A model the agent does not offer fails the phase with the new `PhaseFailure::ModelUnavailable`.
+No crate was added.
+
+**No wire type changed.** `PhaseFailure` is a Rust enum of `core` with no serde or schema derive, and the store keeps
+the failure as free text (`RunRecordResult.failure` is a string in the schema). So the new arm has no generated file
+and no TS that matches on it. `pnpm gen` was run and left every generated file as it was.
+
+- `core/src/adapter.rs`, `PhaseFailure::ModelUnavailable` (new arm).
+- `host/src/agent_feed.rs`, `failure_text`: `model_unavailable`; the test `a_failure_is_worded_for_the_store` has it.
+  `host/src/store.rs`, the doc of `PhaseRecord::failure`, names it.
+- `host/src/adapters/acp/options.rs`, `AcpOptions::model` and `with_model`: the id, as data only.
+- `host/src/adapters/acp/model.rs` (new, private module): `plan` reads the `session/new` result and says `Keep`,
+  `Set(ModelRequest)` or `Unavailable { offered }`; `config_option_holds` checks the answer to
+  `session/set_config_option`. `configOptions` (the option with `category: "model"` and an `id`; a flat or grouped
+  list) wins; else the draft `models`, which only `draft_listing` knows, with a comment that says when it can go.
+- `host/src/adapters/acp/session.rs`, `AcpSession`:
+  - `Awaiting::Model(ModelForm)`, a request kept by `note_written` for `session/set_config_option` and
+    `session/set_model`, so a replay holds the same awaiting request;
+  - `model_refused` (new field) makes `finish` say `Failed { ModelUnavailable }` and makes `send_turn` write nothing;
+    `send_turn` also writes nothing while the model request is out (`model_pending`);
+  - `read_response` asks `model::plan` on the `session/new` result: `Keep` writes the prompt (as before), `Set` writes
+    the request and no prompt, `Unavailable` writes nothing and gives `Other` `model_unavailable` with
+    `raw: { "offered": N }` (the count, never the id);
+  - `model_answered` (new): an answer that is an error gives `Other` `model_set_error`; a `set_config_option` answer
+    that does not hold the id as the option's `currentValue` gives `Other` `model_not_set`; both write no prompt and set
+    `model_refused`. Otherwise it writes the first prompt (`first_prompt`, new, shared with the `Keep` path);
+  - the module doc: the table rows and a section on the model.
+- `host/src/adapters/acp/mod.rs`, `AcpAdapter::session`: passes `request.model.adapter_id()` into the options.
+  `launch` is unchanged and writes no part of the model.
+- Recordings (new), in `host/tests/adapters/acp/fixtures/recordings/`: `model-config-options` (expects
+  `session/set_config_option` with `configId` `model`, answers with the options as they stand, then expects the
+  prompt), `model-set-model` (the draft form, an id with `/` and `:`, an empty answer), `model-not-offered` (stops
+  after `session/new`).
+- Test helpers: `fake.rs` `play` also stops the run when the session says `model_unavailable` (no turn will end);
+  `fake_acp.rs` has the recording count (11 to 14) and a test for the shapes of the three new recordings.
+- `host/tests/adapters/acp/model.rs` (new, 43 tests) and `main.rs` (the module).
+
+**Tests**, in the `acp_adapter` target. None touches the real home, launchd or a daemon: the fake child and the shim's
+child have `env_clear()`, then `PATH`, `HOME` and `COLLIDE_DAEMON_ROOT` in a temp root. No settings file is read.
+
+- Seen red: all 43 were written before the code, against a session that ignores `AcpOptions::model`. 34 failed, 9
+  passed. The 9 that passed are guards for what the old session already did (no request, no model, prompt at once):
+  `a_draft_id_that_is_already_current_writes_no_model_request`,
+  `a_later_config_option_update_stays_an_other_and_writes_nothing`,
+  `a_request_with_no_model_gives_a_session_that_writes_no_model_request`,
+  `a_request_with_no_model_keeps_the_agents_own_even_when_it_lists_a_hosted_one`,
+  `a_request_with_no_model_writes_no_model_request_in_any_form`,
+  `an_agent_with_no_list_runs_when_no_model_is_asked_for`,
+  `an_id_that_is_already_current_writes_no_model_request_and_the_prompt_follows_at_once`,
+  `launch_puts_no_part_of_the_model_in_argv_env_or_a_path`,
+  `the_id_is_not_in_the_event_that_says_the_model_is_unavailable`.
+  The 34 went green with the code. The five that use the real shim failed first on the child (it exited 97 on the
+  order, or the run timed out).
+- `configOptions`: `an_id_the_config_option_offers_is_set_with_set_config_option_and_no_prompt_is_written_yet`,
+  `the_request_names_the_option_by_its_own_id_not_by_the_word_model`, `an_id_in_a_group_of_a_grouped_list_is_offered`,
+  `a_grouped_list_counts_every_option_of_every_group`,
+  `an_id_that_is_not_offered_writes_nothing_and_is_model_unavailable_with_the_count_offered`,
+  `an_answer_that_holds_the_model_as_current_lets_the_prompt_follow`,
+  `an_error_in_answer_to_set_config_option_writes_no_prompt_and_fails_the_phase`,
+  `an_answer_that_leaves_another_model_current_writes_no_prompt_and_fails_the_phase`,
+  `an_answer_with_no_options_is_not_believed`, and the guard for the id that is current (above).
+- Draft `models`: `an_id_the_draft_list_offers_is_set_with_set_model_and_no_prompt_is_written_yet`,
+  `a_draft_id_that_is_not_offered_writes_nothing_and_is_model_unavailable`,
+  `a_hosted_draft_model_is_never_chosen_when_the_request_names_another`,
+  `an_empty_success_to_set_model_lets_the_prompt_follow`, `the_meta_a_real_agent_answers_set_model_with_is_a_success`,
+  `an_error_in_answer_to_set_model_writes_no_prompt_and_fails_the_phase`,
+  `a_current_model_update_after_set_model_is_an_other_and_changes_nothing`.
+- Both forms, one, neither: `with_both_forms_in_one_response_config_options_wins`,
+  `when_both_forms_are_there_an_id_only_the_draft_list_has_is_not_offered`,
+  `config_options_with_no_model_option_fall_back_to_the_draft_list`,
+  `an_agent_with_no_list_and_no_way_to_set_one_fails_the_phase_when_a_model_is_asked_for`,
+  `a_model_list_that_is_not_a_list_offers_nothing`,
+  `a_hosted_model_the_agent_lists_is_never_chosen_when_the_request_names_another`.
+- Order and the held prompt:
+  `the_prompt_is_held_until_the_answer_and_the_writes_after_session_new_are_model_then_prompt`,
+  `a_turn_sent_while_the_model_is_not_set_is_not_written`, `a_turn_sent_after_the_model_was_refused_is_not_written`,
+  `a_turn_sent_after_the_model_was_set_and_the_first_turn_ended_is_written`,
+  `a_model_that_was_set_gives_an_ended_phase_when_the_turn_ends_well`.
+- The id as data: `an_id_with_a_slash_and_a_colon_is_written_as_given_in_either_form`,
+  `the_adapter_hands_the_requests_model_id_to_its_session_and_the_name_when_there_is_no_id`.
+- Replay: `replayed_from_the_journal_each_form_reaches_the_state_of_the_live_session` (the sessions compare equal, also
+  at `finish`), `a_journal_cut_between_the_model_request_and_its_answer_writes_the_prompt_when_the_answer_comes` (the
+  prompt written is the byte string the live journal holds).
+- Under the real shim, one for each form:
+  `under_the_shim_a_child_with_config_options_is_set_through_set_config_option_then_serves_a_turn`,
+  `under_the_shim_a_child_with_only_models_is_set_through_set_model_with_a_slash_and_a_colon_in_the_id`,
+  `under_the_shim_a_child_that_offers_other_ids_gets_no_request_and_is_stopped_by_the_host` (the journal holds only
+  `initialize` and `session/new`; the child exits 0 when the host closes stdin; `finish` says `ModelUnavailable`).
+- The shared contract (`acp_session`) passes unchanged. `core/src/testing/acp.rs` is unchanged.
+- Checks: `cargo build --workspace`, `cargo test --workspace --no-fail-fast` (2816 passed, none failed),
+  `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `pnpm test`, `pnpm typecheck`,
+  `pnpm --filter @collide/app build`, `pnpm build:packs` and `pnpm check` all pass.
+
+### Decisions for the owner
+
+1. **`PhaseFailure::ModelUnavailable` is not a wire change.** The item took it as one. It is a Rust-only enum, and the
+   store keeps a string, so nothing was generated and no TS changed. Recommend keeping the variant as built. If the app
+   later wants to word it, the string `model_unavailable` is what it will match.
+2. **Three event names, one failure.** A model not offered is `model_unavailable` (the item's name). An answer that is
+   an error is `model_set_error`, and an answer that does not show the model set is `model_not_set`; the item named
+   none of these two. All three make `finish` say `ModelUnavailable`, as `initialize_error` and `session_new_error`
+   share one failure. Alternative: name all three `model_unavailable`. Recommend keeping three, so a person reading the
+   events can tell a missing model from an agent that refused or ignored the request.
+3. **`model_not_set` also covers an answer with no `configOptions`.** The schema says the answer holds the full
+   options; an answer without them cannot show the model current, so it is not believed (S7, O8). Alternative: trust
+   an answer with no options. Recommend keeping.
+4. **`set_model` is trusted when its answer is not an error.** The item also says a later `current_model_update` or
+   the next `session/new` must not contradict it. The notes say those updates stay an `Other`, so nothing reads them,
+   and a `session/new` is one per child. Recommend keeping; no check is built for it.
+5. **The count of models offered is in `Other.raw`** as `{ "offered": N }`, a number and not agent content. Alternative:
+   `raw: None`, as the other `Other`s here have. Recommend keeping, since the item asks for it.
+6. **A current id wins over the list.** The order is the item's: no model, then current, then offered. An agent whose
+   current model is the one asked for but that lists nothing runs with no request. Recommend keeping.
+7. **`send_turn` writes nothing while the model request is out or after it was refused**, and says `turn_not_sent`, as
+   it does before the session has an id. Alternative: leave `send_turn` as it was. Recommend keeping: a turn must not
+   reach an agent before its model, and a refused phase writes nothing more.
+8. **The first model option only.** If `configOptions` holds two options with `category: "model"`, the first with an
+   `id` is used. Recommend keeping.
+9. **`play` stops on `model_unavailable`.** A test helper change: a refused phase has no turn end. Alternative: a second
+   `play`. Recommend keeping.
+10. **Plan text, proposed:** none needed. `ts-0092-tw` can say that a refused model arrives as an `Other` followed by a
+    `Failed` outcome, and that the daemon stops the child (closes its stdin) on that outcome.
+
+- Owner decisions (2026-11-16, at the build): decisions 1 to 10 taken under the owner's delegation, as recommended.
+  Review confirmed decision 1: `PhaseFailure` is not on the wire, the store and `run.record` carry the failure as
+  text, and `pnpm gen` gives no diff. The cut after the model answer and before the first prompt is the first-prompt
+  window already carried to `ts-0092-tw`.
+
+### Not done, by design
+
+- No empty turn, `Usage`, stderr evidence or lost-child work: `ts-0091-pz`.
+- No daemon wiring, and nothing that closes the child after a refused model: `ts-0092-tw`. The session writes nothing
+  more and `finish` says why; the host stops the child.
+- A journal cut after the model answer was read and before the first prompt was written leaves a rebuilt session with
+  the model set and no prompt open. It is the window for the first prompt that `ts-0089-wv` carried to `ts-0092-tw`;
+  the model changes nothing about it, and no test pins it here.
+- The session does not follow `current_model_update`, `config_option_update` or any later change of model by the
+  agent; each is an `Other` (the item's note). Nothing reads a model the agent chose by itself.
+- No usage record names the model a turn used: `ts-0091-pz`.
+- No real ACP profile or real agent: Stage 6b.

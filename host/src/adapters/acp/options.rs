@@ -60,21 +60,31 @@ pub struct AcpOptions {
     pub first_prompt: String,
     /// The servers for `session/new`; none by default.
     pub mcp_servers: Vec<McpServer>,
+    /// The model the request names, as the agent knows it (`ModelRef::adapter_id`). It is data for a JSON-RPC body
+    /// only: it is in no argument, variable or file name, so it needs no safe token. `None` keeps the agent's own.
+    pub model: Option<String>,
 }
 
 impl AcpOptions {
-    /// Options with no MCP servers.
+    /// Options with no MCP servers and no model.
     pub fn new(cwd: impl Into<PathBuf>, first_prompt: impl Into<String>) -> Self {
         Self {
             cwd: cwd.into(),
             first_prompt: first_prompt.into(),
             mcp_servers: Vec::new(),
+            model: None,
         }
     }
 
     /// The same options with these servers.
     pub fn with_mcp_servers(mut self, servers: Vec<McpServer>) -> Self {
         self.mcp_servers = servers;
+        self
+    }
+
+    /// The same options that ask the agent for this model after `session/new`.
+    pub fn with_model(mut self, id: impl Into<String>) -> Self {
+        self.model = Some(id.into());
         self
     }
 }

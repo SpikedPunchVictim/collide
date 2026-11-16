@@ -80,6 +80,9 @@ pub enum PhaseFailure {
     /// A turn ended but the settings canary never appeared: Claude ignored Collide's settings, so its hooks and
     /// permissions did not apply (0.3, Settings that fail validation are ignored silently under `-p`).
     SettingsIgnored,
+    /// The role asked for a model that the agent does not offer, or could not be given (ACP: the id is not in the list
+    /// the agent advertised, or the agent has no way to set a model). The phase never ran a turn (0.3, Who picks what).
+    ModelUnavailable,
 }
 
 /// What a phase came to, which [`AgentSession::finish`] returns. A phase settles once the child has exited and its

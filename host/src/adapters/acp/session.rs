@@ -9,6 +9,7 @@
 //!   response makes the session write `session/new`; that response gives `SessionBound` and makes it write the first
 //!   `session/prompt`. The first prompt is the session's own data ([`AcpOptions`]), not a turn queued by `send_turn`,
 //!   so a session rebuilt from the journal still has it;
+//! - **the model:** when the request names one, the first prompt waits for it (see below);
 //! - **request ids:** the requests it writes count from 0. A response is matched to its request by id, and one that
 //!   matches nothing changes nothing;
 //! - **the turn:** the `session/prompt` response ends it. A turn the host cancelled is `Cancelled` whatever
@@ -21,7 +22,11 @@
 //! | agent writes (stdout) | the session reads | and writes |
 //! |---|---|---|
 //! | a response to `initialize` | nothing | `session/new` |
-//! | a response to `session/new` | `SessionBound` | the first `session/prompt` |
+//! | a response to `session/new`, no model asked for, or it is current | `SessionBound` | the first `session/prompt` |
+//! | a response to `session/new`, the model is offered | `SessionBound` | `session/set_config_option`, or `set_model` |
+//! | a response to `session/new`, the model is not offered | `SessionBound`, `Other` `model_unavailable` | nothing |
+//! | a response to the model request that shows the model set | nothing | the first `session/prompt` |
+//! | a model response that is an error, or shows no model set | `Other`, and `finish` says `Failed` | nothing |
 //! | a response to `initialize` or `session/new` that is an error | `Other`, and `finish` says `Failed` | nothing |
 //! | `session/update` `agent_message_chunk` | `Message` | nothing |
 //! | `session/update` `tool_call` | `ToolCall`, by its `kind` | nothing |
@@ -32,6 +37,20 @@
 //! | any other request (`fs/*`, `terminal/*`, `elicitation/*`, unknown) | `Other` named by its method | `-32601` |
 //! | a response to `session/prompt` | `FinalReport` (if any words), `TurnEnd` | `cancelled` for each request held |
 //! | a line that is not a JSON object | `Other` named `unparsed_line` | nothing |
+//!
+//! **The model** (0.3, Who picks what; S7, O8, O9, O11; [`super::model`]). The id is `ModelRef::adapter_id` in
+//! [`AcpOptions::model`]. It is data for a JSON-RPC body and nowhere else. The models the agent offers are read from
+//! the `session/new` response, from `configOptions` when it has a model option, else from the draft `models`. The id is
+//! set only if the agent lists it, and only a request that names a model is acted on: the session never picks one by
+//! default, so a hosted model the agent lists is never reached by accident. With `configOptions` the request is
+//! `session/set_config_option`, believed only when its answer holds the id as the option's `currentValue`; with the
+//! draft form it is `session/set_model`, and an answer that is not an error is enough. The first prompt is written when
+//! that answer is read, never before. An id that is the current one writes nothing. An id the agent does not list, an
+//! agent that lists none, and an answer that is an error or does not show the model set, write no prompt and make
+//! `finish` say `PhaseFailure::ModelUnavailable`. The events are `Other`s named `model_unavailable` (it carries the
+//! count of models offered, never the id), `model_set_error` and `model_not_set`. A `current_model_update` or a
+//! `config_option_update` read later is an `Other`: the session does not follow an agent that changes its model.
+//! `send_turn` writes nothing while the model request is out, and after it was refused.
 //!
 //! **No content from the agent is kept in an event of the `Other` kind.** A stream's content is untrusted and may be
 //! large (0.3), and the journal already holds each line whole. An `Other` carries a name only, cut to 64 characters.
@@ -62,11 +81,12 @@
 //! in the turn with the same id; else `other`. The agent may ask before it announces the call (S7, O6), and a call
 //! announced after the request changes nothing already given.
 //!
-//! Left to the items after this one, which harden what the double had: the model (`ts-0090-jd`), empty turns, lost
-//! children and usage (`ts-0091-pz`). Until then `TurnEnd.empty` is `false`, and no `Usage` event is made.
+//! Left to the item after this one, which hardens what the double had: empty turns, lost children and usage
+//! (`ts-0091-pz`). Until then `TurnEnd.empty` is `false`, and no `Usage` event is made.
 //!
 //! `PermissionRequest` carries no paths (`core/src/agent.rs`); ACP's `toolCall.locations` has them and is left out.
 
+use super::model::{self, ModelForm, ModelPlan};
 use super::options::{AcpOptions, McpServer};
 use collide_core::adapter::{
     AgentSession, ExitInfo, Finished, PhaseFailure, PhaseOutcome, ReplayError, StampedEvent, Step,
@@ -93,6 +113,8 @@ const NAME_LIMIT: usize = 64;
 enum Awaiting {
     Initialize,
     SessionNew,
+    /// `session/set_config_option` or `session/set_model`, by the form the model came from.
+    Model(ModelForm),
     Prompt,
 }
 
@@ -145,6 +167,8 @@ pub struct AcpSession {
     cancel_requested: bool,
     turn_report: String,
     handshake_failed: bool,
+    /// The model the request named cannot be had, so no prompt was or will be written.
+    model_refused: bool,
     last_turn: Option<TurnEndReason>,
 }
 
@@ -161,6 +185,7 @@ impl AcpSession {
             cancel_requested: false,
             turn_report: String::new(),
             handshake_failed: false,
+            model_refused: false,
             last_turn: None,
         }
     }
@@ -264,6 +289,13 @@ impl AcpSession {
         Reading::events(vec![at(self.hold_request(message))])
     }
 
+    /// Whether the request that sets the model is waiting for its answer.
+    fn model_pending(&self) -> bool {
+        self.awaiting
+            .iter()
+            .any(|(_, awaiting)| matches!(awaiting, Awaiting::Model(_)))
+    }
+
     /// Whether a `session/prompt` is waiting for its response.
     fn turn_open(&self) -> bool {
         self.awaiting
@@ -359,21 +391,28 @@ impl AcpSession {
                     }],
                 }
             }
+            (Awaiting::Model(form), result) => self.model_answered(form, result, wall_ns),
             (_, Some(result)) => match result.get("sessionId").and_then(Value::as_str) {
                 Some(session_id) => {
                     self.session_id = Some(session_id.to_string());
-                    Reading {
-                        events: vec![at(AgentEvent::SessionBound {
-                            id: session_id.into(),
-                        })],
-                        writes: vec![Outgoing::Request {
-                            method: "session/prompt",
-                            params: json!({
-                                "sessionId": session_id,
-                                "prompt": [{ "type": "text", "text": self.options.first_prompt }]
-                            }),
-                        }],
+                    let mut reading = Reading::events(vec![at(AgentEvent::SessionBound {
+                        id: session_id.into(),
+                    })]);
+                    match model::plan(result, session_id, self.options.model.as_deref()) {
+                        ModelPlan::Keep => reading.writes.push(self.first_prompt(session_id)),
+                        ModelPlan::Set(request) => reading.writes.push(Outgoing::Request {
+                            method: request.method,
+                            params: request.params,
+                        }),
+                        ModelPlan::Unavailable { offered } => {
+                            self.model_refused = true;
+                            reading.events.push(at(AgentEvent::Other {
+                                raw_type: "model_unavailable".into(),
+                                raw: Some(json!({ "offered": offered })),
+                            }));
+                        }
                     }
+                    reading
                 }
                 None => self.handshake_ended("malformed_response", wall_ns),
             },
@@ -394,6 +433,43 @@ impl AcpSession {
                 },
                 wall_ns,
             ),
+        }
+    }
+
+    /// The first prompt, as the session's own data has it.
+    fn first_prompt(&self, session_id: &str) -> Outgoing {
+        Outgoing::Request {
+            method: "session/prompt",
+            params: json!({
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": self.options.first_prompt }]
+            }),
+        }
+    }
+
+    /// The answer to the request that sets the model. Only an answer that shows the model set lets the first prompt
+    /// go (S7, O8): an agent may answer and keep its own. Otherwise nothing more is written and `finish` says so.
+    fn model_answered(&mut self, form: ModelForm, result: Option<&Value>, wall_ns: u64) -> Reading {
+        let wanted = self.options.model.as_deref().unwrap_or_default();
+        let refusal = match (form, result) {
+            (_, None) => Some("model_set_error"),
+            (ModelForm::ConfigOption, Some(result))
+                if !model::config_option_holds(result, wanted) =>
+            {
+                Some("model_not_set")
+            }
+            _ => None,
+        };
+        if let Some(name) = refusal {
+            self.model_refused = true;
+            return Reading::events(vec![stamped(Some(wall_ns), named(name))]);
+        }
+        let Some(session_id) = self.session_id.clone() else {
+            return Reading::nothing();
+        };
+        Reading {
+            events: Vec::new(),
+            writes: vec![self.first_prompt(&session_id)],
         }
     }
 
@@ -454,13 +530,21 @@ impl Replayable for AcpSession {
             .map_err(|reason| format!("not a JSON-RPC message: {reason}"))?;
         let id = message.get("id");
         match message.get("method").and_then(Value::as_str) {
-            Some(method @ ("initialize" | "session/new" | "session/prompt")) => {
+            Some(
+                method @ ("initialize"
+                | "session/new"
+                | "session/set_config_option"
+                | "session/set_model"
+                | "session/prompt"),
+            ) => {
                 let id = id
                     .and_then(Value::as_u64)
                     .ok_or_else(|| format!("a `{method}` request with no numeric id"))?;
                 let awaiting = match method {
                     "initialize" => Awaiting::Initialize,
                     "session/new" => Awaiting::SessionNew,
+                    "session/set_config_option" => Awaiting::Model(ModelForm::ConfigOption),
+                    "session/set_model" => Awaiting::Model(ModelForm::Draft),
                     _ => {
                         // A new turn: it has no words and no tool calls yet, and is not cancelled.
                         self.turn_report.clear();
@@ -527,7 +611,12 @@ impl AgentSession for AcpSession {
     }
 
     fn send_turn(&mut self, text: &str) -> Step {
-        let Some(session_id) = self.session_id.clone() else {
+        // No prompt goes out before the model is set, and none after it was refused.
+        let session_id = self
+            .session_id
+            .clone()
+            .filter(|_| !self.model_refused && !self.model_pending());
+        let Some(session_id) = session_id else {
             // There is no session to prompt yet. Say so, rather than lose the turn without a trace.
             return Step {
                 events: vec![stamped(None, named("turn_not_sent"))],
@@ -618,6 +707,9 @@ impl AgentSession for AcpSession {
         // response, a pending request or not, leaves nothing known about its work.
         let outcome = match (&exit.record, &self.last_turn) {
             (None, _) => PhaseOutcome::Lost,
+            (Some(_), _) if self.model_refused => PhaseOutcome::Failed {
+                cause: PhaseFailure::ModelUnavailable,
+            },
             (Some(_), _) if self.handshake_failed => PhaseOutcome::Failed {
                 cause: PhaseFailure::Api { status: None },
             },

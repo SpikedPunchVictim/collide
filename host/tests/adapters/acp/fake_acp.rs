@@ -429,7 +429,7 @@ fn every_recording_is_json_on_each_line_says_something_and_holds_only_steps_the_
         }
         seen += 1;
     }
-    assert_eq!(seen, 11, "the recordings: add a test for a new one");
+    assert_eq!(seen, 14, "the recordings: add a test for a new one");
 }
 
 /// What a recording says in answer to `initialize` and to `session/new`.
@@ -498,6 +498,51 @@ fn the_handshake_with_neither_names_no_model() {
     assert_eq!(initialize["protocolVersion"], 1);
     assert!(new["sessionId"].is_string());
     assert!(new.get("configOptions").is_none() && new.get("models").is_none());
+}
+
+#[test]
+fn the_model_recordings_expect_the_request_of_their_form_and_answer_it_before_the_prompt() {
+    let methods = |name: &str| -> Vec<String> {
+        steps(&recording(name))
+            .iter()
+            .filter_map(|step| step["expect"]["method"].as_str().map(str::to_string))
+            .collect()
+    };
+    for (name, method) in [
+        ("model-config-options", "session/set_config_option"),
+        ("model-set-model", "session/set_model"),
+    ] {
+        assert_eq!(
+            methods(name),
+            ["initialize", "session/new", method, "session/prompt"],
+            "{name}"
+        );
+    }
+    assert_eq!(methods("model-not-offered"), ["initialize", "session/new"]);
+
+    // The answer to `set_config_option` is the options as they stand: the model option holds the value asked for.
+    let asked = steps(&recording("model-config-options"))
+        .into_iter()
+        .find(|step| step["expect"]["method"] == "session/set_config_option")
+        .expect("the request is expected");
+    let value = asked["expect"]["params"]["value"].clone();
+    let answer = said_where("model-config-options", |line| {
+        line["id"] == json!({"$id": "set"})
+    });
+    let options = answer["result"]["configOptions"]
+        .as_array()
+        .expect("a list");
+    let model = options
+        .iter()
+        .find(|option| option["category"] == "model")
+        .expect("a model option");
+    assert_eq!(model["currentValue"], value);
+
+    // The answer to `set_model` is empty.
+    let answer = said_where("model-set-model", |line| {
+        line["id"] == json!({"$id": "set"})
+    });
+    assert_eq!(answer["result"], json!({}));
 }
 
 fn parsed(bytes: Vec<u8>) -> Value {

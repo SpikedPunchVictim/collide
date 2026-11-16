@@ -320,7 +320,9 @@ pub struct PhaseRecord {
     /// The last usage event of the phase's session, as it reported it.
     pub usage: Option<Usage>,
     /// `no_result`, `refusal`, `max_tokens`, `max_turns`, `budget`, `blocked`, `api` (`api_<status>` when the result
-    /// had a status), `empty_turn` or `settings_ignored` (the settings canary never appeared): what the session said the failure was. Core's `PhaseState::Failed` carries only `disk`, so the cause is kept here.
+    /// had a status), `empty_turn`, `settings_ignored` (the settings canary never appeared) or `model_unavailable`
+    /// (the agent does not offer the model the role names): what the session said the failure was. Core's
+    /// `PhaseState::Failed` carries only `disk`, so the cause is kept here.
     pub failure: Option<String>,
     /// The text of the session's final report.
     pub report: Option<String>,

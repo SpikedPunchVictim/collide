@@ -103,6 +103,7 @@ pub fn failure_text(cause: &PhaseFailure) -> String {
         PhaseFailure::Api { .. } => "api",
         PhaseFailure::NoResult => "no_result",
         PhaseFailure::SettingsIgnored => SETTINGS_IGNORED_FAILURE,
+        PhaseFailure::ModelUnavailable => "model_unavailable",
     };
     text.to_string()
 }
@@ -589,6 +590,10 @@ mod tests {
             "api_529"
         );
         assert_eq!(failure_text(&PhaseFailure::Api { status: None }), "api");
+        assert_eq!(
+            failure_text(&PhaseFailure::ModelUnavailable),
+            "model_unavailable"
+        );
         assert_eq!(
             failure_text(&PhaseFailure::Blocked { reason: None }),
             "blocked"

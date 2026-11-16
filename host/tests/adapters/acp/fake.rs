@@ -252,12 +252,18 @@ impl Played {
     }
 }
 
+/// Whether the session says the agent cannot be given the model the request names: no prompt follows.
+fn is_refused_model(event: &AgentEvent) -> bool {
+    matches!(event, AgentEvent::Other { raw_type, .. } if raw_type == "model_unavailable")
+}
+
 /// Runs the child on `recording` under the real shim, with a live session built from `options`. The session writes
 /// `initialize` in `start`, and each line the child writes goes through its `feed`; what `feed` writes is written to
 /// the child (and so journaled) after the line, as the daemon will do. The first prompt is the options' own. `turns`
 /// are the turns after it: the next one is sent each time a turn ends. `react` is called with each event the child's
 /// lines make, to answer a request or cancel (what it returns is written to the child). Stdin closes after the last
-/// turn ends. A recording must end every turn it has with a response, or the run waits for one.
+/// turn ends, or when the session says the model is unavailable. A recording must end every turn it has with a
+/// response, or the run waits for one.
 pub fn play(
     recording: &Path,
     options: AcpOptions,
@@ -334,6 +340,10 @@ pub fn play(
         }
         for stamped in step.events {
             drive(&mut |session| react(session, &stamped.event));
+            if is_refused_model(&stamped.event) {
+                // The phase cannot go on and no turn will end: the host stops the child, as it stops a failed phase.
+                break 'run;
+            }
             if matches!(stamped.event, AgentEvent::TurnEnd { .. }) {
                 match turns.next() {
                     Some(text) => drive(&mut |session| session.send_turn(text)),
