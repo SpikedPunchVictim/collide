@@ -4048,8 +4048,9 @@ the 3c tests are rewritten against the engine. The cost is accepted for an earli
 
 **Tests**: The loop over `rpc` in a browser against the fake Claude; permission answer; accept, re-prompt and discard
 against a fixture repo; window close and reopen; scratch-task create and status.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-003-da`, items lettered `3c`
-(part L). It runs after 3b. The ACP engine (3d) follows it; the thin loop needs only Claude.
+**Status**: Not Started. Items from revision 22, split on 2026-11-15: `ts-0075-hj` to `ts-0083-uf`, in epic
+`ep-003-da`, built one at a time in id order (part L). It runs after 3b. The ACP engine (3d) follows it; the thin
+loop needs only Claude.
 
 ### Stage 3d: ACP engine
 
