@@ -1,7 +1,7 @@
 ---
 id: ts-0074-cu
 kind: task
-status: active
+status: done
 title: "Collide's tests pass inside a Collide run"
 owners: []
 links:
