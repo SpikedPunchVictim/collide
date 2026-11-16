@@ -325,6 +325,17 @@ impl Channel {
     }
 }
 
+impl Channel {
+    /// The `state` of each `shell.connection` notice emitted so far, in order.
+    pub fn connection_states(&self) -> Vec<String> {
+        self.events()
+            .iter()
+            .filter(|event| event.method == collide_app::shell::CONNECTION_EVENT)
+            .map(|event| event.params["state"].as_str().unwrap().to_string())
+            .collect()
+    }
+}
+
 impl EventChannel for Channel {
     fn is_open(&self) -> bool {
         true

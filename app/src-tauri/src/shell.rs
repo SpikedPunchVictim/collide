@@ -72,6 +72,12 @@ impl From<Notification> for ChannelEvent {
     }
 }
 
+/// The method of the shell's own notice that the daemon's event stream ended or came back (ts-0081-wm). Its params are
+/// `{"state": "lost"}` or `{"state": "back"}`, and nothing else. The window reloads its state on `back`, because the
+/// daemon's log may no longer hold what came between. `app/src/owner/client.ts` has the same name; a test keeps the two
+/// equal.
+pub const CONNECTION_EVENT: &str = "shell.connection";
+
 /// The event channel, as the shell sees it. The real one is the webview's ([`crate::run`]).
 pub trait EventChannel: Send + Sync {
     /// Whether a window is there to hear.
@@ -325,9 +331,29 @@ const PUMP_TICK: Duration = Duration::from_millis(200);
 /// `daemon.subscribe`.
 const PUMP_CALL_WAIT: Duration = Duration::from_secs(60);
 
+/// Whether the window has been told that the stream is down.
+#[derive(Default, PartialEq)]
+enum StreamState {
+    /// Nothing has ended yet, so the window has heard nothing.
+    #[default]
+    Unknown,
+    Up,
+    /// The window was told `lost` and has not been told `back`.
+    Down,
+}
+
+/// Tells the window about the stream, on the one event channel.
+fn tell_connection(channel: &dyn EventChannel, state: &str) {
+    channel.emit(&ChannelEvent {
+        method: CONNECTION_EVENT.to_string(),
+        params: serde_json::json!({ "state": state }),
+    });
+}
+
 /// What the pump has done so far, which outlives each stream.
 #[derive(Default)]
 struct PumpProgress {
+    stream: StreamState,
     /// The `seq` of the last event put on the channel, or the head of the log when none has been yet.
     last_seq: Option<u64>,
     asked_for_environment: bool,
@@ -335,11 +361,14 @@ struct PumpProgress {
 
 /// Reads the daemon's notices on a connection of its own and puts each on the channel: the `daemon.event` and
 /// `queue.changed` notices of `daemon.subscribe`. The first connection of the app also asks the daemon to capture the
-/// login-shell environment again (0.2, The base environment). When the stream ends, because the daemon stopped or
-/// because this reader fell behind, the pump waits `retry_wait` and subscribes again from the last `seq` it forwarded,
-/// so
-/// no event is missing and none is sent twice. It starts the daemon when none answers, as a call does, and returns when
-/// `stop` is set.
+/// login-shell environment again (0.2, The base environment).
+///
+/// The window is told, with a [`CONNECTION_EVENT`] notice, when the stream ends and when it comes back. The first
+/// connection is not a return and says nothing, unless it had to be tried again.
+///
+/// When the stream ends, because the daemon stopped or because this reader fell behind, the pump waits `retry_wait` and
+/// subscribes again from the last `seq` it forwarded, so no event is missing and none is sent twice. It starts the
+/// daemon when none answers, as a call does, and returns when `stop` is set.
 pub fn pump_daemon_events(
     access: &DaemonAccess,
     channel: &dyn EventChannel,
@@ -349,7 +378,14 @@ pub fn pump_daemon_events(
     let mut progress = PumpProgress::default();
     let mut told = String::new();
     while !stop.load(Ordering::SeqCst) {
-        match follow_daemon(access, channel, stop, &mut progress) {
+        let followed = follow_daemon(access, channel, stop, &mut progress);
+        // A stream that ends, or a connection that cannot be made, is told once, until it comes back. A pump that is
+        // told to stop is not a stream that ended.
+        if !stop.load(Ordering::SeqCst) && progress.stream != StreamState::Down {
+            progress.stream = StreamState::Down;
+            tell_connection(channel, "lost");
+        }
+        match followed {
             Ok(()) => told.clear(),
             // The same trouble is said once, not at each try.
             Err(error) if error.message != told => {
@@ -396,12 +432,17 @@ fn follow_daemon(
     match progress.last_seq {
         None => progress.last_seq = Some(result.head_seq),
         Some(last) if last + 1 < result.oldest_seq => eprintln!(
-            "collide: the daemon's log no longer holds events {} to {}; the window's state is behind",
+            "collide: the daemon's log no longer holds events {} to {}; the window reloads instead of replaying",
             last + 1,
             result.oldest_seq - 1
         ),
         Some(_) => {}
     }
+    // The window hears of the return before the replay, so it reloads first and the replayed events find it current.
+    if progress.stream == StreamState::Down {
+        tell_connection(channel, "back");
+    }
+    progress.stream = StreamState::Up;
     // After the daemon has shut the stream down macOS refuses to set an option. Then the reads below give what was
     // sent and the end of the stream, and need no wait.
     let _ = client.set_read_wait(Some(PUMP_TICK));

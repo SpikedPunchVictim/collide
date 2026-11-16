@@ -1,28 +1,17 @@
-import { useReducer } from 'react'
-import { AppShell } from './AppShell.tsx'
-import { PLACEHOLDER_DATA, type ShellData } from './components/placeholders-detail.ts'
-import { type Actions, stubActions } from './components/stub-actions.ts'
-import { type UiState, initialState, reducer } from './ui/index.ts'
+import { LoopPage } from './loop/LoopPage.tsx'
+import { useLoop } from './loop/useLoop.ts'
+import { type OwnerClient, createTauriOwner } from './owner/index.ts'
 
-/** The state the window starts in: the corpus the placeholder data holds, so the reducer knows its ids (0.9). */
-function startState(data: ShellData): UiState {
-  return reducer(initialState(), {
-    type: 'user/corpus_loaded',
-    corpus: {
-      tasks: data.tasks.map((t) => t.key),
-      runs: data.runs.map((r) => r.id),
-      phases: [...new Set(data.runs.flatMap((r) => r.phases.map((p) => p.name)))],
-    },
-  })
-}
+// Until Stage 6a brings the tabs, the window is the one page of the thin loop (Stage 3c). `AppShell` and its surfaces
+// stay in the tree and are tested; Stage 6a shows them again, over the owner client.
+const shellOwner = createTauriOwner()
 
 export interface AppProps {
-  /** What the surfaces show. Placeholders until the owner client supplies it (Stage 3c and Stage 6). */
-  readonly data?: ShellData
-  readonly actions?: Actions
+  /** The way to the daemon. The shell's, unless a test gives another. */
+  readonly owner?: OwnerClient
 }
 
-export function App({ data = PLACEHOLDER_DATA, actions = stubActions }: AppProps) {
-  const [state, dispatch] = useReducer(reducer, data, startState)
-  return <AppShell state={state} dispatch={dispatch} data={data} actions={actions} />
+export function App({ owner = shellOwner }: AppProps) {
+  const { state, loop } = useLoop(owner)
+  return <LoopPage state={state} actions={loop} nowMs={Date.now()} />
 }

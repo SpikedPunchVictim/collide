@@ -459,6 +459,9 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   webview. The CLI and the UI therefore share one contract, and UI tests run in a browser against a fake owner.
   A subscriber's events go through a bounded queue, so the daemon never waits for a client. A client that falls
   behind has its stream ended after what was queued, and subscribes again from the last `seq` it has (ts-0076-cw).
+  The shell tells the window when the daemon's event stream ends (`shell.connection`, `lost`) and when it is back
+  (`back`, sent before the replay). On `back` the window reloads its runs and Queue from the daemon and never trusts
+  the replay to fill a gap (ts-0081-wm).
 - Every child gets `COLLIDE_RUN=<id>` and `COLLIDE_RUN_START=<start clock>` in its environment. A stop finds
   descendants three ways:
   - a ppid walk;

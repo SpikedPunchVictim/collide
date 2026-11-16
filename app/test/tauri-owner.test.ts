@@ -7,7 +7,7 @@ const listen = vi.hoisted(() => vi.fn())
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen }))
 
-import { OwnerError } from '../src/owner/client.ts'
+import { CONNECTION_EVENT, OwnerError } from '../src/owner/client.ts'
 import { EVENT_CHANNEL, RPC_COMMAND, createTauriOwner } from '../src/owner/tauri.ts'
 
 beforeEach(() => {
@@ -46,4 +46,9 @@ test('the channel name is the one the shell emits on', () => {
   const lib = readFileSync(join(import.meta.dirname, '..', 'src-tauri', 'src', 'lib.rs'), 'utf8')
   expect(lib).toContain(`pub const EVENT_CHANNEL: &str = "${EVENT_CHANNEL}";`)
   expect(lib).toContain(`pub const RPC_COMMAND: &str = "${RPC_COMMAND}";`)
+})
+
+test('the shell\'s notice of the connection has the name the shell emits', () => {
+  const shell = readFileSync(join(import.meta.dirname, '..', 'src-tauri', 'src', 'shell.rs'), 'utf8')
+  expect(shell).toContain(`pub const CONNECTION_EVENT: &str = "${CONNECTION_EVENT}";`)
 })

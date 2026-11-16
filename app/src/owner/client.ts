@@ -24,8 +24,17 @@ export type RpcArgs<M extends WindowMethod> = {} extends ParamsOf<M>
 /** The event of 0.2: an agent's `tools/call`, for the window to run and answer with `ui_tools.reply`. */
 export type UiToolsRequestEvent = { method: 'ui_tools.request'; params: UiToolsRequestOutput }
 
-/** What arrives on the event channel: the daemon's notices, an ask's, and the shell's own `ui_tools.request`. */
-export type ChannelEvent = OwnerNoticeOutput | AskNoticeOutput | UiToolsRequestEvent
+/** The name of the shell's notice about the daemon's event stream. `app/src-tauri/src/shell.rs` has the same name. */
+export const CONNECTION_EVENT = 'shell.connection'
+
+/**
+ * The shell's notice that the daemon's event stream ended (`lost`) or came back (`back`). On `back` the events between
+ * may be gone from the daemon's log, so a window reloads its state instead of waiting for them.
+ */
+export type ConnectionEvent = { method: typeof CONNECTION_EVENT; params: { state: 'lost' | 'back' } }
+
+/** What arrives on the event channel: the daemon's notices, an ask's, and the shell's own notices. */
+export type ChannelEvent = OwnerNoticeOutput | AskNoticeOutput | UiToolsRequestEvent | ConnectionEvent
 
 export type Unsubscribe = () => void
 

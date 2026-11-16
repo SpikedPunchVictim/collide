@@ -600,3 +600,173 @@ fn the_app_asks_a_real_daemon_for_the_environment_when_it_starts_and_only_then()
     pump.stop();
     assert_eq!(count(), 2);
 }
+
+// ---- the window is told when the stream ends and when it comes back --------------------------------------------
+
+#[test]
+fn a_stream_that_ends_is_told_to_the_window_and_so_is_its_return_before_the_replay() {
+    let root = TempRoot::new();
+    let daemon = start_daemon(&root, Box::new(std::io::sink()), None);
+    let channel = Channel::default();
+    let pump = PumpRun::start(
+        access(&root, FailingStarter::default(), &TestClocks::default()),
+        channel.clone(),
+        Duration::from_millis(300),
+    );
+    wait_until("the pump is subscribed", WAIT, || {
+        append(&daemon, 1);
+        !channel.seqs().is_empty()
+    });
+    // The daemon may not have answered the pump's very first try, which is told as a loss and a return. That is the
+    // pump's, and what follows is the restart's.
+    let told_before = channel.connection_states().len();
+
+    drop(daemon);
+    wait_until("the end of the stream", WAIT, || {
+        channel.connection_states().len() == told_before + 1
+    });
+    let daemon = start_daemon(&root, Box::new(std::io::sink()), None);
+    // Appended while the pump may not have subscribed again: the replay carries them after the notice of the return.
+    append(&daemon, 3);
+    let after = daemon.store().last_seq().unwrap();
+    wait_until("the events after the restart", WAIT, || {
+        channel.seqs().last() == Some(&after)
+    });
+    pump.stop();
+
+    assert_eq!(channel.connection_states()[told_before..], ["lost", "back"]);
+    let events = channel.events();
+    let back = events
+        .iter()
+        .rposition(|event| {
+            event.method == collide_app::shell::CONNECTION_EVENT && event.params["state"] == "back"
+        })
+        .unwrap();
+    let first_replayed = events
+        .iter()
+        .rposition(|event| event.method == "daemon.event" && event.params["seq"] == after - 2)
+        .unwrap();
+    assert!(
+        back < first_replayed,
+        "the window hears of the return, then reloads, then the replay follows: {back} {first_replayed}"
+    );
+}
+
+#[test]
+fn a_notice_of_the_connection_has_the_state_and_nothing_else() {
+    let root = TempRoot::new();
+    let daemon = start_daemon(&root, Box::new(std::io::sink()), None);
+    let channel = Channel::default();
+    let pump = PumpRun::start(
+        access(&root, FailingStarter::default(), &TestClocks::default()),
+        channel.clone(),
+        RETRY,
+    );
+    wait_until("the pump is subscribed", WAIT, || {
+        append(&daemon, 1);
+        !channel.seqs().is_empty()
+    });
+    drop(daemon);
+    wait_until("the end of the stream", WAIT, || {
+        !channel.connection_states().is_empty()
+    });
+    pump.stop();
+    let notice = channel
+        .events()
+        .into_iter()
+        .find(|event| event.method == collide_app::shell::CONNECTION_EVENT)
+        .unwrap();
+    assert_eq!(notice.params, json!({"state": "lost"}));
+}
+
+#[test]
+fn trouble_that_goes_on_is_told_once_and_a_pump_that_is_stopped_says_nothing() {
+    let root = TempRoot::new();
+    let starter = FailingStarter::default();
+    let channel = Channel::default();
+    let pump = PumpRun::start(
+        access(&root, starter.clone(), &TestClocks::default()),
+        channel.clone(),
+        RETRY,
+    );
+    wait_until("the pump has tried", WAIT, || starter.asked() >= 1);
+    wait_until("the trouble is told", WAIT, || {
+        channel.connection_states() == ["lost"]
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    pump.stop();
+    assert_eq!(channel.connection_states(), ["lost"]);
+}
+
+#[test]
+fn a_pump_that_found_no_daemon_tells_the_window_when_the_daemon_comes() {
+    let root = TempRoot::new();
+    let starter = FailingStarter::default();
+    let channel = Channel::default();
+    let pump = PumpRun::start(
+        access(&root, starter.clone(), &TestClocks::default()),
+        channel.clone(),
+        RETRY,
+    );
+    wait_until("the pump has tried", WAIT, || starter.asked() >= 1);
+    let daemon = start_daemon(&root, Box::new(std::io::sink()), None);
+    wait_until("the return is told", WAIT, || {
+        channel.connection_states() == ["lost", "back"]
+    });
+    pump.stop();
+    drop(daemon);
+}
+
+#[test]
+fn a_pump_that_is_stopped_while_the_stream_is_up_says_nothing() {
+    let root = TempRoot::new();
+    let _fake = FakeDaemon::start(&root, |conn| {
+        conn.initialize();
+        conn.answer_recapture();
+        conn.answer_subscribe(0);
+        while conn.read().is_some() {}
+    });
+    let channel = Channel::default();
+    let pump = PumpRun::start(
+        access(&root, AlreadyThere, &TestClocks::default()),
+        channel.clone(),
+        RETRY,
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    pump.stop();
+    assert_eq!(channel.connection_states(), Vec::<String>::new());
+}
+
+#[test]
+fn a_first_connection_that_works_says_nothing_and_the_return_after_it_says_back() {
+    let root = TempRoot::new();
+    let _fake = FakeDaemon::start(&root, |conn| {
+        conn.initialize();
+        if conn.index == 0 {
+            conn.answer_recapture();
+            conn.answer_subscribe(4);
+            conn.event(5);
+            return;
+        }
+        conn.answer_subscribe(6);
+        conn.event(6);
+        while conn.read().is_some() {}
+    });
+    let channel = Channel::default();
+    let pump = PumpRun::start(
+        access(&root, AlreadyThere, &TestClocks::default()),
+        channel.clone(),
+        RETRY,
+    );
+    wait_until("both streams", WAIT, || channel.seqs() == [5, 6]);
+    pump.stop();
+    let told: Vec<String> = channel
+        .events()
+        .iter()
+        .map(|event| match event.method.as_str() {
+            "daemon.event" => format!("event {}", event.params["seq"]),
+            _ => event.params["state"].as_str().unwrap().to_string(),
+        })
+        .collect();
+    assert_eq!(told, ["event 5", "lost", "back", "event 6"]);
+}
