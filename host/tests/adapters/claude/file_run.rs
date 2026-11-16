@@ -172,6 +172,7 @@ impl Fixture {
         options.processes = Arc::new(Guarded::under(paths.runs_dir.clone(), Vec::new()));
         options.home = Some(home.to_str().unwrap().to_string());
         options.git_env = vec![
+            ("HOME".to_string(), home.to_str().unwrap().to_string()),
             ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
             ("GIT_CONFIG_SYSTEM".to_string(), "/dev/null".to_string()),
             ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
@@ -444,7 +445,7 @@ fn the_first_turn_is_the_text_of_the_task_file_and_the_first_stdin_line_the_jour
 }
 
 /// A recording whose child writes its init line and exits 0 with no `result`.
-fn no_result_recording(root: &TempRoot) -> PathBuf {
+pub(super) fn no_result_recording(root: &TempRoot) -> PathBuf {
     let path = root.join("no-result.jsonl");
     fs::write(
         &path,

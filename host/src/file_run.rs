@@ -29,6 +29,12 @@
 //! It stores no agent events (ts-0067) and has no engine, so a budget that runs out is a Queue item that can only stop
 //! the run (there is no `ask_human` phase to resume into). The rest of the phase's life is below.
 //!
+//! ## A prompt run (ts-0078-ye)
+//!
+//! A run of `collide/quick` on a scratch task shares all of this: `FileRuns::begin` is the start both kinds go through,
+//! and the end hook goes on to the review for a run that has a `QuickRun` in its context. Its own part, the
+//! checks, the task's moves, the leftovers' commit and the Review item, is in [`quick_run`].
+//!
 //! ## Pauses, answers and a restart (ts-0066-zb)
 //!
 //! - A phase that settles on a usage limit (a `limited` event, a 429) or on its budget (`error_max_budget_usd`) is
@@ -42,6 +48,8 @@
 //! - Each run's context is in the store ([`crate::store::Store::set_run_context`]), so a daemon that starts again goes
 //!   on with the runs it finds: it rebuilds a running phase's session from its journal, keeps its pending requests in
 //!   the Queue, and resumes a limit that reset while no daemon ran.
+
+pub mod quick_run;
 
 use crate::adapters::claude::session::ClaudeSession;
 use crate::adapters::claude::user_config::{
@@ -79,6 +87,7 @@ use collide_core::profile::RoleConfig;
 use collide_core::resolve::resolve_model_alias;
 use collide_core::state::{PauseCause, PhaseState, RunState, WorkspaceState};
 use collide_core::workflow::{AgentPhase, OnCold, Prompt};
+use quick_run::QuickRun;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use std::collections::{BTreeMap, HashMap};
@@ -144,7 +153,7 @@ pub const RESUME_TURN: &str = "Continue where you left off.";
 struct RunContext {
     run: String,
     repo: String,
-    task_file: String,
+    task_file: Option<String>,
     alias: Option<String>,
     budget_usd: Option<f64>,
     task_text: String,
@@ -164,6 +173,11 @@ struct RunContext {
     branch: String,
     /// The `provisioning` event was written, so a launch that is tried again does not write it twice.
     workspace_recorded: bool,
+    /// What a prompt run (`collide/quick`) records besides: its board, its task and the branch and commit it started
+    /// from. Absent for a run of a task file. It stays in the store after the run ends, because accept, re-prompt and
+    /// discard need the worktree, the branch and the session.
+    #[serde(default)]
+    quick: Option<QuickRun>,
 }
 
 impl RunContext {
@@ -210,6 +224,8 @@ pub struct FileRuns {
     timer_threads: Mutex<Vec<JoinHandle<()>>>,
     closed: AtomicBool,
     counter: AtomicU64,
+    /// Held while a prompt run claims its task, so two starts on one task cannot both find it ready.
+    claims: Mutex<()>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -233,6 +249,17 @@ impl From<LaunchProblem> for Halt {
     fn from(problem: LaunchProblem) -> Halt {
         Halt::Refused(vec![problem])
     }
+}
+
+/// What a run is made of once its request is checked, whatever the request was.
+struct Begin {
+    repo: String,
+    task_file: Option<String>,
+    alias: Option<String>,
+    budget_usd: Option<f64>,
+    task_text: String,
+    model: Option<ModelRef>,
+    quick: Option<QuickRun>,
 }
 
 fn limit_item_id(run: &str) -> String {
@@ -298,6 +325,7 @@ impl FileRuns {
             timer_threads: Mutex::new(Vec::new()),
             closed: AtomicBool::new(false),
             counter: AtomicU64::new(0),
+            claims: Mutex::new(()),
         }
     }
 
@@ -347,6 +375,27 @@ impl FileRuns {
         let Some((task_text, model)) = checked.filter(|_| problems.is_empty()) else {
             return Err(problems);
         };
+        let begin = Begin {
+            repo: params.repo.clone(),
+            task_file: Some(params.task_file.clone()),
+            alias: params.alias.clone(),
+            budget_usd: params.budget_usd,
+            task_text,
+            model,
+            quick: None,
+        };
+        self.begin(phases, begin, &|_| Ok(()))
+    }
+
+    /// What every kind of run does once its request is checked: waits for the base environment, records the run, calls
+    /// `linked` (which a prompt run uses to link its board and task and to claim the task), then makes the worktree
+    /// and starts the phase. A `linked` that refuses ends the run `failed`, as a start that is refused later does.
+    fn begin(
+        &self,
+        phases: &Phases,
+        begin: Begin,
+        linked: &dyn Fn(&str) -> Result<(), Vec<LaunchProblem>>,
+    ) -> Result<String, Vec<LaunchProblem>> {
         let Some(base) = (self.config.base_env)(self.config.capture_wait) else {
             return Err(vec![problem(
                 "the base environment was not captured in time, so no phase can start",
@@ -362,12 +411,12 @@ impl FileRuns {
         let workspace_path = self.config.workspaces_dir.join(&run);
         let ctx = RunContext {
             run: run.clone(),
-            repo: params.repo.clone(),
-            task_file: params.task_file.clone(),
-            alias: params.alias.clone(),
-            budget_usd: params.budget_usd,
-            task_text,
-            model,
+            repo: begin.repo,
+            task_file: begin.task_file,
+            alias: begin.alias,
+            budget_usd: begin.budget_usd,
+            task_text: begin.task_text,
+            model: begin.model,
             session_id,
             attempt: 0,
             spent_usd: 0.0,
@@ -377,6 +426,7 @@ impl FileRuns {
             git_dir: None,
             branch: format!("collide/{run}"),
             workspace_recorded: false,
+            quick: begin.quick,
         };
         if let Err(error) = self.record_run(phases, &run, None, RunState::Running {}) {
             return Err(vec![problem(format!("recording the run: {error}"))]);
@@ -386,7 +436,9 @@ impl FileRuns {
         // In the table before the phase starts, so a phase that ends at once finds its run.
         locked(&self.live).insert(run.clone(), live.clone());
         let mut live = locked(&live);
-        let halted = self.launch(phases, &run, &mut live, &base);
+        let halted = linked(&run)
+            .map_err(Halt::Refused)
+            .and_then(|()| self.launch(phases, &run, &mut live, &base));
         self.sync(&mut live);
         match halted {
             Ok(()) => Ok(run),
@@ -424,13 +476,26 @@ impl FileRuns {
                 None
             }
         };
+        let model = self.check_agent(params.alias.as_deref(), params.budget_usd, problems);
+        Some((text?, model))
+    }
+
+    /// The checks every run's agent shares: the role against an empty requirement, the model alias and the budget.
+    /// Returns the model, which is `None` for a role with no model and for an alias that did not resolve (the problem
+    /// is then in `problems`).
+    fn check_agent(
+        &self,
+        alias: Option<&str>,
+        budget_usd: Option<f64>,
+        problems: &mut Vec<LaunchProblem>,
+    ) -> Option<ModelRef> {
         if let Err(refusals) = refuse_unmet_capabilities("claude", &capabilities(), &[]) {
             for refusal in refusals {
                 problems.push(problem(refusal.to_string()));
             }
         }
         let role = builder_role();
-        let alias = params.alias.as_deref().or(role.model.as_deref());
+        let alias = alias.or(role.model.as_deref());
         let model = match alias {
             None => None,
             Some(alias) => match load_user_models(self.config.home.as_deref()) {
@@ -449,12 +514,12 @@ impl FileRuns {
                 }
             },
         };
-        if let Some(usd) = params.budget_usd
+        if let Some(usd) = budget_usd
             && (!usd.is_finite() || usd <= 0.0)
         {
             problems.push(problem(format!("the budget {usd} is not above zero")));
         }
-        Some((text?, model))
+        model
     }
 
     /// Copies the workspace's state into the context and stores it.
@@ -812,9 +877,19 @@ impl FileRuns {
             PhaseState::Stopped {} => RunState::Stopped {},
             _ => RunState::Failed {},
         };
+        // A prompt run goes on to its review before it shows as final, so a client that sees it final finds the item.
+        let to = self.finish_quick(phases, &mut live, to);
         self.record_run_state(phases, &mut live, to);
         self.sync(&mut live);
-        // An ended run needs nothing from a restart.
+        self.forget_context(&live);
+    }
+
+    /// An ended run needs nothing from a restart, except a prompt run, which review, accept and discard still need.
+    fn forget_context(&self, live: &Live) {
+        if live.ctx.quick.is_some() {
+            return;
+        }
+        let run = &live.ctx.run;
         if let Err(error) = self.config.store.delete_run_context(run) {
             self.log(&format!("run {run}: its context was not deleted: {error}"));
         }
@@ -1134,11 +1209,10 @@ impl FileRuns {
         {
             return false;
         }
-        self.record_run_state(phases, &mut live, RunState::Stopped {});
         self.config.queue.clear_run(run, None);
-        if let Err(error) = self.config.store.delete_run_context(run) {
-            self.log(&format!("run {run}: its context was not deleted: {error}"));
-        }
+        let to = self.finish_quick(phases, &mut live, RunState::Stopped {});
+        self.record_run_state(phases, &mut live, to);
+        self.forget_context(&live);
         true
     }
 
@@ -1195,6 +1269,9 @@ impl FileRuns {
                 Some(_) => Ok(()),
                 None => Err(format!("item {item_id:?} was answered already")),
             },
+            QueueAnswer::Accept {} | QueueAnswer::Reprompt { .. } | QueueAnswer::Discard {} => {
+                Err(format!("{kind:?} on a review is not built yet"))
+            }
             _ => Err(format!("an item of this kind does not take {kind:?} yet")),
         };
         match outcome {
@@ -1292,7 +1369,10 @@ fn restored_workspace(config: &FileRunConfig, ctx: &RunContext) -> BuiltinWorksp
             repo: PathBuf::from(&ctx.repo),
             path: PathBuf::from(&ctx.workspace_path),
             branch: ctx.branch.clone(),
-            base: "HEAD".to_string(),
+            base: ctx
+                .quick
+                .as_ref()
+                .map_or_else(|| "HEAD".to_string(), |quick| quick.base_commit.clone()),
         },
         ctx.git_dir.as_ref().map(PathBuf::from),
         ctx.workspace_state,

@@ -30,6 +30,7 @@ pub mod phases;
 pub mod provider_client;
 pub mod queue;
 pub mod run_cli;
+pub mod run_diff;
 pub mod run_record;
 pub mod run_store;
 pub mod run_summary;

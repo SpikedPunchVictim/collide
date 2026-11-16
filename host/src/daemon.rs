@@ -51,7 +51,8 @@
 //! closed, so an unauthenticated peer learns no version. A connection that says nothing for [`HANDSHAKE_WAIT`] is
 //! closed. Only `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions` (the `claude` version in use and
 //! the published one, [`crate::claude_versions`]), `run.stop`, `run.start_file` (a task file run with
-//! the built-in builder role, [`crate::file_run`]), `queue.list` and `queue.answer` (the stored Queue,
+//! the built-in builder role, [`crate::file_run`]), `run.start` and `run.diff` (a prompt run of `collide/quick` up to
+//! its review, [`crate::file_run::quick_run`]), `queue.list` and `queue.answer` (the stored Queue,
 //! [`crate::queue`]), `board.open` and `board.list` (a git checkout as a board, [`crate::boards`]), and `task.get` and
 //! `task.apply` for scratch tasks ([`crate::scratch`]), `run.list` and `run.get` (from the store's index of runs,
 //! [`crate::run_store`]) and `daemon.subscribe` are served here; the other methods are other items' and answer
@@ -112,6 +113,7 @@ use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, Ver
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
+use crate::file_run::quick_run::RunDiffError;
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
@@ -133,11 +135,11 @@ use collide_core::owner::{
     BoardListResult, BoardOpenParams, BoardOpenResult, DaemonRecaptureEnvironmentResult,
     DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture,
     MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams,
-    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunGetParams,
-    RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
-    RunStartFileParams, RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth,
-    Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code, encode_line,
-    parse_request, route,
+    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunDiffParams,
+    RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
+    RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult,
+    RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams,
+    TaskGetResult, code, encode_line, parse_request, route,
 };
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{ApplyResult, GetParams};
@@ -1738,6 +1740,8 @@ fn call(
         }
         Method::RunStop => run_stop(shared, session, params),
         Method::RunStartFile => run_start_file(shared, session, params),
+        Method::RunStart => run_start(shared, session, params),
+        Method::RunDiff => run_diff(shared, params),
         Method::RunRecord => run_record(shared, params),
         Method::RunList => run_list(shared, params),
         Method::RunGet => run_get(shared, params),
@@ -1809,6 +1813,49 @@ fn run_start_file(
         Err(problems) => RunStartResult::Refused { problems },
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `run.start` for a prompt (ts-0078-ye): one scratch task of a board, run through `collide/quick` in a worktree up to
+/// its review. A board the daemon does not know is `NOT_FOUND`; everything the run is refused for is in the answer, in
+/// Collide's words. It may take as long as the first capture of the base environment and the worktree take.
+fn run_start(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: RunStartParams = read_params("run.start", params)?;
+    if let Caller::RunAgent { run } = session.caller() {
+        return Err(RpcError::new(
+            code::NOT_PERMITTED,
+            format!("the agent of run {run} may not start a run"),
+        ));
+    }
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let root = board_root(shared, &params.board)?;
+    let result = match shared.file_runs.start_quick(&shared.phases, &params, &root) {
+        Ok(run) => RunStartResult::Started { run },
+        Err(problems) => RunStartResult::Refused { problems },
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `run.diff` (ts-0078-ye): the files a prompt run's branch changed since the commit it started from, and with `path`
+/// one file's patch. A run that is not a prompt run, a branch that is gone and a file with no change are `NOT_FOUND`.
+fn run_diff(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: RunDiffParams = read_params("run.diff", params)?;
+    let diff = shared
+        .file_runs
+        .diff(&params.run, params.path.as_deref())
+        .map_err(|error| match error {
+            RunDiffError::NotFound(message) => RpcError::new(code::NOT_FOUND, message),
+            RunDiffError::Failed(message) => RpcError::new(code::INTERNAL_ERROR, message),
+        })?;
+    Ok(serde_json::to_value(diff).expect("a result is JSON"))
 }
 
 /// `run.record` (`collide run`, ts-0069-bn): the run's state, its report and failure cause, and one line for each model
@@ -1928,9 +1975,9 @@ fn run_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::V
     Ok(serde_json::to_value(RunListResult { runs, next_cursor }).expect("a result is JSON"))
 }
 
-/// `run.get`: one run's summary and the phases' rounds. What `run.start` pins at launch (the snapshot, the
-/// implementations, the fingerprint) is not recorded yet, so those are empty. A run the store has no row of is
-/// `NOT_FOUND`.
+/// `run.get`: one run's summary and the phases' rounds. What `run.start` pins at launch (the snapshot, the fingerprint)
+/// is not recorded yet, so those are empty; a prompt run's workspace is the built-in one, and that is all its
+/// `implementations` say so far. A run the store has no row of is `NOT_FOUND`.
 fn run_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
     let params: RunGetParams = read_params("run.get", params)?;
     let row = shared
@@ -1948,7 +1995,11 @@ fn run_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Va
         summary,
         snapshot_commit: String::new(),
         launch: BTreeMap::new(),
-        implementations: BTreeMap::new(),
+        implementations: if shared.file_runs.is_prompt_run(&params.run) {
+            BTreeMap::from([("workspace".to_string(), "builtin".to_string())])
+        } else {
+            BTreeMap::new()
+        },
         rounds,
         fingerprint: BTreeMap::new(),
         annotations: Vec::new(),
@@ -2117,12 +2168,28 @@ fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::V
     } else {
         None
     };
+    let runs = match &task {
+        Some(task) => shared
+            .store
+            .runs(&RunFilter {
+                board: Some(&params.board),
+                task: Some(&task.key),
+                scope: RunScope::All,
+                before: None,
+                limit: RUN_PAGE_MAX,
+            })
+            .map_err(store_failed)?
+            .into_iter()
+            .map(|row| row.run)
+            .collect(),
+        None => Vec::new(),
+    };
     let result = TaskGetResult {
         task,
         ambiguous: Vec::new(),
         copies: Vec::new(),
         collisions: Vec::new(),
-        runs: Vec::new(),
+        runs,
         latest_run: None,
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))

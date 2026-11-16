@@ -53,10 +53,10 @@ use collide_core::transition::{TransitionError, WorkspaceVia, workspace_transiti
 use std::collections::HashSet;
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// What a workspace is made from. The daemon chooses the layout (a repo's worktrees go under one root, 0.4), so `path`
 /// is the whole folder.
@@ -119,22 +119,64 @@ impl From<DiskError> for WorkspaceError {
     }
 }
 
-/// How git is run: `LC_ALL=C`, no prompts, and the environment a test or the daemon adds.
+/// How git is run: `LC_ALL=C`, no prompts, and the environment a test or the daemon adds. The prompt run and its diff
+/// run git this way too, so one place decides how.
 #[derive(Debug, Clone, Default)]
-struct Git {
+pub(crate) struct Git {
     env: Vec<(String, String)>,
 }
 
 impl Git {
-    fn run(&self, cwd: &Path, args: &[&str]) -> Result<Vec<u8>, WorkspaceError> {
-        let output = Command::new("git")
+    pub(crate) fn with_env(env: Vec<(String, String)>) -> Git {
+        Git { env }
+    }
+
+    fn command(&self, cwd: &Path, args: &[&str]) -> Command {
+        let mut command = Command::new("git");
+        command
             .args(args)
             .current_dir(cwd)
             .env("LC_ALL", "C")
             .env("GIT_TERMINAL_PROMPT", "0")
-            .envs(self.env.iter().map(|(k, v)| (k, v)))
+            .envs(self.env.iter().map(|(k, v)| (k, v)));
+        command
+    }
+
+    pub(crate) fn run(&self, cwd: &Path, args: &[&str]) -> Result<Vec<u8>, WorkspaceError> {
+        let output = self
+            .command(cwd, args)
             .output()
             .map_err(WorkspaceError::GitMissing)?;
+        Git::stdout_of(args, output)
+    }
+
+    /// Like [`Git::run`], with `input` on git's standard input. It is written on a thread of its own, so a command that
+    /// answers while it is still reading cannot fill its output pipe and stop both.
+    pub(crate) fn run_with_input(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        input: Vec<u8>,
+    ) -> Result<Vec<u8>, WorkspaceError> {
+        let mut child = self
+            .command(cwd, args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(WorkspaceError::GitMissing)?;
+        let mut stdin = child.stdin.take().expect("stdin was piped");
+        let writer = std::thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        });
+        let output = child
+            .wait_with_output()
+            .map_err(WorkspaceError::GitMissing)?;
+        let _ = writer.join();
+        Git::stdout_of(args, output)
+    }
+
+    fn stdout_of(args: &[&str], output: std::process::Output) -> Result<Vec<u8>, WorkspaceError> {
         if output.status.success() {
             Ok(output.stdout)
         } else {
@@ -145,7 +187,7 @@ impl Git {
         }
     }
 
-    fn text(&self, cwd: &Path, args: &[&str]) -> Result<String, WorkspaceError> {
+    pub(crate) fn text(&self, cwd: &Path, args: &[&str]) -> Result<String, WorkspaceError> {
         let bytes = self.run(cwd, args)?;
         Ok(String::from_utf8_lossy(&bytes).trim().to_string())
     }

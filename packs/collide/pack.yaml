@@ -6,7 +6,20 @@ name: collide
 # it names come with the pack's own files (Stage 3), and nothing resolves those names before then. The decision
 # script stops to `ask_human` at the round limit, and when a round leaves as many open findings as the round
 # before it.
+#
+# `collide/quick`: one agent phase in a worktree, then review. The task goes `active` at the start and `review` at
+# the end, by category. The last phase ends the run `done`, and accept, re-prompt and discard are the review's. Until
+# Stage 8's engine reads this table, the daemon runs the same sequence hard-coded (`host/src/file_run/quick_run.rs`),
+# and a test holds the two to each other.
 workflows:
+  quick:
+    integrate: collide/merge-local
+    on_start: [{ op: setStatus, args: { category: active } }]
+    # Every end goes to review: a failed or stopped run's Review item holds the person's decision (ts-0078-ye).
+    on_end: [{ op: setStatus, args: { category: review } }]
+    phases:
+      build: { role: builder, prompt: build, label: build }
+
   review:
     integrate: collide/merge-local
     on_start: [{ op: setStatus, args: { category: active } }]

@@ -20,6 +20,10 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
                             start a child that writes its own environment to the file, and wait for it
     {"sleep": SECONDS}      do nothing for that long (a child that holds on until it is signalled)
     {"touch": "path"}       create the file (a mark that the steps before it ran)
+    {"write_file": {"path": "a/b.txt", "text": "..."}}
+                            write the text to the file, below this process's working folder (ts-0078-ye)
+    {"git_commit": "message"}
+                            stage everything in the working folder and commit it, as an agent does (ts-0078-ye)
     {"exit": N}             exit with code N now
 
 `expect` is a subset match: every key in the expected object must be in the line, with a value that matches, and the
@@ -110,6 +114,26 @@ def emulate_session_start_hooks(words):
         write_line(sys.stdout, json.dumps(response, separators=(",", ":")))
 
 
+def write_file(path, text):
+    """Writes below the working folder; a path that leaves it is a mistake in the recording."""
+    if os.path.isabs(path) or ".." in path.split("/"):
+        stop(EXIT_STEP_UNKNOWN, "write_file takes a path below the working folder, not %s" % path)
+    os.makedirs(os.path.dirname(os.path.join(os.getcwd(), path)), exist_ok=True)
+    with open(path, "w") as out:
+        out.write(text)
+
+
+def git_commit(message):
+    """Stages and commits everything, with an identity of its own and none of the user's or the system's git config."""
+    env = dict(os.environ, HOME="/nonexistent", GIT_CONFIG_GLOBAL="/dev/null")
+    env.update(GIT_CONFIG_SYSTEM="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+    identity = ["-c", "user.name=Fake Claude", "-c", "user.email=fake@example.invalid", "-c", "commit.gpgsign=false"]
+    for args in (["add", "-A"], identity + ["commit", "-q", "-m", message]):
+        ran = subprocess.run(["git"] + args, env=env, capture_output=True, text=True)
+        if ran.returncode != 0:
+            stop(EXIT_STEP_UNKNOWN, "git %s failed: %s" % (" ".join(args), ran.stderr.strip()))
+
+
 def main():
     words = sys.argv[1:]
     emulate = bool(words) and words[0] == "--emulate-hooks"
@@ -139,6 +163,10 @@ def main():
             time.sleep(step["sleep"])
         elif "touch" in step:
             open(step["touch"], "w").close()
+        elif "write_file" in step:
+            write_file(step["write_file"]["path"], step["write_file"]["text"])
+        elif "git_commit" in step:
+            git_commit(step["git_commit"])
         elif "exit" in step:
             sys.stdout.flush()
             sys.exit(step["exit"])

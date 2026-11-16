@@ -1057,3 +1057,34 @@ fn the_registry_lists_the_manifest_keys() {
         serde_json::json!(["apiVersion", "name"])
     );
 }
+
+#[test]
+fn the_collide_pack_declares_quick_as_one_builder_phase_that_moves_the_task_by_category() {
+    let manifest: PackManifest = load_yaml_file(&repo("packs/collide/pack.yaml")).unwrap();
+    let quick = manifest
+        .workflows
+        .get("quick")
+        .expect("the collide pack declares quick");
+    let phases: Vec<&str> = quick.phases.iter().map(|(name, _)| name).collect();
+    assert_eq!(phases, ["build"]);
+    let Some(Phase::Agent(build)) = quick.phases.get("build") else {
+        panic!("build is an agent phase");
+    };
+    assert_eq!(build.role, "builder");
+    assert!(build.then.is_none(), "the last phase ends the run, done");
+    assert_eq!(quick.integrate.as_deref(), Some("collide/merge-local"));
+    let ops = |ops: &[collide_core::workflow::WorkflowOp]| -> Vec<(String, Value, Option<String>)> {
+        ops.iter()
+            .map(|op| (op.op.clone(), op.args["category"].clone(), op.when.clone()))
+            .collect()
+    };
+    assert_eq!(
+        ops(&quick.on_start),
+        [("setStatus".to_string(), "active".into(), None)]
+    );
+    assert_eq!(
+        ops(&quick.on_end),
+        [("setStatus".to_string(), "review".into(), None)],
+        "every end of a quick run goes to review, failed and stopped too"
+    );
+}

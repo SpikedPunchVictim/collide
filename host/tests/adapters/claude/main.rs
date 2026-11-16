@@ -28,6 +28,7 @@ mod limits;
 mod metrics;
 mod pause;
 mod published;
+mod quick_run;
 mod real;
 mod real_claude;
 mod replay;
