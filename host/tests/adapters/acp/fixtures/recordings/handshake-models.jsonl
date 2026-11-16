@@ -1,0 +1,7 @@
+# Built for the tests: the handshake of an agent that offers only the draft `models` (S7, O9), with no `configOptions`.
+# `initialize` follows `InitializeResponse` (schema-v1.31.0). `models` is the draft shape S7 read from a real agent:
+# `currentModelId` and `availableModels`, each `{modelId, name}`. Ids, names and models are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true},"promptCapabilities":{"embeddedContext":true,"image":true}},"agentInfo":{"name":"fake-acp-agent","version":"0"},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1","models":{"currentModelId":"stand-in-model-a","availableModels":[{"modelId":"stand-in-model-a","name":"Stand-in A"},{"modelId":"stand-in-model-b","name":"Stand-in B"}]}}}}

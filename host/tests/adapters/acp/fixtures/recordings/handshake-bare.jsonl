@@ -1,0 +1,7 @@
+# Built for the tests: the handshake of an agent that names no model: neither `configOptions` nor `models`, and no
+# optional capability. Follows `InitializeResponse` and `NewSessionResponse` (schema-v1.31.0), which need only a
+# `protocolVersion` and a `sessionId`. The id is a stand-in.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"fake-acp-agent","version":"0"},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1"}}}

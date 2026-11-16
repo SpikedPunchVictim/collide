@@ -1,0 +1,8 @@
+# Built for the tests: the handshake of an agent that offers `configOptions`, with a model option and a mode option.
+# Follows the ACP schema (schema-v1.31.0): `InitializeResponse` with `agentCapabilities` and `mcpCapabilities`;
+# `NewSessionResponse.configOptions`, each a `SessionConfigOption` of type `select` with a `category`, a flat list of
+# `{value, name}` and a `currentValue`. Ids, names and models are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false},"promptCapabilities":{"image":false,"audio":false,"embeddedContext":true}},"agentInfo":{"name":"fake-acp-agent","version":"0"},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1","configOptions":[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"build","options":[{"value":"build","name":"Build"},{"value":"plan","name":"Plan"}]},{"id":"model","name":"Model","category":"model","type":"select","currentValue":"stand-in-model-a","options":[{"value":"stand-in-model-a","name":"Stand-in A"},{"value":"stand-in-model-b","name":"Stand-in B"}]}]}}}

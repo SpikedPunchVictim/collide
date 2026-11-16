@@ -36,3 +36,10 @@ path = "src/bin/collide-daemon.rs"
 [[test]]
 name = "claude_adapter"
 path = "tests/adapters/claude/main.rs"
+
+# The ACP engine's tests (Stage 3d): the fake ACP child and, with the later items, the session and the phases that use
+# it. They sit below `tests/adapters/acp/`, beside the Claude adapter's, and need a target of their own for the same
+# reason: cargo does not find a test two folders down.
+[[test]]
+name = "acp_adapter"
+path = "tests/adapters/acp/main.rs"
