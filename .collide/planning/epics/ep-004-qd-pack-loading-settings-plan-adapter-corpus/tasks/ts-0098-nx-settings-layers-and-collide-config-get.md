@@ -1,7 +1,7 @@
 ---
 id: ts-0098-nx
 kind: task
-status: active
+status: done
 title: "Settings layers and collide config get"
 owners: []
 links:
