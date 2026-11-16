@@ -15,9 +15,31 @@ use collide_host::owner_client::OwnerClient;
 use collide_host::settings_files::user_config_dir;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// A log writer that keeps what it is given, so a test can read what the daemon wrote.
+#[derive(Clone, Default)]
+pub struct CapturedLog(Arc<Mutex<Vec<u8>>>);
+
+impl CapturedLog {
+    pub fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+impl Write for CapturedLog {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 pub struct Fixture {
     pub repo: GitRepo,
@@ -41,6 +63,12 @@ fn make_sdk(dir: &Path) {
 impl Fixture {
     /// A checkout on `main` with one commit, and a daemon that has not been told of it yet.
     pub fn new() -> Fixture {
+        Fixture::with_options(|_| {})
+    }
+
+    /// As [`Fixture::new`], with `configure` run on the daemon's options before it starts: a test gives it a keychain
+    /// of its own, or a log it can read.
+    pub fn with_options(configure: impl FnOnce(&mut DaemonOptions)) -> Fixture {
         let repo = GitRepo::new();
         repo.write("README.md", b"fixture\n");
         repo.commit_all("start");
@@ -80,6 +108,7 @@ impl Fixture {
             ))
         });
         options.load_context = Some(factory);
+        configure(&mut options);
         let daemon = Daemon::start(options).expect("the daemon starts");
         Fixture { repo, daemon }
     }

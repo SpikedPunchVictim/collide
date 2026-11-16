@@ -73,6 +73,7 @@
 //! | `shim: pty ring` | [`PtyRing`] | the last 1 MiB of a PTY's output, and the replay on attach |
 //! | `shim: daemon link` | [`ShimLink`] | the shim's socket: handshake, `Write`, `CloseStdin`, `Signal`, `AckExit` |
 
+use crate::atomic_write::write_atomically;
 use crate::auth::{self, StdFs, UnixPeer};
 use crate::clock::{Clock, Clocks, SystemClocks};
 use crate::daemon::{DaemonPaths, ROOT_ENV};
@@ -854,47 +855,21 @@ impl<W: Write> JournalWriter<W> {
     }
 }
 
-/// Writes `bytes` to `dir/name` atomically: a temp file beside it, `fsync`, rename, and `fsync` of `dir`. A write
-/// that fails removes the temp file and leaves what was at `name` whole. `wrap` is the seam a test uses to make the
-/// write fail; the shim passes the file itself.
+/// Writes `bytes` to `dir/name` atomically ([`write_atomically`]): a temp file beside it, `fsync`, rename, and `fsync`
+/// of `dir`. A write that fails removes the temp file and leaves what was at `name` whole. `wrap` is the seam a test
+/// uses to make the write fail; the shim passes the file itself.
 fn write_file_atomically<W: Write>(
     dir: &Path,
     name: &str,
     bytes: &[u8],
     wrap: impl FnOnce(File) -> W,
 ) -> Result<(), ShimError> {
-    let temp = dir.join(format!("{name}.tmp"));
-    let target = dir.join(name);
-    let failed =
-        |what: &str, path: &Path, source| write_error(format!("{what} {}", path.display()), source);
-    // A temp file left by a shim that died is ours to replace. The record itself is never opened for writing.
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&temp)
-        .map_err(|source| failed("creating", &temp, source))?;
-    let sync_handle = file
-        .try_clone()
-        .map_err(|source| failed("creating", &temp, source))?;
-    let mut sink = wrap(file);
-    let written = sink
-        .write_all(bytes)
-        .and_then(|()| sink.flush())
-        .and_then(|()| sync_handle.sync_all());
-    drop(sink);
-    if let Err(source) = written {
-        let _ = fs::remove_file(&temp);
-        return Err(failed("writing", &temp, source));
-    }
-    if let Err(source) = fs::rename(&temp, &target) {
-        let _ = fs::remove_file(&temp);
-        return Err(failed("renaming to", &target, source));
-    }
-    File::open(dir)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|source| failed("syncing", dir, source))
+    write_atomically(dir, name, bytes, 0o600, wrap).map_err(|error| {
+        write_error(
+            format!("{} {}", error.verb(), error.path.display()),
+            error.source,
+        )
+    })
 }
 
 /// Writes `record` to `dir/exit.json` atomically: a temp file, `fsync`, rename, and `fsync` of `dir`. A file that

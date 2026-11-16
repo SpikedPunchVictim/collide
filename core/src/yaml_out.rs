@@ -215,3 +215,41 @@ pub fn to_yaml<T: Serialize + ?Sized>(
     }
     Ok(out)
 }
+
+/// Whether `text` has a YAML comment: a `#` outside a quoted scalar that starts a line or follows a space or tab. A
+/// reading on the safe side: a `#` inside a block scalar counts, so a file is refused a rewrite when in doubt, and
+/// a comment is never dropped by one.
+pub fn has_comment(text: &str) -> bool {
+    // A quote opens a quoted scalar only where a scalar can start; an apostrophe inside a plain word does not.
+    const SCALAR_STARTS: [char; 6] = [':', '-', ',', '[', '{', '?'];
+    let mut quote: Option<char> = None;
+    let mut previous = '\n';
+    let mut last_significant: Option<char> = None;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if let Some(open) = quote {
+            // A backslash escape in a double-quoted scalar, and a doubled apostrophe in a single-quoted one, each
+            // take the next character with them.
+            let escaped = (open == '"' && c == '\\')
+                || (open == '\'' && c == open && chars.peek() == Some(&'\''));
+            if escaped {
+                chars.next();
+            } else if c == open {
+                quote = None;
+            }
+        } else if c == '#' && matches!(previous, '\n' | ' ' | '\t') {
+            return true;
+        } else if (c == '"' || c == '\'')
+            && last_significant.is_none_or(|last| SCALAR_STARTS.contains(&last))
+        {
+            quote = Some(c);
+        }
+        if c == '\n' {
+            last_significant = None;
+        } else if !c.is_whitespace() && quote.is_none() {
+            last_significant = Some(c);
+        }
+        previous = c;
+    }
+    false
+}

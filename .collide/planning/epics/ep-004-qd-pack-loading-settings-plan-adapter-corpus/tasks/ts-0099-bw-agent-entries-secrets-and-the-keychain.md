@@ -148,3 +148,88 @@ Write these first:
   criterion, so the repo's `budget_usd` wins over an entry's own and a team's cap holds (0.7 now says so); and
   `security-framework` 2.11.1 is approved as a new dependency, macOS only, behind the keychain trait with a memory
   double for tests.
+
+### Built
+
+- `core/src/agent_layers.rs` (new, pure): `agent_layers(&AgentInputs)` gives each entry, each field's layer,
+  `ask.agent`, the
+  notices and the problems. `AgentView::config_entries` makes the `agents.<id>.<field>` entries. Also in `core`:
+  `settings::is_secret_name`, `check_agents`, `ConfigFile::with_value`, `DEFAULT_TIMEOUT_S`; `yaml_out::has_comment`;
+  `setting_value::value_from_text`; `settings_layers::find_setting` (and `KeyInfo` is public).
+- `host/src/keychain.rs`: `Secret` (prints `<secret>`), the `Keychain` trait, `KeychainError`, `MemoryKeychain`,
+  `pack_item`, `MacKeychain` (`security-framework` 2.11.1, macOS only, service `collide`, `contains` reads attributes
+  only), `UnavailableKeychain` elsewhere, `system_keychain`, and `keychain_for_root` (memory under
+  `COLLIDE_DAEMON_ROOT`).
+- `host/src/atomic_write.rs`: one helper (temp file in the folder, mode on the open file, rename, sync). `shim.rs` and
+  `trust.rs` use it and keep their own wording and error types; `config set` uses it too.
+- `host/src/agent_checks.rs`: a `read` folder that is not a folder, and a `secrets` item the keychain lacks (`contains`
+  only). `settings_files.rs` runs `check_agents` on the two user files, naming the file.
+- `host/src/config_get.rs`: gather and resolve are shared; `get` answers `agents.<id>.<field>` and `agents.<id>`, adds
+  `notices` to `ConfigGetResult` (`pnpm gen` ran), and runs the load checks. New `ConfigService::set` and `SetError`.
+- `config.set` served in `daemon.rs` (`DaemonOptions.keychain`, memory by default; `collide-daemon` picks it by root).
+  Its params error carries no serde text, no line is logged for the call, and the answer holds no value.
+- `host/src/config_set_cli.rs` and `config_cli::run_config`: `collide config set <key> <value> [--layer user|repo]
+  [--global]` and `collide config set <key> --secret` (stdin, 64 KiB cap, UTF-8, one trailing `\n` or `\r\n` trimmed,
+  empty refused). `cli: config` is built and moved to `FILLED_TAGS` (41); `ui_tools: endpoint token store` stays a 6b
+  stub.
+- Cargo.lock gained `security-framework` 2.11.1, `security-framework-sys` 2.17.0 and `core-foundation` 0.9.4.
+- Tests: `core/tests/agent_layers.rs` (37), `settings_edit.rs` (18), `settings_layers.rs` (+3), `setting_value.rs` (+2);
+  `host/tests/atomic_write.rs` (9), `keychain.rs` (11, one gated by `COLLIDE_REAL_KEYCHAIN=1`, not run),
+  `agent_checks.rs` (13), `config_agents.rs` (19), `config_set.rs` (35), `config_set_command.rs` (17),
+  `config_process.rs` (9, real binary and daemon under a temp root). Changed existing tests: `config_get.rs`
+  (`config.set`
+  is served now), `config_process.rs` (the stub test), `command_tree.rs` (see below), `real_tree.rs` (the tag moved).
+- Red first: seen red by assertion were the 8 of 10 keychain tests and the 9 of 13 `agent_checks` tests (over `todo!`
+  stubs), and the new `agent_layers`, `settings_layers` (`find_setting`) tests. Not seen red by assertion:
+  `settings_edit`
+  (the first red run stopped at an earlier binary), and `config_set`, `config_agents`, `config_set_command`,
+  `value_from_text`, which were written first but failed only to compile until the code existed.
+- Gates: `cargo build`, `cargo test --workspace` (3628 passed, 0 failed), `clippy -D warnings`, `fmt --check`, `pnpm
+  test`,
+  `pnpm typecheck`, `pnpm --filter @collide/app build`, `pnpm build:packs`, `pnpm check` (`stubs: ok`) all pass. No
+  `packs/plan` timeout and no `shim_child` flake were seen.
+- **Incident.** `host/tests/command_tree.rs` ran `collide config set disk.floor_gib 3` with the real environment, as
+  a stub check. Once `set` was built, that run reached the real home: a real `collide-daemon` started under launchd
+  and wrote `~/.config/collide/config.yaml` and `~/Library/Application Support/Collide/`. At the review, with the
+  owner's yes, the daemon's launchd job was booted out and both folders, which held only what that run made, were
+  removed. The cause is fixed: `command_tree.rs`, `schema_command.rs` and `task_cli.rs` now start `collide` with
+  `env_clear` and a temp `HOME` and `COLLIDE_DAEMON_ROOT`, and `checks/tests/real_tree.rs` fails any `host/tests`
+  file that starts the binary without `env_clear` (`every_test_that_runs_the_collide_binary_clears_its_environment`,
+  seen red on those three).
+
+### Decisions for the owner
+
+1. **`config get ask.agent`.** It still prints `<not set> (default)`, because the existing tests pin it and the full
+   listing. `agent_layers` knows the resolved id (`claude-haiku`). Recommend showing the resolved value, as a change to
+   those two tests. Alternative: leave it.
+2. **Machine checks refuse every `config get`.** A missing `read` folder or keychain item fails the whole call, as every
+   other problem does. `config set --secret` works regardless, so the way out is one command. Alternative: refuse only
+   `agents.*` and the full listing, and make the rest a notice. Recommend keeping it simple (as built).
+3. **Where the CLI writes.** In a checkout, `config set` writes the board's own user file, so a pack key can be checked
+   against its schema; `--global` writes the user's own file (Collide keys only, because the wire's `board` is both the
+   schema context and the target). Alternative: a second wire field. Recommend as built; revisit with the Settings page.
+4. **Agent fields.** `config set agents.<id>.<field>` is refused, naming the file to edit; only
+  `agents.<id>.secrets.<ENV>`
+   with `--secret` is set here. Recommend leaving it to the Settings page (6a).
+5. **A write that adds no new problem is allowed** even when the file already has one, so a bad `ask.agent` can be fixed
+   with `config set`. A write that adds one is refused and nothing is written.
+6. **A string value is read as the setting's type** (`"7"` for an integer, `"false"` for a boolean) before the schema
+   check; text that does not read as the type stays text and the check names the type, never the value.
+7. Plan text proposed for 0.7, Secrets: "`collide config set --secret` reads the value from standard input and refuses
+   one on the command line. A file that holds a comment is not rewritten by `config set`; edit it by hand."
+
+- Owner decisions (2026-11-16, at the build): 1 taken at the review: with no layer setting it, `config get ask.agent`
+  shows the resolved `"claude-haiku"` (layer `default`). 2 to 6 as built, on delegation. 7 in the plan's 0.7 Secrets
+  text. The Cargo.lock gained `security-framework` 2.11.1 (owner-approved), with `security-framework-sys` 2.17.0 and
+  `core-foundation` 0.9.4 under it.
+
+### Not done, by design
+
+- Launching an agent and the test that a secret reaches it and no file, argv or log (6b). `ui_tools: endpoint token
+  store`.
+- The real-keychain test was not run (owner, `ts-0105-jv`). No test touched the real keychain.
+- ts-0100 (git mirror): its lock or state writes can call `atomic_write::write_atomically`. ts-0101 (user packs): the
+  `config.pack_*` methods are still "not served", and `config_get.rs` is where the user files are read.
+  ts-0102 (daemon lines, trust prompt): `ConfigService::gather` loads `HEAD` at each call; a line cache replaces
+  `load` there.
+- `config set` of a profile, of a repo value (`--layer repo` is refused by design), and of an agent field.

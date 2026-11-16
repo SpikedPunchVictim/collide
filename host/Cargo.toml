@@ -18,6 +18,11 @@ rusqlite = { version = "0.42", features = ["bundled"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The real keychain behind `host/src/keychain.rs` (ts-0099-bw; owner, 2026-11-16): macOS only, in `host` only, and never
+# named outside the one store that implements the trait. The tests use the memory double.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "=2.11.1"
+
 [dev-dependencies]
 # The test doubles of `core` (0.15), so the shim's journal is replayed into a session double.
 collide-core = { path = "../core", features = ["testing"] }

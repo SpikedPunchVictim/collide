@@ -1637,8 +1637,10 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     (below).
   - Some keys describe the repo and are refused in the user's file and in a user profile: a pack marks them
     `repoOnly: true`, as `collide/plan` does `layout` (owner, 2026-11-15; revision 20). The message names the key.
-  - **Secrets** (`secret: true`) come only from the OS keychain, set in the UI or with `collide config set --secret`.
-    A secret in either file is a load error. Hooks receive settings as `config` on stdin (0.5).
+  - **Secrets** (`secret: true`) come only from the OS keychain, set in the UI or with `collide config set --secret`,
+    which reads the value from standard input and refuses one on the command line. A secret in either file is a load
+    error. Hooks receive settings as `config` on stdin (0.5). `collide config set` does not rewrite a file that holds
+    a comment; edit it by hand (ts-0099-bw).
   - `.collide/config.yaml` loads from the line's snapshot and is in the trust hash, like `board.yaml` (0.9).
   - **Agent entries** (owner, 2026-11-14; S6's in-app agent section). The agents the ask box can use (0.3, 0.11) are
     Collide's own settings under `agents:`, one entry per id, and `ask.agent` names the one the ask box uses. They

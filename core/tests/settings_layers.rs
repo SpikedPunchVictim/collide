@@ -8,7 +8,7 @@ use collide_core::pack::SchemaObject;
 use collide_core::profile::{Profile, ProfileLookupError, ProfileSource, find_profile};
 use collide_core::settings::ConfigFile;
 use collide_core::settings_layers::{
-    LayerInputs, PackSettings, ProfileUse, SettingProblem, Settings, settings_layers,
+    LayerInputs, PackSettings, ProfileUse, SettingProblem, Settings, find_setting, settings_layers,
 };
 use collide_core::yaml::load_yaml;
 use serde_json::{Value, json};
@@ -753,4 +753,52 @@ fn an_unknown_name_is_an_error_naming_the_name_and_where_it_looked() {
     ] {
         assert!(text.contains(place), "{place} missing from: {text}");
     }
+}
+
+// ---- finding one setting (ts-0099-bw: `config set` reads the schema to read a value) ----
+
+#[test]
+fn a_key_of_collides_own_is_found_with_its_schema_and_flags() {
+    let found = find_setting(&[], "ask.timeout_s").expect("a registry key");
+    assert_eq!(found.pack, None);
+    assert_eq!(found.schema["type"], json!("integer"));
+    assert_eq!(found.schema["minimum"], json!(5));
+    assert!(found.overridable && !found.secret);
+}
+
+#[test]
+fn a_pack_key_is_found_with_its_pack_its_schema_and_its_flags() {
+    let (ferry, other) = (ferry(), other());
+    let packs = [
+        PackSettings {
+            pack: "ferry",
+            config: &ferry,
+        },
+        PackSettings {
+            pack: "other",
+            config: &other,
+        },
+    ];
+    let lane = find_setting(&packs, "ferry.lanePool").expect("a pack key");
+    assert_eq!(lane.pack.as_deref(), Some("ferry"));
+    assert_eq!(lane.schema["type"], json!("integer"));
+    assert!(lane.overridable);
+    assert!(find_setting(&packs, "ferry.notifyHook").unwrap().secret);
+    assert!(find_setting(&packs, "ferry.layout").unwrap().repo_only);
+    assert_eq!(
+        find_setting(&packs, "other.color").unwrap().pack.as_deref(),
+        Some("other")
+    );
+}
+
+#[test]
+fn a_key_that_is_nobodys_is_not_found() {
+    let ferry = ferry();
+    let packs = [PackSettings {
+        pack: "ferry",
+        config: &ferry,
+    }];
+    assert!(find_setting(&packs, "ferry.nope").is_none());
+    assert!(find_setting(&packs, "ghost.key").is_none());
+    assert!(find_setting(&[], "ferry.lanePool").is_none());
 }

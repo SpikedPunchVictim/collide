@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 mod common;
-use common::{Bundle, repo_root, scratch};
+use common::{Bundle, TempRoot, repo_root, scratch};
 
 const BUNDLE: &str = "task-cli-packs";
 
@@ -82,8 +82,10 @@ struct Run {
     stderr: String,
 }
 
-/// Runs `collide` in `cwd` with the packs bundle at `packs`, and `env` added.
+/// Runs `collide` in `cwd` with the packs bundle at `packs`, and `env` added. The environment is the test's own:
+/// `PATH` is kept (the plan provider runs on `node`), and `HOME` and the daemon root are a temp root.
 fn collide_with(cwd: &Path, packs: &Path, env: &[(&str, &str)], args: &[&str]) -> Run {
+    let root = TempRoot::new();
     let Output {
         status,
         stdout,
@@ -91,6 +93,12 @@ fn collide_with(cwd: &Path, packs: &Path, env: &[(&str, &str)], args: &[&str]) -
     } = Command::new(env!("CARGO_BIN_EXE_collide"))
         .args(args)
         .current_dir(cwd)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", root.path())
+        .env("COLLIDE_DAEMON_ROOT", root.path())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("COLLIDE_BUILTIN_PACKS", packs)
         .envs(env.iter().copied())
         .output()

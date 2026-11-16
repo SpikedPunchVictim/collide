@@ -109,6 +109,29 @@ impl fmt::Display for Violation {
     }
 }
 
+/// The value `text` stands for under `schema`, for a setting typed on a command line: an integer, a number, a boolean,
+/// an array or an object is read from the text as JSON, and anything else (a string, or no `type`) is the text itself.
+/// Text that does not read as the type stays a string, so [`check_value`] refuses it naming the type.
+pub fn value_from_text(schema: &Value, text: &str) -> Value {
+    let wanted = schema.get("type").and_then(Value::as_str);
+    match serde_json::from_str::<Value>(text) {
+        Ok(value) if fits_kind(wanted, &value) => value,
+        _ => Value::String(text.to_string()),
+    }
+}
+
+/// Whether `value` is of the JSON type `name` names, for the types [`value_from_text`] reads.
+fn fits_kind(name: Option<&str>, value: &Value) -> bool {
+    match name {
+        Some("integer") => is_integer(value),
+        Some("number") => value.is_number(),
+        Some("boolean") => value.is_boolean(),
+        Some("array") => value.is_array(),
+        Some("object") => value.is_object(),
+        _ => false,
+    }
+}
+
 /// The JSON type of `value`, with the article: `a string`, `an integer`.
 pub fn type_of(value: &Value) -> &'static str {
     match value {

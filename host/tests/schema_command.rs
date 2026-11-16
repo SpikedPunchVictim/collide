@@ -3,9 +3,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::{Command, Output};
 
+mod common;
+use common::TempRoot;
+
+/// Runs `collide` with an environment of the test's own: `HOME` and the daemon root in a temp root.
 fn collide(args: &[&str]) -> Output {
+    let root = TempRoot::new();
     Command::new(env!("CARGO_BIN_EXE_collide"))
         .args(args)
+        .current_dir(root.path())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", root.path())
+        .env("COLLIDE_DAEMON_ROOT", root.path())
         .output()
         .expect("collide should run")
 }

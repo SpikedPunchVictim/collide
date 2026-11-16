@@ -8,10 +8,14 @@
 //! Every file is read with the hardened loader (a size cap, no aliases, a duplicate key is an error). A file that is
 //! not there is empty, as is a file that holds nothing, or only comments. A file that is there and wrong is an error
 //! that names its path, and the other files are still read, so one call reports every bad file.
+//!
+//! The agent entries of the two settings files are checked as they are read ([`check_agents`], which `core` owns), each
+//! message naming its file. The checks that need the machine (a `read` folder, a keychain item) are
+//! [`crate::agent_checks`]'s.
 
 use collide_core::profile::{Profile, check_profile};
 use collide_core::resolve::is_safe_token;
-use collide_core::settings::ConfigFile;
+use collide_core::settings::{ConfigFile, check_agents};
 use collide_core::yaml::{YamlError, load_yaml_file};
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -37,6 +41,25 @@ pub fn read_config_file(path: &Path) -> Result<ConfigFile, String> {
     read_optional::<ConfigFile>(path).map(Option::unwrap_or_default)
 }
 
+/// A settings file of the user's, with its agent entries checked: every refusal names `path`.
+fn read_user_config_file(path: &Path, errors: &mut Vec<String>) -> Option<ConfigFile> {
+    match read_config_file(path) {
+        Ok(file) => {
+            let refused = check_agents(&file);
+            errors.extend(
+                refused
+                    .iter()
+                    .map(|error| format!("{}: {error}", path.display())),
+            );
+            refused.is_empty().then_some(file)
+        }
+        Err(error) => {
+            errors.push(error);
+            None
+        }
+    }
+}
+
 /// The user's layers.
 #[derive(Debug, Clone, Default)]
 pub struct UserFiles {
@@ -54,16 +77,14 @@ pub fn read_user_files(home: &Path, board: Option<&str>) -> Result<UserFiles, Ve
     let dir = user_config_dir(home);
     let mut errors = Vec::new();
     let mut files = UserFiles::default();
-    match read_config_file(&dir.join("config.yaml")) {
-        Ok(file) => files.global = file,
-        Err(error) => errors.push(error),
+    if let Some(file) = read_user_config_file(&dir.join("config.yaml"), &mut errors) {
+        files.global = file;
     }
     if let Some(board) = board {
         if is_safe_token(board) {
             let path = dir.join("boards").join(board).join("config.yaml");
-            match read_config_file(&path) {
-                Ok(file) => files.board = file,
-                Err(error) => errors.push(error),
+            if let Some(file) = read_user_config_file(&path, &mut errors) {
+                files.board = file;
             }
         } else {
             errors.push(format!(

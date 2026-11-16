@@ -3,7 +3,7 @@
 //! a value that must not appear in a message.
 
 use collide_core::setting_value::{
-    SCHEMA_KEYWORDS, SchemaProblem, check_setting_schema, check_value,
+    SCHEMA_KEYWORDS, SchemaProblem, check_setting_schema, check_value, value_from_text,
 };
 use serde_json::{Value, json};
 
@@ -380,4 +380,49 @@ fn a_default_is_not_checked_when_the_schema_is_unsound() {
     // One problem, the keyword's: not a second one for a default that cannot be judged.
     let found = problems(json!({ "type": "integer", "minimum": "1", "default": 0 }));
     assert_eq!(found.len(), 1, "{found:?}");
+}
+
+// ---- text typed on a command line, read as the schema's type (ts-0099-bw) ----
+
+#[test]
+fn text_is_read_as_the_type_the_schema_names() {
+    let cases = [
+        (json!({"type": "integer"}), "7", json!(7)),
+        (json!({"type": "integer"}), "-3", json!(-3)),
+        (json!({"type": "number"}), "1.5", json!(1.5)),
+        (json!({"type": "boolean"}), "true", json!(true)),
+        (json!({"type": "boolean"}), "false", json!(false)),
+        (json!({"type": "string"}), "7", json!("7")),
+        (
+            json!({"type": "array", "items": {"type": "string"}}),
+            "[\"a\",\"b\"]",
+            json!(["a", "b"]),
+        ),
+        (json!({"type": "object"}), "{\"a\":1}", json!({"a": 1})),
+        (json!({}), "7", json!("7")),
+    ];
+    for (schema, text, expected) in cases {
+        assert_eq!(
+            value_from_text(&schema, text),
+            expected,
+            "{schema} from {text}"
+        );
+    }
+}
+
+#[test]
+fn text_that_does_not_read_as_the_type_stays_text_so_the_check_names_the_type() {
+    for (schema, text) in [
+        (json!({"type": "integer"}), "seven"),
+        (json!({"type": "integer"}), "1.5"),
+        (json!({"type": "boolean"}), "yes"),
+        (json!({"type": "array"}), "not json"),
+    ] {
+        let value = value_from_text(&schema, text);
+        assert_eq!(value, json!(text), "{schema} from {text}");
+        assert!(
+            !check_value(&schema, &value).is_empty(),
+            "{schema} from {text}"
+        );
+    }
 }

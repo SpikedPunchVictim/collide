@@ -33,11 +33,22 @@ pub const MIN_TIMEOUT_S: u64 = 5;
 /// The longest timeout an agent may have, in seconds.
 pub const MAX_TIMEOUT_S: u64 = 1800;
 
+/// The timeout of an agent that no layer gives one (0.7: the built-in entry has 180 s).
+pub const DEFAULT_TIMEOUT_S: u64 = 180;
+
 /// The id of the one built-in agent entry: Claude Code with haiku (0.7, Agent entries).
 pub const BUILTIN_AGENT_ID: &str = "claude-haiku";
 
 /// A name that, at the end of an `env` variable's name, marks it as a secret (0.7, Secrets are names).
 pub const SECRET_NAME_ENDINGS: [&str; 4] = ["KEY", "TOKEN", "SECRET", "PASSWORD"];
+
+/// Whether an `env` variable's name reads as a secret: it ends in `KEY`, `TOKEN`, `SECRET` or `PASSWORD`, in any case
+/// (0.7, Secrets are names). A suffix match, so `MONKEY` reads as one and `KEYBOARD` does not: a false positive asks
+/// the person to use `secrets`, and a false negative would leak.
+pub fn is_secret_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    SECRET_NAME_ENDINGS.iter().any(|end| upper.ends_with(end))
+}
 
 /// What an agent runs as. The variants carry plain comments, not doc comments, so the schema stays a bare enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -232,6 +243,27 @@ pub struct ConfigFile {
 }
 
 impl ConfigFile {
+    /// This file with `value` at `path` (`["ask", "timeout_s"]`, `["config", "ferry", "lanePool"]`), read back as a
+    /// settings file, so a path or a value the file cannot hold is an error and the file is not changed.
+    pub fn with_value(&self, path: &[&str], value: Value) -> Result<ConfigFile, String> {
+        let Some((last, parents)) = path.split_last() else {
+            return Err("there is no key to set".into());
+        };
+        let mut root = serde_json::to_value(self).map_err(|error| error.to_string())?;
+        let mut at = &mut root;
+        for part in parents {
+            at = at
+                .as_object_mut()
+                .ok_or_else(|| format!("`{}` is not a section", path.join(".")))?
+                .entry(*part)
+                .or_insert_with(|| json!({}));
+        }
+        at.as_object_mut()
+            .ok_or_else(|| format!("`{}` is not a section", path.join(".")))?
+            .insert((*last).to_string(), value);
+        serde_json::from_value(root).map_err(|error| format!("`{}`: {error}", path.join(".")))
+    }
+
     /// The keys of Collide's own settings this file sets (`ask`, `disk` and `claude`; not `agents` or `config`), as
     /// `section.key`.
     pub fn collide_keys_set(&self) -> Vec<&'static str> {
@@ -272,7 +304,7 @@ pub fn builtin_agents() -> BTreeMap<String, AgentEntry> {
             config: Some(RoleConfig::None),
             read: Some(vec!["<board root>".into()]),
             tools: Some(vec![ToolKind::Read, ToolKind::Search]),
-            timeout_s: Some(180),
+            timeout_s: Some(DEFAULT_TIMEOUT_S),
             ..AgentEntry::default()
         },
     )])
@@ -426,8 +458,7 @@ fn check_agent(id: &str, entry: &AgentEntry, errors: &mut Vec<SettingsError>) {
         });
     }
     for (name, value) in entry.env.iter().flatten() {
-        let upper = name.to_ascii_uppercase();
-        if !value.is_empty() && SECRET_NAME_ENDINGS.iter().any(|end| upper.ends_with(end)) {
+        if !value.is_empty() && is_secret_name(name) {
             errors.push(SettingsError::LiteralSecretInEnv {
                 id: id.into(),
                 name: name.clone(),
@@ -445,14 +476,20 @@ fn check_agent(id: &str, entry: &AgentEntry, errors: &mut Vec<SettingsError>) {
     }
 }
 
-/// Checks one settings file on its own, whichever file it is. Returns every refusal: the entries in the order of
-/// their ids, then `ask`, then `disk`, then `config:`. Which keys the file's place allows is
-/// [`repo_file_refusals`]; whether `ask.agent` names an entry, and every merged value, is Stage 4a's.
-pub fn check_config_file(file: &ConfigFile) -> Result<(), Vec<SettingsError>> {
+/// The refusals of the `agents` entries of one file, in the order of their ids ([`check_config_file`] adds the rest).
+pub fn check_agents(file: &ConfigFile) -> Vec<SettingsError> {
     let mut errors = Vec::new();
     for (id, entry) in &file.agents {
         check_agent(id, entry, &mut errors);
     }
+    errors
+}
+
+/// Checks one settings file on its own, whichever file it is. Returns every refusal: the entries in the order of
+/// their ids, then `ask`, then `disk`, then `config:`. Which keys the file's place allows is
+/// [`repo_file_refusals`]; whether `ask.agent` names an entry, and every merged value, is Stage 4a's.
+pub fn check_config_file(file: &ConfigFile) -> Result<(), Vec<SettingsError>> {
+    let mut errors = check_agents(file);
     if file
         .ask
         .agent

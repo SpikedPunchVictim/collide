@@ -9,8 +9,8 @@
 //! (user)`. A refusal prints every problem on standard error and nothing on standard output, and exits
 //! [`exit::FAILED`]; a key, a profile or a board that is not there exits [`exit::ID`].
 //!
-//! `collide config set` is the keychain's and the writers' (`ts-0099-bw`), so it is still the tagged stub of
-//! [`crate::commands`].
+//! `collide config set` is [`crate::config_set_cli`]'s. [`run_config`] reads the word after `config` and hands the
+//! rest to `get` or to `set`.
 
 use crate::daemon::{DaemonPaths, ROOT_ENV};
 use crate::launch::ensure_running_from_cli;
@@ -20,7 +20,7 @@ use collide_core::owner::{
     BoardOpenParams, BoardOpenResult, ConfigEntry, ConfigGetParams, ConfigGetResult, SettingLayer,
     code,
 };
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 pub const USAGE: &str = "usage: collide config get [<key>] [--profile <name>]";
@@ -40,7 +40,7 @@ pub fn parse(args: &[String]) -> Result<GetArgs, String> {
         .ok_or("name what to do: `collide config get`")?;
     if command != "get" {
         return Err(format!(
-            "`{command}` is not a `collide config` command that works yet; `get` does"
+            "`{command}` is not a `collide config get` command line; `get` is the command"
         ));
     }
     let mut key: Option<String> = None;
@@ -64,6 +64,35 @@ pub fn parse(args: &[String]) -> Result<GetArgs, String> {
         }
     }
     Ok(GetArgs { key, profile })
+}
+
+/// `collide config <get|set> ...`: `args` are the arguments after `config`. With none, or one that is neither, the
+/// usage of both is printed and the exit is [`exit::USAGE`].
+pub fn run_config(
+    args: &[String],
+    cwd: &Path,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
+    match args.split_first() {
+        Some((command, _)) if command == "get" => run(args, cwd, out, err),
+        Some((command, rest)) if command == "set" => {
+            crate::config_set_cli::run_set(rest, cwd, input, out, err)
+        }
+        other => {
+            let said = match other {
+                Some((command, _)) => format!("`{command}` is not a `collide config` command"),
+                None => "name what to do: `collide config get` or `collide config set`".to_string(),
+            };
+            let _ = writeln!(
+                err,
+                "collide config: {said}\n{USAGE}\n{}",
+                crate::config_set_cli::USAGE
+            );
+            exit::USAGE
+        }
+    }
 }
 
 fn layer_name(layer: SettingLayer) -> &'static str {
@@ -176,7 +205,10 @@ pub fn run_with(
 }
 
 /// The id of the board for the checkout `cwd` is in, or `None` when it is in none.
-fn open_board(client: &mut OwnerClient, cwd: &Path) -> Result<Option<String>, ClientError> {
+pub(crate) fn open_board(
+    client: &mut OwnerClient,
+    cwd: &Path,
+) -> Result<Option<String>, ClientError> {
     let params = BoardOpenParams {
         root: cwd.display().to_string(),
         init_git: false,

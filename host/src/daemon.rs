@@ -113,12 +113,13 @@ use crate::boards;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::config_get::{
-    BoardRef, ConfigService, GetError, LoadContextFactory, system_load_context,
+    BoardRef, ConfigService, GetError, LoadContextFactory, SetError, system_load_context,
 };
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
 use crate::file_run::quick_run::RunDiffError;
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
+use crate::keychain::{Keychain, MemoryKeychain};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::metrics::Metrics;
@@ -137,7 +138,7 @@ use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
-    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams,
+    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams, ConfigSetParams,
     DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
     DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
     OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams, QueueListResult, Request,
@@ -537,6 +538,10 @@ pub struct DaemonOptions {
     /// Makes the loader's context for `config.get` (the cache, the SDK, the built-in packs). `None`, the default,
     /// finds the bundle from the process and keeps the cache beside the runs. A test passes one over fixtures.
     pub load_context: Option<LoadContextFactory>,
+    /// Where `config.set --secret` keeps a secret and the load checks look for one. [`DaemonOptions::new`] gives a
+    /// store in memory, so no daemon touches the OS keychain unless it is given one: `collide-daemon` gives
+    /// [`crate::keychain::system_keychain`] when it runs for a person (ts-0099-bw).
+    pub keychain: Arc<dyn Keychain>,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -593,6 +598,7 @@ impl DaemonOptions {
             subscriber_queue: SUBSCRIBER_QUEUE,
             feed_rebuilder: None,
             load_context: None,
+            keychain: Arc::new(MemoryKeychain::new()),
         }
     }
 }
@@ -713,6 +719,7 @@ impl Daemon {
             subscriber_queue,
             feed_rebuilder,
             load_context,
+            keychain,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -903,6 +910,7 @@ impl Daemon {
                 )
             }),
             git_env.clone(),
+            keychain,
         );
         let uid = auth::daemon_uid();
         let tree =
@@ -1789,6 +1797,7 @@ fn call(
         Method::QueueList => queue_list(shared, params),
         Method::QueueAnswer => queue_answer(shared, session, params),
         Method::ConfigGet => config_get(shared, params),
+        Method::ConfigSet => config_set(shared, params),
         Method::BoardOpen => board_open(shared, params),
         Method::BoardList => board_list(shared),
         Method::TaskGet => task_get(shared, params),
@@ -2145,17 +2154,66 @@ fn config_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
             "the daemon is shutting down",
         ));
     }
-    let root = match &params.board {
-        Some(id) => Some(std::path::PathBuf::from(board_root(shared, id)?)),
-        None => None,
-    };
+    let root = board_root_of(shared, params.board.as_deref())?;
     let board = params
         .board
         .as_deref()
         .zip(root.as_deref())
         .map(|(id, root)| BoardRef { id, root });
-    // The tools a pack needs are looked for where the user's login shell finds them, once it has been captured.
-    let path = shared
+    match shared.config.get(&params, board, &tools_path(shared)) {
+        Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
+        Err(GetError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
+        Err(GetError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
+    }
+}
+
+/// `config.set` (ts-0099-bw): a secret to the keychain, or a plain value to the user's file ([`crate::config_get`]).
+/// The request's `value` may be a secret, so nothing here reads it into a message: the params that cannot be read are
+/// answered without the serde error (which can quote a value), no line is logged for the call, and the answer holds no
+/// value.
+fn config_set(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigSetParams = serde_json::from_value(params.clone()).map_err(|_| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            "the params of config.set are not readable: they need `key`, `value` and `layer`, and may have `board` \
+             and `secret`",
+        )
+    })?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let root = board_root_of(shared, params.board.as_deref())?;
+    let board = params
+        .board
+        .as_deref()
+        .zip(root.as_deref())
+        .map(|(id, root)| BoardRef { id, root });
+    match shared.config.set(&params, board, &tools_path(shared)) {
+        Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
+        Err(SetError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
+        Err(SetError::Invalid(message)) => Err(RpcError::new(code::INVALID_PARAMS, message)),
+        Err(SetError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
+        Err(SetError::Failed(message)) => Err(RpcError::new(code::INTERNAL_ERROR, message)),
+    }
+}
+
+/// The root of the board a request names, or `None` for a request with no board.
+fn board_root_of(
+    shared: &Shared,
+    board: Option<&str>,
+) -> Result<Option<std::path::PathBuf>, RpcError> {
+    board
+        .map(|id| board_root(shared, id).map(std::path::PathBuf::from))
+        .transpose()
+}
+
+/// The `PATH` the tools a pack needs are looked for on: where the user's login shell finds them, once it has been
+/// captured.
+fn tools_path(shared: &Shared) -> std::ffi::OsString {
+    shared
         .env
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -2163,12 +2221,7 @@ fn config_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
         .and_then(|env| env.vars.get("PATH").cloned())
         .map(std::ffi::OsString::from)
         .or_else(|| std::env::var_os("PATH"))
-        .unwrap_or_default();
-    match shared.config.get(&params, board, &path) {
-        Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
-        Err(GetError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
-        Err(GetError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
-    }
+        .unwrap_or_default()
 }
 
 /// `board.open` (ts-0075-hj): any folder in a git checkout becomes the board of that checkout's top level, and the same

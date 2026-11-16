@@ -7,24 +7,29 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 mod common;
-use common::repo_root;
+use common::{TempRoot, repo_root};
 
 const TREE: [&str; 9] = [
     "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "sections",
 ];
 
 /// The commands whose handler is a tagged stub (`stop` is built: `tests/stop_command.rs`; `run` is built:
-/// `tests/adapters/claude/run_command.rs` and `run_process.rs`), with the tag and stage that fills each.
-const STUBBED: [(&str, &str, &str); 3] = [
-    ("report", "cli: report", "7"),
-    ("config", "cli: config", "4a"),
-    ("pack", "cli: pack", "4b"),
-];
+/// `tests/adapters/claude/run_command.rs` and `run_process.rs`; `config` is built: `tests/config_process.rs`, which
+/// runs it with an environment of its own), with the tag and stage that fills each.
+const STUBBED: [(&str, &str, &str); 2] =
+    [("report", "cli: report", "7"), ("pack", "cli: pack", "4b")];
 
+/// Runs `collide` in a temp root that is also its `HOME` and its daemon root, so a stub that has since been built
+/// never reaches the real home or daemon.
 fn collide(args: &[&str]) -> Output {
+    let root = TempRoot::new();
     Command::new(env!("CARGO_BIN_EXE_collide"))
         .args(args)
-        .current_dir(std::env::temp_dir())
+        .current_dir(root.path())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", root.path())
+        .env("COLLIDE_DAEMON_ROOT", root.path())
         .output()
         .expect("collide should run")
 }
@@ -130,15 +135,6 @@ fn a_stubbed_command_with_arguments_still_names_its_tag_and_prints_no_backtrace(
     assert!(stderr.contains("(cli: pack, Stage 4b)"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("RUST_BACKTRACE"), "{stderr}");
-}
-
-#[test]
-fn config_set_is_still_a_stub_at_stage_4a_and_prints_no_backtrace() {
-    let output = collide(&["config", "set", "disk.floor_gib", "3"]);
-    assert_eq!(output.status.code(), Some(6));
-    let stderr = text(output.stderr);
-    assert!(stderr.contains("(cli: config, Stage 4a)"), "{stderr}");
-    assert!(!stderr.contains("panicked"), "{stderr}");
 }
 
 #[test]

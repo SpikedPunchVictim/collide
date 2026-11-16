@@ -26,11 +26,12 @@ fn main() -> ExitCode {
         }
         Some("help" | "--help" | "-h") => {
             println!(
-                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}\n\n{}",
+                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}\n\n{}\n{}",
                 commands::tree_text(),
                 collide_host::run_cli::USAGE,
                 collide_host::run_cli::HELP,
-                collide_host::config_cli::USAGE
+                collide_host::config_cli::USAGE,
+                collide_host::config_set_cli::USAGE
             );
             return ExitCode::SUCCESS;
         }
@@ -41,6 +42,21 @@ fn main() -> ExitCode {
                 &mut std::io::stdout().lock(),
                 &mut std::io::stderr().lock(),
             ));
+        }
+        Some("config") => {
+            return match std::env::current_dir() {
+                Ok(cwd) => ExitCode::from(collide_host::config_cli::run_config(
+                    rest,
+                    &cwd,
+                    &mut std::io::stdin().lock(),
+                    &mut std::io::stdout().lock(),
+                    &mut std::io::stderr().lock(),
+                )),
+                Err(error) => {
+                    eprintln!("collide config: cannot read the working directory: {error}");
+                    ExitCode::from(exit::FAILED)
+                }
+            };
         }
         Some("stop") => {
             return ExitCode::from(collide_host::stop_cli::run(

@@ -65,16 +65,17 @@ pub struct Settings {
     pub problems: Vec<SettingProblem>,
 }
 
-/// What the layers know about one key.
-struct KeyInfo {
-    key: String,
+/// What the layers know about one key: where it belongs, its schema and its flags.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyInfo {
+    pub key: String,
     /// The pack the key belongs to, or `None` for one of Collide's own.
-    pack: Option<String>,
-    schema: Value,
-    overridable: bool,
-    repo_only: bool,
-    per_user: bool,
-    secret: bool,
+    pub pack: Option<String>,
+    pub schema: Value,
+    pub overridable: bool,
+    pub repo_only: bool,
+    pub per_user: bool,
+    pub secret: bool,
 }
 
 impl KeyInfo {
@@ -138,6 +139,12 @@ fn key_infos(packs: &[PackSettings]) -> Vec<KeyInfo> {
         }
     }
     infos
+}
+
+/// What is known about `key` (`disk.floor_gib`, `ferry.lanePool`): one of Collide's own settings or a key of one of
+/// `packs`. `None` for a key that is neither, and for a key of a pack that is not among `packs`.
+pub fn find_setting(packs: &[PackSettings], key: &str) -> Option<KeyInfo> {
+    key_infos(packs).into_iter().find(|info| info.key == key)
 }
 
 /// Resolves the layers. See the module docs.

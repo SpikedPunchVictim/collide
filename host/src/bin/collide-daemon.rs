@@ -64,6 +64,9 @@ fn main() -> ExitCode {
             options.claude_published = collide_host::claude_versions::published_from_env(
                 std::env::var(ROOT_ENV).ok().as_deref(),
             );
+            // Secrets are kept in the OS keychain only when the daemon is not under an overridden root.
+            options.keychain =
+                collide_host::keychain::keychain_for_root(std::env::var(ROOT_ENV).ok().as_deref());
             let exe = std::env::current_exe().and_then(std::fs::canonicalize);
             // The shim is `collide shim`, the binary next to this one; a shim that finds no daemon starts this one,
             // with the same root and home, so it finds the same files.

@@ -14,7 +14,7 @@
 //! | `cli: run` | `collide run` | built: [`crate::run_cli`], one Claude phase on a task file, in a new worktree |
 //! | `cli: stop` | `collide stop` | built: [`crate::stop_cli`], the stop of 0.5 ([`crate::stop`]) through the daemon |
 //! | `cli: report` | `collide report` | report files for shell scripts (`span`, `metric`) |
-//! | `cli: config` | `collide config` | `get` is built ([`crate::config_cli`]); `set` and `set --secret` are the stub |
+//! | `cli: config` | `collide config` | built: `get`, `set`, `set --secret` ([`crate::config_set_cli`]) |
 //! | `cli: pack` | `collide pack` | `add`, `link`, `enable`, `disable` and `list`; `update` and `test` come with Stage 12 |
 
 use crate::task_cli::exit;
@@ -90,12 +90,8 @@ pub const COMMANDS: [Command; 9] = [
     },
     Command {
         name: "config",
-        summary: "show a setting and the layer it came from (`get` works; `set` comes later)",
-        build: Build::NotBuilt(Stub {
-            tag: "cli: config",
-            stage: "4a",
-            handler: config,
-        }),
+        summary: "show a setting and the layer it came from (`get`), or set one (`set`, `set --secret`)",
+        build: Build::Built,
     },
     Command {
         name: "pack",
@@ -201,26 +197,6 @@ pub fn report(args: &[String]) -> u8 {
     todo!("cli: report")
 }
 
-/// `collide config get|set`: a setting and the layer it came from. `get` is built ([`crate::config_cli`]); `set` is
-/// the stub, which Stage 4a's `ts-0099-bw` fills in, and so is `collide config` with no command.
-pub fn config(args: &[String]) -> u8 {
-    if args.first().map(String::as_str) == Some("get") {
-        return match std::env::current_dir() {
-            Ok(cwd) => crate::config_cli::run(
-                args,
-                &cwd,
-                &mut std::io::stdout().lock(),
-                &mut std::io::stderr().lock(),
-            ),
-            Err(error) => {
-                eprintln!("collide config get: cannot read the working directory: {error}");
-                exit::FAILED
-            }
-        };
-    }
-    todo!("cli: config")
-}
-
 /// `collide pack add|link|enable|disable|list` (Stage 4b).
 pub fn pack(args: &[String]) -> u8 {
     let _ = args;
@@ -291,7 +267,7 @@ mod tests {
     #[test]
     fn the_built_commands_are_not_run_as_stubs() {
         for name in [
-            "run", "stop", "tasks", "task", "schema", "sections", "nonsense",
+            "run", "stop", "tasks", "task", "schema", "sections", "config", "nonsense",
         ] {
             assert_eq!(execute_stub(name, &[]), None, "{name}");
         }

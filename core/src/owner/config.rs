@@ -59,6 +59,9 @@ pub struct ConfigGetParams {
 #[serde(deny_unknown_fields)]
 pub struct ConfigGetResult {
     pub entries: Vec<ConfigEntry>,
+    /// What is worth saying and is no error, one line each (a default budget an agent cannot enforce).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<String>,
 }
 
 /// `config.set` params (`collide config set <key> <value> [--secret]`). With `secret` true the value goes to the OS

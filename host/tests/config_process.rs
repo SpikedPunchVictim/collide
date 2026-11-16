@@ -1,9 +1,10 @@
 //! `collide config get` as a process (ts-0098-nx): the real `collide` binary, which starts a real `collide-daemon`
 //! under the test's own root. What needs a checkout and packs is in `config_command.rs`; here are the cases that need
-//! neither: the user's layers outside a checkout, the usage, the problems of a user file, and `set`, which is still the
-//! tagged stub. Every process has a cleared environment with `HOME`, `COLLIDE_DAEMON_ROOT` and `SHELL` in the test's
-//! own folder under `/tmp`, runs in that folder (which is not in a repository), and the daemon is stopped at the end by
-//! the pid it reports on the test's own socket.
+//! neither: the user's layers outside a checkout, the usage, the problems of a user file, and `set` (ts-0099-bw), whose
+//! secret goes in on standard input and into the daemon's keychain, which under a test's root is in memory, so no
+//! test reaches the OS keychain. Every process has a cleared environment with `HOME`, `COLLIDE_DAEMON_ROOT` and
+//! `SHELL` in the test's own folder under `/tmp`, runs in that folder (which is not in a repository), and the daemon
+//! is stopped at the end by the pid it reports on the test's own socket.
 
 mod common;
 
@@ -87,7 +88,7 @@ fn with_no_key_every_setting_of_collides_own_is_listed_with_its_layer() {
     assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
     assert_eq!(
         text(&output.stdout),
-        "ask.agent = <not set>  (default)\n\
+        "ask.agent = \"claude-haiku\"  (default)\n\
          ask.timeout_s = <not set>  (default)\n\
          ask.budget_usd = <not set>  (default)\n\
          disk.floor_gib = 5  (default)\n\
@@ -120,25 +121,141 @@ fn a_bad_command_line_exits_2_with_the_usage_and_starts_no_daemon() {
 }
 
 #[test]
-fn set_and_a_bare_config_are_still_the_stub_with_the_new_stage() {
+fn a_bare_config_or_an_unknown_word_exits_2_with_both_usages_and_starts_no_daemon() {
     let root = TempRoot::new();
-    for args in [
-        &["config", "set", "disk.floor_gib", "3"][..],
-        &["config"][..],
-    ] {
+    for args in [&["config"][..], &["config", "nothing"][..]] {
         let output = collide(&root, args);
-        assert_eq!(output.status.code(), Some(6), "{args:?}");
-        assert_eq!(
-            text(&output.stderr),
-            "collide config: not built yet (cli: config, Stage 4a)\n",
-            "{args:?}"
-        );
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = text(&output.stderr);
+        assert!(stderr.contains("usage: collide config get"), "{stderr}");
+        assert!(stderr.contains("usage: collide config set"), "{stderr}");
+    }
+    assert!(daemon_status(&DaemonPaths::under(root.path())).is_none());
+}
+
+/// A value no file, log or argument of these tests may hold, other than the one file it is piped from.
+const CANARY: &str = "canary-3d58a1-never-written";
+
+#[test]
+fn a_secret_on_the_command_line_exits_2_and_starts_no_daemon() {
+    let root = TempRoot::new();
+    let output = collide(
+        &root,
+        &[
+            "config",
+            "set",
+            "agents.mine.secrets.SOME_API_KEY",
+            CANARY,
+            "--secret",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = text(&output.stderr);
+    assert!(stderr.contains("standard input"), "{stderr}");
+    assert!(!stderr.contains(CANARY), "{stderr}");
+    assert!(daemon_status(&DaemonPaths::under(root.path())).is_none());
+}
+
+/// `collide <args>` with the file `stdin` as its standard input, as `collide` above otherwise.
+fn collide_reading(root: &TempRoot, args: &[&str], stdin: &std::path::Path) -> Output {
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg(format!("exec \"$0\" \"$@\" < '{}'", stdin.display()))
+        .arg(COLLIDE)
+        .args(args)
+        .current_dir(root.path())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", root.path())
+        .env("SHELL", fake_shell(root))
+        .env("COLLIDE_DAEMON_ROOT", root.path());
+    common::detached::Detached::start(root, &command).wait()
+}
+
+/// The files under `dir` that hold `needle`.
+fn holding(dir: &std::path::Path, needle: &str, found: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let kind = entry.file_type().unwrap();
+        if kind.is_dir() {
+            holding(&path, needle, found);
+        } else if kind.is_file()
+            && fs::read(&path)
+                .is_ok_and(|bytes| bytes.windows(needle.len()).any(|w| w == needle.as_bytes()))
+        {
+            found.push(path);
+        }
     }
 }
 
 #[test]
-fn help_names_the_get_command() {
+fn a_secret_from_standard_input_reaches_the_daemons_keychain_and_no_file() {
+    let root = TempRoot::new();
+    let _guard = DaemonGuard(DaemonPaths::under(root.path()));
+    write_user_config(
+        &root,
+        "agents:\n  mine:\n    kind: external\n    secrets: { SOME_API_KEY: my-item }\n",
+    );
+    // The item is missing, so the load refuses the entry and names the way out.
+    let before = collide(&root, &["config", "get"]);
+    assert_eq!(before.status.code(), Some(1));
+    assert!(
+        text(&before.stderr).contains("agents.mine.secrets.SOME_API_KEY"),
+        "{}",
+        text(&before.stderr)
+    );
+
+    let stdin = root.join("stdin.txt");
+    fs::write(&stdin, format!("{CANARY}\n")).unwrap();
+    let set = collide_reading(
+        &root,
+        &[
+            "config",
+            "set",
+            "agents.mine.secrets.SOME_API_KEY",
+            "--secret",
+        ],
+        &stdin,
+    );
+    assert_eq!(set.status.code(), Some(0), "{}", text(&set.stderr));
+    assert_eq!(
+        text(&set.stdout),
+        "agents.mine.secrets.SOME_API_KEY = <secret, in the keychain>  (user)\n"
+    );
+
+    let after = collide(&root, &["config", "get"]);
+    assert_eq!(after.status.code(), Some(0), "{}", text(&after.stderr));
+
+    let mut found = Vec::new();
+    holding(root.path(), CANARY, &mut found);
+    // The file it was piped from is the one place it is meant to be; `detached-N` hold the commands' own output, which
+    // is checked below for the two that took the secret.
+    found.retain(|path| path != &stdin && !path.to_string_lossy().contains("/detached-"));
+    assert!(found.is_empty(), "the value is in {found:?}");
+    assert!(!text(&set.stdout).contains(CANARY) && !text(&set.stderr).contains(CANARY));
+}
+
+#[test]
+fn a_plain_value_is_written_through_the_real_binary() {
+    let root = TempRoot::new();
+    let _guard = DaemonGuard(DaemonPaths::under(root.path()));
+    let output = collide(&root, &["config", "set", "disk.floor_gib", "9"]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert_eq!(text(&output.stdout), "disk.floor_gib = 9  (user)\n");
+    let got = collide(&root, &["config", "get", "disk.floor_gib"]);
+    assert_eq!(text(&got.stdout), "disk.floor_gib = 9  (user)\n");
+}
+
+#[test]
+fn help_names_the_get_and_set_commands() {
     let root = TempRoot::new();
     let output = collide(&root, &["--help"]);
-    assert!(text(&output.stdout).contains("usage: collide config get [<key>] [--profile <name>]"));
+    let help = text(&output.stdout);
+    assert!(help.contains("usage: collide config get [<key>] [--profile <name>]"));
+    assert!(help.contains("usage: collide config set <key> <value>"));
+    assert!(help.contains("collide config set <key> --secret"));
 }

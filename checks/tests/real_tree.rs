@@ -95,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 40] = [
+const FILLED_TAGS: [(&str, &str, &str); 41] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -136,6 +136,7 @@ const FILLED_TAGS: [(&str, &str, &str); 40] = [
     ("cli: run", "3b", "ts-0069-bn"),
     ("shell: daemon connection", "3c", "ts-0077-ws"),
     ("shell: daemon events", "3c", "ts-0077-ws"),
+    ("cli: config", "4a", "ts-0099-bw"),
 ];
 
 #[test]
@@ -156,10 +157,9 @@ fn every_filled_tag_stays_registered_under_its_stage_and_counts_no_stub() {
 }
 
 /// The tags of the rest of the `host` outlines (ts-0041-xf) and the stage that fills each one: the provider
-/// supervisor and the pack command Stage 4b, the config command Stage 4a (`get` is built, `set` is the stub), the hook
-/// executor and `collide report` Stage 7, observers Stage 12, the resource sources Stage 13. Each must count at least
-/// one stub today.
-const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 13] = [
+/// supervisor and the pack command Stage 4b, the hook executor and `collide report` Stage 7, observers Stage 12, the
+/// resource sources Stage 13. Each must count at least one stub today.
+const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 12] = [
     ("hooks: invocation", "7"),
     ("hooks: result file", "7"),
     ("supervisor: provider start", "4b"),
@@ -171,7 +171,6 @@ const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 13] = [
     ("sampler: gpu", "13"),
     ("sampler: containers", "13"),
     ("cli: report", "7"),
-    ("cli: config", "4a"),
     ("cli: pack", "4b"),
 ];
 
@@ -232,4 +231,52 @@ fn every_shell_tag_names_its_stage_and_counts_at_least_one_stub() {
             "tag \"{tag}\" is registered but no stub carries it"
         );
     }
+}
+
+/// The `.rs` files under `dir`, in path order.
+fn rust_files(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            found.extend(rust_files(&path));
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// A test that runs the `collide` binary with the environment it was started with reaches the person's real home and
+/// daemon as soon as the command it runs is built: a stub check of `collide config set` did, once `set` was filled
+/// (ts-0099-bw). So every place in `host/tests` that starts the binary clears the environment in the same command, and
+/// gives the process a `HOME` and `COLLIDE_DAEMON_ROOT` of the test's own.
+#[test]
+fn every_test_that_runs_the_collide_binary_clears_its_environment() {
+    let start = ["Command::new(env!(\"CARGO_BIN_EXE_collide", "\"))"].concat();
+    let mut found = Vec::new();
+    for file in rust_files(&repo().join("host").join("tests")) {
+        let text = std::fs::read_to_string(&file).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            if !line.contains(&start) {
+                continue;
+            }
+            let command = lines[index..].iter().take_while(|line| !line.contains(';'));
+            if !command.clone().any(|line| line.contains(".env_clear()")) {
+                let rel = file.strip_prefix(repo()).unwrap().display().to_string();
+                found.push(format!("{rel}: the command started at line {}", index + 1));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "these start `collide` with the test's own environment; clear it and set `HOME` and \
+         `COLLIDE_DAEMON_ROOT` to a temp root:\n{}",
+        found.join("\n")
+    );
 }

@@ -57,6 +57,13 @@
         "$ref": "#/$defs/ConfigEntry"
       },
       "type": "array"
+    },
+    "notices": {
+      "description": "What is worth saying and is no error, one line each (a default budget an agent cannot enforce).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [

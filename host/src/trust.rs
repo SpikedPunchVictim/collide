@@ -9,6 +9,7 @@
 //! This module has no prompt and runs no repo code. The daemon and the CLI that ask (`ts-0102-vu`) call it, and the
 //! stages that run repo code call [`Trust::require_trusted`].
 
+use crate::atomic_write::{Step, write_atomically};
 use crate::board_load::LoadedLine;
 use crate::git_objects::{GitError, GitObjects, ObjectKind, TreeChangeKind, check_id};
 use collide_core::owner::TrustState;
@@ -20,9 +21,9 @@ use collide_core::yaml::{MAX_YAML_BYTES, YamlError, load_yaml_file};
 use collide_core::yaml_out::to_yaml;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 const FILE_MODE: u32 = 0o600;
@@ -209,39 +210,18 @@ impl TrustStore {
             .and_then(|()| fs::set_permissions(&self.dir, fs::Permissions::from_mode(DIR_MODE)))
             .map_err(|source| failed("prepare its folder", source))?;
 
-        // A temp file that a crash left is ours to replace, so its mode is set on the open file, not only at creation.
-        let temp = self.dir.join(format!("{TRUST_FILE}.tmp"));
-        let handle = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(FILE_MODE)
-            .open(&temp)
-            .and_then(|handle| {
-                handle.set_permissions(fs::Permissions::from_mode(FILE_MODE))?;
-                Ok(handle)
-            })
-            .map_err(|source| failed("create a temp file", source))?;
-        let sync_handle = handle
-            .try_clone()
-            .map_err(|source| failed("create a temp file", source))?;
-        let mut sink = wrap(handle);
-        let written = sink
-            .write_all(text.as_bytes())
-            .and_then(|()| sink.flush())
-            .and_then(|()| sync_handle.sync_all());
-        drop(sink);
-        if let Err(source) = written {
-            let _ = fs::remove_file(&temp);
-            return Err(failed("write the temp file", source));
-        }
-        if let Err(source) = fs::rename(&temp, &target) {
-            let _ = fs::remove_file(&temp);
-            return Err(failed("replace the file", source));
-        }
-        File::open(&self.dir)
-            .and_then(|dir| dir.sync_all())
-            .map_err(|source| failed("sync its folder", source))
+        write_atomically(&self.dir, TRUST_FILE, text.as_bytes(), FILE_MODE, wrap).map_err(|error| {
+            StoreError::Write {
+                file: target.clone(),
+                what: match error.step {
+                    Step::CreateTemp => "create a temp file",
+                    Step::WriteTemp => "write the temp file",
+                    Step::Rename => "replace the file",
+                    Step::SyncDir => "sync its folder",
+                },
+                source: error.source,
+            }
+        })
     }
 }
 

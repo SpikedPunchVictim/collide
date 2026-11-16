@@ -10,6 +10,10 @@ export type SettingLayer = 'default' | 'user' | 'repo' | 'profile'
  */
 export interface ConfigGetResult {
   entries: ConfigEntry[]
+  /**
+   * What is worth saying and is no error, one line each (a default budget an agent cannot enforce).
+   */
+  notices?: string[]
 }
 /**
  * One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS

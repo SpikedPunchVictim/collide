@@ -82,7 +82,7 @@ fn with_no_board_the_entries_are_collides_own_keys_with_their_defaults() {
     );
     assert_eq!(
         value_and_layer(&result, "ask.agent"),
-        (None, SettingLayer::Default)
+        (Some(json!("claude-haiku")), SettingLayer::Default)
     );
 }
 
@@ -148,13 +148,10 @@ fn a_board_the_daemon_does_not_know_is_not_found() {
 }
 
 #[test]
-fn the_other_config_methods_are_still_not_served() {
+fn the_pack_config_methods_are_still_not_served() {
+    // `config.set` is served since ts-0099-bw (`config_set.rs`); the pack methods are ts-0100's and ts-0101's.
     let fixture = Fixture::new();
     let methods = [
-        (
-            "config.set",
-            json!({ "key": "disk.floor_gib", "value": 3, "layer": "user" }),
-        ),
         ("config.pack_list", json!({ "board": "board-1" })),
         ("config.pack_add", json!({ "source": "git:example/x" })),
     ];

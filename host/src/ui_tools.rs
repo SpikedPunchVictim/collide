@@ -218,7 +218,7 @@ pub trait EndpointTokens {
     fn rotate(&mut self) -> String;
 }
 
-/// The real [`EndpointTokens`], in the keychain.
+/// The real [`EndpointTokens`], in the keychain. Stage 6b builds it on the port of [`crate::keychain`].
 pub struct KeychainTokens;
 
 impl EndpointTokens for KeychainTokens {
