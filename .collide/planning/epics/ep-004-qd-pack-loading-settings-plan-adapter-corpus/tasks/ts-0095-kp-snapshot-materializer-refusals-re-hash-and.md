@@ -1,7 +1,7 @@
 ---
 id: ts-0095-kp
 kind: task
-status: ready
+status: active
 title: "Snapshot materializer: refusals, re-hash and the cache"
 owners: []
 links:
