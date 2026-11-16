@@ -1,7 +1,7 @@
 ---
 id: ts-0082-fp
 kind: task
-status: ready
+status: active
 title: "The thin loop in a browser, against fake Claude"
 owners: []
 links:
