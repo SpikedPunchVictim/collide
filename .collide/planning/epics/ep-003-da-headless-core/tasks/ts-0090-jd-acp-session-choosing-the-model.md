@@ -1,7 +1,7 @@
 ---
 id: ts-0090-jd
 kind: task
-status: ready
+status: active
 title: "ACP session: choosing the model"
 owners: []
 links:
