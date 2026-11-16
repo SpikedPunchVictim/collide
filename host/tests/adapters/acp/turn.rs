@@ -352,18 +352,6 @@ fn an_error_response_gives_no_final_report_and_the_next_turn_starts_with_no_word
     ));
 }
 
-#[test]
-fn a_turn_the_host_cancelled_ends_cancelled_whatever_the_agent_says() {
-    // Hardened by ts-0089-wv; the contract's scenario needs it from the start (S7, O1).
-    let mut session = ready();
-    session.cancel();
-    let step = session.feed(&prompt_response(2, "end_turn", None), 600);
-    assert_eq!(
-        turn_end_of(&step),
-        (TurnEndReason::Cancelled {}, true, false)
-    );
-}
-
 // ---- one turn of the fake child under the real shim ----------------------------------------------------------------
 
 #[test]

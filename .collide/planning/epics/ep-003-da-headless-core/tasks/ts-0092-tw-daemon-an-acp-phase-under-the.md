@@ -130,3 +130,7 @@ Write these first:
 - Carried from `ts-0087-mf` (review): a journal cut between the `session/new` response and the first prompt leaves a
   rebuilt `AcpSession` that never wrote its prompt. Decide how the daemon, after a restart, makes that session send
   it exactly once, and test the cut there.
+- Carried from `ts-0089-wv` (review): the same kind of owed write. A journal cut after a read that the session
+  answers on its own (`-32601` for an unserved request, `cancelled` for a request after a cancel or at a turn end)
+  and before that answer leaves the agent waiting, since replay writes nothing. Settle every owed write, the prompt's
+  included, with one rule, and test each cut.

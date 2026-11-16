@@ -1,0 +1,11 @@
+# Built for the tests: the handshake (cut to what the session reads), some words, then a wait for `session/cancel`
+# (a notification: it has no id), after which the agent ends its turn with `end_turn`, as opencode does (S7, O1).
+# Ids are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1"}}}
+{"expect":{"method":"session/prompt","params":{"sessionId":"ses-stand-in-1","prompt":[{"type":"text"}]}},"as":"prompt"}
+{"say":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-stand-in-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Working. "}}}}}
+{"expect":{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"ses-stand-in-1"}}}
+{"say":{"jsonrpc":"2.0","id":{"$id":"prompt"},"result":{"stopReason":"end_turn"}}}

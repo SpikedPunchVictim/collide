@@ -9,6 +9,7 @@ mod adapter;
 mod contract;
 mod fake;
 mod fake_acp;
+mod permission;
 mod probe;
 mod replay;
 mod session;

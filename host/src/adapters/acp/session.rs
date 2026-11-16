@@ -12,7 +12,11 @@
 //! - **request ids:** the requests it writes count from 0. A response is matched to its request by id, and one that
 //!   matches nothing changes nothing;
 //! - **the turn:** the `session/prompt` response ends it. A turn the host cancelled is `Cancelled` whatever
-//!   `stopReason` says (S7, O1). The final report is rebuilt from the message chunks after the last tool call.
+//!   `stopReason` says (S7, O1). The final report is rebuilt from the message chunks after the last tool call;
+//! - **permission requests:** a `session/request_permission` is held, with the id the agent wrote it with, until
+//!   `answer` or `cancel` answers it. The held requests are what [`AgentSession::pending_permissions`] gives, oldest
+//!   first. They are rebuilt by a replay (a request in the journal with no answer after it), because the agent is a
+//!   child of the shim, outlives the daemon, and keeps its request open across a restart.
 //!
 //! | agent writes (stdout) | the session reads | and writes |
 //! |---|---|---|
@@ -22,9 +26,11 @@
 //! | `session/update` `agent_message_chunk` | `Message` | nothing |
 //! | `session/update` `tool_call` | `ToolCall`, by its `kind` | nothing |
 //! | any other `session/update` | `Other` named by its `sessionUpdate` | nothing |
-//! | `session/request_permission` | `PermissionRequest`, held until `answer` or `cancel` | nothing |
+//! | `session/request_permission` | `PermissionRequest`, held until `answer`, `cancel` or the turn's end | nothing |
+//! | `session/request_permission` after `cancel`, in the open turn | `Other` | the outcome `cancelled` |
+//! | (the host) `answer`, `cancel` | `PermissionUnanswerable` for an `Allow` with no one-time allow | the outcome |
 //! | any other request (`fs/*`, `terminal/*`, `elicitation/*`, unknown) | `Other` named by its method | `-32601` |
-//! | a response to `session/prompt` | `FinalReport` (if any words), `TurnEnd` | nothing |
+//! | a response to `session/prompt` | `FinalReport` (if any words), `TurnEnd` | `cancelled` for each request held |
 //! | a line that is not a JSON object | `Other` named `unparsed_line` | nothing |
 //!
 //! **No content from the agent is kept in an event of the `Other` kind.** A stream's content is untrusted and may be
@@ -34,9 +40,30 @@
 //! its own file and shell tools and a daemon restart cannot stall a write. A request for one of them is answered
 //! "method not found", so the agent never waits on it.
 //!
-//! Left to the items after this one, which harden what the double had: permission and cancel (`ts-0089-wv`), the
-//! model (`ts-0090-jd`), empty turns, lost children and usage (`ts-0091-pz`). Until then `pending_permissions` is the
-//! trait's default, `TurnEnd.empty` is `false`, and no `Usage` event is made.
+//! **Answering** (0.3, Permissions). `Allow` picks the first option of kind `allow_once`, and never `allow_always`,
+//! which would change the agent's own standing rules. `Deny` picks `reject_once`; its message is dropped, because ACP
+//! has no place for it. `Cancel` writes the outcome `cancelled`. An `Allow` with no `allow_once` option writes
+//! `cancelled` and makes `PermissionUnanswerable`, so the host can tell the person why; a `Deny` with no `reject_once`
+//! writes `cancelled` and says nothing more. An id the session does not hold, or has answered, writes nothing.
+//!
+//! **Cancel.** `cancel` writes the outcome `cancelled` for each pending request, then the notification
+//! `session/cancel` (it has no id). It writes nothing before the session has an id, after the turn ended, or when the
+//! turn is cancelled already. The turn ends when the `session/prompt` response comes, and is `Cancelled` whatever the
+//! agent's stop reason says. A request the agent asks after the cancel, while the turn is open, is answered
+//! `cancelled` at once and never held, with an `Other` named `permission_request_after_cancel` in place of the
+//! `PermissionRequest`, so no one is asked: the agent may wait on the answer, and the turn could not end.
+//!
+//! **A turn end clears what is held.** When the `session/prompt` response is read, each request still held is answered
+//! `cancelled` and dropped, before the `TurnEnd`, so `pending_permissions` is empty after it and a later `answer` is
+//! for an unknown id. The agent is never left waiting on Collide, as for the `-32601` answer. A replay drops the same
+//! requests when it reads the response, and adds no write: the journal holds the answer or does not.
+//!
+//! **The kind of a request** is its `toolCall.kind`; when that has none, the kind of the `tool_call` announced earlier
+//! in the turn with the same id; else `other`. The agent may ask before it announces the call (S7, O6), and a call
+//! announced after the request changes nothing already given.
+//!
+//! Left to the items after this one, which harden what the double had: the model (`ts-0090-jd`), empty turns, lost
+//! children and usage (`ts-0091-pz`). Until then `TurnEnd.empty` is `false`, and no `Usage` event is made.
 //!
 //! `PermissionRequest` carries no paths (`core/src/agent.rs`); ACP's `toolCall.locations` has them and is left out.
 
@@ -70,12 +97,11 @@ enum Awaiting {
 }
 
 /// A request of the agent that no one has answered. `raw_id` is the JSON-RPC id as the agent wrote it, which the
-/// answer must echo; the normalized id of the request is its text.
+/// answer must echo (a number stays a number); `request.id` is its text.
 #[derive(Debug, Clone, PartialEq)]
 struct HeldRequest {
-    id: String,
     raw_id: Value,
-    options: Vec<PermissionOption>,
+    request: PermissionRequest,
 }
 
 /// What reading a line makes the session write next, if anything.
@@ -89,14 +115,14 @@ enum Outgoing {
 /// What reading one line gave.
 struct Reading {
     events: Vec<StampedEvent>,
-    write: Option<Outgoing>,
+    writes: Vec<Outgoing>,
 }
 
 impl Reading {
     fn events(events: Vec<StampedEvent>) -> Self {
         Self {
             events,
-            write: None,
+            writes: Vec::new(),
         }
     }
 
@@ -114,6 +140,8 @@ pub struct AcpSession {
     awaiting: Vec<(u64, Awaiting)>,
     session_id: Option<String>,
     held: Vec<HeldRequest>,
+    /// The kind of each tool call announced in the turn, to give a request that names a call but no kind.
+    tool_kinds: Vec<(String, ToolKind)>,
     cancel_requested: bool,
     turn_report: String,
     handshake_failed: bool,
@@ -129,6 +157,7 @@ impl AcpSession {
             awaiting: Vec::new(),
             session_id: None,
             held: Vec::new(),
+            tool_kinds: Vec::new(),
             cancel_requested: false,
             turn_report: String::new(),
             handshake_failed: false,
@@ -173,16 +202,14 @@ impl AcpSession {
         let has_id = message.get("id").is_some();
         match message.get("method").and_then(Value::as_str) {
             Some("session/update") => Reading::events(self.read_update(&message, wall_ns)),
-            Some("session/request_permission") if has_id => {
-                Reading::events(vec![at(self.hold_request(&message))])
-            }
+            Some("session/request_permission") if has_id => self.read_request(&message, wall_ns),
             // A request the engine does not serve: tell the agent at once, so it never waits on the answer.
             Some(method) if has_id => Reading {
                 events: vec![at(named(method))],
-                write: Some(Outgoing::Reply(json!({
+                writes: vec![Outgoing::Reply(json!({
                     "jsonrpc": "2.0", "id": message["id"],
                     "error": { "code": METHOD_NOT_FOUND, "message": "Method not found" }
-                }))),
+                }))],
             },
             Some(method) => Reading::events(vec![at(named(method))]),
             None => self.read_response(&message, wall_ns),
@@ -203,13 +230,17 @@ impl AcpSession {
             Some("tool_call") => {
                 // The report is what the agent says after its last tool call.
                 self.turn_report.clear();
+                let id = text_of(update, "toolCallId");
+                let kind = tool_kind(update.get("kind"));
+                self.tool_kinds.retain(|(known, _)| *known != id);
+                self.tool_kinds.push((id.clone(), kind));
                 Some(AgentEvent::ToolCall {
-                    id: text_of(update, "toolCallId"),
+                    id,
                     tool: update
                         .get("title")
                         .and_then(Value::as_str)
                         .map(str::to_string),
-                    kind: tool_kind(update.get("kind")),
+                    kind,
                     input: known_input(update.get("rawInput")),
                 })
             }
@@ -217,6 +248,27 @@ impl AcpSession {
         };
         let event = event.unwrap_or_else(|| named(kind.unwrap_or("session/update")));
         vec![stamped(Some(wall_ns), event)]
+    }
+
+    /// A request for permission. While the turn is cancelled and open the agent may be waiting on it, and cancel has
+    /// already answered every request it knew, so this one is answered `cancelled` at once and never held: the turn
+    /// could not end otherwise. The event is an `Other`, not a `PermissionRequest`, so no one is asked.
+    fn read_request(&mut self, message: &Value, wall_ns: u64) -> Reading {
+        let at = |event| stamped(Some(wall_ns), event);
+        if self.cancel_requested && self.turn_open() {
+            return Reading {
+                events: vec![at(named("permission_request_after_cancel"))],
+                writes: vec![Outgoing::Reply(cancelled_reply(&message["id"]))],
+            };
+        }
+        Reading::events(vec![at(self.hold_request(message))])
+    }
+
+    /// Whether a `session/prompt` is waiting for its response.
+    fn turn_open(&self) -> bool {
+        self.awaiting
+            .iter()
+            .any(|(_, awaiting)| *awaiting == Awaiting::Prompt)
     }
 
     fn hold_request(&mut self, message: &Value) -> AgentEvent {
@@ -240,26 +292,38 @@ impl AcpSession {
                 })
             })
             .collect();
-        self.held.retain(|held| held.id != id);
-        self.held.push(HeldRequest {
+        let tool_call_id = text_of(&call, "toolCallId");
+        let request = PermissionRequest {
             id: id.clone(),
+            kind: self.request_kind(&call, &tool_call_id),
+            tool_call_id,
+            tool: call
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            input: known_input(call.get("rawInput")),
+            reason: None,
+            options,
+        };
+        self.held.retain(|held| held.request.id != id);
+        self.held.push(HeldRequest {
             raw_id,
-            options: options.clone(),
+            request: request.clone(),
         });
-        AgentEvent::PermissionRequest {
-            request: PermissionRequest {
-                id,
-                tool_call_id: text_of(&call, "toolCallId"),
-                tool: call
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                kind: tool_kind(call.get("kind")),
-                input: known_input(call.get("rawInput")),
-                reason: None,
-                options,
-            },
+        AgentEvent::PermissionRequest { request }
+    }
+
+    /// The kind of the tool a request is for: its own `kind`, else the kind of the `tool_call` the agent announced
+    /// earlier with the same id, else `other`. The agent may ask before it announces the call (S7, O6), and a call
+    /// announced after the request changes nothing already given.
+    fn request_kind(&self, call: &Value, tool_call_id: &str) -> ToolKind {
+        if call.get("kind").is_some_and(Value::is_string) {
+            return tool_kind(call.get("kind"));
         }
+        self.tool_kinds
+            .iter()
+            .find(|(known, _)| known == tool_call_id)
+            .map_or(ToolKind::Other, |(_, kind)| *kind)
     }
 
     fn read_response(&mut self, message: &Value, wall_ns: u64) -> Reading {
@@ -272,7 +336,7 @@ impl AcpSession {
         };
         let (_, awaiting) = self.awaiting.remove(position);
         if awaiting == Awaiting::Prompt {
-            return Reading::events(self.end_turn(message, wall_ns));
+            return self.end_turn(message, wall_ns);
         }
         let failed = message.get("error").is_some();
         let result = message.get("result").filter(|_| !failed);
@@ -286,13 +350,13 @@ impl AcpSession {
                     .collect();
                 Reading {
                     events: Vec::new(),
-                    write: Some(Outgoing::Request {
+                    writes: vec![Outgoing::Request {
                         method: "session/new",
                         params: json!({
                             "cwd": self.options.cwd.to_string_lossy(),
                             "mcpServers": servers
                         }),
-                    }),
+                    }],
                 }
             }
             (_, Some(result)) => match result.get("sessionId").and_then(Value::as_str) {
@@ -302,13 +366,13 @@ impl AcpSession {
                         events: vec![at(AgentEvent::SessionBound {
                             id: session_id.into(),
                         })],
-                        write: Some(Outgoing::Request {
+                        writes: vec![Outgoing::Request {
                             method: "session/prompt",
                             params: json!({
                                 "sessionId": session_id,
                                 "prompt": [{ "type": "text", "text": self.options.first_prompt }]
                             }),
-                        }),
+                        }],
                     }
                 }
                 None => self.handshake_ended("malformed_response", wall_ns),
@@ -339,9 +403,15 @@ impl AcpSession {
         Reading::events(vec![stamped(Some(wall_ns), named(name))])
     }
 
-    fn end_turn(&mut self, message: &Value, wall_ns: u64) -> Vec<StampedEvent> {
+    fn end_turn(&mut self, message: &Value, wall_ns: u64) -> Reading {
         let at = |event| stamped(Some(wall_ns), event);
         let mut events = Vec::new();
+        // The agent no longer waits on a request still held, so each is answered `cancelled` and dropped, before the
+        // turn is reported. A request that came back after a restart would be a stale ask.
+        let writes = std::mem::take(&mut self.held)
+            .into_iter()
+            .map(|held| Outgoing::Reply(cancelled_reply(&held.raw_id)))
+            .collect();
         let failed = message.get("error").is_some();
         if !failed && !self.turn_report.is_empty() {
             events.push(at(AgentEvent::FinalReport {
@@ -374,7 +444,7 @@ impl AcpSession {
             cancel_requested: self.cancel_requested,
             empty: false,
         }));
-        events
+        Reading { events, writes }
     }
 }
 
@@ -392,8 +462,9 @@ impl Replayable for AcpSession {
                     "initialize" => Awaiting::Initialize,
                     "session/new" => Awaiting::SessionNew,
                     _ => {
-                        // A new turn: it has no words yet and is not cancelled.
+                        // A new turn: it has no words and no tool calls yet, and is not cancelled.
                         self.turn_report.clear();
+                        self.tool_kinds.clear();
                         self.cancel_requested = false;
                         Awaiting::Prompt
                     }
@@ -442,12 +513,12 @@ impl AgentSession for AcpSession {
     fn feed(&mut self, line: &[u8], wall_ns: u64) -> Step {
         let reading = self.read(line, wall_ns);
         let writes = reading
-            .write
+            .writes
+            .into_iter()
             .map(|outgoing| match outgoing {
                 Outgoing::Request { method, params } => self.request(method, params),
                 Outgoing::Reply(message) => self.write(message),
             })
-            .into_iter()
             .collect();
         Step {
             events: reading.events,
@@ -470,10 +541,20 @@ impl AgentSession for AcpSession {
     }
 
     fn answer(&mut self, request_id: &str, reply: PermissionReply) -> Step {
-        let Some(held) = self.held.iter().find(|held| held.id == request_id).cloned() else {
+        let Some(held) = self
+            .held
+            .iter()
+            .find(|held| held.request.id == request_id)
+            .cloned()
+        else {
             return Step::default();
         };
-        let pick = |kind| held.options.iter().find(|option| option.kind == kind);
+        let pick = |kind| {
+            held.request
+                .options
+                .iter()
+                .find(|option| option.kind == kind)
+        };
         let selected =
             |option: &PermissionOption| json!({ "outcome": "selected", "optionId": option.id });
         let cancelled = json!({ "outcome": "cancelled" });
@@ -505,19 +586,27 @@ impl AgentSession for AcpSession {
         }
     }
 
+    fn pending_permissions(&self) -> Vec<PermissionRequest> {
+        self.held.iter().map(|held| held.request.clone()).collect()
+    }
+
     fn cancel(&mut self) -> Step {
-        let Some(session_id) = self.session_id.clone() else {
-            // Nothing has been prompted yet, so there is no turn to cancel.
+        // Nothing to cancel before the session has an id, after the turn ended, or once the turn is cancelled.
+        let Some(session_id) = self.session_id.clone().filter(|_| self.turn_open()) else {
             return Step::default();
         };
-        let mut writes = vec![self.write(json!({
-            "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": session_id }
-        }))];
-        // After `session/cancel` the client must answer every request still pending as cancelled.
-        let held: Vec<Value> = self.held.iter().map(|held| held.raw_id.clone()).collect();
-        for raw_id in held {
-            writes.push(self.respond(&raw_id, json!({ "outcome": "cancelled" })));
+        if self.cancel_requested {
+            return Step::default();
         }
+        // ACP: every request still pending is answered `cancelled`, before the turn is cancelled.
+        let pending: Vec<Value> = self.held.iter().map(|held| held.raw_id.clone()).collect();
+        let mut writes: Vec<Vec<u8>> = pending
+            .iter()
+            .map(|raw_id| self.respond(raw_id, json!({ "outcome": "cancelled" })))
+            .collect();
+        writes.push(self.write(json!({
+            "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": session_id }
+        })));
         Step {
             events: Vec::new(),
             writes,
@@ -582,6 +671,11 @@ fn text_of(value: &Value, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+/// The answer to a request for permission that picks nothing: the outcome `cancelled`, with the agent's own id.
+fn cancelled_reply(raw_id: &Value) -> Value {
+    json!({ "jsonrpc": "2.0", "id": raw_id, "result": { "outcome": { "outcome": "cancelled" } } })
 }
 
 /// A JSON-RPC id as the text the normalized request carries.

@@ -1,0 +1,12 @@
+# Built for the tests: the handshake (cut to what the session reads), then a permission request that the turn waits
+# on, answered with the one-time reject. The host's deny message has no place in ACP, so the answer holds the
+# option's id only. Shapes as in `permission-request`; ids and the tool call are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1"}}}
+{"expect":{"method":"session/prompt","params":{"sessionId":"ses-stand-in-1","prompt":[{"type":"text"}]}},"as":"prompt"}
+{"say":{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"ses-stand-in-1","toolCall":{"toolCallId":"call-stand-in-1","title":"bash","kind":"execute","rawInput":{}},"options":[{"optionId":"once","name":"Allow once","kind":"allow_once"},{"optionId":"always","name":"Allow always","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}}
+{"expect":{"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"selected","optionId":"reject"}}}}
+{"say":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-stand-in-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Not run."}}}}}
+{"say":{"jsonrpc":"2.0","id":{"$id":"prompt"},"result":{"stopReason":"end_turn"}}}

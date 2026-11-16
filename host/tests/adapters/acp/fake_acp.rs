@@ -429,7 +429,7 @@ fn every_recording_is_json_on_each_line_says_something_and_holds_only_steps_the_
         }
         seen += 1;
     }
-    assert_eq!(seen, 5, "the recordings: add a test for a new one");
+    assert_eq!(seen, 11, "the recordings: add a test for a new one");
 }
 
 /// What a recording says in answer to `initialize` and to `session/new`.

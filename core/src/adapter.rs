@@ -157,8 +157,10 @@ pub trait AgentSession {
     fn answer(&mut self, request_id: &str, reply: PermissionReply) -> Step;
 
     /// The permission requests the session has been asked and has not answered, oldest first. The daemon reads them
-    /// after it rebuilt a session from the journal, so a request asked before a restart is put to the person again. A
-    /// session that holds none (an ACP session answers inside its own turn) has the default.
+    /// after it rebuilt a session from the journal, so a request asked before a restart is put to the person again.
+    /// Both engines hold them: an ACP agent is a child of the shim, outlives the daemon and keeps its request open, so
+    /// the ACP session rebuilds its requests from the journal as Claude's does. A session that holds none has the
+    /// default.
     fn pending_permissions(&self) -> Vec<PermissionRequest> {
         Vec::new()
     }
