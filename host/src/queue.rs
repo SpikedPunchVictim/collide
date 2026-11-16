@@ -8,13 +8,18 @@
 //! next restart.
 
 use crate::store::Store;
-use collide_core::owner::{QueueItem, QueueKind};
+use collide_core::owner::{QueueChanged, QueueItem, QueueKind};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+/// Told of each change to the set of items ([`Queue::on_change`]). It runs while the Queue's lock is held, so that two
+/// changes are told in the order they were made: it must be quick, and must not call the Queue.
+pub type QueueSink = Arc<dyn Fn(QueueChanged) + Send + Sync>;
 
 pub struct Queue {
     store: Arc<Store>,
     items: Mutex<Vec<QueueItem>>,
     log: Arc<dyn Fn(&str) + Send + Sync>,
+    sink: Mutex<Option<QueueSink>>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -40,7 +45,26 @@ impl Queue {
             store,
             items: Mutex::new(items),
             log,
+            sink: Mutex::new(None),
         }
+    }
+
+    /// Tells `sink` of each item that comes and each that goes, from now on. It replaces the sink there was.
+    pub fn on_change(&self, sink: QueueSink) {
+        *locked(&self.sink) = Some(sink);
+    }
+
+    /// Tells the sink that `added` or `removed` changed the set, with the size it has now. The caller holds the items'
+    /// lock, so the sizes are in the order of the changes.
+    fn tell(&self, items: &[QueueItem], added: Option<&str>, removed: Option<&str>) {
+        let Some(sink) = locked(&self.sink).clone() else {
+            return;
+        };
+        sink(QueueChanged {
+            count: u32::try_from(items.len()).unwrap_or(u32::MAX),
+            added: added.map(str::to_string).into_iter().collect(),
+            removed: removed.map(str::to_string).into_iter().collect(),
+        });
     }
 
     /// Adds an item, or replaces the one with the same id.
@@ -59,7 +83,11 @@ impl Queue {
         let mut items = locked(&self.items);
         match items.iter_mut().find(|held| held.id == item.id) {
             Some(held) => *held = item,
-            None => items.push(item),
+            None => {
+                let id = item.id.clone();
+                items.push(item);
+                self.tell(&items, Some(&id), None);
+            }
         }
     }
 
@@ -69,7 +97,9 @@ impl Queue {
         let item = {
             let mut items = locked(&self.items);
             let at = items.iter().position(|item| item.id == id)?;
-            items.remove(at)
+            let item = items.remove(at);
+            self.tell(&items, None, Some(id));
+            item
         };
         if let Err(error) = self.store.delete_queue_item(id) {
             (self.log)(&format!("queue item {id} was not deleted: {error}"));
@@ -233,6 +263,71 @@ mod tests {
         queue.clear_run("run-1", None);
         assert!(queue.get("a").is_none());
         assert!(queue.get("c").is_some());
+    }
+
+    fn changes(queue: &Queue) -> Arc<Mutex<Vec<QueueChanged>>> {
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let sink = told.clone();
+        queue.on_change(Arc::new(move |changed| sink.lock().unwrap().push(changed)));
+        told
+    }
+
+    fn change(count: u32, added: &[&str], removed: &[&str]) -> QueueChanged {
+        let names = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect();
+        QueueChanged {
+            count,
+            added: names(added),
+            removed: names(removed),
+        }
+    }
+
+    #[test]
+    fn a_new_item_is_told_as_added_with_the_size_after_it() {
+        let dir = TempDir::new();
+        let queue = open(&dir);
+        let told = changes(&queue);
+        queue.push(item("a", "run-1", QueueKind::UsageLimit, 1));
+        queue.push(item("b", "run-1", QueueKind::DiskFull, 2));
+        assert_eq!(
+            *told.lock().unwrap(),
+            [change(1, &["a"], &[]), change(2, &["b"], &[])]
+        );
+    }
+
+    #[test]
+    fn a_taken_item_is_told_as_removed_and_taking_it_again_tells_nothing() {
+        let dir = TempDir::new();
+        let queue = open(&dir);
+        queue.push(item("a", "run-1", QueueKind::UsageLimit, 1));
+        let told = changes(&queue);
+        queue.take("a");
+        queue.take("a");
+        assert_eq!(*told.lock().unwrap(), [change(0, &[], &["a"])]);
+    }
+
+    #[test]
+    fn a_replaced_item_changes_no_set_and_tells_nothing() {
+        let dir = TempDir::new();
+        let queue = open(&dir);
+        queue.push(item("a", "run-1", QueueKind::UsageLimit, 1));
+        let told = changes(&queue);
+        queue.push(item("a", "run-1", QueueKind::UsageLimit, 1));
+        assert!(told.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn clearing_a_run_tells_each_item_that_went() {
+        let dir = TempDir::new();
+        let queue = open(&dir);
+        queue.push(item("a", "run-1", QueueKind::UsageLimit, 1));
+        queue.push(item("b", "run-1", QueueKind::DiskFull, 2));
+        queue.push(item("c", "run-2", QueueKind::DiskFull, 3));
+        let told = changes(&queue);
+        queue.clear_run("run-1", None);
+        assert_eq!(
+            *told.lock().unwrap(),
+            [change(2, &[], &["a"]), change(1, &[], &["b"])]
+        );
     }
 
     #[test]

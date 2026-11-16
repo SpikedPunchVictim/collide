@@ -279,6 +279,10 @@ pub struct PhasePause {
     pub pause: Pause,
 }
 
+/// Told of each event as it is stored ([`PhasesConfig::on_event`]). It runs under the lock that numbers the events,
+/// so it is told in `seq` order: it must be quick, and must not append an event.
+pub type EventSink = Arc<dyn Fn(&Event) + Send + Sync>;
+
 /// Called when a phase pauses, with no lock held, on the thread that noticed.
 pub type PhasePauseHook = Box<dyn Fn(&Phases, &PhasePause) + Send + Sync>;
 
@@ -423,6 +427,8 @@ pub struct PhasesConfig {
     pub rebuild_feed: Option<FeedRebuilder>,
     /// The always-recorded metrics: the phase's spans, its agent's events and how it ended.
     pub metrics: Arc<Metrics>,
+    /// Told of each event once the store has it (the event stream's hub in a running daemon).
+    pub on_event: Option<EventSink>,
 }
 
 /// A lock that a panicking thread poisoned is still a lock.
@@ -562,6 +568,7 @@ struct PhasesShared {
     queue: Arc<Queue>,
     on_phase_pause: Option<PhasePauseHook>,
     metrics: Arc<Metrics>,
+    on_event: Option<EventSink>,
     table: Mutex<HashMap<PhaseKey, Arc<Entry>>>,
     /// Held to take the next event number and write the event, so two threads never take the same one.
     events: Mutex<()>,
@@ -615,6 +622,7 @@ impl Phases {
             on_phase_pause,
             rebuild_feed,
             metrics,
+            on_event,
         } = config;
         let mut last: HashMap<PhaseKey, PhaseState> = HashMap::new();
         for event in store.events_since(0)? {
@@ -666,6 +674,7 @@ impl Phases {
                 queue,
                 on_phase_pause,
                 metrics,
+                on_event,
                 table: Mutex::new(table),
                 events: Mutex::new(()),
                 watchers: Mutex::new(Vec::new()),
@@ -711,6 +720,17 @@ impl Phases {
     /// Whether the daemon has a phase of the run.
     pub fn has_run(&self, run: &str) -> bool {
         locked(&self.shared.table).keys().any(|key| key.run == run)
+    }
+
+    /// The run's phases and the state each is in, by phase name.
+    pub fn run_phases(&self, run: &str) -> Vec<(String, PhaseState)> {
+        let mut phases: Vec<(String, PhaseState)> = locked(&self.shared.table)
+            .values()
+            .filter(|e| e.key.run == run)
+            .map(|e| (e.key.phase.clone(), locked(&e.inner).state.clone()))
+            .collect();
+        phases.sort_by(|a, b| a.0.cmp(&b.0));
+        phases
     }
 
     /// The phase's state, or `None` for a phase the daemon does not know.
@@ -1160,7 +1180,11 @@ impl Phases {
             experiment: None,
             body,
         };
-        self.shared.store.append_event(&event)
+        self.shared.store.append_event(&event)?;
+        if let Some(sink) = &self.shared.on_event {
+            sink(&event);
+        }
+        Ok(())
     }
 
     /// Moves a phase to `to` if the state machine allows it: the event first, then the state. A move to the state the
@@ -2036,11 +2060,7 @@ impl Phases {
 
     /// The `to` of the run's last `run.transition` event.
     fn recorded_run_state(&self, run: &str) -> Option<RunState> {
-        let events = self.shared.store.events_since(0).ok()?;
-        events.into_iter().rev().find_map(|event| match event.body {
-            EventBody::RunTransition { run: named, to, .. } if named == run => Some(to),
-            _ => None,
-        })
+        self.shared.store.run_state(run).ok().flatten()
     }
 
     // ---- health ----------------------------------------------------------------------------------------------

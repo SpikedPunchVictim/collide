@@ -7,6 +7,7 @@
 
 pub mod detached;
 pub mod procs;
+pub mod subscriber;
 
 use collide_host::auth::{ProcessTree, SystemProcessTree};
 use std::ffi::OsStr;

@@ -26,8 +26,9 @@
 //! | `store: event log` | [`Store::append_event`], [`Store::events_since`] | the event log's append and read |
 //! | `store: quarantine` | [`quarantine`] | moves an unreadable store or record aside, with a report |
 
+use crate::run_store::note_transition;
 use collide_core::agent::Usage;
-use collide_core::events::Event;
+use collide_core::events::{Event, EventBody};
 use rusqlite::{Connection, ErrorCode, OpenFlags, TransactionBehavior, params};
 use std::ffi::OsString;
 use std::fmt;
@@ -66,7 +67,7 @@ pub struct Migration {
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
 /// written with, and `line` is its JSON.
-pub const MIGRATIONS: [Migration; 5] = [
+pub const MIGRATIONS: [Migration; 6] = [
     Migration {
         version: 1,
         name: "events",
@@ -111,7 +112,61 @@ pub const MIGRATIONS: [Migration; 5] = [
         name: "boards_and_scratch_tasks",
         sql: BOARDS_SQL,
     },
+    Migration {
+        version: 6,
+        name: "runs",
+        sql: RUNS_SQL,
+    },
 ];
+
+/// The index of runs (ts-0076-cw; 0.8, Run), see [`crate::run_store`]. `state` is the run's latest `RunState` as JSON,
+/// and `live` is 1 for a state that is not final. `opened_seq` is the number of the run's first event, so it orders the
+/// runs and is the cursor of a page. `board` is null for a run that has none. The insert at the end gives a run the log
+/// already has a row, from its `run.transition` events: its first and its last.
+const RUNS_SQL: &str = "
+    CREATE TABLE runs (
+        run        TEXT PRIMARY KEY,
+        board      TEXT,
+        line       TEXT NOT NULL DEFAULT '',
+        workflow   TEXT NOT NULL DEFAULT '',
+        state      TEXT NOT NULL,
+        live       INTEGER NOT NULL,
+        opened_seq INTEGER NOT NULL,
+        started_ms INTEGER NOT NULL,
+        ended_ms   INTEGER
+    );
+    CREATE INDEX runs_by_opened ON runs (opened_seq);
+    CREATE INDEX runs_by_board ON runs (board, opened_seq);
+    CREATE TABLE run_tasks (
+        run    TEXT NOT NULL,
+        ord    INTEGER NOT NULL,
+        task   TEXT NOT NULL,
+        status TEXT NOT NULL,
+        PRIMARY KEY (run, ord)
+    );
+    CREATE INDEX run_tasks_by_task ON run_tasks (task, run);
+    WITH transitions AS (
+        SELECT seq, wall_ms,
+               json_extract(line, '$.body.run') AS run,
+               json_extract(line, '$.body.to') AS to_state
+        FROM events
+        WHERE json_extract(line, '$.body.event') = 'run.transition'
+    ),
+    bounds AS (
+        SELECT run, MIN(seq) AS first_seq, MAX(seq) AS last_seq FROM transitions GROUP BY run
+    )
+    INSERT INTO runs (run, state, live, opened_seq, started_ms, ended_ms)
+    SELECT bounds.run,
+           latest.to_state,
+           json_extract(latest.to_state, '$.state') NOT IN ('ended', 'failed', 'stopped'),
+           bounds.first_seq,
+           first.wall_ms,
+           CASE WHEN json_extract(latest.to_state, '$.state') IN ('ended', 'failed', 'stopped')
+                THEN latest.wall_ms END
+    FROM bounds
+    JOIN transitions AS first ON first.seq = bounds.first_seq
+    JOIN transitions AS latest ON latest.seq = bounds.last_seq;
+";
 
 /// The boards the user opened and their scratch tasks (ts-0075-hj; 0.1, 0.10). `boards.root` is the checkout's top
 /// level, so opening it again finds the same row. A scratch task is numbered inside its board: `num` is the short id
@@ -354,8 +409,33 @@ impl Store {
 
     /// Appends one event to the event log. `event.seq` is the next number, and a gap or a repeat is refused with
     /// [`StoreError::OutOfOrder`]. The check and the insert are one statement, so two writers cannot both take a number.
+    ///
+    /// A `run.transition` event also moves the run's row in the index of runs ([`crate::run_store`]), in the same
+    /// transaction, so the log and the index never disagree.
     pub fn append_event(&self, event: &Event) -> Result<(), StoreError> {
-        insert_event(&self.connect()?, event)
+        let context = "writing an event";
+        let mut conn = self.connect()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| sql_error(context, e))?;
+        insert_event(&tx, event)?;
+        if let EventBody::RunTransition { run, to, .. } = &event.body {
+            note_transition(&tx, event.seq, event.wall_ms, run, to)?;
+        }
+        tx.commit().map_err(|e| sql_error(context, e))
+    }
+
+    /// The number of the oldest event the log holds. An empty log has none, and its answer is the number the first
+    /// event will have, so a client that asks for `since` below it finds nothing missing.
+    pub fn oldest_seq(&self) -> Result<u64, StoreError> {
+        let conn = self.connect()?;
+        let oldest: Option<i64> = conn
+            .query_row("SELECT MIN(seq) FROM events", [], |row| row.get(0))
+            .map_err(|e| sql_error("reading the first event number", e))?;
+        match oldest {
+            Some(seq) => Ok(seq as u64),
+            None => Ok(last_seq(&conn)? + 1),
+        }
     }
 
     /// The events with `seq` above `after`, in order, for a client that reconnects. `0` is the whole log. A line this
@@ -844,6 +924,8 @@ mod tests {
     use collide_core::change::{Actor, ActorKind};
     use collide_core::events::{BudgetScope, EventBody, StepKind};
     use collide_core::hook::HookExperiment;
+    use collide_core::non_empty::NonEmpty;
+    use collide_core::state::{PauseCause, RunState};
     use rusqlite::{Connection, OpenFlags};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::mpsc;
@@ -935,6 +1017,20 @@ mod tests {
 
     fn known_version() -> u32 {
         MIGRATIONS.last().map_or(0, |m| m.version)
+    }
+
+    fn transition(seq: u64, run: &str, to: RunState) -> Event {
+        Event {
+            seq,
+            wall_ms: 1000 + seq,
+            actor: actor(ActorKind::Workflow),
+            experiment: None,
+            body: EventBody::RunTransition {
+                run: run.to_string(),
+                from: None,
+                to,
+            },
+        }
     }
 
     // ---- shape ----------------------------------------------------------------------------------------------
@@ -1721,5 +1817,93 @@ mod tests {
             });
         });
         assert_eq!(store.last_seq().unwrap(), total);
+    }
+    // ---- the index of runs ------------------------------------------------------------------------------------
+
+    #[test]
+    fn migrating_a_store_that_has_events_gives_each_run_its_row_from_its_first_and_last_transition()
+    {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 5);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        let ended = RunState::Ended {
+            outcome: NonEmpty::new("done").unwrap(),
+        };
+        let paused = RunState::Paused {
+            cause: PauseCause::Disk,
+        };
+        let events = [
+            transition(1, "a", RunState::Running {}),
+            transition(2, "b", RunState::Running {}),
+            event(3, 3),
+            transition(4, "a", ended.clone()),
+            transition(5, "b", paused.clone()),
+        ];
+        for event in &events {
+            insert_event(&conn, event).unwrap();
+        }
+        drop(conn);
+
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.run_state("a").unwrap(), Some(ended));
+        assert_eq!(store.run_state("b").unwrap(), Some(paused));
+        let a = store.run("a").unwrap().unwrap();
+        assert_eq!(
+            (a.opened_seq, a.started_ms, a.ended_ms),
+            (1, 1001, Some(1004))
+        );
+        let b = store.run("b").unwrap().unwrap();
+        assert_eq!((b.opened_seq, b.started_ms, b.ended_ms), (2, 1002, None));
+        assert_eq!(
+            (b.board, b.line, b.workflow),
+            (None, String::new(), String::new())
+        );
+    }
+
+    #[test]
+    fn migrating_a_store_with_no_runs_leaves_the_index_empty() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 5);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.run_state("a").unwrap(), None);
+        assert_eq!(user_version(&raw(&store)), known_version());
+    }
+
+    #[test]
+    fn a_run_transition_moves_the_row_with_the_event_and_an_event_that_is_refused_moves_nothing() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .append_event(&transition(1, "a", RunState::Running {}))
+            .unwrap();
+        let refused = store.append_event(&transition(5, "a", RunState::Failed {}));
+        assert!(matches!(refused, Err(StoreError::OutOfOrder { .. })));
+        assert_eq!(store.run_state("a").unwrap(), Some(RunState::Running {}));
+        store
+            .append_event(&transition(2, "a", RunState::Failed {}))
+            .unwrap();
+        assert_eq!(store.run_state("a").unwrap(), Some(RunState::Failed {}));
+    }
+
+    #[test]
+    fn an_event_that_is_not_a_run_transition_makes_no_row() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        store.append_event(&event(1, 1)).unwrap();
+        assert_eq!(store.run_state("r-1").unwrap(), None);
+    }
+
+    #[test]
+    fn the_oldest_seq_is_the_first_events_and_for_an_empty_log_the_one_after_the_head() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(store.oldest_seq().unwrap(), 1);
+        store.append_event(&event(1, 1)).unwrap();
+        store.append_event(&event(2, 2)).unwrap();
+        assert_eq!(store.oldest_seq().unwrap(), 1);
+        raw(&store)
+            .execute("DELETE FROM events WHERE seq = 1", [])
+            .unwrap();
+        assert_eq!(store.oldest_seq().unwrap(), 2);
     }
 }

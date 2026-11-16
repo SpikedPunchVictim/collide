@@ -17,6 +17,7 @@ mod agent_setup;
 mod canary;
 mod capabilities;
 mod contract;
+mod event_stream;
 mod fake;
 mod fake_claude;
 mod file_run;

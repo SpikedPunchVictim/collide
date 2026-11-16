@@ -362,7 +362,7 @@ fn a_method_that_another_item_serves_answers_method_not_found() {
     let (daemon, _) = start(&root);
     let mut client = connected(&daemon);
     assert_eq!(
-        error_of(&client.call(2, "run.list", json!({}))).0,
+        error_of(&client.call(2, "workspace.list", json!({"board": "board-1"}))).0,
         code::METHOD_NOT_FOUND
     );
     assert_eq!(

@@ -195,6 +195,16 @@ impl Store {
         )
     }
 
+    /// The run's phase spans, in the order they were opened: when each phase began and ended, for a list of runs.
+    pub fn phase_spans(&self, run: &str) -> Result<Vec<Span>, StoreError> {
+        self.read_spans(
+            &format!(
+                "SELECT {SPAN_COLUMNS} FROM spans WHERE run = ?1 AND kind = 'phase' ORDER BY id"
+            ),
+            params![run],
+        )
+    }
+
     /// The spans of the run that have no end yet.
     pub fn open_spans(&self, run: &str) -> Result<Vec<Span>, StoreError> {
         self.read_spans(

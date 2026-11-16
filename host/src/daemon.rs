@@ -53,8 +53,18 @@
 //! the published one, [`crate::claude_versions`]), `run.stop`, `run.start_file` (a task file run with
 //! the built-in builder role, [`crate::file_run`]), `queue.list` and `queue.answer` (the stored Queue,
 //! [`crate::queue`]), `board.open` and `board.list` (a git checkout as a board, [`crate::boards`]), and `task.get` and
-//! `task.apply` for scratch tasks ([`crate::scratch`]) are served here; the other methods are other items' and answer
+//! `task.apply` for scratch tasks ([`crate::scratch`]), `run.list` and `run.get` (from the store's index of runs,
+//! [`crate::run_store`]) and `daemon.subscribe` are served here; the other methods are other items' and answer
 //! `method not found`.
+//!
+//! ## The event stream
+//!
+//! `daemon.subscribe` ([`crate::event_hub`]) makes the connection a subscriber: the answer is written first, then a
+//! thread of the connection writes the events after `since` and the live ones, and each `queue.changed`. Each
+//! subscriber has a bounded queue ([`DaemonOptions::subscriber_queue`]), so a publisher never waits for a client. A
+//! client that does not read until its queue is full is logged and its connection is closed for writing: it reads
+//! what was sent, sees the end of the stream, and subscribes again from the last `seq` it has. All writes to a
+//! connection go through one lock ([`Conn`]), so a notice is never inside an answer's line.
 //!
 //! ## Who is asking
 //!
@@ -87,6 +97,7 @@
 //! |---|---|---|
 //! | `daemon: entry` | [`run`], [`Daemon::start`] | the start sequence above, then the serve loop |
 //! | `daemon: socket server` | [`bind_socket`], [`Daemon`] | the bind, the handshake and the JSON-RPC loop, over [`crate::auth`]'s checks |
+//! | `daemon: event stream` | [`Hub`], `subscribe` | `daemon.subscribe`, the replay, the live events, `queue.changed` |
 //! | `daemon: adopt shims` | [`adopt_shims`], [`Phases::adopt`] | scan `runs_dir`, classify each shim by `exit.json` and by pid plus start time, reattach, settle |
 
 use crate::auth::{
@@ -97,6 +108,7 @@ use crate::boards;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
+use crate::event_hub::{Hub, Subscription};
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
@@ -106,6 +118,8 @@ use crate::phases::{
     PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
 };
 use crate::queue::Queue;
+use crate::run_store::{RunFilter, RunRow};
+use crate::run_summary::summarize;
 use crate::sampler::{Sampler, TICK};
 use crate::scratch::{self, ScratchSource};
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
@@ -114,15 +128,18 @@ use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
     BoardListResult, BoardOpenParams, BoardOpenResult, DaemonRecaptureEnvironmentResult,
-    DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method, OWNER_PROTOCOL,
-    OwnerInitializeResult, QueueAnswerParams, QueueListParams, QueueListResult, Request, Response,
-    Routed, RpcError, RunRecordParams, RunRecordResult, RunStartFileParams, RunStartResult,
-    RunStopParams, RunStopResult, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
-    TaskGetParams, TaskGetResult, code, encode_line, parse_request, route,
+    DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture,
+    MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams,
+    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunGetParams,
+    RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
+    RunStartFileParams, RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth,
+    Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code, encode_line,
+    parse_request, route,
 };
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -130,7 +147,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -492,7 +509,13 @@ pub struct DaemonOptions {
     pub claude_published: PublishedChoice,
     /// How often the published version is fetched again ([`REFRESH_EVERY`]). A test passes a short one.
     pub claude_refresh_every: Duration,
+    /// How many notices a subscriber may have waiting before the daemon ends its subscription ([`SUBSCRIBER_QUEUE`]).
+    /// A test passes a small one.
+    pub subscriber_queue: usize,
 }
+
+/// How many notices a subscribed connection may have waiting ([`DaemonOptions::subscriber_queue`]).
+pub const SUBSCRIBER_QUEUE: usize = 1024;
 
 /// How often a limit's timer looks at the wall clock ([`DaemonOptions::limit_poll`]).
 pub const LIMIT_POLL: Duration = Duration::from_secs(1);
@@ -532,6 +555,7 @@ impl DaemonOptions {
             sampler_tick: TICK,
             claude_published: PublishedChoice::Off,
             claude_refresh_every: REFRESH_EVERY,
+            subscriber_queue: SUBSCRIBER_QUEUE,
         }
     }
 }
@@ -563,6 +587,10 @@ struct Shared {
     previous_end: login::End,
     stop: AtomicBool,
     connections: AtomicUsize,
+    /// The numbers connections are told apart by in the hub.
+    next_connection: AtomicU64,
+    /// Who has subscribed to the event stream, and the notices that reach them.
+    hub: Arc<Hub>,
     /// The version of `claude` and the published one; the thread that refreshes the second.
     claude: Arc<ClaudeVersions>,
     claude_refresher: Mutex<Option<std::thread::JoinHandle<()>>>,
@@ -643,6 +671,7 @@ impl Daemon {
             sampler_tick,
             claude_published,
             claude_refresh_every,
+            subscriber_queue,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -704,6 +733,15 @@ impl Daemon {
             let log = log.clone();
             Arc::new(move |text: &str| log.line(text))
         }));
+        // The event stream's hub: the Queue tells it of each change, and the events' door tells it of each event.
+        let hub = Arc::new(Hub::new(subscriber_queue, {
+            let log = log.clone();
+            Arc::new(move |text: &str| log.line(text))
+        }));
+        queue.on_change({
+            let hub = hub.clone();
+            Arc::new(move |changed| hub.publish_queue(changed))
+        });
 
         // The metrics every run is recorded in, whatever the observers are set to (ts-0067-kw).
         let metrics = Arc::new(Metrics::new(store.clone(), clocks.clone(), {
@@ -786,6 +824,10 @@ impl Daemon {
                 Some(Box::new(move |key, dir| runs.rebuild_feed(key, dir)))
             },
             metrics: metrics.clone(),
+            on_event: {
+                let hub = hub.clone();
+                Some(Arc::new(move |event: &Event| hub.publish_event(event)))
+            },
         })
         .map_err(SocketError::Store)?;
         match adopt_shims(&paths.runs_dir) {
@@ -830,6 +872,8 @@ impl Daemon {
             previous_end,
             stop: AtomicBool::new(false),
             connections: AtomicUsize::new(0),
+            next_connection: AtomicU64::new(1),
+            hub,
             claude,
             claude_refresher: Mutex::new(None),
         });
@@ -1331,7 +1375,12 @@ fn serve_connection(shared: &Shared, mut stream: UnixStream) {
         pid.map_or("?".to_string(), |p| p.to_string()),
         session.actor().kind
     ));
-    converse(shared, &mut lines, &mut stream, &session);
+    let conn = Arc::new(Conn {
+        id: shared.next_connection.fetch_add(1, Ordering::SeqCst),
+        writer: Mutex::new(stream),
+    });
+    converse(shared, &mut lines, &conn, &session);
+    shared.hub.remove(conn.id);
 }
 
 /// The first request: it must be `initialize`, with the token and then the version right. Anything else is answered
@@ -1407,44 +1456,200 @@ fn handshake(
     }
 }
 
+/// A connection after its handshake. Everything written to the socket goes through `writer`, so an answer and the
+/// notices of a subscription never mix inside a line.
+struct Conn {
+    id: u64,
+    writer: Mutex<UnixStream>,
+}
+
+impl Conn {
+    fn stream(&self) -> MutexGuard<'_, UnixStream> {
+        self.writer.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn send(&self, response: &Response) -> io::Result<()> {
+        send(&mut self.stream(), response)
+    }
+
+    /// Writes a notice of a subscription, unless the subscription was cancelled. The flag is read with the lock held:
+    /// a subscription that is replaced writes nothing after the answer of the one that replaced it. A failed write
+    /// has left half a line, so the connection is closed.
+    fn send_notice(&self, cancelled: &AtomicBool, notice: &Notice) -> bool {
+        let mut stream = self.stream();
+        if cancelled.load(Ordering::SeqCst) {
+            return false;
+        }
+        let line = encode_line(&notice.to_notification());
+        if stream.write_all(line.as_bytes()).is_err() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            return false;
+        }
+        true
+    }
+
+    /// Ends what the daemon writes to the connection, after the notices already written: the client reads those,
+    /// then the end of the stream. What the client writes is still read, until it closes.
+    fn close(&self, cancelled: &AtomicBool) {
+        let stream = self.stream();
+        if !cancelled.load(Ordering::SeqCst) {
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+        }
+    }
+}
+
+/// What a subscription sends after its answer: the events the client asked for, then the live ones. A live event whose
+/// `seq` is at or below `floor` was in the replay or came before the answer, and is not sent again.
+struct Pump {
+    subscription: Subscription,
+    replay: Vec<Event>,
+    floor: u64,
+}
+
 /// The requests after `initialize`, until the client closes or the daemon stops.
-fn converse(shared: &Shared, lines: &mut LineReader, stream: &mut UnixStream, session: &Session) {
+fn converse(shared: &Shared, lines: &mut LineReader, conn: &Arc<Conn>, session: &Session) {
     loop {
         let line = match lines.next(|| shared.stopping(), None) {
             Ok(Line::Text(line)) => line,
             Ok(Line::NotText) => {
-                if send(stream, &not_text()).is_err() {
+                if conn.send(&not_text()).is_err() {
                     return;
                 }
                 continue;
             }
             Ok(Line::TooLong) => {
-                let _ = send(stream, &too_long());
-                drain_then_close(stream);
+                let _ = conn.send(&too_long());
+                drain_then_close(&mut conn.stream());
                 return;
             }
             Ok(Line::Closed | Line::Stopping | Line::TimedOut) | Err(_) => return,
         };
-        let response = match parse_request(&line) {
-            Err(response) => response,
-            Ok(request) => answer(shared, session, request),
+        let (response, pump) = match parse_request(&line) {
+            Err(response) => (response, None),
+            Ok(request) => answer(shared, conn, session, request),
         };
-        if send(stream, &response).is_err() {
+        if conn.send(&response).is_err() {
             return;
+        }
+        // The answer is written: the replay and the live events come after it.
+        if let Some(pump) = pump {
+            start_pump(shared, conn, pump);
         }
     }
 }
 
-fn answer(shared: &Shared, session: &Session, request: Request) -> Response {
+fn answer(
+    shared: &Shared,
+    conn: &Conn,
+    session: &Session,
+    request: Request,
+) -> (Response, Option<Pump>) {
     let id = request.id.clone();
+    let mut pump = None;
     let result = match route(true, &request) {
         Err(error) => Err(error),
         Ok(Routed::Initialize(_)) => unreachable!("route(true, ..) refuses a second initialize"),
+        Ok(Routed::Call(Method::DaemonSubscribe)) => subscribe(shared, conn.id, &request.params)
+            .map(|(value, started)| {
+                pump = Some(started);
+                value
+            }),
         Ok(Routed::Call(method)) => call(shared, session, method, &request.params),
     };
-    match result {
+    let response = match result {
         Ok(value) => Response::success(id, value),
         Err(error) => Response::failure(Some(id), error),
+    };
+    (response, pump)
+}
+
+/// `daemon.subscribe` (ts-0076-cw): registers for the live events first, then reads the head and the events after
+/// `since`, so an event is in the replay, in the queue, or in both, and never in neither. The queue's copy of an event
+/// the replay has is dropped by its `seq` ([`Pump::floor`]).
+fn subscribe(
+    shared: &Shared,
+    connection: u64,
+    params: &serde_json::Value,
+) -> Result<(serde_json::Value, Pump), RpcError> {
+    let params: DaemonSubscribeParams = read_params("daemon.subscribe", params)?;
+    let subscription = shared.hub.register(connection);
+    let read = || -> Result<(u64, u64, Vec<Event>), StoreError> {
+        let head = shared.store.last_seq()?;
+        let oldest = shared.store.oldest_seq()?;
+        let replay = match params.since {
+            Some(since) => shared
+                .store
+                .events_since(since)?
+                .into_iter()
+                .filter(|event| event.seq <= head)
+                .collect(),
+            None => Vec::new(),
+        };
+        Ok((head, oldest, replay))
+    };
+    let (head, oldest, replay) = read().map_err(|error| {
+        shared.hub.remove(connection);
+        store_failed(error)
+    })?;
+    let result = DaemonSubscribeResult {
+        head_seq: head,
+        oldest_seq: oldest,
+        replayed: replay.len() as u64,
+    };
+    let value = serde_json::to_value(result).expect("a result is JSON");
+    Ok((
+        value,
+        Pump {
+            subscription,
+            replay,
+            floor: head,
+        },
+    ))
+}
+
+/// Starts the thread that writes a subscription's notices to its connection.
+fn start_pump(shared: &Shared, conn: &Arc<Conn>, pump: Pump) {
+    let log = shared.log.clone();
+    let writing = conn.clone();
+    let started = spawn_named("collide-subscription", move || {
+        run_pump(&log, &writing, pump);
+    });
+    if let Err(e) = started {
+        shared
+            .log
+            .line(&format!("could not start a subscription's thread: {e}"));
+        shared.hub.remove(conn.id);
+    }
+}
+
+/// Writes the replay, then each notice of the queue, until the subscription is cancelled, the client is gone, or the
+/// queue was full: then the socket is closed, and the client subscribes again from the last `seq` it has.
+fn run_pump(log: &DaemonLog, conn: &Conn, pump: Pump) {
+    let Pump {
+        subscription,
+        replay,
+        floor,
+    } = pump;
+    let cancelled = &subscription.cancelled;
+    for event in replay {
+        if !conn.send_notice(cancelled, &Notice::DaemonEvent(Box::new(event))) {
+            return;
+        }
+    }
+    while let Ok(notice) = subscription.notices.recv() {
+        if matches!(&notice, Notice::DaemonEvent(event) if event.seq <= floor) {
+            continue;
+        }
+        if !conn.send_notice(cancelled, &notice) {
+            return;
+        }
+    }
+    if subscription.overflowed.load(Ordering::SeqCst) {
+        log.line(&format!(
+            "connection {} was closed: it did not read its events fast enough",
+            conn.id
+        ));
+        conn.close(cancelled);
     }
 }
 
@@ -1512,6 +1717,8 @@ fn call(
         Method::RunStop => run_stop(shared, session, params),
         Method::RunStartFile => run_start_file(shared, session, params),
         Method::RunRecord => run_record(shared, params),
+        Method::RunList => run_list(shared, params),
+        Method::RunGet => run_get(shared, params),
         Method::QueueList => queue_list(shared, params),
         Method::QueueAnswer => queue_answer(shared, session, params),
         Method::BoardOpen => board_open(shared, params),
@@ -1627,6 +1834,102 @@ fn run_record(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
             .map(|path| path.to_string_lossy().into_owned()),
         wall_ms: crate::run_record::run_wall_ms(&spans, now_ns),
         calls: crate::run_record::recorded_calls(&spans, &rows, now_ns),
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// How many runs `run.list` gives when the request names no limit, and the most it gives.
+const RUN_PAGE: u32 = 50;
+const RUN_PAGE_MAX: u32 = 200;
+
+/// The run as `run.list` and `run.get` give it: its row, its phases from the daemon, the times of their spans from the
+/// store, and its workspace folder when it has one.
+fn summary_of(
+    shared: &Shared,
+    row: &RunRow,
+) -> Result<(RunSummary, BTreeMap<String, u32>), RpcError> {
+    let spans = shared.store.phase_spans(&row.run).map_err(store_failed)?;
+    let workspace = shared
+        .file_runs
+        .workspace_path(&row.run)
+        .map(|path| path.to_string_lossy().into_owned());
+    Ok(summarize(
+        row,
+        &shared.phases.run_phases(&row.run),
+        &spans,
+        workspace,
+    ))
+}
+
+/// `run.list` (ts-0076-cw): the runs of the store, newest first, by board, task and scope, a page at a time. A run
+/// that has no board (one `run.start_file` made) is in a list that names no board. A page's cursor is the number of its
+/// last run's first event, and the next page is the runs opened before it. A board that was not opened is `NOT_FOUND`,
+/// and a cursor that is not a number is `INVALID_PARAMS`.
+fn run_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: RunListParams = read_params("run.list", params)?;
+    if let Some(board) = &params.board {
+        board_root(shared, board)?;
+    }
+    let before = params
+        .cursor
+        .as_deref()
+        .map(|cursor| {
+            cursor.parse::<u64>().map_err(|_| {
+                RpcError::new(
+                    code::INVALID_PARAMS,
+                    format!("{cursor:?} is not a cursor run.list gave"),
+                )
+            })
+        })
+        .transpose()?;
+    let limit = params.limit.unwrap_or(RUN_PAGE).clamp(1, RUN_PAGE_MAX);
+    // One more than the page, to know whether there is a next one.
+    let mut rows = shared
+        .store
+        .runs(&RunFilter {
+            board: params.board.as_deref(),
+            task: params.task.as_deref(),
+            scope: params.scope,
+            before,
+            limit: limit + 1,
+        })
+        .map_err(store_failed)?;
+    let more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    let next_cursor = more
+        .then(|| rows.last().map(|row| row.opened_seq.to_string()))
+        .flatten();
+    let runs = rows
+        .iter()
+        .map(|row| summary_of(shared, row).map(|(summary, _)| summary))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(serde_json::to_value(RunListResult { runs, next_cursor }).expect("a result is JSON"))
+}
+
+/// `run.get`: one run's summary and the phases' rounds. What `run.start` pins at launch (the snapshot, the
+/// implementations, the fingerprint) is not recorded yet, so those are empty. A run the store has no row of is
+/// `NOT_FOUND`.
+fn run_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: RunGetParams = read_params("run.get", params)?;
+    let row = shared
+        .store
+        .run(&params.run)
+        .map_err(store_failed)?
+        .ok_or_else(|| {
+            RpcError::new(
+                code::NOT_FOUND,
+                format!("the daemon has no run {:?}", params.run),
+            )
+        })?;
+    let (summary, rounds) = summary_of(shared, &row)?;
+    let result = RunGetResult {
+        summary,
+        snapshot_commit: String::new(),
+        launch: BTreeMap::new(),
+        implementations: BTreeMap::new(),
+        rounds,
+        fingerprint: BTreeMap::new(),
+        annotations: Vec::new(),
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
