@@ -1,7 +1,7 @@
 ---
 id: ts-0091-pz
 kind: task
-status: active
+status: done
 title: "ACP session: empty turns, lost children and usage quality"
 owners: []
 links:
