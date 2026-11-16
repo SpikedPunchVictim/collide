@@ -1,7 +1,7 @@
 ---
 id: ts-0084-sy
 kind: task
-status: ready
+status: done
 title: "Plan pack tests time out under load"
 owners: []
 links: []
