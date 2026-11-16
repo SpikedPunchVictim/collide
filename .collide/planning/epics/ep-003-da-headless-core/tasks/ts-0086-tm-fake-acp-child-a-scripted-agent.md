@@ -1,7 +1,7 @@
 ---
 id: ts-0086-tm
 kind: task
-status: ready
+status: active
 title: "Fake ACP child: a scripted agent and its harness"
 owners: []
 links: []
