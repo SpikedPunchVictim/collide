@@ -23,8 +23,9 @@ pub struct Captured {
     pub stderr: Vec<u8>,
 }
 
-/// Runs `command` with `stdin` written to it and closed, reading stdout and stderr, and ends it if it is not done within
-/// `timeout`. The process is the caller's own child, so killing it is safe.
+/// Runs `command` with `stdin` written to it and closed, reading stdout and stderr, and ends it if it is not done
+/// within `timeout`. The input is written while the output is read, so neither waits on the other. The process is the
+/// caller's own child, so killing it is safe.
 pub fn run_bounded(
     mut command: Command,
     stdin: Option<&[u8]>,
@@ -40,8 +41,12 @@ pub fn run_bounded(
         .stderr(Stdio::piped());
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     if let (Some(bytes), Some(mut pipe)) = (stdin, child.stdin.take()) {
-        // A child that ended before it read its turn leaves a broken pipe; its exit says what happened.
-        let _ = pipe.write_all(bytes);
+        // Written on a thread of its own, so input larger than a pipe holds cannot block the reads below or the
+        // timeout. A child that ended before it read its turn leaves a broken pipe; its exit says what happened.
+        let bytes = bytes.to_vec();
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&bytes);
+        });
     }
     let read = |mut pipe: Box<dyn Read + Send>| {
         let (send, received) = std::sync::mpsc::channel();

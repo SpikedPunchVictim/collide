@@ -356,16 +356,19 @@ fn one_prompt_turn_runs_end_to_end_and_each_write_of_the_handshake_is_made_once(
 }
 
 #[test]
-fn a_send_turn_after_the_first_turn_ended_is_a_second_turn() {
+fn a_send_turn_after_the_first_turn_ended_is_a_second_turn_and_an_unanswered_one_is_lost() {
     let mut rig = Rig::new("second");
     // No close after the turn, so the phase is there for a second one.
     let feed =
         AgentFeed::new(adapter().session(&request(rig.root.path())), &rig.dir()).start_on_launch();
     rig.start_with("prompt-turn-held", feed);
-    rig.wait_journal("the first turn ends", |rig| {
-        rig.messages(Direction::Out)
-            .iter()
-            .any(|message| message["result"]["stopReason"] == "end_turn")
+    // The daemon, and not only the journal, must have read the first turn's end before the second turn is sent: the
+    // turn's usage is stored in the same step.
+    wait_until("the daemon reads the first turn's end", PATIENCE, || {
+        rig.daemon()
+            .store()
+            .usage_rows(&rig.key.run, Some(&rig.key.phase))
+            .is_ok_and(|rows| !rows.is_empty())
     });
     assert_eq!(rig.written("session/prompt"), 1);
     rig.phases().send_turn(&rig.key, "and then this").unwrap();
@@ -379,9 +382,11 @@ fn a_send_turn_after_the_first_turn_ended_is_a_second_turn() {
     assert_eq!(prompts[1]["id"], 3);
     assert_eq!(prompts[1]["params"]["prompt"][0]["text"], "and then this");
     rig.phases().close_stdin(&rig.key).unwrap();
-    // The session judges the phase by the last turn it saw end, so a second turn with no response ends it as the
-    // first did (see Decisions in the item).
-    rig.wait_ended();
+    // The phase is judged by its latest turn. A child that exits with no response to it leaves nothing known about
+    // that turn's work (`AcpSession::finish`), so the phase is lost, as Claude's would fail with no result.
+    rig.wait_state("the phase is lost", |state| {
+        matches!(state, PhaseState::Lost {})
+    });
 }
 
 // ---- a permission answer ---------------------------------------------------------------------------------------

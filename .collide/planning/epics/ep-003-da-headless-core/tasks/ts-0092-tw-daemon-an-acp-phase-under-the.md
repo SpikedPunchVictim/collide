@@ -210,6 +210,10 @@ Tests, and which I saw red first:
 6. **A second turn with no response ends as the first did.** `AcpSession::finish` judges by the last turn it saw end,
    so a phase whose second prompt got no answer ends `Ended` when the child exits 0. `ts-0089-wv` and `ts-0090-jd`
    built that; I did not change it.
+   Corrected on 2026-11-16, in the review of `ts-0094-av`: a new prompt clears the last turn, so a second prompt with
+   no answer ends the phase `Lost`, as Claude's ends `NoResult`. The test passed only when the daemon read the first
+   turn's end after the second turn was sent; it failed about one run in three. It now waits for the daemon to store
+   that turn's usage and expects `Lost`.
 
 - Owner decisions (2026-11-16, at the build): decisions taken under the owner's delegation, as recommended. Decision
   1's `take_owed_writes` is a defaulted method on `AgentSession`; the split's "no trait change" was about starting a
