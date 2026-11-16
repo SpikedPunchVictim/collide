@@ -7,11 +7,16 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 21.** Revision 21 adds Up next, an ordered list of tasks and groups that start one after another,
-tells an agent about the group it works in, and loads a repository's own agent instructions from the run's worktree,
-with a warning when a run changes them (owner, 2026-11-15). Revision 20 gives Tracks two layouts, List and Timeline,
-makes the free-space floor a setting, adds repo-only settings keys, and puts every file Collide writes on macOS in
-one folder (owner, 2026-11-15). Revision 19 keeps the tab names Field, Tracks, Queue and Planning, each with a plain
+**Status: revision 22.** Revision 22 lets a pack say where its agents start (the repository root by default for
+agents that make their own worktrees), notices those worktrees and tracks them under their run until their work
+lands, lets each workflow say whether Collide or the repository lands its work, and puts every repository and branch
+in one line selector, with a Lines control on Tracks and the Queue and one Up next list per repository. When Collide
+starts again after a long close, it checks everything it keeps against the world before anything acts on it (owner,
+2026-11-15). Revision 21 adds Up next, an ordered list of tasks and groups that start one after another, tells an
+agent about the group it works in, and loads a repository's own agent instructions from the run's worktree, with a
+warning when a run changes them (owner, 2026-11-15). Revision 20 gives Tracks two layouts, List and Timeline, makes
+the free-space floor a setting, adds repo-only settings keys, and puts every file Collide writes on macOS in one
+folder (owner, 2026-11-15). Revision 19 keeps the tab names Field, Tracks, Queue and Planning, each with a plain
 subtitle (owner, 2026-11-15). Revision 18 adds planning quality checks from the Field mockup: a Decision log, an
 Assumption ledger, a coverage map, a kill criterion for spikes, a red-team pass and a session budget meter (owner,
 2026-11-15). Revision 17 picks shadcn/ui and sets the interface's audience: product managers as well as engineers
@@ -478,6 +483,56 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   person to say. A merge that finds its change already at the target is a success, not a conflict. Hooks run under the
   shim like any child, so a hook's side effect is covered by the same rule (Stage 8 tests it with a SIGKILL after
   the intent).
+- **Coming back after a long close** (owner, 2026-11-15; revision 22). Collide may be closed for weeks while tasks,
+  branches and worktrees change. Before anything acts on what Collide keeps, each board checks it against the world
+  (a catch-up), and the person is told what changed.
+  - **When.** At daemon start, and on wake from sleep (the gap between the continuous and uptime clocks, 0.13), since
+    a daemon that stayed alive through a closed lid watched nothing. The daemon records both clocks and the wall clock
+    at each event it handles and at a clean stop, not on a timer. The wall-clock gap only words the summary; a
+    negative or implausible one, or a record that failed to write (a full disk), reads as unknown, and unknown
+    means check.
+  - **Hold.** While a board catches up, it shows "checking" and holds every new start (Up next included), its queued
+    writes (0.10), the next phase of a run that survived, and the reaper. Reattaching to surviving children and the
+    intent checks (above) still run.
+  - **A check that cannot finish** (offline, an expired `gh` token or `claude` login, a repository that moved) is not
+    a check that found nothing. Its source is "could not check": nothing is removed or closed on its account, what
+    depends on it (its tasks' runs, Up next entries and Queue items) stays held, and one Queue item names the cause
+    and the fix (sign in again, locate the repository, retry), with "continue anyway" for the person.
+  - **Tasks.** Each source reconciles against its persisted cache (0.10). A remote source whose last full reconcile
+    is older than its period runs one first, so issues deleted or transferred meanwhile are seen.
+  - **Boards and lines.** A board whose repository moved or is gone is shown as missing, with "locate", and nothing
+    of it is deleted (its scratch tasks, Up next list, trust entry and pack data). A line whose ref or root checkout
+    is gone is shown as missing, nothing starts on it, and it leaves the Lines control's hand-picked sets; a line
+    selector left on it moves to the board's default line and says why. Each line's snapshot is reloaded, and a
+    changed trust hash raises its Queue item (0.11).
+  - **Workspaces.** `git worktree list` is read for each repository (0.4). A workspace whose folder is gone is
+    `prunable`, and one whose branch landed meanwhile is marked landed. The reaper takes it only on ancestry or patch
+    evidence, with a clean tree, after the person has seen the summary; an inferred landing (0.4) is listed instead.
+    A worktree first seen after a gap is attached only by `identify`, and otherwise listed for a person, since the
+    person may have made it.
+  - **Runs.** A run whose processes did not survive (a reboot) is recorded as interrupted by host shutdown, not as
+    failed, and waits in the Queue to be resumed or stopped. A waiting run whose task changed since the run started
+    says so on its item, with the diff, and the person chooses: resume, re-prompt with the task as it is now, or stop.
+    A resume that cannot resume (the agent tool removed the session, or its login expired) says so and offers a
+    re-prompt in the same workspace. A take-over whose process is gone is closed with its output kept. An
+    experiment with an arm interrupted is marked interrupted and never resumed on its own (0.14), because its order
+    and pairs no longer hold.
+  - **Queue.** An item whose subject is gone (its task removed or closed elsewhere, its workspace removed) is closed
+    as gone while Collide was closed, and listed; one whose subject changed is marked as changed since it was raised.
+  - **Up next** is held when the world under it changed: an entry's task changed or went away, the line's ref moved
+    (each entry builds on the last), the trust hash changed, or a check could not finish. An entry whose task was
+    done or removed elsewhere is taken off, and a group from a view is computed again. A Queue item lists what
+    changed, entry by entry, and nothing on the list starts until the person resumes it. A setting may also hold it
+    after any stop longer than a set time; it is off by default.
+  - **Views.** A personal view whose expression names a status or field the line's packs no longer have shows its
+    error count (0.10) and is kept.
+  - **One summary.** What a catch-up found notifies once, as "While Collide was closed", with counts of tasks
+    changed, added and removed and a lens of them on the Field; never one notification for each.
+  - **Caches on disk** need no clearing. Packs are keyed by git tree id and the SDK by version (0.6), so a changed
+    pack is a new entry, and a `git:` pack stays at the tree its lock pins, so nothing is fetched at start. The agent
+    tool's version, its tested range and the store's schema are checked as at any start (0.3, Stage 3a).
+  - **Limit.** A child that survived a daemon restart keeps sending telemetry to the receiver port it was given; when
+    the new daemon binds another, that run's telemetry from then on is lost, and the run says so.
 - **The UI-tools endpoint** (owner, 2026-11-14; S6's in-app agent section). It lets an agent change what the window
   shows (0.11). The transport was measured in S9 and R5 checked where it lives. It stays in the app shell (owner,
   2026-11-14), with the fixes below.
@@ -779,7 +834,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     - Plain `claude` in a worktree, as in a take-over, loads everything, including the main checkout's untracked
       `settings.local.json` and `.mcp.json` servers nobody approved (measured S1).
     - **The repository's own instructions load from the worktree** (owner, 2026-11-15; revision 21). A phase reads
-      the repository's `CLAUDE.md` files and skills from its own worktree, as plain `claude` in that folder would, so
+      the repository's `CLAUDE.md` files and skills from the folder it starts in (its worktree, or the root: 0.4,
+      revision 22), as plain `claude` in that folder would, so
       a team's setup works unchanged: the guides those files name and the scripts they say to run are paths in the
       same checkout, at the worktree's root. Freezing `CLAUDE.md` at the line's commit would protect little, since
       the guides it names are read from the worktree anyway, and an agent outside Collide can edit it too. What runs
@@ -1034,6 +1090,97 @@ How packs share points:
     a folder inside a trusted one (measured S2 for a subfolder), so one answer covers the repo's later sessions
     (0.11).
   - The run preview names the implementations a run will use.
+- **Where an agent starts** (owner, 2026-11-15; revision 22). Collide sits on top of the way a team already works,
+  and most developers start their agents at the repository root. A role says where its agent starts with `start`:
+  `workspace` (a workspace the workflow's implementation makes), `root` (the line root, which for the default line
+  is the person's own checkout), or a folder under the root.
+  - **The default follows the workflow.** A workflow whose agents make their own worktrees says so with
+    `agentWorktrees: true`. Its roles start at the root by default (owner), and Collide provisions nothing for it.
+    Every other workflow's roles start in the workspace by default, so a pack that says nothing keeps its agents
+    out of the person's checkout.
+  - `root` is refused for a `readOnly` role (it cannot be checked at the root), a sandbox phase, an experiment arm
+    (0.14) and a task whose author is not trusted (0.9). A person may override `start` per board in settings (0.7),
+    and the effective value is checked again.
+  - The run preview says where each phase starts, and warns when that is the person's checkout and the workflow may
+    merge into its branch there.
+  - **The root session** launches with the snapshot's flags like any phase (0.3, 0.7), so untracked local settings
+    and MCP servers in the person's checkout are not loaded. Stage 4a measures it.
+  - **Collide's writes at a root with a live phase** do not wait (0.10's queue is for workspaces). A task write and
+    its `record` run as one step under the line lock, retrying while git's index lock is held, so no uncommitted
+    Collide edit is left for the agent's `git add` or merge to sweep up.
+  - One phase that starts at the root runs per line at a time; a workflow may raise it with `rootPhases`. Another
+    waits, shown as waiting on the root, because two agents merging into one branch would collide.
+  - Collide cannot tell an agent's edits at the root from the person's. It records HEAD and `git status` when the
+    phase starts, shows the commits added and the files changed when it ends, and flags each file-edit tool call
+    (0.3) the agent makes to a path at the root outside its worktrees. Writes made through a shell command escape
+    that flag (0.1, same-user reality). A root left on another branch at the phase's end is flagged, and `record`
+    refuses there, as on any line root off its ref.
+- **Worktrees an agent makes for itself** (owner, 2026-11-15; revision 22). A repository's own instructions may have
+  an agent make worktrees itself: Orchard's orchestrating session runs `dev worktree new` for each task from the
+  root, has the work done in those worktrees, and merges it back. Collide notices them, and the agent and the
+  repository change nothing. A workflow with `agentWorktrees: true` names, with `adopt`, the workspace implementation
+  whose `identify` and `release` hooks apply; nothing is provisioned through it.
+  - **Reading.** Collide reads `git worktree list` and the repository's branches once for each repository, not for
+    each run: after each tool call of a run there that ran a command, at the end of each phase, every minute while a
+    run there is live, and when the daemon starts. The entries present when a run starts are its baseline, kept in
+    the store, so a restart keeps it. Entries of the baseline are never attached.
+  - **Collide's own provisioning is excluded.** Before a workspace hook starts (`create`, `line`, `sandbox`, an
+    experiment root), Collide records that it is provisioning on that repository. An entry that appears while the
+    hook runs is held until it returns: the entry it returns is Collide's workspace, and only the others are
+    attributed.
+  - **Attribution**, first answer wins:
+    1. the optional `identify` hook of the workflow's workspace implementation: it gets the path and branch and
+       returns task keys. Its input is written by an agent, so it is untrusted (0.9), and an answer outside the
+       tasks of the runs live on that repository is ignored and counted. Orchard's reads the task that `dev
+       worktree new` records when it is given one, then the creator label, which a role's `ORCHARD_ITER_AGENT`
+       sets (0.7);
+    2. the run whose command call was running when the entry appeared, when exactly one was. A worktree the person
+       makes in a terminal meanwhile is attached by this rule too, and the person detaches it;
+    3. the working directories of the runs' processes;
+    4. a person: the entry is listed under its line as made during a run, with the candidate runs.
+
+    With one run live and no task named, the entry is attached to the run with its task unknown. Tracks shows how
+    each entry was attached, and a person can detach it in one step.
+  - **An adopted workspace** (kind `adopted`, 0.8) belongs to its task, or to its run when the task is unknown.
+    Collide tracks its branch, diff and size, its per-checkout task state, and whether its branch has landed (below),
+    as for a workspace Collide made, and shows it under its run in Tracks. A later run of the same task attaches it
+    again, and a phase may start in it (Orchard's reviewers work read-only in the build worktree, and its fix
+    rounds reuse it), with the `readOnly` check. A workflow that provisions for each task starts its `workspace`
+    roles in the task's adopted worktree when it has one and skips `create`; with two, the latest, and the preview
+    names it.
+  - **Disk.** Each new entry's volume is read by the free-space check (0.2), and under the floor the run goes to
+    `paused: disk`. Size is measured at each phase end and on request, not on every read.
+  - **Removal.** Collide never removes or changes an adopted worktree, and the reaper skips it. On a stop, its
+    processes are stopped with the run's (0.2), and the implementation's `cleanup` hook takes its lanes down as for
+    any workspace, removing nothing. The tool that made it, or the agent, removes it under that tool's own rules
+    (Orchard's `worktree rm` refuses a worktree another agent made). A person may ask Collide to remove one through
+    the optional `release` hook, which runs with the creator's label. A half-made one, left by a creation command
+    that was stopped, is listed like any other. One whose folder is gone is `prunable`; one no longer listed is
+    `removed`.
+  - **Limits.** Worktrees made in another repository are not seen. A worktree made and removed between two reads
+    leaves only its branch, which is listed as made during a run.
+  - **Two Orchard modes.** A workflow whose workspace implementation provisions for each task (Orchard's `loop`,
+    through `ws-create`) and one whose agent makes its own worktrees (Orchard's `session`, with `agentWorktrees:
+    true`) are separate workflows. A run in a workspace Collide made is told in its brief that its worktree exists,
+    so the repository's instruction to make one is already met.
+- **How a workflow's work lands** (owner, 2026-11-15; revision 22). Each workflow says, with `landing`:
+  - `integrate` (the default, except with `agentWorktrees: true`): every workspace of the run, adopted ones
+    included, goes through accept, the gates and the workflow's `integrate` (0.4, Stage 9). Commits that a root
+    phase adds to the line's ref itself are flagged in review as landed outside accept;
+  - `observed` (the default with `agentWorktrees: true`): the repository's own flow merges, as Orchard's
+    orchestrating session does. A branch has landed when its commits are on the line's ref, by ancestry or by patch
+    (a rebase or a cherry-pick), or, inferred, when the line's ref already has its changes to the files it touched
+    (a squash). The item shows which rule matched, and the reaper never removes on an inferred one. Its task is
+    then landed, and Up next moves on task by task (Stage 11). A worktree whose task is unknown lands no
+    task: its merge is shown, and the person names the task. Collide checks each merged range against
+    `protectedPaths` (0.9) after the fact, and a range that touched them raises a Queue item. A merge that changes
+    the line's trust hash holds the line's next start, Up next included, behind the trust Queue item (0.11).
+  - **Work that never lands** (owner). When a run ends, fails or is stopped with commits or uncommitted changes in
+    its workspaces that are not on the line's ref, a Queue item lists each workspace with its branch, its changes
+    and its size. The person opens the diff; re-prompts (a new run of the task in that workspace, told to land it);
+    lands it through the workflow's `integrate`, with accept and the gates; removes it (`release`, for an adopted
+    one); or keeps it, which leaves the task unlanded and asks whether its Up next entry waits or is skipped. Until
+    then the entry stays paused.
 - **The built-in `collide` pack** ships with the app and is trusted with it, so it needs no trust prompt (owner,
   2026-11-13). It makes a repo with no pack usable (0.11, first run):
   - `collide/quick`: one agent phase in a worktree, then review: accept, re-prompt or discard;
@@ -1735,6 +1882,8 @@ workspaces:                                    # named implementations (0.4); cw
     line:    { script: hooks/ws-line.ts,    timeout: 120m }             # a line root or an experiment root
     resume:  { script: hooks/ws-resume.ts,  timeout: 90m }              # `doctor --fix`, then `iter map-build`
     doctor:  { script: hooks/ws-doctor.ts,  timeout: 5m }               # checks workspace state and rewrites it
+    identify: { script: hooks/ws-identify.ts, timeout: 1m }             # a worktree an agent made: its tasks (0.4)
+    release:  { script: hooks/ws-release.ts,  timeout: 15m }            # a person asks to remove an adopted one
     remove:  { script: hooks/ws-remove.ts,  timeout: 15m }              # task workspaces, once the task is done at base
     discard: { script: hooks/ws-discard.ts, timeout: 15m }              # sandbox and experiment kinds: lanes down,
                                                                         # `git worktree remove`, delete the branch
@@ -1787,11 +1936,17 @@ roles:
     definition: agents/orchestrator.md         # pack file: writes briefs, adjudicates, writes the round record
     model: strong
     readOnly: true                             # writes only to phase.dir; `record` commits its outputs
+  lead:                                        # Orchard's own orchestrating session (revision 22)
+    agent: claude
+    model: strong
+    start: root                                # the default with agentWorktrees, written out (0.4)
+    env: { ORCHARD_ITER_AGENT: "{{ run.slug }}-lead" }   # `dev worktree new` refuses without a label
 
 prompts:
   build: briefs/build.md.j2                    # carries launch.review_budget; `iter timings --write` gets --run
   review-brief: briefs/review-brief.md.j2      # instructs the orchestrator to write a fresh brief per round
   adjudicate: briefs/adjudicate.md.j2
+  session: briefs/session.md.j2                # the group's tasks; the repository's own rules do the rest
 
 gates:
   iter-evidence:                               # checks the agent's own iter run; does not re-run it
@@ -1828,6 +1983,14 @@ workflows:
           on: { fix: fix, close: close, stop: ask_human }
       fix:   { role: builder, prompt: { artifact: adjudicate/fix-brief.md }, label: "fix{{ round }}", gates: [iter-evidence], then: brief }
       close: { role: builder, prompt: { artifact: adjudicate/fix-brief.md }, label: close, gates: [iter-evidence], then: { end: closed } }
+  session:                                     # Orchard's own orchestrating session (revision 22)
+    accepts: { sources: [plan], fields: [labelId] }
+    group: whole                               # one run given the whole group (Stage 11)
+    agentWorktrees: true                       # roles start at the root; landing defaults to observed (0.4)
+    adopt: orchard/worktree                    # its `identify` and `release`; nothing is provisioned
+    integrate: orchard/merge-local             # for work that never lands, with accept and the gates
+    phases:
+      lead: { role: lead, prompt: session }    # makes its own worktrees, and merges them
 
 providers:
   plan: { script: providers/plan.ts }          # scope: ref; parses arch/ directly; writes via a line root's ./plan
@@ -1859,7 +2022,7 @@ Collide plays the lead, so it does all four, through the pack.
 
 ### 0.8 Data model (core)
 
-- **App:** several boards, one switcher.
+- **App:** several boards, one line selector over all their lines (0.11).
 - **Board:** repo root, lines (0.12; the default line is the base ref at the board root), source configuration,
   saved views.
 - **Line:** ref, root checkout, the snapshot commit used by each run, applied packs, default workflow, trust entry,
@@ -1904,11 +2067,14 @@ Collide plays the lead, so it does all four, through the pack.
   - `task`;
   - `sandbox`;
   - `line` (a line root);
-  - `experiment` (an experiment root, or an arm's task workspace).
+  - `experiment` (an experiment root, or an arm's task workspace);
+  - `adopted` (a worktree an agent made during a run, 0.4). Collide neither provisions nor removes it. It is `in_use`
+    while a run works in it, `idle` after, `prunable` once its folder is gone, and `removed` once `git worktree
+    list` no longer has it.
 
   Lifecycle:
-  - States: `provisioning → ready → in_use → idle → removable → removed`, plus `failed`. `failed` resumes through
-    the `resume` hook.
+  - States: `provisioning → ready → in_use → idle → removable → removed`, plus `failed`, and `prunable` for an
+    adopted workspace whose folder is gone. `failed` resumes through the `resume` hook.
   - A reaper removes `task` workspaces once their tasks are done at the base ref (committed by `record`, merged by
     `integrate`), and reports disk use.
   - `sandbox` workspaces are discarded when their phase ends. An arm's task workspaces and sandboxes are discarded
@@ -2148,8 +2314,10 @@ Why the plan adapter parses files itself:
   excluded (0.14).
 - The board shows the default line's state. Divergence chips compare a line's root with the workspaces forked from
   it. Other lines' states appear in the task drawer, so a long-lived line does not mark every task divergent.
-- Every write names its checkout. The UI defaults to the selected line's root.
-- **No writes into a checkout while a phase is running there.** They queue until the phase ends. A builder stages
+- Every write names its checkout. The UI defaults to the selected line's root, and the CLI to the line whose
+  checkout it runs in, else the default line (revision 22).
+- **No writes into a checkout while a phase is running there**, except at a root that a phase starts at, where a
+  write and its `record` are one step (0.4, revision 22). They queue until the phase ends. A builder stages
   by explicit path, so a Collide edit would otherwise ride into its commit. Writes into a phase's checkout are also
   what `readOnly` and `dev worktree rm` (which refuses dirty trees) would trip on.
 - A write leaves uncommitted changes, which can be several files: `plan set` regenerates epic tables. The UI shows
@@ -2450,7 +2618,8 @@ The names stay; the subtitles are the audience rule above applied to navigation.
     The toggle is per person and remembered. Both layouts show the same runs in the same order, so switching keeps
     one's place.
   - **Up next** (owner, 2026-11-15; revision 21; ships in Stage 11). Below the live runs, in both layouts: the
-    tasks and groups waiting to start, in the person's order, each with what it waits on. The tab named Queue stays
+    tasks and groups waiting to start, in the person's order, each with what it waits on; one list per board
+    (revision 22). The tab named Queue stays
     "what needs you", so this list is never called a queue.
   - **The Timeline's real-time axis**, not equal-width phase columns (owner, 2026-11-13; from the Tracks-first
     mockup). A segment's width is its duration. The axis has:
@@ -2684,9 +2853,26 @@ Details:
   - board settings stay per user until **Share with team** writes `.collide/` into the repo (`collide init`);
   - a trust prompt only for packs from the repo or ones the user adds;
   - source auth when a source needs it, e.g. `gh auth refresh -s project` with the account to use.
-- **Lines.** Each board has a line switcher, a menu in the top bar, visible on every surface (S6 Q4, default `top`;
-  the alternative was chips in the Field's filter bar). Launch lists the selected line's workflows, and a run's
-  track is tagged with its line.
+- **Line selector** (owner, 2026-11-15; revision 22). One menu in the top bar, visible on every surface (S6 Q4,
+  default `top`), lists every open board (one repository each) and, under each, its lines (0.12). The person picks
+  a line and need not care whether it is another repository or another branch; boards stay underneath.
+  - Selecting a line of the same board swaps its packs, workflows and views in place. Selecting a line of another
+    board also swaps the sources, the corpus, the status mapping, the checkout filter and the person's own views.
+  - The Field, Planning and Launch follow the selected line.
+  - **The Lines control** on Tracks and on the Queue: the selected line, all lines, or a hand-picked set (a
+    multiselect grouped by board). Each item is tagged with its line. Both start on all lines, because a decision
+    on another line still needs the person, and each remembers its own choice. A line added later joins "all
+    lines", not a hand-picked set.
+  - Nothing is hidden from the count: the Queue's badge and the menu bar count every line, and a Queue that hides
+    items says how many, with a link to show them. `a` and `d` act on an item in place; `o` or a notification for
+    an item on a hidden line shows it, with its line named, without changing the selector or the control.
+  - Up next is one list per board (owner): each board's list shows in Tracks under its runs, filtered by the Lines
+    control. The concurrency cap is the app's, because it is this machine's capacity.
+  - Switching stops and restarts nothing. A line's loaded snapshot stays in memory after the person leaves it, up
+    to the eight lines used last, so switching back is immediate; an older one reloads from git.
+  - When the selected line's ref moves, its snapshot and views reload. A trust hash that changes on any line,
+    selected or not, raises a Queue item, and nothing on that line starts, Up next included, until it is trusted
+    (0.9).
 - **Metrics.** A run opens to a waterfall:
   - phases, hooks, gates and reported spans on a time axis, with the critical path over the phase graph marked.
     Reported spans are marked as reported;
@@ -2858,9 +3044,11 @@ branches can offer different workflows at the same time.
     - git refuses to check out a branch that another worktree has checked out. So the option needs the user's own
       checkout on another branch, and Collide refuses it otherwise.
 
-- **Per line:** the `packs` list (its order and sources), the default workflow and the profiles.
-  - Everything else in `board.yaml` is board-level and comes from the default line: sources, the status mapping,
-    the checkout filter and views.
+- **Per line:** the `packs` list (its order and sources), the default workflow, the profiles and the views
+  (revision 22). Committed views load from the line's snapshot, and the line's packs contribute theirs. A person's
+  own views are per board and show on each of its lines.
+  - Everything else in `board.yaml` is board-level and comes from the default line: sources, the status mapping
+    and the checkout filter.
   - A line's snapshot follows its ref between runs. A run pins the commit it launched from, and every pack's tree
     id.
 - **What a line has:**
@@ -2883,10 +3071,14 @@ branches can offer different workflows at the same time.
   - One task cannot have live runs on two lines at once, except inside an experiment.
 - **Why this does not weaken 0.7.** The snapshot rule stops agents from editing their own gates.
   - A line is a ref that the user opened, with its gate code in the trust hash.
-  - Agents still work only in workspaces.
-  - A workspace's edits reach a line only through `integrate`, and `protectedPaths` flags them in review.
-- **Why not one board per branch.** Lines share one corpus, one set of views and one set of sources. Separate boards
-  would duplicate all three and lose cross-line task state in the drawer.
+  - Agents work in workspaces, or at a root only where a workflow says so (0.4, revision 22): never for an
+    untrusted author's task, an experiment arm or a sandbox, and with the start record and the preview's warning.
+  - A workspace's edits reach a line through `integrate`, where `protectedPaths` flags them in review, or, in a
+    workflow whose landing is `observed`, through the repository's own merge, checked against `protectedPaths`
+    after the fact (0.4).
+- **Why not one board per branch.** Lines share one corpus and one set of sources, and a person's own views; a
+  line's packs add views of their own (revision 22). Separate boards would duplicate the corpus and the sources and
+  lose cross-line task state in the drawer.
 - **Cost.** A line root is a full checkout. A provisioned orchard worktree takes 230–330 s, plus about 1500 s of map
   build (measured R1).
   - A line more than 50 commits from every existing map needs its own map (measured: the dev CLI README, the 50-commit
@@ -3378,7 +3570,7 @@ reproduction script and a record, together in one spike folder under `.collide/p
   - **Run identity against state colour.** Colour is reserved for state (0.11). Default `id`: a run's id label.
   - **`a` and `d` per Queue kind.** Default `literal`: the table in 0.11.
   - **`o` from a Queue item** opens its run's track at the moment of the decision. Default `moment`.
-  - **Where the line switcher lives.** Default `top`: a menu in the top bar.
+  - **Where the line selector lives.** Default `top`: a menu in the top bar.
   - **"review ×2" means two reviewers in parallel (A and B), not two rounds.** The mockups showed rounds. The
     prototype's data is corrected.
 
@@ -3940,7 +4132,10 @@ yet.
 - **The repository's own instructions** (0.3; revision 21). First measure, with the fake and then once with the real
   `claude`, a launch line that loads the worktree's `CLAUDE.md` files and skills while settings, hooks and MCP config
   stay from the snapshot. Then build it, with the role key `repo_instructions` and the warning when a run changed an
-  instruction file.
+  instruction file. Measure also (revision 22): that a session started at the person's checkout with the snapshot's
+  flags loads none of its untracked local settings or MCP servers; and what a `claude` that the agent starts itself,
+  inside a worktree it made, loads from that worktree, since the snapshot's flags reach only the session Collide
+  starts.
 
 This sub-stage checks agent entries at load only. Launching an agent, and the secrets test at launch, are in 6b.
 
@@ -4126,6 +4321,8 @@ freezes the provider contract in full, including the Projects keys.
   - Issues from repos without a board are shown but not launchable, and the reason is given.
   - `initialize` checks the token's scopes for what Issues needs and names the fix.
   - A periodic full reconcile emits `task.removed` for deleted or transferred issues, which `since` never returns.
+    It also runs at start when the last one is older than its period (0.2; revision 22). An expired token at start
+    makes the source "could not check": nothing is removed, and one Queue item says to sign in again.
 - **Operations:** `setStatus` (close or reopen with a reason; categories map through `board.yaml`'s status mapping)
   and `comment`. Versions are per item (0.10). A stale version is detected before the write and returns `conflict`.
 - **Provenance:** `author_association` per task, for 0.9's trust rules.
@@ -4162,7 +4359,8 @@ shell and window; this finishes them.
 - **Field:** views; board and run-order layouts; live updates from `watch`; divergence and collision chips.
 - **Filter bar:** chips that write CEL; saving a view writes a view file.
 - **Task drawer, read-only:** body, dependencies both ways, collections, per-checkout state.
-- **Board switcher.**
+- **Line selector** (0.11): every open board with its default line. Switching swaps views and workflows in place
+  and stops nothing.
 - **Settings:** each key's effective value and the layer it came from (0.7). Secrets are set into the keychain from
   here. The Agents page is part of it (6b).
 - **No-setup open** (0.11): any git repo opens with the built-in packs, a GitHub source when `origin` is on GitHub
@@ -4178,6 +4376,8 @@ shell and window; this finishes them.
   `file:` links, and external links opened by the OS after a confirmation.
 
 **Success Criteria**:
+- **A missing board** (0.2; revision 22): a board whose repository folder was moved shows as missing with
+  "locate", deletes nothing, and after "locate" shows its tasks and Up next list as they were.
 - S6 scenario 2, and scenario 1 up to the board, pass as UI tests ported from S6's pilots against the real app, each
   completing and detecting its end state. The owner's walkthrough of both is recorded as owner judgement in the
   stage's task item, which lists what to record: the owner's time per scenario beside S6's advisory limit, the
@@ -4455,6 +4655,14 @@ and sandboxes, with no real agent.
 - `readOnly` check: HEAD unchanged, and tracked plus untracked-but-not-ignored files unchanged outside `phase.dir`.
   Ignored files are out of scope, because a reviewer's own `iter` run rebuilds `dist/`. That limit is stated.
 - Agent phases get no `COLLIDE_REPORT` (0.5).
+- **Where an agent starts** (0.4; revision 22): `start: root | workspace | <folder>`, its default from
+  `agentWorktrees`, the refusals, `rootPhases`, a write and its `record` as one step at a root, the start record and
+  the file-edit flags, and the preview's start and warning.
+- **Worktrees an agent makes for itself** (0.4; revision 22): the reads, the baseline in the store, the
+  provisioning hold, attribution with `identify` (named by `adopt`), kind `adopted` and its states, attaching to
+  later runs of its task, `cleanup` of its lanes, `release` on request.
+- **`landing: integrate | observed`**, the landed rule, and the Queue item for work that never lands (0.4; revision
+  22).
 - The adapter's config paths (0.3): a run whose range edits them is flagged, and its integrate waits for an
   acknowledgement (Stage 9).
 - `ask_human` carries its cause: the decision token that led to it, a budget, or an agent's stop-and-report.
@@ -4510,6 +4718,41 @@ gates:
   phase's launch carries the option;
 - after a fake builder edits `.claude/settings.json`, the next automatic phase runs without waiting, and the run is
   flagged for an acknowledgement before integrate.
+- Worktrees an agent makes (revision 22):
+  - a fake agent that runs `git worktree add` in its phase gets the worktree attached to its run as `adopted`, with
+    its branch and diff; the reaper leaves it once the task is done at base; a worktree made before the run is not
+    attached;
+  - a fixture `create` hook's worktree is never attached to another run while the hook runs;
+  - with two runs live, a fixture `identify` hook that names a task attaches the worktree to that task's run; one
+    that names a task of neither run is ignored and counted; one that times out falls through to the next rule;
+  - after the daemon is killed and restarted mid-run, the baseline holds, and a worktree made while it was down is
+    attributed by `identify` or listed for a person;
+  - a second run of the same task attaches the adopted worktree, starts its builder there without `create`, and
+    runs a `readOnly` reviewer in it;
+  - a new worktree on a volume under the floor pauses the run with `paused: disk`; one whose folder is deleted
+    becomes `prunable`;
+  - a run that ends, or is stopped, with commits or uncommitted changes in an adopted worktree that are not on the
+    line's ref raises the Queue item, and `release` runs only when a person chooses it.
+- Where an agent starts and how work lands (revision 22):
+  - a phase of a workflow with `agentWorktrees: true` starts at the line root by default, one of any other workflow
+    starts in its workspace, and a `<folder>` start runs in that folder; the preview names each and warns for the
+    person's checkout;
+  - a task write at a root with a live phase is committed by `record` in the same step; a second root-started phase
+    on the line waits; a fake agent's file-edit call to a root file is flagged;
+  - `start: root` is refused for a `readOnly` role, an experiment arm and an untrusted author's task, also when it
+    comes from a per-board override;
+  - with `landing: observed`, a merge, a rebase and a squash of a branch each land its task; a merged range that
+    touches `protectedPaths` raises a Queue item.
+- Coming back (0.2; revision 22):
+  - with the daemon stopped, a waiting run's task changed, another task removed and a workspace folder deleted,
+    the next start marks the run's item as changed since it was raised, closes the removed task's item as gone,
+    makes the workspace `prunable`, and notifies once;
+  - with the daemon alive throughout and a fake wake after a long sleep, the same catch-up runs;
+  - until a board's catch-up ends, nothing starts, no queued write applies, a surviving run's next phase waits and
+    the reaper takes nothing;
+  - a source that fails with an auth error removes and closes nothing, and raises one Queue item;
+  - a wall clock set backwards reads as unknown and still checks;
+  - a worktree first seen after the gap, with no `identify` answer, is listed for a person, not attached.
 - Planning:
   - three instances with different prompts run in separate workspaces, and the next phase sees all three
     artifacts. Two identical instances are refused;
@@ -4629,8 +4872,14 @@ New session and the menu bar.
   they hold no endpoint token unless the person adds one (0.7; R5).
 - **Menu bar** (0.11): the icon, badge, countdown, notifications and actions. Closing the window destroys the webview
   and keeps the app running. The app restarts a daemon that stopped answering, with 0.2's back-off.
+- **The Lines control** on Tracks and the Queue (0.11; revision 22): the selected line, all lines or a hand-picked
+  set; the Queue's badge and the menu bar count every line.
 
 **Success Criteria**:
+- **Lines control:** with two boards open and Tracks set to one line, a Queue item on the other board still counts
+  in the badge and in the Queue's hidden-items link, and `o` on it shows it without changing the selector.
+- **Coming back:** after a start that found three tasks changed and one removed (0.2), the menu bar shows one "While
+  Collide was closed" notification, and its lens on the Field shows the three and names the removed one.
 - **New session:** a terminal opens in a fresh worktree, a prompt typed there is answered, closing the view
   detaches, and exiting `claude` puts the diff into review. The first session in a repo shows Claude's trust prompt
   and Collide sends it no keys; the second shows none.
@@ -4827,17 +5076,21 @@ recorded in a spike folder under `.collide/planning/spikes/`.
   proposes the groups. A group on the Field's lens selects its tasks and opens the group-run preview above. The agent
   has no tool for it: a person presses Launch, and the lens stays as the agent made it.
 - **Up next** (owner, 2026-11-15; revision 21; 0.11). An ordered list of entries waiting to start, kept by the
-  daemon in the store, so it survives a restart.
+  daemon in the store, so it survives a restart. One list per board (owner, revision 22).
   - An entry is a task, or a group: an epic, a view or a hand-picked selection. A person adds entries in the order
     they want (the Field: select, then Add to Up next; the CLI: `collide next add|list|move|remove`), and may
     reorder or remove an entry until it starts. Adding is the person's Launch: the in-app agent may propose an
     order, as it proposes groups, but has no tool to add one.
-  - The next entry starts once the one before it has landed (integrated, by the rule above), so each builds on the
-    last. A switch on the list lets independent entries overlap, up to the concurrency cap.
+  - The next entry starts once the one before it has landed (integrated, by the rule above; for a workflow whose
+    `landing` is `observed`, merged as Collide sees it on the line's ref, 0.4), so each builds on the last. A switch
+    on the list lets independent entries overlap, up to the concurrency cap.
   - A group is one entry. Its tasks run as a group run (above): in parallel under the cap, in the order their
     `blocked-by` links give. The list moves on once every task of the group has landed.
   - A run of an entry that fails, is stopped or is refused pauses the list and raises a Queue item. Nothing after
     it starts until the person resumes, skips or removes that entry.
+- **Orchard's `session` workflow, for real** (0.4, 0.7; revision 22): once, with the owner, on a small group. Its
+  label passes `dev worktree new`'s check, its worktrees are attached with their tasks, its merges land them, and Up
+  next moves on. Whether the lead's one label fits review records that name the reviewer that ran is checked here.
 - **What an agent is told about its group** (owner, 2026-11-15; revision 21). How a group is worked is the rule of
   the applied packs and of the repository's own instructions (0.3), never Collide's: a team may already have rules
   for how its agents treat a group of tasks. Collide hands the agent what those rules need, in the phase's brief and
@@ -4859,6 +5112,9 @@ recorded in a spike folder under `.collide/planning/spikes/`.
   preview.
 
 **Success Criteria**:
+- **Coming back** (0.2; revision 22): with three Up next entries and the daemon stopped, one entry's task done
+  elsewhere and the line's ref moved, the start takes that entry off, holds the list with a Queue item that names
+  both, and starts nothing until the person resumes it. A stop in which nothing under the list changed holds nothing.
 - Three tasks with dependencies run under a cap of 2. The dependent starts only after its dependency is
   integrated.
 - Launching the MVP view starts only its `ready` tasks.
@@ -5043,7 +5299,7 @@ Docker API; the sampling row's wording: exact for CPU and approximate for short-
 - Launch resolves (shortId, path) at the line's ref. One live run per task across lines.
 - Observers receive only their own lines' events (0.4).
 - The optional Collide-owned default root (`defaultRoot: managed`, 0.12).
-- The line switcher in the app.
+- Branch lines in the line selector (0.11), each with its own views.
 
 **Success Criteria**:
 - A second line whose `ws-create` hook differs creates workspaces with its own hook. The default line keeps the
@@ -5054,6 +5310,10 @@ Docker API; the sampling row's wording: exact for CPU and approximate for short-
 - An observer of a pack applied only on the second line receives no events from the default line's runs.
 - With `defaultRoot: managed`, Collide provisions the default root as a worktree on the base ref. While the user's
   own checkout has the base branch checked out, it refuses, and says why.
+- With a run live on each of two lines, switching the selector from one line to the other and back stops nothing.
+  The Field shows each line's own views, and Tracks shows both runs.
+- A trust hash that changes on a line that is not selected raises a Queue item, and that line's Up next entry does
+  not start until it is trusted.
 
 **Tests**: Line snapshot and trust isolation; lock scope; per-line provider writes; collision refusal on launch;
 observer scoping; the managed root's refusal.
@@ -6195,3 +6455,44 @@ which shows each tab with a subtitle, and kept them: "we can keep these with the
   hooks, permissions, MCP servers and agent definitions still load from the snapshot, because they run code or grant
   access without the model asking (S1); `repo_instructions: none` for a role and for experiment arms. Which launch
   line does this is unmeasured, so Stage 4a measures it first.
+
+**Revision 22, 2026-11-15 (owner).** Where agents start, worktrees an agent makes, how work lands, and one line
+selector.
+- **Worktrees an agent makes:** the owner asked how Collide tracks worktrees that a repository's own tools make
+  (Orchard's `dev worktree`), and chose that Collide notices them, with nothing asked of the agent or the repository.
+  Changed: 0.4, 0.7 (the example), 0.8 and Stage 8.
+- **Where agents start:** "Ideally, Collide would be a layer that sits on top of the developer's workflows,
+  providing all of this extra intelligence. Most developers spin up their agents from the repo root - but not
+  always(?). It seems like we may need to provide settings for where orchestrating agents start from. This could be
+  a setting within the pack, and the default should be the repo root." The root is the default for a workflow whose
+  agents make their own worktrees (`agentWorktrees: true`); other workflows keep their agents in workspaces unless a
+  role says otherwise. Changed: 0.3, 0.4, 0.7, 0.10, 0.12, Stage 4a and Stage 8.
+- **How work lands:** the owner chose that each workflow decides, and: "what if the agent doesn't perform the merge
+  and it just sits there? Collide should be able to flag this scenario and have the user take action." Changed: 0.4,
+  0.12, Stage 8 and Stage 11.
+- **One line selector:** "We currently have a code line selector in our UI. These code lines can be different
+  repositories or different branches of the same repository (collide shouldn't care). But each of them has their own
+  pack they load. We will need to support swapping out packs and views on the fly when this changes." Changed: 0.8,
+  0.10, 0.11, 0.12, Stage 6a and Stage 14.
+- **Lines on Tracks and the Queue:** "For the queue and the tracks, we should have toggles to view just that line, or
+  to view several lines (a multiselect in that case?)." The owner chose one Up next list per repository. Changed:
+  0.11, Stage 9b and Stage 11.
+- **Coming back after a long close:** "Another aspect to consider is closing collide, and opening it several weeks
+  later, when tasks have changed. Collide will need to clear/update its cache to reflect the current state of the
+  world." Changed: 0.2, Stage 5, Stage 6a, Stage 8, Stage 9b and Stage 11.
+- **Adversarial review** (Fable, three passes). The first found that Collide's own provisioning would be adopted by
+  another run's read, that adopted work had no landing path, that a read-only phase in the person's checkout
+  contradicted 0.10 and could not be checked, that the Orchard example had no label for the orchestrating session,
+  and that "a line can be another repository" contradicted 0.12. The second found that `root` as every role's
+  default would put other packs' agents in the person's checkout, and that a root agent's own commits bypass accept.
+  The third found that the catch-up missed a daemon that stayed alive through sleep, held nothing while it ran, and
+  read a check that could not finish as one that found nothing. Each is answered above; the real `session` run is in
+  Stage 11.
+- **Choices made:** attribution order (`identify`, the call that was running, working directories, a person), with
+  the baseline kept in the store and Collide's own provisioning held out; an adopted worktree belongs to its task
+  and is attached to that task's later runs; Collide removes one only when a person asks, through `release`; one
+  root-started phase per line unless `rootPhases` says more; `root` refused for `readOnly` roles, sandboxes,
+  experiment arms and untrusted authors' tasks; a write and its `record` are one step at a live root; a squash or a
+  rebase counts as landed; the Lines control starts on all lines and never hides a count; eight snapshots stay
+  loaded; the concurrency cap is the app's; after a long close, Up next is held when the world under it changed,
+  not after a set time (a setting, off by default), and what changed notifies once.
