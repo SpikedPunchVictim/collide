@@ -86,6 +86,7 @@ fn options(root: &TempRoot, log: &LogBuf) -> DaemonOptions {
         fake_shell(root),
         Box::new(log.clone()),
     );
+    options.process_tree = common::test_process_tree();
     options.capture = CaptureOptions {
         timeout: Duration::from_secs(10),
         cap_bytes: 1024 * 1024,

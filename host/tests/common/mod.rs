@@ -5,14 +5,17 @@
 
 #![allow(dead_code)]
 
+pub mod detached;
 pub mod procs;
 
+use collide_host::auth::{ProcessTree, SystemProcessTree};
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -28,9 +31,38 @@ pub fn scratch(name: &str) -> PathBuf {
 /// The build script rebuilds the SDK's `dist/` in place, so two builds must not overlap.
 static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
-/// Runs `pnpm build:packs --out <out>` from the repo root. A leftover read-only `out` from an earlier run is the
-/// build's own to replace.
+/// The first executable file called `program` in a folder of `path`, as a shell finds it.
+pub fn find_on_path(program: &str, path: &OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| {
+            fs::metadata(candidate)
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
+}
+
+/// What a test that needs `node` says when `path` has none: it names `node` and every folder searched. `None` when
+/// `node` is there. A test must fail with this and not be skipped: a phase of a Collide run may have a `PATH` with no
+/// `node` (ts-0074-cu).
+pub fn node_missing_message(path: &OsStr) -> Option<String> {
+    if find_on_path("node", path).is_some() {
+        return None;
+    }
+    let searched: Vec<String> = std::env::split_paths(path)
+        .map(|dir| dir.display().to_string())
+        .collect();
+    Some(format!(
+        "this test needs `node` and it was not found on PATH (searched: {}); put the folder that holds `node` on the PATH the tests run with",
+        searched.join(", ")
+    ))
+}
+
+/// Runs `node scripts/build-packs.ts --out <out>` from the repo root. A leftover read-only `out` from an earlier run is
+/// the build's own to replace.
 pub fn build_packs(out: &Path) {
+    if let Some(message) = node_missing_message(&std::env::var_os("PATH").unwrap_or_default()) {
+        panic!("{message}");
+    }
     let _guard = BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let status = Command::new("node")
         .args(["scripts/build-packs.ts", "--out"])
@@ -108,6 +140,47 @@ impl std::ops::Deref for Bundle {
     fn deref(&self) -> &Path {
         &self.0
     }
+}
+
+/// Who is asking, as far as a test is concerned: the system's own answer for every process, except that the walk
+/// stops at this test process and the process itself is not read. What is at or above it (cargo, a shell, a phase of a
+/// Collide run with `COLLIDE_RUN` in its environment) is not the test's: the system's answer for a process is the
+/// environment it was started with, which a test cannot change, so a client in this process, or a child of it, would
+/// look like the agent of the run the tests are run in. A child that has its own marker (a run's agent a test starts)
+/// is still read as one.
+pub struct StopsAtThisTest(SystemProcessTree);
+
+impl StopsAtThisTest {
+    pub fn new() -> StopsAtThisTest {
+        StopsAtThisTest(SystemProcessTree::new(None))
+    }
+}
+
+impl ProcessTree for StopsAtThisTest {
+    fn parent(&self, pid: u32) -> Option<u32> {
+        if pid == std::process::id() {
+            None
+        } else {
+            self.0.parent(pid)
+        }
+    }
+
+    fn run_marker(&self, pid: u32) -> Option<String> {
+        if pid == std::process::id() {
+            None
+        } else {
+            self.0.run_marker(pid)
+        }
+    }
+
+    fn is_app(&self, pid: u32) -> bool {
+        self.0.is_app(pid)
+    }
+}
+
+/// [`StopsAtThisTest`] for `DaemonOptions::process_tree`: every daemon a test runs in its own process gets it.
+pub fn test_process_tree() -> Option<Arc<dyn ProcessTree + Send + Sync>> {
+    Some(Arc::new(StopsAtThisTest::new()))
 }
 
 static TEMP_COUNTER: AtomicU32 = AtomicU32::new(0);

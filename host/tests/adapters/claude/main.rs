@@ -32,6 +32,7 @@ mod real_claude;
 mod replay;
 mod results;
 mod run_command;
+mod run_env;
 mod run_process;
 mod session;
 mod settings_schema;

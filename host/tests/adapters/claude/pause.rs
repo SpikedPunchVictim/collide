@@ -412,6 +412,7 @@ pub(crate) fn start_daemon(
         shell.to_str().unwrap().to_string(),
         Box::new(io::sink()),
     );
+    options.process_tree = super::common::test_process_tree();
     options.capture = CaptureOptions {
         timeout: Duration::from_secs(10),
         cap_bytes: 1024 * 1024,

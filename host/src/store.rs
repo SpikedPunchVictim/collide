@@ -769,22 +769,36 @@ fn quarantine_database(path: &Path, reason: &str) -> Result<PathBuf, StoreError>
 /// So before the open the WAL file gets a second name (a hard link, no copy), and [`quarantine_database`] moves from
 /// it when the open fails. A name left by an open that died is kept as it is. The shared-memory file is only an index
 /// that SQLite rewrites in place, so it is moved when it is still there and not kept.
+///
+/// The link is tried, not checked first: another connection to the database (the daemon's, while a test reads the
+/// store) can close between a check and the link, and SQLite then deletes the WAL. A WAL that is not there has
+/// nothing to keep.
 fn keep_side_files(db: &Path) -> Result<(), StoreError> {
     let original = with_suffix(db, WAL);
     let keep = with_suffix(db, &format!("{WAL}{KEEP}"));
-    if original.exists() && !keep.exists() {
-        fs::hard_link(&original, &keep).map_err(|source| io_context(&keep, source))?;
+    match fs::hard_link(&original, &keep) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::AlreadyExists
+            ) =>
+        {
+            Ok(())
+        }
+        Err(source) => Err(io_context(&keep, source)),
     }
-    Ok(())
 }
 
-/// Removes the second names of [`keep_side_files`] once the open is over and the database is usable.
+/// Removes the second names of [`keep_side_files`] once the open is over and the database is usable. A name that is
+/// already gone was released by another open of the same store.
 fn release_side_files(db: &Path) -> Result<(), StoreError> {
     let keep = with_suffix(db, &format!("{WAL}{KEEP}"));
-    if keep.exists() {
-        fs::remove_file(&keep).map_err(|source| io_context(&keep, source))?;
+    match fs::remove_file(&keep) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(io_context(&keep, source)),
     }
-    Ok(())
 }
 
 fn io_context(path: &Path, source: io::Error) -> StoreError {
@@ -1509,6 +1523,33 @@ mod tests {
         assert_eq!(again.events_since(0).unwrap().len(), 3);
         assert!(!with_suffix(&store.db_path(), &format!("{WAL}{KEEP}")).exists());
         held.execute_batch("COMMIT").unwrap();
+    }
+
+    #[test]
+    fn keeping_the_side_files_of_a_database_with_no_wal_makes_no_second_name() {
+        let dir = TempDir::new();
+        let path = dir.path().join(DB_FILE);
+        keep_side_files(&path).unwrap();
+        assert!(!with_suffix(&path, &format!("{WAL}{KEEP}")).exists());
+    }
+
+    #[test]
+    fn a_second_name_left_by_an_open_that_died_is_kept_as_it_is() {
+        let dir = TempDir::new();
+        let path = dir.path().join(DB_FILE);
+        write_file(&with_suffix(&path, WAL), b"new wal");
+        write_file(&with_suffix(&path, &format!("{WAL}{KEEP}")), b"old wal");
+        keep_side_files(&path).unwrap();
+        assert_eq!(
+            fs::read(with_suffix(&path, &format!("{WAL}{KEEP}"))).unwrap(),
+            b"old wal"
+        );
+    }
+
+    #[test]
+    fn releasing_a_second_name_that_is_already_gone_is_not_an_error() {
+        let dir = TempDir::new();
+        release_side_files(&dir.path().join(DB_FILE)).unwrap();
     }
 
     #[test]

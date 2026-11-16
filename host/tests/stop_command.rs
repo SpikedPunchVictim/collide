@@ -43,7 +43,8 @@ fn fake_shell(root: &TempRoot) -> String {
         .to_string()
 }
 
-/// `collide <args>` with an environment of the test's own: nothing of the caller's, and `extra` on top.
+/// `collide <args>` with an environment of the test's own: nothing of the caller's, and `extra` on top. It is not a
+/// child of this process (see `common::detached`), so a test run inside a run of Collide is not its run's agent.
 fn collide(root: &TempRoot, args: &[&str], extra: &[(&str, &str)]) -> Output {
     let mut command = Command::new(COLLIDE);
     command
@@ -57,7 +58,7 @@ fn collide(root: &TempRoot, args: &[&str], extra: &[(&str, &str)]) -> Output {
     for (name, value) in extra {
         command.env(name, value);
     }
-    command.output().expect("collide runs")
+    common::detached::Detached::start(root, &command).wait()
 }
 
 fn text(bytes: &[u8]) -> String {

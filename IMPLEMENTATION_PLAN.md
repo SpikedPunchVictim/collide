@@ -3742,7 +3742,10 @@ hook the test injects). The real launchd check runs only with `COLLIDE_REAL_LAUN
   changed type fails. `COLLIDE_REAL_LAUNCHD=1` runs a fake-Claude phase through a SIGKILL of the launchd-started
   daemon, and with `COLLIDE_REAL_CLAUDE=1` a real `claude -p` phase under it
   (`host/tests/adapters/claude/launchd_run.rs`).
-- **Dogfood** (part L): `collide run` takes an item from `.collide/planning/` as its task file.
+- **Dogfood** (part L): `collide run` takes an item from `.collide/planning/` as its task file. Collide's own tests
+  pass inside a run (ts-0074-cu): the daemon reads the environment a process was started with, so a test keeps
+  itself out of the walk. An in-process daemon gets a process tree that stops at the test, and a `collide` command
+  starts detached from the test.
 - `collide run` on a file task: a new worktree, one Claude phase, the record. The run uses the built-in
   `collide/builder` role with the alias `fast` (a run may name another), and the three context variables are set
   after the strip, so they win over a role's `env:`.

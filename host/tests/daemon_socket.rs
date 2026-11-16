@@ -71,6 +71,7 @@ fn fake_shell(root: &TempRoot) -> String {
 
 fn options(root: &TempRoot, log: Box<dyn Write + Send>) -> DaemonOptions {
     let mut options = DaemonOptions::new(DaemonPaths::under(root.path()), fake_shell(root), log);
+    options.process_tree = common::test_process_tree();
     options.capture = CaptureOptions {
         timeout: Duration::from_secs(10),
         cap_bytes: 1024 * 1024,

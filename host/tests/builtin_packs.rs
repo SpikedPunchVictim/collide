@@ -302,3 +302,57 @@ fn the_bundled_provider_answers_initialize_and_list_over_a_fixture_root() {
         ]
     );
 }
+
+// ---- a test that needs `node` and cannot find it (ts-0074-cu) -----------------------------------------------------
+
+#[test]
+fn the_message_for_a_missing_node_names_node_and_every_folder_searched() {
+    let (path, without, _) = fake_path("test-missing-node");
+    let other = scratch("test-missing-node").join("empty-too");
+    fs::create_dir_all(&other).unwrap();
+    let path_without = std::env::join_paths([&without, &other]).unwrap();
+    assert_eq!(common::node_missing_message(&path), None);
+    let message = common::node_missing_message(&path_without).expect("no node there");
+    assert!(message.contains("`node`"), "{message}");
+    assert!(
+        message.contains(&format!(
+            "searched: {}, {}",
+            without.display(),
+            other.display()
+        )),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_test_that_needs_node_fails_naming_node_and_the_path_when_the_path_has_none() {
+    let empty = scratch("test-no-node-path");
+    let _ = fs::remove_dir_all(&empty);
+    fs::create_dir_all(&empty).unwrap();
+    // This binary again, on one other test that builds the bundle, with a `PATH` that holds nothing.
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "the_bundle_holds_both_packs_the_compiled_provider_and_its_own_sdk_copy",
+        ])
+        .env_clear()
+        .env("PATH", &empty)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !output.status.success(),
+        "it was skipped or passed:\n{text}"
+    );
+    assert!(text.contains("needs `node`"), "{text}");
+    assert!(
+        text.contains(&format!("searched: {}", empty.display())),
+        "{text}"
+    );
+    let _ = fs::remove_dir_all(&empty);
+}

@@ -149,7 +149,9 @@ fn clean(program: &str) -> Command {
     command
 }
 
-/// Stops the walk at this test process: what is above it (cargo, a shell, a run of Collide) is not the test's.
+/// Stops the walk at this test process and does not read it: what is at or above it (cargo, a shell, a phase of a
+/// Collide run, whose `COLLIDE_RUN` is in the environment this process was started with and cannot be changed) is not
+/// the test's. A child's own marker is still read.
 struct CutAtThisProcess<'a> {
     inner: &'a SystemProcessTree,
 }
@@ -164,7 +166,11 @@ impl ProcessTree for CutAtThisProcess<'_> {
     }
 
     fn run_marker(&self, pid: u32) -> Option<String> {
-        self.inner.run_marker(pid)
+        if pid == std::process::id() {
+            None
+        } else {
+            self.inner.run_marker(pid)
+        }
     }
 
     fn is_app(&self, pid: u32) -> bool {

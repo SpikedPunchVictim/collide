@@ -88,7 +88,9 @@
 //! | `daemon: socket server` | [`bind_socket`], [`Daemon`] | the bind, the handshake and the JSON-RPC loop, over [`crate::auth`]'s checks |
 //! | `daemon: adopt shims` | [`adopt_shims`], [`Phases::adopt`] | scan `runs_dir`, classify each shim by `exit.json` and by pid plus start time, reattach, settle |
 
-use crate::auth::{self, Admitted, Caller, Session, StdFs, SystemProcessTree, UnixPeer};
+use crate::auth::{
+    self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer,
+};
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
@@ -430,6 +432,11 @@ pub struct DaemonOptions {
     pub capture: CaptureOptions,
     /// The app's executable, so a peer below it is the app ([`crate::auth::SystemProcessTree`]).
     pub app_executable: Option<PathBuf>,
+    /// Who is asking is read from this tree of processes. `None` is the system's own ([`SystemProcessTree`] over
+    /// `app_executable`). A test that runs the daemon in its own process gives a tree that stops at the test, because
+    /// the test process is the peer's parent, and a test run inside a run of Collide has the run's `COLLIDE_RUN` in
+    /// the environment it was started with, which no test can change (ts-0074-cu).
+    pub process_tree: Option<Arc<dyn ProcessTree + Send + Sync>>,
     pub clocks: Arc<dyn Clocks + Send + Sync>,
     /// Where the log goes.
     pub log: Box<dyn Write + Send>,
@@ -495,6 +502,7 @@ impl DaemonOptions {
             shell,
             capture: CaptureOptions::default(),
             app_executable: None,
+            process_tree: None,
             clocks: Arc::new(SystemClocks),
             log,
             handshake_wait: HANDSHAKE_WAIT,
@@ -533,7 +541,7 @@ struct Shared {
     file_runs: Arc<FileRuns>,
     shell: String,
     capture: CaptureOptions,
-    tree: SystemProcessTree,
+    tree: Arc<dyn ProcessTree + Send + Sync>,
     uid: u32,
     clocks: Arc<dyn Clocks + Send + Sync>,
     log: Arc<DaemonLog>,
@@ -603,6 +611,7 @@ impl Daemon {
             shell,
             capture,
             app_executable,
+            process_tree,
             clocks,
             log,
             handshake_wait,
@@ -799,7 +808,7 @@ impl Daemon {
             file_runs,
             shell,
             capture,
-            tree: SystemProcessTree::new(app_executable),
+            tree: process_tree.unwrap_or_else(|| Arc::new(SystemProcessTree::new(app_executable))),
             uid,
             started_wall_ms: clocks.read(Clock::Wall).nanos / 1_000_000,
             started_uptime: clocks.read(Clock::Uptime),
@@ -1275,7 +1284,11 @@ fn drain_then_close(stream: &mut UnixStream) {
 
 fn serve_connection(shared: &Shared, mut stream: UnixStream) {
     let pid = crate::sysproc::peer_pid(&stream).ok();
-    let admitted = match auth::admit(shared.uid, &UnixPeer { stream: &stream }, &shared.tree) {
+    let admitted = match auth::admit(
+        shared.uid,
+        &UnixPeer { stream: &stream },
+        shared.tree.as_ref(),
+    ) {
         Ok(admitted) => admitted,
         Err(refused) => {
             shared

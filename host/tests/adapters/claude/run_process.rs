@@ -8,6 +8,7 @@
 //! run's shim and child by identity (pid and start time), and the daemon by the pid it reports on this test's own socket.
 //! Nothing here runs the real `claude`, reads the owner's files or reaches a network.
 
+use super::common::detached::Detached;
 use super::common::{TempRoot, daemon_status, kill_child_of, signal_if_same, wait_until};
 use super::fake::{BinarySpec, ClaudeBinary, recording};
 use super::file_run::git;
@@ -117,11 +118,15 @@ impl Proc {
         command
     }
 
+    /// `collide <args>` in `cwd`, started so that this process is not among its parents (`common::detached`): a test run
+    /// inside a run of Collide must not be seen as its run's agent.
+    pub(super) fn start(&self, args: &[&str], cwd: &Path) -> Detached {
+        Detached::start(&self.root, &self.command(args, cwd))
+    }
+
     /// `collide <args>` in the repository, to its end.
     pub(super) fn collide(&self, args: &[&str]) -> Output {
-        self.command(args, &self.repo)
-            .output()
-            .expect("collide runs")
+        self.start(args, &self.repo).wait()
     }
 
     fn daemon_runs(&self) -> bool {
@@ -193,10 +198,7 @@ fn a_task_outside_any_checkout_exits_1() {
     let loose = proc.root.join("loose");
     fs::create_dir(&loose).unwrap();
     fs::write(loose.join("task.md"), "Do it.\n").unwrap();
-    let output = proc
-        .command(&["run", "task.md"], &loose)
-        .output()
-        .expect("collide runs");
+    let output = proc.start(&["run", "task.md"], &loose).wait();
     assert_eq!(output.status.code(), Some(1), "{}", text(&output.stderr));
     assert!(text(&output.stderr).contains("git repository"));
 }
@@ -275,19 +277,14 @@ fn a_run_goes_on_when_the_command_is_killed_and_resume_follows_it_to_its_end() {
     let scratch = TempRoot::new();
     let slow = slowed_report(&scratch, 3);
     let proc = Proc::new(&slow);
-    let mut first = proc
-        .command(&["run", &task_of(&proc)], &proc.repo)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("collide runs");
-    let lines = lines_of(&mut first);
+    let first = proc.start(&["run", &task_of(&proc)], &proc.repo);
+    let lines = first.lines();
     let mut run = None;
     while run.is_none() {
         let line = lines
             .recv_timeout(Duration::from_secs(60))
             .unwrap_or_else(|_| {
-                let _ = first.kill();
+                first.kill();
                 panic!("the command never said it started")
             });
         if let Some(rest) = line.strip_prefix("run ")
@@ -298,8 +295,8 @@ fn a_run_goes_on_when_the_command_is_killed_and_resume_follows_it_to_its_end() {
     }
     let run = run.unwrap();
     // The command ends here, as a closed terminal ends it. This is the test's own child.
-    first.kill().expect("the command is killed");
-    first.wait().expect("the command is reaped");
+    first.kill();
+    first.wait();
 
     let second = proc.collide(&["run", "--resume", &run]);
     let out = text(&second.stdout);
