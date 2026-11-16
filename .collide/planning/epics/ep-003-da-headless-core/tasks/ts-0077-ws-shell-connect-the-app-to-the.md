@@ -1,7 +1,7 @@
 ---
 id: ts-0077-ws
 kind: task
-status: active
+status: done
 title: "Shell: connect the app to the daemon"
 owners: []
 links:
