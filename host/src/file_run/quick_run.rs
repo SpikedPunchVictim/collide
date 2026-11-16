@@ -23,7 +23,8 @@
 //!   leftovers are committed too, so its diff shows them; only a run that is done can fail on that commit (a hook of
 //!   the repository that refuses it).
 //! - **The context stays.** A prompt run's context is kept in the store after the run ends, because accept,
-//!   re-prompt and discard (ts-0079, ts-0080) need its worktree, branch, base and session.
+//!   re-prompt and discard (ts-0079, ts-0080) need its worktree, branch, base and session. Accept (the `accept` module)
+//!   removes the worktree and keeps the context, with the workspace `removed`, so `run.get` still knows the run.
 //! - **The diff.** [`FileRuns::diff`] is [`crate::run_diff`] between the recorded commit and the branch's head.
 
 use super::{Begin, FileRuns, Live, locked, problem};
@@ -59,6 +60,9 @@ pub struct QuickSequence {
     /// The category the task moves to when the run ends done (and, here, however it ends: the review is where the
     /// person decides).
     pub on_end: Category,
+    /// The category the task moves to when accept merges the run. In the engine this is the task source's operation
+    /// that follows an `integrate` (0.4); the pack declares none yet, so it is written here.
+    pub on_merged: Category,
 }
 
 pub const QUICK: QuickSequence = QuickSequence {
@@ -67,7 +71,11 @@ pub const QUICK: QuickSequence = QuickSequence {
     role: BUILDER_ROLE_NAME,
     on_start: Category::Active,
     on_end: Category::Review,
+    on_merged: Category::Done,
 };
+
+/// The Review item's title for a run that is done.
+pub(super) const READY_TITLE: &str = "The agent finished and its changes are ready to review";
 
 /// The subject of the commit Collide makes of what the agent left uncommitted.
 pub const LEFTOVER_COMMIT: &str = "Commit what the agent left uncommitted";
@@ -289,7 +297,7 @@ impl FileRuns {
     }
 
     /// Moves the task to the status its source declares for `category`, and records the change as the run's.
-    fn move_task(
+    pub(super) fn move_task(
         &self,
         phases: &crate::phases::Phases,
         quick: &QuickRun,
@@ -356,7 +364,7 @@ impl FileRuns {
                 RunState::Ended {
                     outcome: NonEmpty::new("done").expect("the text is not empty"),
                 },
-                "The agent finished and its changes are ready to review",
+                READY_TITLE,
             ),
             (RunState::Ended { .. }, Err(_)) => (
                 RunState::Failed {},
@@ -377,7 +385,20 @@ impl FileRuns {
                 quick.task
             ));
         }
-        let answers = if matches!(to, RunState::Ended { .. }) {
+        self.push_review(
+            &run,
+            &quick.task,
+            matches!(to, RunState::Ended { .. }),
+            title,
+        );
+        to
+    }
+
+    /// Puts the run's `Review` item in the Queue: accept, re-prompt and discard for a run that is done, and re-prompt
+    /// and discard alone for one that is not, so no worktree is left with no way to remove it. The id is the run's, so
+    /// pushing it again replaces the item.
+    pub(super) fn push_review(&self, run: &str, task: &str, done: bool, title: &str) {
+        let answers = if done {
             vec![
                 AnswerKind::Accept,
                 AnswerKind::Reprompt,
@@ -389,9 +410,9 @@ impl FileRuns {
         self.config.queue.push(QueueItem {
             id: format!("{run}-review"),
             kind: QueueKind::Review,
-            run: Some(run),
+            run: Some(run.to_string()),
             phase: None,
-            task: Some(quick.task),
+            task: Some(task.to_string()),
             since_ms: self.now_ms(),
             title: title.to_string(),
             permission: None,
@@ -401,7 +422,6 @@ impl FileRuns {
             show: Vec::new(),
             answers,
         });
-        to
     }
 
     /// Commits what the worktree holds that is not committed, as one commit of Collide's own. Nothing is made when

@@ -32,10 +32,10 @@ use std::time::Duration;
 
 // ---- helpers ------------------------------------------------------------------------------------------------------
 
-const PROMPT: &str = "Rename the widget";
+pub(super) const PROMPT: &str = "Rename the widget";
 
 /// Runs git in `dir` with a cleared environment and returns what it printed.
-fn git_out(dir: &Path, args: &[&str]) -> String {
+pub(super) fn git_out(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args([
             "-c",
@@ -69,7 +69,7 @@ fn call<P: Serialize, R: DeserializeOwned>(fx: &mut Fixture, method: &str, param
 }
 
 /// The code and message of the error the daemon answers `method` with.
-fn rpc_error<P: Serialize>(fx: &mut Fixture, method: &str, params: &P) -> (i64, String) {
+pub(super) fn rpc_error<P: Serialize>(fx: &mut Fixture, method: &str, params: &P) -> (i64, String) {
     let answer: Result<Value, ClientError> =
         fx.client
             .call(method, params, Some(Duration::from_secs(60)));
@@ -79,7 +79,7 @@ fn rpc_error<P: Serialize>(fx: &mut Fixture, method: &str, params: &P) -> (i64, 
     }
 }
 
-fn open(fx: &mut Fixture, folder: &Path) -> String {
+pub(super) fn open(fx: &mut Fixture, folder: &Path) -> String {
     let opened: BoardOpenResult = call(
         fx,
         "board.open",
@@ -91,7 +91,13 @@ fn open(fx: &mut Fixture, folder: &Path) -> String {
     opened.board.expect("the folder opens as a board").id
 }
 
-fn apply(fx: &mut Fixture, board: &str, op: &str, id: Option<&str>, args: Value) -> ApplyResult {
+pub(super) fn apply(
+    fx: &mut Fixture,
+    board: &str,
+    op: &str,
+    id: Option<&str>,
+    args: Value,
+) -> ApplyResult {
     let params = TaskApplyParams {
         board: board.to_string(),
         source: Some("scratch".to_string()),
@@ -108,14 +114,14 @@ fn apply(fx: &mut Fixture, board: &str, op: &str, id: Option<&str>, args: Value)
 }
 
 /// A scratch task with `prompt`, and its key.
-fn create(fx: &mut Fixture, board: &str, prompt: &str) -> String {
+pub(super) fn create(fx: &mut Fixture, board: &str, prompt: &str) -> String {
     match apply(fx, board, "create", None, json!({"prompt": prompt})) {
         ApplyResult::Ok { task, .. } => task.key,
         other => panic!("create should work: {other:?}"),
     }
 }
 
-fn task(fx: &mut Fixture, board: &str, key: &str) -> Task {
+pub(super) fn task(fx: &mut Fixture, board: &str, key: &str) -> Task {
     call::<_, TaskGetResult>(
         fx,
         "task.get",
@@ -129,7 +135,7 @@ fn task(fx: &mut Fixture, board: &str, key: &str) -> Task {
     .expect("the task is there")
 }
 
-fn start_params(board: &str, tasks: &[&str], workflow: Option<&str>) -> RunStartParams {
+pub(super) fn start_params(board: &str, tasks: &[&str], workflow: Option<&str>) -> RunStartParams {
     RunStartParams {
         board: board.to_string(),
         tasks: tasks.iter().map(ToString::to_string).collect(),
@@ -141,18 +147,18 @@ fn start_params(board: &str, tasks: &[&str], workflow: Option<&str>) -> RunStart
     }
 }
 
-fn start(fx: &mut Fixture, params: &RunStartParams) -> RunStartResult {
+pub(super) fn start(fx: &mut Fixture, params: &RunStartParams) -> RunStartResult {
     call(fx, "run.start", params)
 }
 
-fn started(fx: &mut Fixture, board: &str, key: &str) -> String {
+pub(super) fn started(fx: &mut Fixture, board: &str, key: &str) -> String {
     match start(fx, &start_params(board, &[key], None)) {
         RunStartResult::Started { run } => run,
         RunStartResult::Refused { problems } => panic!("refused: {problems:?}"),
     }
 }
 
-fn refusal(result: RunStartResult) -> Vec<String> {
+pub(super) fn refusal(result: RunStartResult) -> Vec<String> {
     match result {
         RunStartResult::Refused { problems } => problems
             .into_iter()
@@ -162,7 +168,7 @@ fn refusal(result: RunStartResult) -> Vec<String> {
     }
 }
 
-fn run_get(fx: &mut Fixture, run: &str) -> RunGetResult {
+pub(super) fn run_get(fx: &mut Fixture, run: &str) -> RunGetResult {
     call(
         fx,
         "run.get",
@@ -172,7 +178,11 @@ fn run_get(fx: &mut Fixture, run: &str) -> RunGetResult {
     )
 }
 
-fn wait_state(fx: &mut Fixture, run: &str, want: impl Fn(&RunState) -> bool) -> RunState {
+pub(super) fn wait_state(
+    fx: &mut Fixture,
+    run: &str,
+    want: impl Fn(&RunState) -> bool,
+) -> RunState {
     let until = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         let state = run_get(fx, run).summary.state;
@@ -187,11 +197,11 @@ fn wait_state(fx: &mut Fixture, run: &str, want: impl Fn(&RunState) -> bool) -> 
     }
 }
 
-fn wait_ended(fx: &mut Fixture, run: &str) -> RunState {
+pub(super) fn wait_ended(fx: &mut Fixture, run: &str) -> RunState {
     wait_state(fx, run, |state| matches!(state, RunState::Ended { .. }))
 }
 
-fn wait_item(fx: &mut Fixture, run: &str, kind: QueueKind) -> QueueItem {
+pub(super) fn wait_item(fx: &mut Fixture, run: &str, kind: QueueKind) -> QueueItem {
     let until = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(item) = fx.queue(run).into_iter().find(|item| item.kind == kind) {
@@ -205,7 +215,7 @@ fn wait_item(fx: &mut Fixture, run: &str, kind: QueueKind) -> QueueItem {
     }
 }
 
-fn answer(fx: &mut Fixture, item: &QueueItem, answer: QueueAnswer) -> QueueAnswerResult {
+pub(super) fn answer(fx: &mut Fixture, item: &QueueItem, answer: QueueAnswer) -> QueueAnswerResult {
     call(
         fx,
         "queue.answer",
@@ -216,7 +226,7 @@ fn answer(fx: &mut Fixture, item: &QueueItem, answer: QueueAnswer) -> QueueAnswe
     )
 }
 
-fn diff(fx: &mut Fixture, run: &str, path: Option<&str>) -> RunDiffResult {
+pub(super) fn diff(fx: &mut Fixture, run: &str, path: Option<&str>) -> RunDiffResult {
     call(
         fx,
         "run.diff",
@@ -228,7 +238,7 @@ fn diff(fx: &mut Fixture, run: &str, path: Option<&str>) -> RunDiffResult {
 }
 
 /// `report.jsonl` with `steps` after the turn it waits for, in `root`.
-fn report_with(root: &TempRoot, steps: &[Value]) -> PathBuf {
+pub(super) fn report_with(root: &TempRoot, steps: &[Value]) -> PathBuf {
     let text = fs::read_to_string(recording("report")).unwrap();
     let mut lines = Vec::new();
     let mut inserted = false;
@@ -244,20 +254,23 @@ fn report_with(root: &TempRoot, steps: &[Value]) -> PathBuf {
     path
 }
 
-fn write_file(path: &str, text: &str) -> Value {
+pub(super) fn write_file(path: &str, text: &str) -> Value {
     json!({"write_file": {"path": path, "text": text}})
 }
 
 /// A fixture whose agent does `steps`, a board on its repository, and one scratch task with `PROMPT`.
-fn quick(root: &TempRoot, steps: &[Value]) -> (Fixture, String, String) {
+pub(super) fn quick(root: &TempRoot, steps: &[Value]) -> (Fixture, String, String) {
     let mut fx = Fixture::new(&report_with(root, steps), Setup::default());
     let repo = fx.repo.clone();
+    // The identity of the merge commits that accept makes in the checkout: the daemon's git reads no global one.
+    git_out(&repo, &["config", "user.name", "test"]);
+    git_out(&repo, &["config", "user.email", "test@example.invalid"]);
     let board = open(&mut fx, &repo);
     let key = create(&mut fx, &board, PROMPT);
     (fx, board, key)
 }
 
-fn file(path: &str, status: DiffStatus, additions: u32, deletions: u32) -> DiffFile {
+pub(super) fn file(path: &str, status: DiffStatus, additions: u32, deletions: u32) -> DiffFile {
     DiffFile {
         path: path.to_string(),
         old_path: None,
@@ -267,7 +280,7 @@ fn file(path: &str, status: DiffStatus, additions: u32, deletions: u32) -> DiffF
     }
 }
 
-fn status_moves(events: &[EventBody]) -> Vec<String> {
+pub(super) fn status_moves(events: &[EventBody]) -> Vec<String> {
     events
         .iter()
         .filter_map(|body| match body {
@@ -279,7 +292,7 @@ fn status_moves(events: &[EventBody]) -> Vec<String> {
         .collect()
 }
 
-fn workspace_moves(events: &[EventBody]) -> Vec<WorkspaceState> {
+pub(super) fn workspace_moves(events: &[EventBody]) -> Vec<WorkspaceState> {
     events
         .iter()
         .filter_map(|body| match body {
@@ -405,7 +418,7 @@ fn the_workflow_may_be_named() {
 
 // ---- run.diff -----------------------------------------------------------------------------------------------------
 
-fn changes_and_commits() -> Vec<Value> {
+pub(super) fn changes_and_commits() -> Vec<Value> {
     vec![
         write_file("src/a.rs", "fn a() {}\n"),
         write_file("README", "hello\nmore\n"),
@@ -881,13 +894,12 @@ fn a_board_whose_root_is_a_linked_worktree_runs_from_the_branch_it_is_on() {
 // ---- what is not built yet ----------------------------------------------------------------------------------------
 
 #[test]
-fn accept_reprompt_and_discard_are_not_built_yet() {
+fn reprompt_and_discard_are_not_built_yet() {
     let root = TempRoot::new();
     let (mut fx, board, key) = quick(&root, &[]);
     let run = started(&mut fx, &board, &key);
     let item = wait_item(&mut fx, &run, QueueKind::Review);
     for reply in [
-        QueueAnswer::Accept {},
         QueueAnswer::Reprompt {
             prompt: "again".to_string(),
         },

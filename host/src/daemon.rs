@@ -53,9 +53,10 @@
 //! the published one, [`crate::claude_versions`]), `run.stop`, `run.start_file` (a task file run with
 //! the built-in builder role, [`crate::file_run`]), `run.start` and `run.diff` (a prompt run of `collide/quick` up to
 //! its review, [`crate::file_run::quick_run`]), `queue.list` and `queue.answer` (the stored Queue,
-//! [`crate::queue`]), `board.open` and `board.list` (a git checkout as a board, [`crate::boards`]), and `task.get` and
-//! `task.apply` for scratch tasks ([`crate::scratch`]), `run.list` and `run.get` (from the store's index of runs,
-//! [`crate::run_store`]) and `daemon.subscribe` are served here; the other methods are other items' and answer
+//! [`crate::queue`]; accept on a review merges the run's branch into the checkout, [`crate::file_run`]), `board.open`
+//! and `board.list` (a git checkout as a board, [`crate::boards`]), and `task.get` and `task.apply` for scratch tasks
+//! ([`crate::scratch`]), `run.list` and `run.get` (from the store's index of runs, [`crate::run_store`]) and
+//! `daemon.subscribe` are served here; the other methods are other items' and answer
 //! `method not found`.
 //!
 //! ## The event stream
@@ -2024,8 +2025,8 @@ fn queue_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
     Ok(serde_json::to_value(QueueListResult { items }).expect("a result is JSON"))
 }
 
-/// `queue.answer`: answers one Queue item (a permission request, a usage limit's Resume, a Stop). Only a person does
-/// it: a run's agent that could answer its own permission request would make the request pointless.
+/// `queue.answer`: answers one Queue item (a permission request, a usage limit's Resume, a Stop, an accept). Only a
+/// person does it: a run's agent that could answer its own permission request would make the request pointless.
 fn queue_answer(
     shared: &Shared,
     session: &Session,

@@ -24,12 +24,15 @@
 //! - **uncommitted changes**: a change to a tracked file, or an untracked file that is not ignored. An untracked file
 //!   counts, because removing the worktree would delete work that git has no copy of. An ignored file (build output)
 //!   does not, because it can be made again; removal deletes it;
-//! - **commits not merged into its base**: `git rev-list --count <base>..HEAD` is not zero. A branch that was squash
-//!   merged or rebased onto the base has commits the base does not contain, so it is refused as well: the safe
-//!   answer when git cannot tell.
+//! - **commits not merged into its base**: `git rev-list --count <base>..HEAD` is not zero, and the base does not
+//!   already have the branch's change. A branch that was squash merged or rebased onto the base has commits the base
+//!   does not contain, so the count alone would refuse it. It counts as merged when a merge of the two is clean and
+//!   makes the base's own tree (`git merge-tree --write-tree`): the base already has the change (0.2: a merge that
+//!   finds its change at the target is a success). A change that the base has not got, or took out again, is still
+//!   refused.
 //!
 //! A worktree that is dirty and unmerged is called dirty. When removal goes ahead the branch Collide made is deleted
-//! with it (`git branch -D` is safe, since every commit is in the base).
+//! with it (`git branch -D` is safe, since every change is in the base).
 //!
 //! The answers come from git's machine-readable output (`status --porcelain=v1 -z`, `rev-list --count`,
 //! `rev-parse`), run with `LC_ALL=C`, never from text meant for people.
@@ -180,9 +183,15 @@ impl Git {
         if output.status.success() {
             Ok(output.stdout)
         } else {
+            // Some commands say why on standard output (a merge's conflicts), so it is the fallback.
+            let said = if output.stderr.iter().all(u8::is_ascii_whitespace) {
+                &output.stdout
+            } else {
+                &output.stderr
+            };
             Err(WorkspaceError::Git {
                 args: args.join(" "),
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                stderr: String::from_utf8_lossy(said).trim().to_string(),
             })
         }
     }
@@ -190,6 +199,66 @@ impl Git {
     pub(crate) fn text(&self, cwd: &Path, args: &[&str]) -> Result<String, WorkspaceError> {
         let bytes = self.run(cwd, args)?;
         Ok(String::from_utf8_lossy(&bytes).trim().to_string())
+    }
+}
+
+/// What `git merge-tree --write-tree` found for a merge of `theirs` into `ours`, without touching any checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MergeCheck {
+    /// The merge is clean, and its tree is `ours`' own: `ours` already has the change of `theirs`. It covers a branch
+    /// merged, squash merged or rebased, and one that changed nothing.
+    InBase,
+    /// The merge is clean and makes a new tree.
+    Clean,
+    /// The merge conflicts in these files, sorted.
+    Conflict { files: Vec<String> },
+}
+
+impl Git {
+    /// Checks a merge of `theirs` into `ours` (both refs, or commits) with `git merge-tree --write-tree`. It writes
+    /// objects and changes no ref, no index and no file.
+    pub(crate) fn merge_check(
+        &self,
+        cwd: &Path,
+        ours: &str,
+        theirs: &str,
+    ) -> Result<MergeCheck, WorkspaceError> {
+        let args = [
+            "merge-tree",
+            "--write-tree",
+            "--name-only",
+            "-z",
+            ours,
+            theirs,
+        ];
+        let output = self
+            .command(cwd, &args)
+            .output()
+            .map_err(WorkspaceError::GitMissing)?;
+        // The output is the merged tree, then the conflicted files, each ended by a NUL, then an empty field.
+        let mut fields = output.stdout.split(|byte| *byte == 0);
+        let tree = String::from_utf8_lossy(fields.next().unwrap_or_default()).into_owned();
+        match output.status.code() {
+            Some(0) => {
+                let ours_tree =
+                    self.text(cwd, &["rev-parse", "--verify", &format!("{ours}^{{tree}}")])?;
+                Ok(if tree == ours_tree {
+                    MergeCheck::InBase
+                } else {
+                    MergeCheck::Clean
+                })
+            }
+            Some(1) => {
+                let mut files: Vec<String> = fields
+                    .take_while(|field| !field.is_empty())
+                    .map(|field| String::from_utf8_lossy(field).into_owned())
+                    .collect();
+                files.sort();
+                files.dedup();
+                Ok(MergeCheck::Conflict { files })
+            }
+            _ => Err(Git::stdout_of(&args, output).expect_err("a failed command is an error")),
+        }
     }
 }
 
@@ -237,6 +306,12 @@ impl BuiltinWorkspace {
 
     pub fn state(&self) -> WorkspaceState {
         self.state
+    }
+
+    /// Changes the ref that removal checks the branch is merged into. A workspace made from a commit is removed against
+    /// the branch that commit was on: after accept the commits are in that branch, and not ahead of the commit.
+    pub fn set_base(&mut self, base: &str) {
+        self.spec.base = base.to_string();
     }
 
     /// `{ path, gitDir }`, once the worktree is made.
@@ -351,6 +426,12 @@ impl BuiltinWorkspace {
     }
 
     fn refuse_work(&self) -> Result<(), WorkspaceError> {
+        self.refuse_dirty()?;
+        self.refuse_unmerged()
+    }
+
+    /// Refuses a worktree that has uncommitted changes or untracked files that git does not ignore.
+    pub fn refuse_dirty(&self) -> Result<(), WorkspaceError> {
         let path = &self.spec.path;
         let status = self.git.run(
             path,
@@ -376,6 +457,11 @@ impl BuiltinWorkspace {
                 ),
             });
         }
+        Ok(())
+    }
+
+    fn refuse_unmerged(&self) -> Result<(), WorkspaceError> {
+        let path = &self.spec.path;
         let range = format!("{}..HEAD", self.spec.base);
         let count = self
             .git
@@ -385,7 +471,7 @@ impl BuiltinWorkspace {
                 args: format!("rev-list --count {range}"),
                 stderr: format!("the count is not a number: {error}"),
             })?;
-        if count > 0 {
+        if count > 0 && !self.change_is_in_base()? {
             let commits = if count == 1 { "commit" } else { "commits" };
             return Err(WorkspaceError::Refused {
                 reason: RemoveRefusal::Unmerged,
@@ -397,6 +483,17 @@ impl BuiltinWorkspace {
             });
         }
         Ok(())
+    }
+}
+
+impl BuiltinWorkspace {
+    /// Whether the base already has the change of the worktree's `HEAD`, though `HEAD` has commits it does not
+    /// contain: a squash or a rebase (see the module notes).
+    fn change_is_in_base(&self) -> Result<bool, WorkspaceError> {
+        let check = self
+            .git
+            .merge_check(&self.spec.path, &self.spec.base, "HEAD")?;
+        Ok(check == MergeCheck::InBase)
     }
 }
 

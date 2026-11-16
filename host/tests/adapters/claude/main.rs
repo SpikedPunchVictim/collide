@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 #[path = "../../common/mod.rs"]
 mod common;
 
+mod accept;
 mod agent_setup;
 mod canary;
 mod capabilities;

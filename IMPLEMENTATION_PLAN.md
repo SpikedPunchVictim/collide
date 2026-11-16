@@ -487,9 +487,10 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   and what it will do; the outcome names the result. After a restart the engine finds an intent with no outcome and
   checks the world first, with the step's own check (is the branch merged, does the PR exist, is the label set), and
   never repeats the step blind. When the check cannot tell, the run waits in the Queue as "outcome unknown", for a
-  person to say. A merge that finds its change already at the target is a success, not a conflict. Hooks run under the
-  shim like any child, so a hook's side effect is covered by the same rule (Stage 8 tests it with a SIGKILL after
-  the intent).
+  person to say. Until Stage 9a's answer that says what happened, the item's one answer is Dismiss: it closes the
+  step as failed and gives the run its review item back, so the run is never left with no way out (ts-0079-pu). A
+  merge that finds its change already at the target is a success, not a conflict. Hooks run under the shim like any
+  child, so a hook's side effect is covered by the same rule (Stage 8 tests it with a SIGKILL after the intent).
 - **Coming back after a long close** (owner, 2026-11-15; revision 22). Collide may be closed for weeks while tasks,
   branches and worktrees change. Before anything acts on what Collide keeps, each board checks it against the world
   (a catch-up), and the person is told what changed.

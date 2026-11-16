@@ -283,6 +283,70 @@ fn removal_goes_ahead_once_the_commit_is_merged_into_the_base() {
     assert!(!fx.tree().exists());
 }
 
+/// A workspace with one commit that adds `work.txt`, idle.
+fn idle_with_work(name: &str) -> (Fixture, BuiltinWorkspace) {
+    let fx = Fixture::new(name);
+    let ws = fx.idle();
+    fs::write(fx.tree().join("work.txt"), "done\n").unwrap();
+    git(&fx.tree(), &["add", "work.txt"]);
+    git(&fx.tree(), &["commit", "-q", "-m", "work"]);
+    (fx, ws)
+}
+
+#[test]
+fn removal_goes_ahead_when_the_change_was_squash_merged_into_the_base() {
+    let (fx, mut ws) = idle_with_work("squashed");
+    git(&fx.repo, &["merge", "-q", "--squash", "collide/ts-0001"]);
+    git(&fx.repo, &["commit", "-q", "-m", "squash"]);
+    ws.remove().unwrap();
+    assert!(!fx.tree().exists());
+    assert_eq!(git(&fx.repo, &["branch", "--list", "collide/ts-0001"]), "");
+}
+
+#[test]
+fn removal_goes_ahead_when_the_change_was_rebased_onto_the_base() {
+    let (fx, mut ws) = idle_with_work("rebased");
+    fs::write(fx.repo.join("other.txt"), "later\n").unwrap();
+    git(&fx.repo, &["add", "other.txt"]);
+    git(&fx.repo, &["commit", "-q", "-m", "later"]);
+    git(&fx.repo, &["cherry-pick", "collide/ts-0001"]);
+    ws.remove().unwrap();
+    assert!(!fx.tree().exists());
+}
+
+#[test]
+fn removal_refuses_a_change_the_base_does_not_have_even_when_the_base_moved_on() {
+    let (fx, mut ws) = idle_with_work("moved-on");
+    fs::write(fx.repo.join("other.txt"), "later\n").unwrap();
+    git(&fx.repo, &["add", "other.txt"]);
+    git(&fx.repo, &["commit", "-q", "-m", "later"]);
+    expect_refused(ws.remove(), RemoveRefusal::Unmerged);
+    assert!(fx.tree().exists());
+}
+
+#[test]
+fn removal_refuses_a_change_that_was_squash_merged_and_then_taken_out_again() {
+    let (fx, mut ws) = idle_with_work("squashed-then-reverted");
+    git(&fx.repo, &["merge", "-q", "--squash", "collide/ts-0001"]);
+    git(&fx.repo, &["commit", "-q", "-m", "squash"]);
+    git(&fx.repo, &["rm", "-q", "work.txt"]);
+    git(&fx.repo, &["commit", "-q", "-m", "take it out"]);
+    expect_refused(ws.remove(), RemoveRefusal::Unmerged);
+    assert!(fx.tree().exists());
+}
+
+#[test]
+fn removal_checks_the_base_it_is_given_and_not_the_one_the_workspace_started_from() {
+    let (fx, mut ws) = idle_with_work("rebase-the-base");
+    let start = git(&fx.repo, &["rev-parse", "HEAD"]);
+    git(&fx.repo, &["merge", "-q", "--ff-only", "collide/ts-0001"]);
+    // As the daemon builds a run's workspace: from a commit, which the merged branch is ahead of.
+    ws.set_base(&start);
+    expect_refused(ws.remove(), RemoveRefusal::Unmerged);
+    ws.set_base("main");
+    ws.remove().unwrap();
+}
+
 #[test]
 fn removal_says_dirty_before_unmerged_when_both_are_true() {
     let fx = Fixture::new("both");

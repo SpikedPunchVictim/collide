@@ -49,6 +49,7 @@
 //!   on with the runs it finds: it rebuilds a running phase's session from its journal, keeps its pending requests in
 //!   the Queue, and resumes a limit that reset while no daemon ran.
 
+mod accept;
 pub mod quick_run;
 
 use crate::adapters::claude::session::ClaudeSession;
@@ -226,6 +227,8 @@ pub struct FileRuns {
     counter: AtomicU64,
     /// Held while a prompt run claims its task, so two starts on one task cannot both find it ready.
     claims: Mutex<()>,
+    /// Held while accept merges into a checkout, so two accepts never meet in git's own lock.
+    merging: Mutex<()>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -326,6 +329,7 @@ impl FileRuns {
             closed: AtomicBool::new(false),
             counter: AtomicU64::new(0),
             claims: Mutex::new(()),
+            merging: Mutex::new(()),
         }
     }
 
@@ -1026,6 +1030,7 @@ impl FileRuns {
                 self.arm_timer(phases, &run, reset_ms, Duration::ZERO);
             }
         }
+        self.recover_accepts(phases);
     }
 
     /// Starts a thread that resumes the run when its limit has reset. A limit with no reset time has no timer: only the
@@ -1266,10 +1271,16 @@ impl FileRuns {
                 }
             }
             QueueAnswer::Dismiss {} => match self.config.queue.take(item_id) {
-                Some(_) => Ok(()),
+                Some(taken) => {
+                    if taken.kind == QueueKind::OutcomeUnknown {
+                        self.dismiss_unknown(phases, &taken);
+                    }
+                    Ok(())
+                }
                 None => Err(format!("item {item_id:?} was answered already")),
             },
-            QueueAnswer::Accept {} | QueueAnswer::Reprompt { .. } | QueueAnswer::Discard {} => {
+            QueueAnswer::Accept {} => return Ok(self.accept(phases, item_id)),
+            QueueAnswer::Reprompt { .. } | QueueAnswer::Discard {} => {
                 Err(format!("{kind:?} on a review is not built yet"))
             }
             _ => Err(format!("an item of this kind does not take {kind:?} yet")),

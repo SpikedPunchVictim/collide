@@ -81,6 +81,8 @@ pub(super) struct Fixture {
     pub(super) client: OwnerClient,
     pub(super) repo: PathBuf,
     pub(super) task: PathBuf,
+    shell: PathBuf,
+    home: PathBuf,
 }
 
 pub(super) fn git(dir: &Path, args: &[&str]) {
@@ -107,6 +109,44 @@ pub(super) fn git(dir: &Path, args: &[&str]) {
         "git {args:?}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// The options of a daemon under `root`: fake Claude's shell, the temp `home`, and git that reads no configuration.
+fn daemon_options(root: &TempRoot, shell: &Path, home: &Path, setup: Setup) -> DaemonOptions {
+    let paths = DaemonPaths::under(root.path());
+    let mut options = DaemonOptions::new(
+        paths.clone(),
+        shell.to_str().unwrap().to_string(),
+        Box::new(io::sink()),
+    );
+    options.process_tree = super::common::test_process_tree();
+    options.capture = CaptureOptions {
+        timeout: Duration::from_secs(10),
+        cap_bytes: 1024 * 1024,
+        fallback: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
+    };
+    options.shim_exe = Some(PathBuf::from(env!("CARGO_BIN_EXE_collide")));
+    options.phases = PhaseOptions {
+        reply_wait: Duration::from_millis(1500),
+        unresponsive_after: Duration::from_millis(800),
+        ..PhaseOptions::default()
+    };
+    options.processes = Arc::new(Guarded::under(paths.runs_dir.clone(), Vec::new()));
+    options.home = Some(home.to_str().unwrap().to_string());
+    options.git_env = vec![
+        ("HOME".to_string(), home.to_str().unwrap().to_string()),
+        ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
+        ("GIT_CONFIG_SYSTEM".to_string(), "/dev/null".to_string()),
+        ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
+    ];
+    if let Some(free) = setup.free {
+        options.free_space = free;
+    }
+    if let Some(published) = setup.published {
+        options.claude_published = published;
+        options.claude_refresh_every = Duration::from_secs(3600);
+    }
+    options
 }
 
 impl Fixture {
@@ -151,39 +191,7 @@ impl Fixture {
         let task = root.join("task.md");
         fs::write(&task, "Add a line to README.\n").unwrap();
 
-        let paths = DaemonPaths::under(root.path());
-        let mut options = DaemonOptions::new(
-            paths.clone(),
-            shell.to_str().unwrap().to_string(),
-            Box::new(io::sink()),
-        );
-        options.process_tree = super::common::test_process_tree();
-        options.capture = CaptureOptions {
-            timeout: Duration::from_secs(10),
-            cap_bytes: 1024 * 1024,
-            fallback: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
-        };
-        options.shim_exe = Some(PathBuf::from(env!("CARGO_BIN_EXE_collide")));
-        options.phases = PhaseOptions {
-            reply_wait: Duration::from_millis(1500),
-            unresponsive_after: Duration::from_millis(800),
-            ..PhaseOptions::default()
-        };
-        options.processes = Arc::new(Guarded::under(paths.runs_dir.clone(), Vec::new()));
-        options.home = Some(home.to_str().unwrap().to_string());
-        options.git_env = vec![
-            ("HOME".to_string(), home.to_str().unwrap().to_string()),
-            ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
-            ("GIT_CONFIG_SYSTEM".to_string(), "/dev/null".to_string()),
-            ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
-        ];
-        if let Some(free) = setup.free {
-            options.free_space = free;
-        }
-        if let Some(published) = setup.published {
-            options.claude_published = published;
-            options.claude_refresh_every = Duration::from_secs(3600);
-        }
+        let options = daemon_options(&root, &shell, &home, setup);
         let daemon = Daemon::start(options).expect("the daemon starts");
         let phases = daemon.phases();
         let client = OwnerClient::connect(daemon.paths(), "file-run-test").expect("connects");
@@ -195,7 +203,22 @@ impl Fixture {
             client,
             repo: fs::canonicalize(repo).unwrap(),
             task,
+            shell,
+            home,
         }
+    }
+
+    /// Stops the daemon, and leaves none running until [`Fixture::start_daemon`].
+    pub(super) fn stop_daemon(&mut self) {
+        drop(self.daemon.take());
+    }
+
+    pub(super) fn start_daemon(&mut self) {
+        let options = daemon_options(&self.root, &self.shell, &self.home, Setup::default());
+        let daemon = Daemon::start(options).expect("the daemon starts");
+        self.phases = daemon.phases();
+        self.client = OwnerClient::connect(daemon.paths(), "file-run-test").expect("connects");
+        self.daemon = Some(daemon);
     }
 
     pub(super) fn start_params(&self) -> RunStartFileParams {
