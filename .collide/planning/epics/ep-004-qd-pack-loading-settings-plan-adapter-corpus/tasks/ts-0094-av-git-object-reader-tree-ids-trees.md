@@ -1,7 +1,7 @@
 ---
 id: ts-0094-av
 kind: task
-status: ready
+status: active
 title: "Git object reader: tree ids, trees and blobs"
 owners: []
 links:
