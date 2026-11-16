@@ -1,7 +1,7 @@
 ---
 id: ts-0079-pu
 kind: task
-status: active
+status: done
 title: "Daemon: accept a quick run with a local merge"
 owners: []
 links:
