@@ -25,6 +25,11 @@
 //! the shim does only after it has drained the child's stdout, so the journal is whole and the order of the exit and
 //! the end of stdout does not matter. The phase's last usage and its failure cause are stored in the phase's record.
 //!
+//! A feed made with [`crate::agent_feed::AgentFeed::start_on_launch`] (an ACP session's) is started by the daemon: the
+//! bytes of its `start` are written once the shim is up and before any turn, and the caller sends no first turn, as the
+//! session writes the first prompt itself. A feed rebuilt from the journal may owe writes the journal cut left undone;
+//! the watcher sends them before it reads anything, so a close of stdin never goes before them.
+//!
 //! ## How the daemon finds the shims it left behind
 //!
 //! [`crate::daemon::adopt_shims`] scans `runs_dir` for `<run>/<phase>` directories that hold a `spec.json`, which is
@@ -350,6 +355,9 @@ pub enum PhaseError {
     NotPaused(PhaseKey),
     /// The phase's last attempt is still being watched: the shim has not finished.
     Busy(PhaseKey),
+    /// The phase's shim is up and its child runs, but the session's own start could not be written to it. The child's
+    /// stdin was closed, so the phase ends on its own.
+    NotStarted(PhaseKey, LinkError),
 }
 
 impl fmt::Display for PhaseError {
@@ -369,6 +377,9 @@ impl fmt::Display for PhaseError {
             PhaseError::Transition(error) => write!(f, "{error}"),
             PhaseError::NotPaused(key) => write!(f, "the phase {key} is not paused"),
             PhaseError::Busy(key) => write!(f, "the last attempt of phase {key} has not finished"),
+            PhaseError::NotStarted(key, error) => {
+                write!(f, "the agent of phase {key} could not be started: {error}")
+            }
         }
     }
 }
@@ -748,6 +759,11 @@ impl Phases {
         self.entry(key).and_then(|e| locked(&e.inner).exit.clone())
     }
 
+    /// The folder of a phase: its spec, journal, exit record and the shim's socket.
+    pub fn phase_dir(&self, key: &PhaseKey) -> PathBuf {
+        self.shared.runs_dir.join(&key.run).join(&key.phase)
+    }
+
     /// The pid of the phase's shim, once known.
     pub fn shim_pid(&self, key: &PhaseKey) -> Option<u32> {
         self.entry(key)
@@ -927,6 +943,42 @@ impl Phases {
         }
         self.log(&format!("phase {key}: started its shim"));
         self.watch(&entry);
+        self.start_session(&entry)
+    }
+
+    /// Writes the session's own start, for a feed made to be started on launch ([`AgentFeed::start_on_launch`]): an ACP
+    /// session's `initialize`. The shim is up, so the write is journaled before the child sees it; no turn goes before
+    /// it. The first turn of such a feed is the session's own (it writes the first prompt when the agent has answered),
+    /// so the caller sends none. A feed that is not made so has nothing written here.
+    fn start_session(&self, entry: &Arc<Entry>) -> Result<(), PhaseError> {
+        let Some(feed) = &entry.feed else {
+            return Ok(());
+        };
+        let (step, events) = {
+            let mut feed = locked(feed);
+            if !feed.starts_on_launch() {
+                return Ok(());
+            }
+            let step = feed.start();
+            (step, feed.take_events())
+        };
+        self.shared
+            .metrics
+            .turn_started(&entry.key.run, &entry.key.phase);
+        self.record_events(&entry.key, &events);
+        for bytes in step.writes {
+            if let Err(error) = self.write(&entry.key, &String::from_utf8_lossy(&bytes)) {
+                // The agent would wait for a write that is not coming: its stdin is closed, so it ends and the
+                // phase settles with what the session makes of that.
+                if let Err(closed) = self.close_stdin(&entry.key) {
+                    self.log(&format!(
+                        "phase {}: stdin was not closed after the start failed: {closed}",
+                        entry.key
+                    ));
+                }
+                return Err(PhaseError::NotStarted(entry.key.clone(), error));
+            }
+        }
         Ok(())
     }
 
@@ -1537,27 +1589,19 @@ impl Phases {
         if is_settled(&locked(&entry.inner).state) {
             return;
         }
-        let (pumped, record, events) = {
+        let (pumped, record, events, pending) = {
             let mut feed = locked(feed);
             let pumped = feed.pump();
             let record = pumped.record_changed.then(|| feed.record(None));
-            (pumped, record, feed.take_events())
+            let pending = feed.pending_permissions();
+            (pumped, record, feed.take_events(), pending)
         };
         self.record_events(&entry.key, &events);
         if let Some(problem) = &pumped.problem {
             self.log(&format!("phase {}: {problem}", entry.key));
         }
         for bytes in &pumped.writes {
-            let data = String::from_utf8_lossy(bytes).into_owned();
-            // A request nobody waits on still takes the shim's answer, so the answers stay in step.
-            let (reply, _unwanted) = mpsc::channel();
-            let mut writer = locked(&link.writer);
-            locked(&link.pending).push_back(Pending {
-                sent: Instant::now(),
-                reply,
-            });
-            if let Err(error) = send(&mut writer, &DaemonMessage::Write { data }) {
-                locked(&link.pending).pop_back();
+            if let Err(error) = send_unawaited(link, bytes) {
                 self.log(&format!(
                     "phase {}: a write of the session was not sent: {error}",
                     entry.key
@@ -1577,6 +1621,56 @@ impl Phases {
         }
         for request in &pumped.requests {
             self.ask_permission(&entry.key, request);
+        }
+        if pumped.turn_ended {
+            self.drop_stale_permission_items(&entry.key, &pending);
+        }
+    }
+
+    /// Sends the writes a rebuilt session owes, without waiting for the shim's answers (the watcher is the thread that
+    /// reads them). A write the link cannot take is owed again, with the ones after it, for the next link.
+    fn send_owed(&self, entry: &Arc<Entry>, link: &Arc<Link>) {
+        let Some(feed) = &entry.feed else { return };
+        if is_settled(&locked(&entry.inner).state) {
+            return;
+        }
+        let owed = locked(feed).take_owed();
+        for (sent, bytes) in owed.iter().enumerate() {
+            if let Err(error) = send_unawaited(link, bytes) {
+                self.log(&format!(
+                    "phase {}: a write the restart left owed was not sent: {error}",
+                    entry.key
+                ));
+                locked(feed).owe_again(owed[sent..].to_vec());
+                return;
+            }
+        }
+        if !owed.is_empty() {
+            self.log(&format!(
+                "phase {}: wrote {} message(s) the restart left owed",
+                entry.key,
+                owed.len()
+            ));
+        }
+    }
+
+    /// Takes out of the Queue the permission items of the phase that the session no longer holds: a request still open
+    /// at a turn's end was answered `cancelled` by the session, and nobody is left to answer it.
+    fn drop_stale_permission_items(&self, key: &PhaseKey, pending: &[PermissionRequest]) {
+        let held: Vec<String> = pending
+            .iter()
+            .map(|request| permission_item_id(key, &request.id))
+            .collect();
+        for item in self.shared.queue.list(Some(&key.run)) {
+            if item.kind == QueueKind::Permission
+                && item.phase.as_deref() == Some(key.phase.as_str())
+                && !held.contains(&item.id)
+            {
+                self.shared.queue.take(&item.id);
+                self.shared
+                    .metrics
+                    .wait_ended_for_item(&key.run, &key.phase, &item.id);
+            }
         }
     }
 
@@ -2227,6 +2321,9 @@ impl Phases {
             state.link = Some(link.clone());
         }
         self.mark_responsive(entry);
+        // A session rebuilt from the journal may owe writes: they go before anything is read, so the agent that
+        // waits for one is answered first, and a close of stdin that follows a turn's end finds nothing still owed.
+        self.send_owed(entry, &link);
         let mut stopped_since: Option<Instant> = None;
         loop {
             if self.stopping() {
@@ -2377,6 +2474,23 @@ pub fn permission_item(key: &PhaseKey, request: &PermissionRequest, since_ms: u6
         show: Vec::new(),
         answers: vec![AnswerKind::Permission],
     }
+}
+
+/// Writes `bytes` to the child through the link without waiting for the shim's answer (the watcher is the thread that
+/// reads it). A request nobody waits on still takes the answer, so the answers stay in step with the requests.
+fn send_unawaited(link: &Link, bytes: &[u8]) -> io::Result<()> {
+    let data = String::from_utf8_lossy(bytes).into_owned();
+    let (reply, _unwanted) = mpsc::channel();
+    let mut writer = locked(&link.writer);
+    locked(&link.pending).push_back(Pending {
+        sent: Instant::now(),
+        reply,
+    });
+    let sent = send(&mut writer, &DaemonMessage::Write { data });
+    if sent.is_err() {
+        locked(&link.pending).pop_back();
+    }
+    sent
 }
 
 /// Makes the Queue's permission items of a phase the requests the session holds: one that is missing is added and one

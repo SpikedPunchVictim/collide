@@ -134,3 +134,97 @@ Write these first:
   answers on its own (`-32601` for an unserved request, `cancelled` for a request after a cancel or at a turn end)
   and before that answer leaves the agent waiting, since replay writes nothing. Settle every owed write, the prompt's
   included, with one rule, and test each cut.
+
+### Built
+
+An ACP phase now runs under the real shim and the daemon's phases, proven at the `Phases` level. No wire type
+changed, so `pnpm gen` had nothing to regenerate. No crate was added. `collide run` and `file_run.rs` still choose
+Claude; that waits for Stage 6b.
+
+- `core/src/adapter.rs`, `AgentSession::take_owed_writes` (new, defaulted to none): the writes a rebuilt session owes.
+  See the first decision below.
+- `host/src/adapters/acp/session.rs`, `AcpSession`: the owed-write rule (below). `initialize` is built in one place,
+  used by `start` and by the owed `initialize` of an empty journal.
+- `host/src/agent_feed.rs`, `AgentFeed`:
+  - `start_on_launch()` (builder, next to `close_after_turn()`) and `starts_on_launch()`.
+  - `take_owed()` and `owe_again()`. `rebuild` takes the session's owed writes once.
+  - `Pumped.turn_ended`: a turn ended in the read.
+- `host/src/adapters/acp/mod.rs`, `AcpAdapter::feed` (the constructor: `start_on_launch()` and `close_after_turn()`) and
+  `rebuild_feed` (the same through `AgentFeed::rebuild`). `AgentAdapter` has no change.
+- `host/src/phases.rs`, `Phases`:
+  - `start_agent_phase` writes the feed's `start` after the shim is up and before any turn, for a feed made with
+    `start_on_launch` only. A failed write closes stdin, is logged, and returns the new `PhaseError::NotStarted`.
+  - `serve_link` sends the feed's owed writes before its first read, so they go before any `CloseStdin`.
+  - A turn's end takes out of the Queue the phase's permission items the session no longer holds (a request open at the
+    end is answered `cancelled` by the session), and ends their wait metric.
+  - `phase_dir(key)`, and `send_unawaited` (the one place a write goes out without waiting; `pump_feed` uses it too).
+- `host/src/acp_probe.rs`, `probe_through_shim` (new module): starts the agent as a phase of a run of its own with a
+  unique name, writes `initialize`, reads the response with id 0 from the journal, closes stdin, waits 1.5 s, stops the
+  run if the child is still there, and removes the run's folder. The result is `probe(&response)`. No file run calls it.
+- `host/src/daemon.rs`: `DaemonOptions::feed_rebuilder` (default none), tried before the file run's own rebuild, so a
+  test daemon restarts an ACP phase. `Daemon::queue_items`.
+- Test fixtures: a `wait_file` step in `fake_acp.py`, and the recordings `unserved-request`, `handshake-held`,
+  `permission-reply-cancel`, `cancel-ignored` and `prompt-turn-held`.
+
+Tests, and which I saw red first:
+
+- `host/tests/acp_phases.rs` (new, 23 tests). The first run was red for 21 of 22 (the stub probe passed the
+  never-answers test by erroring); the 23rd, the Queue test, was added after. All pass now. Names:
+  - one prompt turn, written once; a second `send_turn` after the turn is a second prompt;
+  - Allow, Deny and Cancel each reach the child as the right option or outcome;
+  - restart with a permission pending; `a_restart_in_the_handshake_reads_the_answer_that_comes_after_it_and_goes_on`;
+    restart at each of five cuts that leave a write owed (`initialize`, `session/new`, the first prompt, the `-32601`
+    answer, the turn-end `cancelled` answer), each proving one write of each kind in the journal; a restart with nothing
+    owed adds no record;
+  - stop mid-turn, stop of a child that ignores the cancel, exit 0 with a request pending (`Lost`), exit 1 in the
+    handshake and in the turn (`Lost`); an empty turn (`Failed`, cause `empty_turn`, evidence `stand-in-model:1b`);
+    a request open at the turn's end leaves the Queue;
+  - the probe against `handshake-config-options`, `handshake-models` and `handshake-bare`, a probe that reads what the
+    recording says, and a probe of a child that never answers (returns within its wait, stops the child).
+- `host/tests/adapters/acp/replay.rs` and `permission.rs`: eight owed-write tests at every cut of a journal (seven red
+  first), and two `permission.rs` tests changed to take the owed writes and compare them with the live journal.
+- `host/src/agent_feed.rs`: six unit tests, with a Claude session and with the core double (red first: the methods did
+  not exist). `fake_acp.rs`: two `wait_file` tests (red first).
+
+### Decisions for the owner
+
+1. **The owed-write rule.** A replay keeps every write a replayed line made as owed. A later `in` record removes it (a
+   request by its method, a reply by the id it answers). A journal with no request at all owes `initialize`.
+   `take_owed_writes` sends what is owed through the same path as a live write, so a second call returns nothing and
+   the session equals one rebuilt from a journal that holds the writes. The rebuilt feed takes them once; the watcher
+   sends them before it reads. A live session owes nothing. One rule covers the first prompt, `-32601`, `cancelled`, a
+   model request and `initialize`. Claude's replay is unchanged (its session owes nothing). Alternative: carry the
+   writes in the replay `Step`, which `replay_records` drops by design. Recommend the built rule. Plan text, if wanted
+   (0.3, Two core traits): "A session rebuilt from the journal reports the writes the journal does not hold; the
+   daemon writes them once before it reads."
+2. **A defaulted method on `AgentSession`.** The item said no trait change; I took that as `AgentAdapter`. The method
+   is additive and defaulted, so Claude and the core double need no change. Alternative: a trait of its own that only
+   ACP implements, which the feed would have to find. Recommend the defaulted method.
+3. **A stop wins over a child that goes first.** `settle_with_exit` makes a stopped phase `Stopped` whatever the child
+   did. "`Lost` if the child goes first" is tested without a stop request.
+4. **A failed start write.** The shim is up, so the phase would wait for an agent that waits for `initialize`. The
+   daemon closes stdin, logs, and returns `PhaseError::NotStarted`; the phase then settles from the exit. Alternative:
+   stop the run. Recommend closing stdin, the lighter step.
+5. **The probe leaves its phase in the table and its events in the store.** Only the folder goes. The phase is final
+   (`live()` is zero). A later item may want a `Phases::forget`. Recommend waiting until a file run calls the probe.
+6. **A second turn with no response ends as the first did.** `AcpSession::finish` judges by the last turn it saw end,
+   so a phase whose second prompt got no answer ends `Ended` when the child exits 0. `ts-0089-wv` and `ts-0090-jd`
+   built that; I did not change it.
+
+- Owner decisions (2026-11-16, at the build): decisions taken under the owner's delegation, as recommended. Decision
+  1's `take_owed_writes` is a defaulted method on `AgentSession`; the split's "no trait change" was about starting a
+  session (`start_on_launch` on the feed), and Claude's session is unchanged by the default. Dropping stale
+  permission items at a turn's end applies to every adapter, and takes only items the session no longer holds. The
+  open window (a write sent by the old daemon that the shim has not yet journaled when the new daemon replays; the
+  shim serves each connection on its own thread) is carried to Stage 8, with the real-kill tests.
+
+### Not done, by design
+
+- No wiring into `collide run`, `file_run.rs` or an adapter choice: Stage 6b.
+- No real ACP profile and no real agent.
+- The daemon-level cut for a request read after a cancel, and for a model request, is covered at session level only
+  (`replay.rs`); the daemon tests cut at the five writes above.
+- One window is not closed and not tested: a write the old daemon sent to the shim that the shim had not yet journaled
+  when the new daemon replayed would be written again. `Shim::write_to_child` journals under the input lock, so the
+  window is the time between the socket send and that lock.
+- `IMPLEMENTATION_PLAN.md` is untouched.

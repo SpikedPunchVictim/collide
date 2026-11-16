@@ -21,8 +21,11 @@
 //!
 //! ## What it does not do
 //!
-//! It writes nothing to the child: the first turn is the caller's ([`AgentFeed::send_turn`]), and the feed asks for
-//! stdin to be closed once a turn ends ([`Pumped::close_stdin`]) when it was made to ([`AgentFeed::close_after_turn`]).
+//! It writes nothing to the child: the first turn is the caller's ([`AgentFeed::send_turn`]), except for a feed made
+//! with [`AgentFeed::start_on_launch`] (an ACP session), whose first prompt is the session's own and which the daemon
+//! starts; and the feed asks for stdin to be closed once a turn ends ([`Pumped::close_stdin`]) when it was made to
+//! ([`AgentFeed::close_after_turn`]). A feed rebuilt after a restart holds the writes its session owes
+//! ([`AgentFeed::take_owed`]).
 //! A line the session answers with bytes of its own (the Claude session never does) is returned in [`Pumped::writes`]
 //! for the caller to send without waiting.
 
@@ -56,6 +59,9 @@ pub struct Pumped {
     pub problem: Option<String>,
     /// Permission requests the session was asked in this read, in order. The daemon puts each to the person.
     pub requests: Vec<PermissionRequest>,
+    /// A turn ended in this read. A request still held at a turn's end is answered by the session and dropped, so the
+    /// daemon takes what is left of it out of the Queue.
+    pub turn_ended: bool,
 }
 
 /// Why a settled phase pauses and does not end or fail, and what the pause needs to be resumed (0.3, Usage limits).
@@ -116,6 +122,10 @@ pub struct AgentFeed {
     offset: u64,
     next_seq: u64,
     close_after_turn: bool,
+    /// The daemon writes the session's own start before any turn ([`AgentFeed::start_on_launch`]).
+    start_on_launch: bool,
+    /// Writes the session owed when the feed was rebuilt, and nobody has sent ([`AgentFeed::take_owed`]).
+    owed: Vec<Vec<u8>>,
     stdin_closed: bool,
     damaged: bool,
     usage: Option<Usage>,
@@ -140,6 +150,8 @@ impl AgentFeed {
             offset: 0,
             next_seq: 0,
             close_after_turn: false,
+            start_on_launch: false,
+            owed: Vec::new(),
             stdin_closed: false,
             damaged: false,
             usage: None,
@@ -173,6 +185,7 @@ impl AgentFeed {
         feed.take(&replayed.step);
         // The replayed events were recorded before the restart.
         feed.taken.clear();
+        feed.owed = feed.session.take_owed_writes();
         Ok(feed)
     }
 
@@ -238,6 +251,32 @@ impl AgentFeed {
         self
     }
 
+    /// Makes the daemon write the session's own start when the phase's shim is up, before any turn: an ACP session
+    /// writes `initialize` and then, as the agent answers, the first prompt, which is the session's own data and not a
+    /// turn the caller sends. A feed without it is started by nobody (a Claude session has nothing to write).
+    pub fn start_on_launch(mut self) -> AgentFeed {
+        self.start_on_launch = true;
+        self
+    }
+
+    /// Whether the feed was made with [`AgentFeed::start_on_launch`].
+    pub fn starts_on_launch(&self) -> bool {
+        self.start_on_launch
+    }
+
+    /// The writes the session owed when the feed was rebuilt from the journal, taken: the daemon sends them once,
+    /// before it reads on ([`AgentSession::take_owed_writes`]). A second call has none.
+    pub fn take_owed(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.owed)
+    }
+
+    /// Owes writes again that could not be sent (the link was down), ahead of any owed after them. The session counts
+    /// them as written already, so they are never made again.
+    pub fn owe_again(&mut self, mut unsent: Vec<Vec<u8>>) {
+        unsent.append(&mut self.owed);
+        self.owed = unsent;
+    }
+
     /// The session's own start: what it would write before any turn (nothing, for Claude).
     pub fn start(&mut self) -> Step {
         let step = self.session.start();
@@ -288,6 +327,10 @@ impl AgentFeed {
                 let step = self.session.feed(&record.bytes, record.wall_ns);
                 self.take(&step);
                 pumped.requests.extend(requests_of(&step));
+                pumped.turn_ended |= step
+                    .events
+                    .iter()
+                    .any(|stamped| matches!(stamped.event, AgentEvent::TurnEnd { .. }));
                 pumped.writes.extend(step.writes);
             }
         }
@@ -600,5 +643,95 @@ mod tests {
             failure_text(&PhaseFailure::Blocked { reason: None }),
             "blocked"
         );
+    }
+    // ---- starting on launch, and the writes a restart left owed (ts-0092-tw) ---------------------------------
+
+    fn acp_session() -> crate::adapters::acp::session::AcpSession {
+        use crate::adapters::acp::options::AcpOptions;
+        crate::adapters::acp::session::AcpSession::new(AcpOptions::new("/work", "go"))
+    }
+
+    fn in_record(seq: u64, bytes: &[u8]) -> Vec<u8> {
+        encode_record(&JournalRecord {
+            seq,
+            wall_ns: 1_000 + seq,
+            direction: Direction::In,
+            bytes: bytes.to_vec(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_feed_starts_on_launch_only_when_it_was_made_to() {
+        let dir = Dir::new();
+        assert!(!feed_in(&dir).starts_on_launch());
+        assert!(feed_in(&dir).start_on_launch().starts_on_launch());
+    }
+
+    #[test]
+    fn a_claude_feed_that_starts_on_launch_has_nothing_to_write() {
+        let dir = Dir::new();
+        let mut feed = feed_in(&dir).start_on_launch();
+        let step = feed.start();
+        assert!(step.writes.is_empty());
+        // What Claude's start says is the session it assigned, which is the same with or without the flag.
+        assert_eq!(step, feed_in(&dir).start());
+    }
+
+    #[test]
+    fn an_acp_double_feed_that_starts_on_launch_writes_initialize() {
+        let dir = Dir::new();
+        let double = collide_core::testing::acp::AcpSession::new("/work", "go");
+        let mut feed = AgentFeed::new(Box::new(double), &dir.0).start_on_launch();
+        let step = feed.start();
+        assert_eq!(step.writes.len(), 1);
+        let sent: serde_json::Value = serde_json::from_slice(&step.writes[0]).unwrap();
+        assert_eq!(sent["method"], "initialize");
+    }
+
+    /// A journal of a started ACP session: its `initialize` and the agent's answer, which owes `session/new`.
+    fn journal_that_owes_session_new(dir: &Dir) -> Vec<u8> {
+        let mut session = acp_session();
+        let initialize = session.start().writes.remove(0);
+        let answer = collide_core::testing::acp::initialize_response(0);
+        let mut journal = in_record(0, &initialize);
+        journal.extend(out(1, &answer));
+        dir.append(&journal);
+        initialize
+    }
+
+    #[test]
+    fn a_rebuilt_feed_holds_what_its_session_owes_until_it_is_taken_once() {
+        let dir = Dir::new();
+        journal_that_owes_session_new(&dir);
+        let mut feed = AgentFeed::rebuild(Box::new(acp_session()), &dir.0).unwrap();
+        let owed = feed.take_owed();
+        assert_eq!(owed.len(), 1);
+        let sent: serde_json::Value = serde_json::from_slice(&owed[0]).unwrap();
+        assert_eq!(sent["method"], "session/new");
+        assert!(feed.take_owed().is_empty());
+    }
+
+    #[test]
+    fn writes_that_could_not_be_sent_are_owed_again_before_the_ones_after_them() {
+        let dir = Dir::new();
+        journal_that_owes_session_new(&dir);
+        let mut feed = AgentFeed::rebuild(Box::new(acp_session()), &dir.0).unwrap();
+        let owed = feed.take_owed();
+        feed.owe_again(owed.clone());
+        assert_eq!(feed.take_owed(), owed);
+    }
+
+    #[test]
+    fn a_rebuilt_claude_feed_owes_nothing() {
+        let dir = Dir::new();
+        let mut feed = AgentFeed::rebuild(
+            Box::new(ClaudeSession::new(SessionStart::Assign {
+                uuid: "7c1b0e52-9f3a-4d2e-8b61-0a5d3c9e4f17".to_string(),
+            })),
+            &dir.0,
+        )
+        .unwrap();
+        assert!(feed.take_owed().is_empty());
     }
 }

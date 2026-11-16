@@ -1,0 +1,12 @@
+# Built for the tests: `prompt-turn`, then an agent that stays up until stdin closes, so a second turn can be written
+# to it. It exits 0 when stdin closes, with no response to a second prompt. Ids are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":false},"promptCapabilities":{"image":false,"audio":false,"embeddedContext":true}},"agentInfo":{"name":"fake-acp-agent","version":"0"},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1"}}}
+{"expect":{"method":"session/prompt","params":{"sessionId":"ses-stand-in-1","prompt":[{"type":"text"}]}},"as":"prompt"}
+{"say":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-stand-in-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Let me read the notes. "}}}}}
+{"say":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-stand-in-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-stand-in-1","title":"Read notes.txt","kind":"read","status":"pending"}}}}
+{"say":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-stand-in-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The notes say hello."}}}}}
+{"say":{"jsonrpc":"2.0","id":{"$id":"prompt"},"result":{"stopReason":"end_turn","usage":{"totalTokens":210,"inputTokens":180,"outputTokens":30,"cachedReadTokens":120}}}}
+{"wait_eof":true}

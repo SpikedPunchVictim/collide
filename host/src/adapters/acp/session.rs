@@ -75,7 +75,16 @@
 //! **A turn end clears what is held.** When the `session/prompt` response is read, each request still held is answered
 //! `cancelled` and dropped, before the `TurnEnd`, so `pending_permissions` is empty after it and a later `answer` is
 //! for an unknown id. The agent is never left waiting on Collide, as for the `-32601` answer. A replay drops the same
-//! requests when it reads the response, and adds no write: the journal holds the answer or does not.
+//! requests when it reads the response, and adds no write itself: the journal holds the answer or the session owes it
+//! (below).
+//!
+//! **Owed writes** (ts-0092-tw). A restart can fall between a line of the agent and the write the line made: the shim
+//! journaled the line, and the daemon had not written the answer, or the shim had not journaled it. A replay writes
+//! nothing, so the agent would wait for `session/new`, the first prompt, a `-32601` answer or a `cancelled` answer that
+//! never comes. So a replay keeps each write a line made as owed, and drops it when a later `in` record shows it was
+//! made (a request is matched by its method, a reply by the id it answers). An empty journal owes `initialize`.
+//! [`AgentSession::take_owed_writes`] gives the owed writes once and counts them as written, so the session is then
+//! what one rebuilt from a journal that holds them is. A live session owes nothing.
 //!
 //! **The kind of a request** is its `toolCall.kind`; when that has none, the kind of the `tool_call` announced earlier
 //! in the turn with the same id; else `other`. The agent may ask before it announces the call (S7, O6), and a call
@@ -163,6 +172,7 @@ struct EndedTurn {
 }
 
 /// What reading a line makes the session write next, if anything.
+#[derive(Debug, Clone, PartialEq)]
 enum Outgoing {
     /// A request of the session's own, which takes the next id.
     Request { method: &'static str, params: Value },
@@ -209,6 +219,8 @@ pub struct AcpSession {
     last_turn: Option<EndedTurn>,
     /// The open turn has had a message with text, a tool call or a request.
     turn_had_output: bool,
+    /// The writes a replay found that the journal does not hold ([`AgentSession::take_owed_writes`]).
+    owed: Vec<Outgoing>,
 }
 
 impl AcpSession {
@@ -227,6 +239,7 @@ impl AcpSession {
             model_refused: false,
             last_turn: None,
             turn_had_output: false,
+            owed: Vec::new(),
         }
     }
 
@@ -237,6 +250,42 @@ impl AcpSession {
         self.note_written(&bytes)
             .expect("a session reads its own writes");
         bytes
+    }
+
+    /// The bytes of a write the session decided on, as the session writes them.
+    fn send(&mut self, outgoing: Outgoing) -> Vec<u8> {
+        match outgoing {
+            Outgoing::Request { method, params } => self.request(method, params),
+            Outgoing::Reply(message) => self.write(message),
+        }
+    }
+
+    /// The `initialize` request: only the `session` flags, so no `fs`, `terminal` or `elicitation`, and the agent
+    /// keeps its own tools.
+    fn initialize() -> Outgoing {
+        Outgoing::Request {
+            method: "initialize",
+            params: json!({
+                "protocolVersion": 1,
+                "clientInfo": { "name": CLIENT_NAME, "version": env!("CARGO_PKG_VERSION") },
+                "clientCapabilities": {
+                    "session": { "notices": {}, "compaction": {}, "configOptions": {} }
+                }
+            }),
+        }
+    }
+
+    /// A write that the journal holds is no longer owed: a request by its method (the session has one in flight of
+    /// each kind), a reply by the id of the request it answers.
+    fn written(&mut self, method: Option<&str>, id: Option<&Value>) {
+        let position = self.owed.iter().position(|owed| match (owed, method) {
+            (Outgoing::Request { method: owed, .. }, Some(method)) => *owed == method,
+            (Outgoing::Reply(message), None) => Some(&message["id"]) == id,
+            _ => false,
+        });
+        if let Some(position) = position {
+            self.owed.remove(position);
+        }
     }
 
     /// Writes a request with the next id.
@@ -666,6 +715,7 @@ impl Replayable for AcpSession {
                 };
                 self.awaiting.push((id, awaiting));
                 self.next_id = self.next_id.max(id + 1);
+                self.written(Some(method), None);
             }
             Some("session/cancel") => self.cancel_requested = true,
             Some(other) => return Err(format!("not a request this session writes: `{other}`")),
@@ -673,14 +723,19 @@ impl Replayable for AcpSession {
                 // An answer to a request of the agent: it is no longer waiting.
                 let id = id.ok_or("a message with neither a method nor an id")?;
                 self.held.retain(|held| &held.raw_id != id);
+                self.written(None, Some(id));
             }
         }
         Ok(())
     }
 
     fn read_line(&mut self, line: &[u8], wall_ns: u64) -> Step {
+        // The write the line made is dropped from the step, and kept as owed until a record of the journal shows it
+        // was made.
+        let reading = self.read(line, wall_ns);
+        self.owed.extend(reading.writes);
         Step {
-            events: self.read(line, wall_ns).events,
+            events: reading.events,
             writes: Vec::new(),
         }
     }
@@ -688,17 +743,7 @@ impl Replayable for AcpSession {
 
 impl AgentSession for AcpSession {
     fn start(&mut self) -> Step {
-        // Only the `session` flags: no `fs`, `terminal` or `elicitation`, so the agent keeps its own tools.
-        let write = self.request(
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientInfo": { "name": CLIENT_NAME, "version": env!("CARGO_PKG_VERSION") },
-                "clientCapabilities": {
-                    "session": { "notices": {}, "compaction": {}, "configOptions": {} }
-                }
-            }),
-        );
+        let write = self.send(Self::initialize());
         Step {
             events: Vec::new(),
             writes: vec![write],
@@ -710,10 +755,7 @@ impl AgentSession for AcpSession {
         let writes = reading
             .writes
             .into_iter()
-            .map(|outgoing| match outgoing {
-                Outgoing::Request { method, params } => self.request(method, params),
-                Outgoing::Reply(message) => self.write(message),
-            })
+            .map(|outgoing| self.send(outgoing))
             .collect();
         Step {
             events: reading.events,
@@ -841,7 +883,19 @@ impl AgentSession for AcpSession {
     }
 
     fn replay(&mut self, records: &[JournalRecord]) -> Result<Step, ReplayError> {
-        replay_records(self, records)
+        let step = replay_records(self, records)?;
+        // No request was ever written, not even `initialize` (which is request 0): a restart came before it was.
+        if self.next_id == 0 {
+            self.owed.push(Self::initialize());
+        }
+        Ok(step)
+    }
+
+    fn take_owed_writes(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.owed)
+            .into_iter()
+            .map(|outgoing| self.send(outgoing))
+            .collect()
     }
 }
 

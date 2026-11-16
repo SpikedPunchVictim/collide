@@ -549,12 +549,18 @@ fn live_with_a_turn_end() -> (AcpSession, Journal) {
 #[test]
 fn a_journal_cut_after_the_prompt_response_has_nothing_pending_and_the_session_is_the_live_one() {
     let (live, journal) = live_with_a_turn_end();
-    // The cut is just after the response: the two answers the live session wrote are not in it.
+    // The cut is just after the response: the two answers the live session wrote are not in it, so they are owed, and
+    // owed they are the bytes the live session wrote (ts-0092-tw).
     let cut = Journal {
         records: journal.records[..journal.records.len() - 2].to_vec(),
     };
-    let rebuilt = rebuilt_from(&cut);
+    let mut rebuilt = rebuilt_from(&cut);
     assert!(rebuilt.pending_permissions().is_empty());
+    let wrote: Vec<Vec<u8>> = journal.records[journal.records.len() - 2..]
+        .iter()
+        .map(|record| record.bytes.clone())
+        .collect();
+    assert_eq!(rebuilt.take_owed_writes(), wrote);
     assert_eq!(rebuilt, live);
 }
 
@@ -597,14 +603,17 @@ fn a_request_read_after_a_cancel_is_answered_once_in_the_journal_and_a_replay_ad
 
 #[test]
 fn a_journal_cut_before_the_answer_to_a_request_after_a_cancel_leaves_nothing_pending() {
-    // As for an unserved request today: a replay writes nothing, so an answer that was not journaled is not made up.
+    // A replay writes nothing, so the answer that was not journaled is owed, and owed it is the one the live session
+    // wrote (ts-0092-tw).
     let (live, journal) = live_with_a_request_after_a_cancel();
     let cut = Journal {
         records: journal.records[..journal.records.len() - 1].to_vec(),
     };
-    let rebuilt = rebuilt_from(&cut);
+    let mut rebuilt = rebuilt_from(&cut);
     assert!(rebuilt.pending_permissions().is_empty());
     assert_eq!(answers_to(&cut, json!(7)), 0);
+    let wrote = journal.records[journal.records.len() - 1].bytes.clone();
+    assert_eq!(rebuilt.take_owed_writes(), vec![wrote]);
     assert_eq!(rebuilt, live);
 }
 

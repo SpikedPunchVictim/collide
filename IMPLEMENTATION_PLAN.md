@@ -4105,10 +4105,10 @@ loop needs only Claude.
 
 **Tests**: The fake ACP child, with the same scenarios as the fake Claude where they apply; the `configOptions` and
 `set_model` paths; `Usage.quality`; `TurnEnd` reasons.
-**Status**: Not Started. Split on 2026-11-15 into `ts-0086-tm` to `ts-0092-tw` (revision 23 scope), in epic
-`ep-003-da`, built one at a time in id order (part L). It runs after 3c. Every item runs against a scripted fake ACP
-child, and the protocol is written by hand. A real ACP agent, its first profile and an ACP agent in file runs come
-with Stage 6b.
+**Status**: Complete (2026-11-16). Split on 2026-11-15 into `ts-0086-tm` to `ts-0092-tw` (revision 23 scope), in
+epic `ep-003-da`, built one at a time in id order (part L). Every item runs against a scripted fake ACP child, and the
+protocol is written by hand. A rebuilt session reports the writes it still owes (`take_owed_writes`) and the daemon
+sends them once. A real ACP agent, its first profile and an ACP agent in file runs come with Stage 6b.
 
 ## Stage 4: Pack loading, settings, plan adapter, corpus and views
 
@@ -4756,6 +4756,9 @@ gates:
   that shows the merge is recorded as a success with no second merge; one that shows nothing runs the step again;
   one that cannot be checked puts "outcome unknown" in the Queue. The same holds for a killed `apply` and a killed
   push;
+- a daemon killed with SIGKILL just after it sent an ACP write that the shim had not yet journaled: the new daemon's
+  replay does not send it a second time (carried from ts-0092; the shim serves each connection on its own thread, so
+  the old connection may still be draining);
 - a gate that returns `unverified` holds the run, no fix phase starts, and a retry after the fake environment is
   restored passes;
 - a fake `script` phase with `agentWork: true` reports `usage`, shown apart from the measured totals, and `limited`,

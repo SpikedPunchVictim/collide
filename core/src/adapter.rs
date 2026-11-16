@@ -190,6 +190,16 @@ pub trait AgentSession {
         Vec::new()
     }
 
+    /// The writes the session owes the child after a [`AgentSession::replay`], taken: each is a write that a line of
+    /// the journal made the live session write, whose own record the journal does not hold (a restart cut it between
+    /// the line and the write). A replay writes nothing, so the host sends these once, before it reads on, or the
+    /// agent waits for an answer that is not coming. The session counts them as written, so a second call has none, and
+    /// the session is then as it would be had the journal held them. A session that never owes a write has the
+    /// default; Claude's does not (its replay has nothing to answer).
+    fn take_owed_writes(&mut self) -> Vec<Vec<u8>> {
+        Vec::new()
+    }
+
     /// Asks the child to stop its turn. The session reports `Cancelled` itself when the turn ends, whatever the
     /// agent's own reason says (0.3).
     fn cancel(&mut self) -> Step;

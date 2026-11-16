@@ -390,10 +390,48 @@ fn a_sleep_step_holds_the_steps_after_it_for_that_long() {
     assert_eq!(fake.finish().code, Some(0));
 }
 
+#[test]
+fn a_wait_file_step_holds_the_child_until_the_file_is_in_its_folder() {
+    let root = TempRoot::new();
+    let path = script(
+        &root,
+        &[
+            r#"{"wait_file":"go"}"#,
+            r#"{"say":{"jsonrpc":"2.0","result":{}}}"#,
+        ],
+    );
+    let mut fake = FakeAcp::start(&root, &path);
+    assert!(
+        fake.quiet_for(Duration::from_millis(400)),
+        "no file, no line"
+    );
+    fs::write(root.join("go"), "").unwrap();
+    assert!(fake.next_value().is_some());
+    assert_eq!(fake.finish().code, Some(0));
+}
+
+#[test]
+fn a_wait_file_step_that_is_not_answered_in_time_ends_the_child_with_its_own_code() {
+    let root = TempRoot::new();
+    let path = script(&root, &[r#"{"wait_file":"never","within":0.3}"#]);
+    let mut fake = FakeAcp::start(&root, &path);
+    assert!(fake.next_value().is_none());
+    let ended = fake.finish();
+    assert_eq!(ended.code, Some(95), "{}", ended.stderr);
+}
+
 // ---- the recordings -------------------------------------------------------------------------------------------------
 
-const STEP_KEYS: [&str; 8] = [
-    "say", "say_text", "stderr", "expect", "wait_eof", "sleep", "exit", "signal",
+const STEP_KEYS: [&str; 9] = [
+    "say",
+    "say_text",
+    "stderr",
+    "expect",
+    "wait_eof",
+    "wait_file",
+    "sleep",
+    "exit",
+    "signal",
 ];
 
 /// Every `{"$id": name}` in `value`, as the names.
@@ -450,7 +488,7 @@ fn every_recording_is_json_on_each_line_says_something_and_holds_only_steps_the_
         }
         seen += 1;
     }
-    assert_eq!(seen, 20, "the recordings: add a test for a new one");
+    assert_eq!(seen, 25, "the recordings: add a test for a new one");
 }
 
 /// What a recording says in answer to `initialize` and to `session/new`.

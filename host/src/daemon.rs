@@ -120,8 +120,8 @@ use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::metrics::Metrics;
 use crate::phases::{
-    BIND_WAIT, ExitJson, PhaseEndHook, PhaseKey, PhaseOptions, PhasePauseHook, Phases,
-    PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
+    BIND_WAIT, ExitJson, FeedRebuilder, PhaseEndHook, PhaseKey, PhaseOptions, PhasePauseHook,
+    Phases, PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
 };
 use crate::queue::Queue;
 use crate::run_store::{RunFilter, RunRow};
@@ -136,11 +136,11 @@ use collide_core::owner::{
     BoardListResult, BoardOpenParams, BoardOpenResult, DaemonRecaptureEnvironmentResult,
     DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture,
     MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams,
-    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunDiffParams,
-    RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
-    RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult,
-    RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams,
-    TaskGetResult, code, encode_line, parse_request, route,
+    QueueItem, QueueListParams, QueueListResult, Request, Response, Routed, RpcError,
+    RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
+    RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams,
+    RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
+    TaskGetParams, TaskGetResult, code, encode_line, parse_request, route,
 };
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{ApplyResult, GetParams};
@@ -525,6 +525,10 @@ pub struct DaemonOptions {
     /// How many notices a subscriber may have waiting before the daemon ends its subscription ([`SUBSCRIBER_QUEUE`]).
     /// A test passes a small one.
     pub subscriber_queue: usize,
+    /// Rebuilds the feed of an agent phase after a restart, tried before the file runs' own (Claude's): `None`, the
+    /// default, leaves a phase that is not a file run's with no session. A test passes the ACP adapter's here, until
+    /// Stage 6b chooses the adapter of a run.
+    pub feed_rebuilder: Option<FeedRebuilder>,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -579,6 +583,7 @@ impl DaemonOptions {
             claude_published: PublishedChoice::Off,
             claude_refresh_every: REFRESH_EVERY,
             subscriber_queue: SUBSCRIBER_QUEUE,
+            feed_rebuilder: None,
         }
     }
 }
@@ -695,6 +700,7 @@ impl Daemon {
             claude_published,
             claude_refresh_every,
             subscriber_queue,
+            feed_rebuilder,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -844,7 +850,12 @@ impl Daemon {
             on_phase_pause,
             rebuild_feed: {
                 let runs = file_runs.clone();
-                Some(Box::new(move |key, dir| runs.rebuild_feed(key, dir)))
+                Some(Box::new(move |key, dir| {
+                    feed_rebuilder
+                        .as_ref()
+                        .and_then(|rebuild| rebuild(key, dir))
+                        .or_else(|| runs.rebuild_feed(key, dir))
+                }))
             },
             metrics: metrics.clone(),
             on_event: {
@@ -960,6 +971,11 @@ impl Daemon {
     /// The daemon's store, for a reader of the events and of the metrics tables.
     pub fn store(&self) -> Arc<Store> {
         self.shared.store.clone()
+    }
+
+    /// The Queue items the daemon holds, those of `run` when it is given.
+    pub fn queue_items(&self, run: Option<&str>) -> Vec<QueueItem> {
+        self.shared.file_runs.queue_items(run)
     }
 
     /// The events of the store after `seq`, oldest first.

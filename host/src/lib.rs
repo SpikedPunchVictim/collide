@@ -1,3 +1,4 @@
+pub mod acp_probe;
 pub mod adapters;
 pub mod agent_feed;
 pub mod auth;

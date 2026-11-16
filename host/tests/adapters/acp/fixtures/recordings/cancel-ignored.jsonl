@@ -1,0 +1,10 @@
+# Built for the tests: the handshake (cut to what the session reads), some words, then an agent that does not read its
+# stdin until it closes, so `session/cancel` is not answered and the turn never ends. It exits 0 when stdin closes, with
+# no response to the prompt. Ids are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1"}}}
+{"expect":{"method":"session/prompt","params":{"sessionId":"ses-stand-in-1","prompt":[{"type":"text"}]}},"as":"prompt"}
+{"say":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-stand-in-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Working. "}}}}}
+{"wait_eof":true}

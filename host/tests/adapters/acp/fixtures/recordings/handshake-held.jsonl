@@ -1,0 +1,11 @@
+# Built for the tests: an agent that reads `initialize` and then waits for a file named `go` in its working folder
+# before it answers, so a test can restart the daemon while the handshake is open and let the agent go on when it
+# chooses. After the file the handshake and one prompt turn are as in `prompt-turn`. The ids are stand-ins.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"wait_file":"go"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1"}}}
+{"expect":{"method":"session/prompt","params":{"sessionId":"ses-stand-in-1","prompt":[{"type":"text"}]}},"as":"prompt"}
+{"say":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses-stand-in-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Done after the restart."}}}}}
+{"say":{"jsonrpc":"2.0","id":{"$id":"prompt"},"result":{"stopReason":"end_turn","usage":{"inputTokens":20,"outputTokens":5}}}}

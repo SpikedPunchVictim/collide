@@ -239,3 +239,149 @@ fn a_journal_with_a_method_this_session_never_writes_is_rejected_at_that_record(
         "{error:?}"
     );
 }
+
+// ---- writes the journal cut left owed (ts-0092-tw) ------------------------------------------------------------------
+//
+// A cut can fall after a line the session answers and before its answer: the shim journals the line the child wrote
+// first, and the daemon's write comes after. A replay writes nothing, so the agent would wait. The rebuilt session
+// reports the writes it still owes ([`AgentSession::take_owed_writes`]); the daemon sends them once.
+
+const MODEL: &str = "stand-in-model-b";
+
+/// A session rebuilt from the first `records` records of the journal.
+fn rebuilt_from(played: &Played, options: &AcpOptions, records: usize) -> AcpSession {
+    let ends = record_ends(&played.journal);
+    let cut = if records == 0 { 0 } else { ends[records - 1] };
+    let mut session = AcpSession::new(options.clone());
+    replay_journal_bytes(&mut session, &played.journal[..cut]).expect("a cut journal replays");
+    session
+}
+
+/// At every record boundary: what a rebuilt session owes is the `in` records that follow the cut, which the live
+/// session wrote for the lines before it. Owed once, the session is as one rebuilt from a journal that holds the
+/// writes, and that journal owes nothing.
+fn assert_owes_what_the_live_session_wrote_next(played: &Played, options: &AcpOptions) {
+    let records = read_journal(&played.journal).records;
+    for cut in 0..=records.len() {
+        let expected: Vec<Vec<u8>> = records[cut..]
+            .iter()
+            .take_while(|record| record.direction == Direction::In)
+            .map(|record| record.bytes.clone())
+            .collect();
+        let mut session = rebuilt_from(played, options, cut);
+        assert_eq!(
+            session.take_owed_writes(),
+            expected,
+            "cut after {cut} records"
+        );
+        assert!(
+            session.take_owed_writes().is_empty(),
+            "cut after {cut} records: owed once"
+        );
+        let mut holding = rebuilt_from(played, options, cut + expected.len());
+        assert!(
+            holding.take_owed_writes().is_empty(),
+            "cut after {cut} records: a journal that holds the writes owes none"
+        );
+        assert_eq!(session, holding, "cut after {cut} records: the same state");
+    }
+}
+
+#[test]
+fn a_prompt_turn_journal_owes_at_every_cut_what_the_live_session_wrote_next() {
+    assert_owes_what_the_live_session_wrote_next(&prompt_turn(), &options());
+}
+
+#[test]
+fn a_journal_with_a_request_nobody_serves_owes_the_not_found_answer_at_every_cut() {
+    let played = play(&recording("unserved-request"), options(), &[], |_, _| {
+        Step::default()
+    });
+    assert_owes_what_the_live_session_wrote_next(&played, &options());
+}
+
+#[test]
+fn a_journal_with_a_request_open_at_the_turns_end_owes_the_cancelled_answer_at_every_cut() {
+    let played = play(
+        &recording("permission-open-at-turn-end"),
+        options(),
+        &[],
+        |_, _| Step::default(),
+    );
+    assert_owes_what_the_live_session_wrote_next(&played, &options());
+}
+
+#[test]
+fn a_journal_with_a_model_request_owes_the_request_and_then_the_prompt_at_every_cut() {
+    let options = options().with_model(MODEL);
+    let played = play(
+        &recording("model-config-options"),
+        options.clone(),
+        &[],
+        |_, _| Step::default(),
+    );
+    assert_owes_what_the_live_session_wrote_next(&played, &options);
+}
+
+#[test]
+fn an_empty_journal_owes_the_initialize_the_session_starts_with() {
+    let mut started = AcpSession::new(options());
+    let initialize = started.start().writes;
+    let mut rebuilt = AcpSession::new(options());
+    replay_journal_bytes(&mut rebuilt, &[]).unwrap();
+    assert_eq!(rebuilt.take_owed_writes(), initialize);
+    assert!(rebuilt.take_owed_writes().is_empty());
+    assert_eq!(rebuilt, started, "it is the session that started");
+}
+
+#[test]
+fn a_journal_cut_before_the_first_prompt_owes_it_and_a_journal_that_has_it_owes_nothing() {
+    let played = prompt_turn();
+    let read = read_journal(&played.journal);
+    let prompt = read
+        .records
+        .iter()
+        .position(|record| String::from_utf8_lossy(&record.bytes).contains("session/prompt"))
+        .expect("the prompt is in the journal");
+    let mut cut = rebuilt_from(&played, &options(), prompt);
+    assert_eq!(
+        cut.take_owed_writes(),
+        vec![read.records[prompt].bytes.clone()],
+        "the prompt the live session wrote"
+    );
+    let mut holding = rebuilt_from(&played, &options(), prompt + 1);
+    assert!(holding.take_owed_writes().is_empty());
+}
+
+#[test]
+fn a_request_asked_after_the_cancel_owes_its_cancelled_answer_when_the_journal_stops_after_it() {
+    let played = play(
+        &recording("permission-after-cancel"),
+        options(),
+        &[],
+        |session, event| match event {
+            AgentEvent::Message { .. } => session.cancel(),
+            _ => Step::default(),
+        },
+    );
+    let records = read_journal(&played.journal).records;
+    let asked = records
+        .iter()
+        .position(|record| String::from_utf8_lossy(&record.bytes).contains("request_permission"))
+        .expect("the request is in the journal");
+    let answer = &records[asked + 1];
+    assert_eq!(answer.direction, Direction::In);
+    let mut session = rebuilt_from(&played, &options(), asked + 1);
+    assert_eq!(session.take_owed_writes(), vec![answer.bytes.clone()]);
+    assert!(session.take_owed_writes().is_empty());
+    let mut holding = rebuilt_from(&played, &options(), asked + 2);
+    assert!(holding.take_owed_writes().is_empty());
+}
+
+#[test]
+fn a_live_session_owes_nothing() {
+    let mut live = AcpSession::new(options());
+    assert!(live.take_owed_writes().is_empty());
+    live.start();
+    assert!(live.take_owed_writes().is_empty());
+}

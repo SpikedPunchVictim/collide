@@ -14,6 +14,9 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
                             the same; when the line is a request (it has a `method` and an `id`), remember its `id`
                             under the name
     {"wait_eof": true}      read stdin until it closes
+    {"wait_file": "name"}   wait until a file of that name is in the working folder (the child's own folder; a test
+                            makes the file when it wants the child to go on), for 30 seconds; with
+                            `"within": SECONDS` for that long instead
     {"sleep": SECONDS}      do nothing for that long
     {"exit": N}             exit with code N now
     {"signal": N}           end this process with signal N now, as a child that was killed ends
@@ -25,6 +28,7 @@ ids, such as a permission request's, are written in the recording as they are.
 `expect` is a subset match: every key in the expected object must be in the line, with a value that matches, and the
 line may hold more. A list matches a list of the same length, element by element. Exit codes:
 
+    95  a `wait_file` whose file did not come in time
     96  a step the child does not know, or a recording line that is not JSON
     97  a line that did not match, or is not JSON: the wanted object and the line are on stderr
     98  stdin closed while an `expect` waited
@@ -39,6 +43,8 @@ import os
 import sys
 import time
 
+FILE_WAIT_SECONDS = 30
+EXIT_FILE_NEVER = 95
 EXIT_STEP_UNKNOWN = 96
 EXIT_MISMATCH = 97
 EXIT_STDIN_CLOSED = 98
@@ -112,6 +118,15 @@ def expect(number, step, ids):
         ids[step["as"]] = got["id"]
 
 
+def wait_file(number, step):
+    name = step["wait_file"]
+    until = time.time() + step.get("within", FILE_WAIT_SECONDS)
+    while not os.path.exists(name):
+        if time.time() >= until:
+            stop(EXIT_FILE_NEVER, "step %d waited for the file %s, which did not come" % (number, name))
+        time.sleep(0.02)
+
+
 def main():
     ids = {}
     for number, step in steps_of(sys.argv[1]):
@@ -127,6 +142,8 @@ def main():
             expect(number, step, ids)
         elif "wait_eof" in step:
             sys.stdin.read()
+        elif "wait_file" in step:
+            wait_file(number, step)
         elif "sleep" in step:
             time.sleep(step["sleep"])
         elif "exit" in step:

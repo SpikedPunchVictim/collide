@@ -9,7 +9,8 @@
 //! | `acp: model` | `model` (private) | the models the agent lists, and the request that sets the one asked for |
 //! | `acp: profile` | [`profile::AcpProfile`] | one agent as data: program, strip list, config paths, claims |
 //! | `acp: probe` | [`probe::probe`], [`probe::Probed::merge_into`] | what an `initialize` response implies |
-//! | `acp: adapter` | [`AcpAdapter`] | capabilities, launch, a session from a request, config paths, take-over |
+//! | `acp: adapter` | [`AcpAdapter`] | capabilities, launch, a session from a request, a feed, config, take-over |
+//! | `acp: probe call` | [`crate::acp_probe::probe_through_shim`] | the daemon's `initialize` through the shim |
 //!
 //! Nothing here names an agent: [`AcpAdapter`] is built from a profile, and the profiles of this stage are a test's.
 //! The first real profile comes with Stage 6b.
@@ -19,6 +20,7 @@ pub mod options;
 pub mod probe;
 pub mod profile;
 pub mod session;
+use crate::agent_feed::AgentFeed;
 use collide_core::adapter::{
     AgentAdapter, AgentSession, CommandSpec, ConfigPath, LaunchError, LaunchRequest, LaunchSpec,
     SessionRef, refuse_unmet_capabilities,
@@ -29,6 +31,7 @@ use options::{AcpOptions, McpServer};
 use probe::Probed;
 use profile::AcpProfile;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// The adapter for any ACP agent: the engine ([`session::AcpSession`]) and one [`AcpProfile`]. It has no state a phase
 /// changes. What it holds is set when it is built: the probe's answer once one has run, the MCP servers a session asks
@@ -70,6 +73,23 @@ impl AcpAdapter {
     pub fn requiring(mut self, required: Vec<String>) -> Self {
         self.required = required;
         self
+    }
+
+    /// The feed of a phase for the request: its session, made to be started on launch (the daemon writes `initialize`,
+    /// and the session writes the first prompt, which is the request's own) and to close stdin when the turn ends. The
+    /// caller sends no turn for the first prompt. Nothing is written and nothing is read here; `dir` is the phase's
+    /// shim folder.
+    pub fn feed(&self, request: &LaunchRequest, dir: &Path) -> AgentFeed {
+        AgentFeed::new(self.session(request), dir)
+            .start_on_launch()
+            .close_after_turn()
+    }
+
+    /// [`AcpAdapter::feed`] for a phase whose shim outlived the daemon: the session is rebuilt from the journal in
+    /// `dir`, and holds the writes the journal left owed ([`AgentFeed::take_owed`]). An error says why it could not be.
+    pub fn rebuild_feed(&self, request: &LaunchRequest, dir: &Path) -> Result<AgentFeed, String> {
+        AgentFeed::rebuild(self.session(request), dir)
+            .map(|feed| feed.start_on_launch().close_after_turn())
     }
 }
 

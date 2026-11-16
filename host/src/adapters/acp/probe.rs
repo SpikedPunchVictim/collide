@@ -1,7 +1,7 @@
 //! The `initialize` probe (0.3, What the adapter declares; S7, P5): what an agent's `initialize` response implies for
 //! the capability table. [`probe`] is a plain function, not a method of `AgentAdapter` (0.3 has none there, and a
 //! change to the trait reaches `core` and Claude). The call that sends `initialize` and reads the response is the
-//! daemon's (`ts-0092-tw`); this module only reads the response.
+//! daemon's ([`crate::acp_probe::probe_through_shim`], `ts-0092-tw`); this module only reads the response.
 //!
 //! A field the response leaves out is `Unknown`, never `No`, so a role that requires it is refused as 0.3 says. The
 //! probe reads only what it uses: `agentCapabilities.loadSession` and `agentCapabilities.mcpCapabilities.http`.
