@@ -1,7 +1,7 @@
 ---
 id: ts-0081-wm
 kind: task
-status: active
+status: done
 title: "App: the thin-loop page"
 owners: []
 links:
