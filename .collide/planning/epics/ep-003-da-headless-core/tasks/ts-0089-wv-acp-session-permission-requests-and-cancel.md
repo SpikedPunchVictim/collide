@@ -1,7 +1,7 @@
 ---
 id: ts-0089-wv
 kind: task
-status: active
+status: done
 title: "ACP session: permission requests and cancel"
 owners: []
 links:
