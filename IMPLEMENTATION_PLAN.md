@@ -7,11 +7,13 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 22.** Revision 22 lets a pack say where its agents start (the repository root by default for
-agents that make their own worktrees), notices those worktrees and tracks them under their run until their work
-lands, lets each workflow say whether Collide or the repository lands its work, and puts every repository and branch
-in one line selector, with a Lines control on Tracks and the Queue and one Up next list per repository. When Collide
-starts again after a long close, it checks everything it keeps against the world before anything acts on it (owner,
+**Status: revision 23.** Revision 23 makes task statuses data: each source declares its own, any names and any
+number, the six categories under them stay fixed, and board columns follow a source's own statuses (owner,
+2026-11-15). Revision 22 lets a pack say where its agents start (the repository root by default for agents that make
+their own worktrees), notices those worktrees and tracks them under their run until their work lands, lets each
+workflow say whether Collide or the repository lands its work, and puts every repository and branch in one line
+selector, with a Lines control on Tracks and the Queue and one Up next list per repository. When Collide starts
+again after a long close, it checks everything it keeps against the world before anything acts on it (owner,
 2026-11-15). Revision 21 adds Up next, an ordered list of tasks and groups that start one after another, tells an
 agent about the group it works in, and loads a repository's own agent instructions from the run's worktree, with a
 warning when a run changes them (owner, 2026-11-15). Revision 20 gives Tracks two layouts, List and Timeline, makes
@@ -2208,8 +2210,9 @@ anything else depends on it:
 | `plan` (Orchard pack) | ref | parses task-file frontmatter in each checkout's `arch/` | `setStatus` (`plan set`), `create` (`plan new task`), via `./plan --root <checkout>/arch` run from the root of the line that owns the checkout; never commits | file watch on each checkout's `arch/` and HEAD, debounced, plus a 10 s recheck |
 
 A third source is built in and needs no setup: **scratch tasks** (0.1). They live in Collide's store, one list per
-user per board, and are not ref-scoped. A prompt becomes a task, its first line the title. Their statuses are the
-categories themselves (`ready`, `active`, `review`, `done`, `dropped`); operations `create` and `setStatus`. Moving a
+user per board, and are not ref-scoped. A prompt becomes a task, its first line the title. Their statuses are named
+for the categories (`ready`, `active`, `review`, `done`, `dropped`) and declared like any source's, so nothing
+special-cases them (revision 23); operations `create` and `setStatus`. Moving a
 scratch task into another source is deferred.
 
 Why the plan adapter parses files itself:
@@ -2303,6 +2306,21 @@ Why the plan adapter parses files itself:
 **Status categories.**
 - Every source status maps to one of `backlog | ready | active | review | done | dropped`, so views, kanban columns
   and Tracks (0.11) work across sources. "Open" means not `done` or `dropped`.
+- **Statuses are data; the six categories are fixed** (owner, 2026-11-15; revision 23). A source declares its own
+  statuses in `initialize`, any names and any number, in its order, each with a category. No status name is written
+  into core, the host, the shell or the app. Behavior reads the category: workflow ops, gates, "open", Up next and
+  the reaper. The UI always shows the source's own status name, coloured by its category. Collide's own planning
+  and scratch tasks declare theirs the same way.
+- **Board columns** (`layout.groupBy`) are `status` or `category`.
+  - `status` gives one column per declared status, in the source's order, empty ones too. It is the default when
+    the view's tasks share one status list: one source and one kind.
+  - `category` gives the six columns, each card showing its own status name. It is the default for a view that
+    mixes sources or kinds.
+  - A saved view can pick either.
+- **A status no one mapped.** A Projects Status option missing from `board.yaml`'s status mapping shows under its
+  own name, in a column of its own, and counts as `backlog`. A category op never writes it. The board's checks name
+  it, with the fix: map it in `board.yaml`. A task whose status its source did not declare is listed with the
+  source's invalid items, with the status named.
 - Orchard: `specified → backlog`, `ready`, `doing → active`, `in_review → review`, `done`, `dropped`.
 - GitHub: an issue's open/closed state (closed as not planned → `dropped`), or a Projects v2 Status field, mapped
   in `board.yaml`.
@@ -2944,7 +2962,7 @@ code files. It presents what it is told, and the agent does the analysis (0.3 fo
   - Task filters are epic, status, label, source, text and ids. Run filters are status, task, workflow and ids. Field
     sorts are id, title, epic, labels and status. Tracks sorts are total, start, end, spend, wait and
     `phase:<name>`, the seconds a run spent in that phase, with a missing value last. `group_by` is status
-    (category), epic, label or source. A `window` is two clock times such as `09:15`.
+    (the source's own), category, epic, label or source. A `window` is two clock times such as `09:15`.
   - **No tool launches, accepts, edits or deletes in v0.** A group the agent shows is a selection a person can launch
     from the Field (Stage 11), and the agent has no tool for it. Tools that act are deferred (Deferred).
 - **A view and a lens are two things** (S6 proposal 2). Keeping them apart means a saved View never silently holds an
@@ -4213,6 +4231,8 @@ combined into a corpus, and filtered by views.
 - **Root busy (0.4):** a write to the board root waits while a rebase, merge, cherry-pick or bisect is in progress
   there, and says why.
 - **Corpus** with status categories, identity and collisions.
+  - A task whose status its source did not declare is listed with the source's invalid items, with the status named
+    (0.10, revision 23).
   - The corpus cache persists in the store. On start, core reconciles each source against it and emits one
     `task.changed` per item with `cause: startup` (0.10; S11).
   - Links are resolved one hop out, both directions and across sources, into `tasks[].links` (0.5; S11).
@@ -4358,6 +4378,8 @@ shell and window; this finishes them.
   capabilities are `rpc` and one event channel, and nothing else. The UI's client speaks the owner's JSON-RPC
   (handshake, reconnect), so it also runs in a browser against a fake owner.
 - **Field:** views; board and run-order layouts; live updates from `watch`; divergence and collision chips.
+  Board columns come from the declared statuses, by status or by category (0.10, revision 23). Stage 2's fixed
+  category columns go.
 - **Filter bar:** chips that write CEL; saving a view writes a view file.
 - **Task drawer, read-only:** body, dependencies both ways, collections, per-checkout state.
 - **Line selector** (0.11): every open board with its default line. Switching swaps views and workflows in place
@@ -4390,6 +4412,9 @@ shell and window; this finishes them.
 - A `plan set` in a worktree shows as a divergence chip within the watch debounce plus the 10 s recheck.
 - A key set in both settings files shows the repo's value, labelled as coming from the repo.
 - The UI's tests run in a browser against a fake owner, with no Tauri.
+- **Statuses as data** (revision 23). A fixture source with eight statuses, two of them mapped to `review`, shows
+  eight columns in its order. Renaming its statuses changes the columns with no code change. A view mixing it with
+  the plan source shows the six categories, each card with its own status name.
 - A proposal shared on a branch and checked out as a worktree shows its items with the branch-only chip. The
   planning view's counts match the CLI's, and its sections and their feature counts match `collide sections --json`.
 - A recorded GitHub issue whose body holds raw HTML, a `javascript:` link, a `file:` link and an image that fetches a
@@ -4398,6 +4423,7 @@ shell and window; this finishes them.
 
 **Tests**: Reducers over provider notifications; view save round-trip; the no-setup open and first-run checks; the
 settings view; the hostile-issue fixture in a browser, against the CSP; one Playwright smoke run of scenarios 1 and 2.
+Columns from a fixture source's declared statuses, and from categories for a mixed view.
 Planning: planning-view counts against the CLI; the branch-only chip.
 **Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-006-wq`, items lettered `6a`
 (part L).
@@ -4523,9 +4549,11 @@ planted outside every readable folder.
 - A write with a stale version on a Projects item is detected before the write and returns `conflict`.
 - A token without the `project` scope fails with the message that names the command.
 - A draft item shows as untrusted. The cost of one poll and the chosen interval are in the stage's task item.
+- A Status option missing from `board.yaml`'s mapping shows under its own name, counts as `backlog`, is never written
+  by a category op, and the board's checks name it with the fix (0.10, revision 23).
 
 **Tests**: Recorded GraphQL fixtures (no network in CI); the scope check; version conflict on an item; draft items;
-category mapping.
+category mapping; an unmapped Status option.
 **Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-006-wq`, items lettered `6c`
 (it extends the adapter of epic `ep-005-hs`; part L).
 
@@ -6497,3 +6525,16 @@ selector.
   rebase counts as landed; the Lines control starts on all lines and never hides a count; eight snapshots stay
   loaded; the concurrency cap is the app's; after a long close, Up next is held when the world under it changed,
   not after a set time (a setting, off by default), and what changed notifies once.
+
+**Revision 23, 2026-11-15 (owner).** Task statuses are data.
+- **The ask:** "One thing to note about task statues - while we have a default for them with our own planning
+  system, other projects may have different stages for their tasks. We should support dynamic statuses, and not hard
+  code the status throughout the IDE."
+- **What was there:** each source already declared its own statuses, each mapped to one of six categories, and
+  behavior read the categories. Board columns grouped by category only, and nothing said what happens to a status no
+  one mapped.
+- **Owner's choices:** the six categories stay fixed, so one workflow works on any project's statuses. A view whose
+  tasks share one status list shows one column per status, in the source's order; a mixed view shows the six
+  categories. Changed: 0.10, 0.11, Stage 4b, Stage 6a and Stage 6c.
+- **Choices made:** an unmapped status counts as `backlog` and is flagged with its fix; a status a source did not
+  declare is an invalid item; scratch tasks declare their statuses like any source (applied in `ts-0075-hj`).
