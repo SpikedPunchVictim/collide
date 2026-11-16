@@ -2,7 +2,7 @@
 id: ep-004-qd
 alias: stage-4
 kind: epic
-status: ready
+status: active
 title: "Stage 4: Pack loading, settings, plan adapter, corpus and views"
 owners: []
 links: []
