@@ -1,7 +1,7 @@
 ---
 id: ts-0075-hj
 kind: task
-status: ready
+status: active
 title: "Scratch tasks and a minimal board in the daemon"
 owners: []
 links:
