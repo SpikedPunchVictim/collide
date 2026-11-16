@@ -127,3 +127,6 @@ Write these first:
 - Owner decisions (2026-11-15, at the split): the decisions for the owner above, taken as recommended under the
   owner's delegation; the owner may change them before the item is built. The ACP protocol is written by hand: no ACP
   crate is added.
+- Carried from `ts-0087-mf` (review): a journal cut between the `session/new` response and the first prompt leaves a
+  rebuilt `AcpSession` that never wrote its prompt. Decide how the daemon, after a restart, makes that session send
+  it exactly once, and test the cut there.

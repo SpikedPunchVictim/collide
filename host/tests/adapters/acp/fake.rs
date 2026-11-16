@@ -1,16 +1,29 @@
 //! The fake ACP child, started for a test (`fixtures/fake_acp.py`; its step format is in that file's docstring).
 //!
-//! [`FakeAcp`] is a plain child of the test with its stdin and stdout piped, and no daemon, shim or session: the test
-//! is the client. It has an environment of its own (`env_clear()`, then `HOME` and `COLLIDE_DAEMON_ROOT` in a temp
-//! root) and is reaped on drop, so a test that fails first still leaves no child behind.
+//! Two ways to run it, both with an environment of the test's own (`env_clear()`, then `HOME` and `COLLIDE_DAEMON_ROOT`
+//! in a temp root) and no daemon:
+//!
+//! - [`FakeAcp`] is a plain child of the test with its stdin and stdout piped, and no shim or session: the test is the
+//!   client;
+//! - [`play`] runs it under the real shim ([`collide_host::shim::Shim`]) with a live [`AcpSession`] fed from the shim's
+//!   line hook, as the daemon will, so the journal the shim wrote is the one a replay is checked against.
+//!
+//! Both reap what they start, so a test that fails first still leaves no child behind.
 
 use super::common::{PYTHON, TempRoot};
+use collide_core::adapter::{AgentSession, ExitInfo, StampedEvent, Step};
+use collide_core::agent::AgentEvent;
+use collide_host::adapters::acp::options::AcpOptions;
+use collide_host::adapters::acp::session::AcpSession;
+use collide_host::shim::{self, ChildStdio, Limits, Shim, ShimSpec, Sinks, files};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -188,5 +201,164 @@ impl Drop for FakeAcp {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+
+// ---- a live session under the real shim ---------------------------------------------------------------------------
+
+/// The shim and its child, killed and reaped if the test ends before [`play`] finishes it.
+struct Running(Option<Shim>);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Some(shim) = self.0.take() {
+            let pid = shim.identity().pid;
+            // SAFETY: `kill` takes two integers; the pid is the child this test's shim started and has not reaped.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            let _ = shim::reap(pid);
+        }
+    }
+}
+
+/// A live session and everything it made, behind the lock the shim's line hook and the driver share.
+struct Live {
+    session: AcpSession,
+    events: Vec<StampedEvent>,
+}
+
+/// What [`play`] leaves: the live session as it ended, all of its events in order (a fed event has the stored time
+/// of its line; one made by `start`, `send_turn` or `answer` has none), the bytes of the journal the real shim
+/// wrote, and the exit information `finish` takes.
+pub struct Played {
+    pub session: AcpSession,
+    pub events: Vec<StampedEvent>,
+    pub journal: Vec<u8>,
+    pub exit: ExitInfo,
+}
+
+impl Played {
+    /// The events a replay makes: those that came from a line of the child's.
+    pub fn fed_events(&self) -> Vec<StampedEvent> {
+        self.events
+            .iter()
+            .filter(|stamped| stamped.wall_ns.is_some())
+            .cloned()
+            .collect()
+    }
+
+    /// The agent events only, in order.
+    pub fn agent_events(&self) -> Vec<AgentEvent> {
+        self.events.iter().map(|s| s.event.clone()).collect()
+    }
+}
+
+/// Runs the child on `recording` under the real shim, with a live session built from `options`. The session writes
+/// `initialize` in `start`, and each line the child writes goes through its `feed`; what `feed` writes is written to
+/// the child (and so journaled) after the line, as the daemon will do. The first prompt is the options' own. `turns`
+/// are the turns after it: the next one is sent each time a turn ends. `react` is called with each event the child's
+/// lines make, to answer a request or cancel (what it returns is written to the child). Stdin closes after the last
+/// turn ends. A recording must end every turn it has with a response, or the run waits for one.
+pub fn play(
+    recording: &Path,
+    options: AcpOptions,
+    turns: &[&str],
+    mut react: impl FnMut(&mut AcpSession, &AgentEvent) -> Step,
+) -> Played {
+    let root = TempRoot::new();
+    let run_dir = root.join("run");
+    fs::create_dir(&run_dir).unwrap();
+    let spec = ShimSpec {
+        program: PYTHON.into(),
+        args: vec![
+            fake_acp_script().display().to_string(),
+            recording.display().to_string(),
+        ],
+        env: BTreeMap::from([
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("HOME".to_string(), root.path().display().to_string()),
+            (
+                "COLLIDE_DAEMON_ROOT".to_string(),
+                root.path().display().to_string(),
+            ),
+        ]),
+        cwd: root.path().to_path_buf(),
+        run_dir: run_dir.clone(),
+        stdio: ChildStdio::Pipes,
+        daemon: None,
+    };
+
+    let live = Arc::new(Mutex::new(Live {
+        session: AcpSession::new(options),
+        events: Vec::new(),
+    }));
+    let (fed, steps) = mpsc::channel::<Step>();
+    let hook_live = Arc::clone(&live);
+    let mut sinks = Sinks::files(&run_dir).unwrap();
+    sinks.on_line = Some(Box::new(move |line, wall_ns| {
+        let step = {
+            let mut live = hook_live.lock().unwrap();
+            let step = live.session.feed(line, wall_ns);
+            live.events.extend(step.events.clone());
+            step
+        };
+        let _ = fed.send(step);
+    }));
+    let limits = Limits {
+        drain_after_exit: Duration::from_secs(5),
+        ..Limits::default()
+    };
+    let running = Running(Some(
+        Shim::start_with(&spec, limits, sinks).expect("the shim starts"),
+    ));
+    let shim = || running.0.as_ref().expect("not finished");
+
+    // One call of the live session: its events are kept, and what it writes goes to the child (and so to the journal).
+    // The lock is held for the call and not for the write, so the shim's line hook is never kept waiting.
+    let drive = |call: &mut dyn FnMut(&mut AcpSession) -> Step| {
+        let step = {
+            let mut live = live.lock().unwrap();
+            let step = call(&mut live.session);
+            live.events.extend(step.events.clone());
+            step
+        };
+        for bytes in &step.writes {
+            shim().write_to_child(bytes).expect("the child reads stdin");
+        }
+    };
+    let mut turns = turns.iter();
+    drive(&mut |session| session.start());
+    'run: loop {
+        let step = steps.recv_timeout(PATIENCE).expect("a line from the child");
+        for bytes in &step.writes {
+            shim().write_to_child(bytes).expect("the child reads stdin");
+        }
+        for stamped in step.events {
+            drive(&mut |session| react(session, &stamped.event));
+            if matches!(stamped.event, AgentEvent::TurnEnd { .. }) {
+                match turns.next() {
+                    Some(text) => drive(&mut |session| session.send_turn(text)),
+                    None => break 'run,
+                }
+            }
+        }
+    }
+    shim().close_stdin().unwrap();
+    let outcome = shim().finish().expect("the child is reaped");
+    let exit = ExitInfo {
+        record: Some(outcome.keeper.record().clone()),
+        stderr_tail: fs::read_to_string(run_dir.join(files::STDERR_LOG)).unwrap_or_default(),
+    };
+    let journal = fs::read(run_dir.join(files::JOURNAL)).unwrap();
+    drop(running);
+    let Live { session, events } = Arc::try_unwrap(live)
+        .ok()
+        .expect("the shim is done with the hook")
+        .into_inner()
+        .unwrap();
+    Played {
+        session,
+        events,
+        journal,
+        exit,
     }
 }

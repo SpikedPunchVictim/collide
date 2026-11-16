@@ -1,6 +1,8 @@
 //! The scripted ACP double: an [`AgentSession`] that is fed the lines of an ACP agent and writes the client's side
-//! of the conversation (S7, the `opencode acp` run). It is the outline of the engine of Stage 3d, which reuses its
-//! script ([`initialize_response`] and the functions after it) and runs the same contract (`contract`).
+//! of the conversation (S7, the `opencode acp` run). It is `core`'s own test double. The ACP engine is
+//! `host::adapters::acp::session::AcpSession`, which began as a copy of this logic and has hardened it since; the two
+//! are kept in step by the shared contract (`contract`), which both run. The engine's tests reuse the script here
+//! ([`initialize_response`] and the functions after it).
 //!
 //! The session is the client. It holds what an ACP conversation needs held (0.3, Two core traits):
 //!
