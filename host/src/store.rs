@@ -66,7 +66,7 @@ pub struct Migration {
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
 /// written with, and `line` is its JSON.
-pub const MIGRATIONS: [Migration; 4] = [
+pub const MIGRATIONS: [Migration; 5] = [
     Migration {
         version: 1,
         name: "events",
@@ -106,7 +106,31 @@ pub const MIGRATIONS: [Migration; 4] = [
         name: "metrics",
         sql: METRICS_SQL,
     },
+    Migration {
+        version: 5,
+        name: "boards_and_scratch_tasks",
+        sql: BOARDS_SQL,
+    },
 ];
+
+/// The boards the user opened and their scratch tasks (ts-0075-hj; 0.1, 0.10). `boards.root` is the checkout's top
+/// level, so opening it again finds the same row. A scratch task is numbered inside its board: `num` is the short id
+/// of the key `scratch:<num>`. `status` is one of the five categories, and `version` counts the writes to the task.
+const BOARDS_SQL: &str = "
+    CREATE TABLE boards (
+        id   INTEGER PRIMARY KEY,
+        root TEXT NOT NULL UNIQUE
+    );
+    CREATE TABLE scratch_tasks (
+        board   INTEGER NOT NULL,
+        num     INTEGER NOT NULL,
+        title   TEXT NOT NULL,
+        prompt  TEXT NOT NULL,
+        status  TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        PRIMARY KEY (board, num)
+    );
+";
 
 /// The tables of the always-recorded metrics (ts-0067-kw; 0.13). `spans` holds runs, phases, turns and waits, each
 /// with the continuous clock's nanoseconds (`started_ns`, `ended_ns`: what lengths are measured on) and the wall
@@ -1062,6 +1086,16 @@ mod tests {
         store_at_version(dir.path(), 1);
         let store = Store::open(dir.path()).unwrap();
         assert!(table_exists(&raw(&store), "phase_records"));
+        assert_eq!(user_version(&raw(&store)), known_version());
+    }
+
+    #[test]
+    fn a_store_at_version_four_gains_the_board_and_scratch_task_tables() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 4);
+        let store = Store::open(dir.path()).unwrap();
+        assert!(table_exists(&raw(&store), "boards"));
+        assert!(table_exists(&raw(&store), "scratch_tasks"));
         assert_eq!(user_version(&raw(&store)), known_version());
     }
 

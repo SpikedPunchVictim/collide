@@ -68,7 +68,7 @@ fn migration_four_makes_the_metrics_tables() {
     let root = TempRoot::new();
     let _store = store(&root);
     let conn = raw(&root);
-    assert_eq!(MIGRATIONS.last().unwrap().name, "metrics");
+    assert_eq!(MIGRATIONS[3].name, "metrics");
     for table in [
         "spans",
         "usage_rows",

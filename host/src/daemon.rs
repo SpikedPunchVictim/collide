@@ -52,8 +52,9 @@
 //! closed. Only `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions` (the `claude` version in use and
 //! the published one, [`crate::claude_versions`]), `run.stop`, `run.start_file` (a task file run with
 //! the built-in builder role, [`crate::file_run`]), `queue.list` and `queue.answer` (the stored Queue,
-//! [`crate::queue`]) are served here; the other
-//! methods are other items' and answer `method not found`.
+//! [`crate::queue`]), `board.open` and `board.list` (a git checkout as a board, [`crate::boards`]), and `task.get` and
+//! `task.apply` for scratch tasks ([`crate::scratch`]) are served here; the other methods are other items' and answer
+//! `method not found`.
 //!
 //! ## Who is asking
 //!
@@ -92,6 +93,7 @@ use crate::auth::{
     self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer,
 };
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
+use crate::boards;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
@@ -105,17 +107,21 @@ use crate::phases::{
 };
 use crate::queue::Queue;
 use crate::sampler::{Sampler, TICK};
+use crate::scratch::{self, ScratchSource};
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
-    DaemonRecaptureEnvironmentResult, DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method,
-    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams, QueueListParams, QueueListResult,
-    Request, Response, Routed, RpcError, RunRecordParams, RunRecordResult, RunStartFileParams,
-    RunStartResult, RunStopParams, RunStopResult, StoreHealth, Survivor, code, encode_line,
-    parse_request, route,
+    BoardListResult, BoardOpenParams, BoardOpenResult, DaemonRecaptureEnvironmentResult,
+    DaemonStatusResult, EnvCapture, MAX_MESSAGE_BYTES, Method, OWNER_PROTOCOL,
+    OwnerInitializeResult, QueueAnswerParams, QueueListParams, QueueListResult, Request, Response,
+    Routed, RpcError, RunRecordParams, RunRecordResult, RunStartFileParams, RunStartResult,
+    RunStopParams, RunStopResult, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
+    TaskGetParams, TaskGetResult, code, encode_line, parse_request, route,
 };
+use collide_core::ports::TaskProvider;
+use collide_core::provider::{ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -548,6 +554,8 @@ struct Shared {
     phases: Phases,
     launchctl: Option<Arc<dyn Launchctl>>,
     handshake_wait: Duration,
+    /// Added to the environment of the git commands that open a board ([`DaemonOptions::git_env`]).
+    git_env: Vec<(String, String)>,
     started_wall_ms: u64,
     started_uptime: Reading,
     login: Arc<dyn LoginSessions>,
@@ -722,7 +730,7 @@ impl Daemon {
             clocks: clocks.clone(),
             free_space: free_space.clone(),
             floor,
-            git_env,
+            git_env: git_env.clone(),
             base_env: {
                 let env = env.clone();
                 Arc::new(move |wait| wait_for_environment(&env, wait))
@@ -817,6 +825,7 @@ impl Daemon {
             phases,
             launchctl,
             handshake_wait,
+            git_env,
             login,
             previous_end,
             stop: AtomicBool::new(false),
@@ -1505,6 +1514,10 @@ fn call(
         Method::RunRecord => run_record(shared, params),
         Method::QueueList => queue_list(shared, params),
         Method::QueueAnswer => queue_answer(shared, session, params),
+        Method::BoardOpen => board_open(shared, params),
+        Method::BoardList => board_list(shared),
+        Method::TaskGet => task_get(shared, params),
+        Method::TaskApply => task_apply(shared, session, params),
         other => Err(RpcError::new(
             code::METHOD_NOT_FOUND,
             format!(
@@ -1668,6 +1681,201 @@ fn queue_answer(
         Err(AnswerError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
         Err(AnswerError::Invalid(message)) => Err(RpcError::new(code::INVALID_PARAMS, message)),
     }
+}
+
+/// Reads a request's params as `T`, or says which method they were not readable for.
+fn read_params<T: serde::de::DeserializeOwned>(
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<T, RpcError> {
+    serde_json::from_value(params.clone()).map_err(|e| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("the params of {method} are not readable: {e}"),
+        )
+    })
+}
+
+/// A store that failed, as the error of a request.
+fn store_failed(error: StoreError) -> RpcError {
+    RpcError::new(code::INTERNAL_ERROR, error.to_string())
+}
+
+/// The root of the board a request names, or `NOT_FOUND` naming the board.
+fn board_root(shared: &Shared, board: &str) -> Result<String, RpcError> {
+    shared
+        .store
+        .board_root(board)
+        .map_err(store_failed)?
+        .ok_or_else(|| {
+            RpcError::new(
+                code::NOT_FOUND,
+                format!("the daemon has no board {board:?}; open its folder with board.open first"),
+            )
+        })
+}
+
+/// `board.open` (ts-0075-hj): any folder in a git checkout becomes the board of that checkout's top level, and the same
+/// board each time. A folder that is not in a checkout answers no board and a failed `git_repo` check. `git init` is
+/// Stage 6a's, so `init_git` is refused.
+fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: BoardOpenParams = read_params("board.open", params)?;
+    if params.init_git {
+        return Err(RpcError::new(
+            code::INVALID_PARAMS,
+            "`init_git` is not built yet (Stage 6a). Run `git init` in the folder, then open it again.",
+        ));
+    }
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let folder = Path::new(&params.root);
+    if !folder.is_absolute() {
+        return Err(RpcError::new(
+            code::INVALID_PARAMS,
+            format!(
+                "`root` must be an absolute path, and `{}` is not",
+                params.root
+            ),
+        ));
+    }
+    let result = match boards::checkout_of(folder, &shared.git_env) {
+        Err(message) => BoardOpenResult {
+            board: None,
+            checks: vec![boards::git_repo_failed(message)],
+        },
+        Ok(checkout) => {
+            let root = checkout.root.display().to_string();
+            let id = shared.store.open_board(&root).map_err(store_failed)?;
+            BoardOpenResult {
+                board: Some(boards::summary(&id, &root, Some(&checkout))),
+                checks: vec![boards::git_repo_ok(&checkout)],
+            }
+        }
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `board.list`: the boards opened before, from the store. A board's line is the branch its checkout is on now, read
+/// from git; a board whose folder is gone or is no longer a checkout is listed with no line.
+fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
+    let boards = shared
+        .store
+        .boards()
+        .map_err(store_failed)?
+        .into_iter()
+        .map(|board| {
+            let checkout = boards::checkout_of(Path::new(&board.root), &shared.git_env).ok();
+            boards::summary(&board.id, &board.root, checkout.as_ref())
+        })
+        .collect();
+    Ok(serde_json::to_value(BoardListResult { boards }).expect("a result is JSON"))
+}
+
+/// `task.get` for a scratch task (ts-0075-hj): the task with its whole prompt, or no task when the board has none with
+/// that id. A key of another source is not found: only the scratch source is built yet.
+fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: TaskGetParams = read_params("task.get", params)?;
+    board_root(shared, &params.board)?;
+    let (source, id) = scratch::split_id(&params.id);
+    let task = if source.is_none_or(|source| source == scratch::SOURCE) {
+        ScratchSource::new(shared.store.clone(), &params.board)
+            .get(&GetParams {
+                id: id.to_string(),
+                checkout: None,
+            })
+            .map_err(|e| RpcError::new(code::INTERNAL_ERROR, e.to_string()))?
+            .task
+    } else {
+        None
+    };
+    let result = TaskGetResult {
+        task,
+        ambiguous: Vec::new(),
+        copies: Vec::new(),
+        collisions: Vec::new(),
+        runs: Vec::new(),
+        latest_run: None,
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `task.apply` on the scratch source (ts-0075-hj): `create` and `setStatus`. The source's own refusal (an unknown
+/// status, an unknown task) is an answer, not an error. Each write records a `task.changed` event with the actor of
+/// the connection. A scratch task is never committed, so `commit` is refused.
+fn task_apply(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: TaskApplyParams = read_params("task.apply", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    if params.commit {
+        return Err(RpcError::new(
+            code::INVALID_PARAMS,
+            "a scratch task is never committed: it lives in Collide's store, not in the repository",
+        ));
+    }
+    board_root(shared, &params.board)?;
+    let mut apply = params.apply;
+    let (from_id, bare_id) = match apply.id.as_deref().map(scratch::split_id) {
+        Some((source, bare)) => (source, Some(bare.to_string())),
+        None => (None, None),
+    };
+    let source = match (params.source.as_deref(), from_id) {
+        (Some(named), Some(in_id)) if named != in_id => {
+            return Err(RpcError::new(
+                code::INVALID_PARAMS,
+                format!("`source` is `{named}`, and the id names the source `{in_id}`"),
+            ));
+        }
+        (Some(source), _) | (None, Some(source)) => source,
+        (None, None) => {
+            return Err(RpcError::new(
+                code::INVALID_PARAMS,
+                "name the source: an op that makes a task has no id to name it, so give `source`",
+            ));
+        }
+    };
+    if source != scratch::SOURCE {
+        return Err(RpcError::new(
+            code::INVALID_PARAMS,
+            format!(
+                "the daemon serves only the `{}` source so far, and `{source}` is not built yet",
+                scratch::SOURCE
+            ),
+        ));
+    }
+    apply.id = bare_id;
+    let result = ScratchSource::new(shared.store.clone(), &params.board)
+        .apply(&apply)
+        .map_err(|e| RpcError::new(code::INTERNAL_ERROR, e.to_string()))?;
+    if let ApplyResult::Ok { items, .. } = &result {
+        for effect in items {
+            if let Err(error) = shared
+                .phases
+                .append_event(session.actor(), scratch::changed_event(effect))
+            {
+                shared.log.line(&format!(
+                    "the change of {} was written but its event was not: {error}",
+                    effect.key
+                ));
+            }
+        }
+    }
+    Ok(serde_json::to_value(TaskApplyResult {
+        result,
+        commit: None,
+    })
+    .expect("a result is JSON"))
 }
 
 /// `run.stop` (`collide stop`, 0.5): stops the run's processes in the order of [`crate::stop::ORDER`] and answers with

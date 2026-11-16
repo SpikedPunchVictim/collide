@@ -2212,8 +2212,9 @@ anything else depends on it:
 A third source is built in and needs no setup: **scratch tasks** (0.1). They live in Collide's store, one list per
 user per board, and are not ref-scoped. A prompt becomes a task, its first line the title. Their statuses are named
 for the categories (`ready`, `active`, `review`, `done`, `dropped`) and declared like any source's, so nothing
-special-cases them (revision 23); operations `create` and `setStatus`. Moving a
-scratch task into another source is deferred.
+special-cases them (revision 23); operations `create` and `setStatus`. A scratch task's key is `scratch:<n>`,
+counted within its board, and a write that asks to commit is refused (0.1). Moving a scratch task into another
+source is deferred.
 
 Why the plan adapter parses files itself:
 - Measured R2: `./plan tasks --format json` returns only `id, status, proposal, epic, title, file`. It returns no
