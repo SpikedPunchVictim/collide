@@ -20,4 +20,4 @@ Tasks come from a ref-scoped source that can be read and written, are combined i
 
 ## Notes
 
-Items are lettered `4a` to `4c` and are not split yet. Split them when Stage 3 nears done (0.10).
+Stage 4a is split (2026-11-16): `ts-0093-am` to `ts-0105-jv`, built one at a time in id order. The contracts and a YAML writer come first, then the git reader, the materializer and the loader, then trust, the settings layers, agent entries and the keychain, `git:` sources and `pack update`, user packs, the daemon and CLI, and last the repository instructions: measured, built, and checked by the owner. Stages 4b and 4c are split when they start (0.10, 0.15).

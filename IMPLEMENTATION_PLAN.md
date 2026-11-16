@@ -1663,7 +1663,8 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     - **Layers and sources.** The repo's file may set only two defaults for every ask, `ask.budget_usd` and
       `ask.timeout_s` (R5), because a team has a say in cost and not in what runs on a developer's machine. They are
       not per agent id: ids are the user's own names, and a committed `agents.<id>` would name an agent the repo
-      cannot know. An entry's own `budget_usd` and `timeout_s` in the user's file win over the repo's default.
+      cannot know. The repo's `ask.budget_usd` wins over an entry's own `budget_usd`, so a team's cap holds (owner,
+      2026-11-16); an entry's own `timeout_s` in the user's file wins over the repo's default.
       `ask.timeout_s` is `overridable`, since a slow local model is a fact about one machine. A repo budget that
       reaches an agent that cannot enforce one (ACP, External) is ignored, with a notice on the Agents page naming the
       agent, and is not a load error, because the repo's file cannot know which agent a developer picked. Every other
@@ -4220,8 +4221,10 @@ This sub-stage checks agent entries at load only. Launching an agent, and the se
 - Pack sources: resolution for each kind; a `dev:` folder's tree id equals `git write-tree` over the same files;
   the name clash; trust per source; the fetch rules, against a fixture remote that prompts, a hanging remote and a
   URL that starts with `-`.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-004-qd`, items lettered `4a`
-(part L).
+**Status**: Not Started. Split on 2026-11-16 into `ts-0093-am` to `ts-0105-jv` (revision 23 scope), in epic
+`ep-004-qd`, built one at a time in id order (part L). It runs after 3d. The keychain uses `security-framework`
+(owner, 2026-11-16). `ts-0103-sa`'s one real `claude` run is approved ($0.50 in all); the real keychain and the
+trust prompt over a real repository are the owner's (`ts-0105-jv`).
 
 ### Stage 4b: Providers, plan adapter, corpus and views
 
