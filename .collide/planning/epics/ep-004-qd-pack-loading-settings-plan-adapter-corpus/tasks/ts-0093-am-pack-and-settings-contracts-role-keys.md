@@ -1,7 +1,7 @@
 ---
 id: ts-0093-am
 kind: task
-status: active
+status: done
 title: "Pack and settings contracts: role keys, repoOnly, the settings registry"
 owners: []
 links: []
