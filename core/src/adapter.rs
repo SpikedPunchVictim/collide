@@ -103,10 +103,32 @@ pub enum PhaseOutcome {
 
 /// What [`AgentSession::finish`] returns: the last events and the outcome. `step.writes` is empty, because the child
 /// has gone.
+///
+/// `evidence` is a short text that backs a failed outcome: the end of the child's stderr for an empty turn, the error
+/// code for an error response (0.3, The stream protocol). It is `None` for every other outcome, and for a failure
+/// that has none. It is at most [`EVIDENCE_BYTES`] long ([`evidence_tail`]), so the store never holds more.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Finished {
     pub step: Step,
     pub outcome: PhaseOutcome,
+    pub evidence: Option<String>,
+}
+
+/// The most evidence a failure keeps, in bytes (0.3: the record keeps the agent's stderr tail, bounded).
+pub const EVIDENCE_BYTES: usize = 2048;
+
+/// The end of `text`, as evidence: surrounding white space is dropped, then at most [`EVIDENCE_BYTES`] are kept from
+/// the end, starting on a character boundary. `None` when nothing is left.
+pub fn evidence_tail(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let mut start = text.len().saturating_sub(EVIDENCE_BYTES);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    Some(text[start..].to_string())
 }
 
 /// Why a [`AgentSession::replay`] stopped.

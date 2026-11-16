@@ -258,6 +258,7 @@ impl AgentFeed {
         PhaseRecord {
             usage: self.usage.clone(),
             failure: failure.map(failure_text),
+            failure_evidence: None,
             report: self.report.clone(),
         }
     }
@@ -321,7 +322,8 @@ impl AgentFeed {
             PhaseOutcome::Failed { cause } => Some(cause.clone()),
             _ => None,
         };
-        let record = self.record(failure.as_ref());
+        let mut record = self.record(failure.as_ref());
+        record.failure_evidence = finished.evidence;
         (finished.outcome, record, problem)
     }
 

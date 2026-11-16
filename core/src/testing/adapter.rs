@@ -287,6 +287,7 @@ impl AgentSession for NormalizedSession {
         Finished {
             step: Step::default(),
             outcome,
+            evidence: None,
         }
     }
 

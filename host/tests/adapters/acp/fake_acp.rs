@@ -307,6 +307,27 @@ fn an_exit_step_ends_it_with_the_recorded_code_and_a_stderr_step_is_written_firs
 }
 
 #[test]
+fn a_signal_step_ends_it_by_that_signal_with_no_exit_code() {
+    let root = TempRoot::new();
+    let path = script(
+        &root,
+        &[
+            r#"{"say":{"jsonrpc":"2.0","result":{}}}"#,
+            r#"{"signal":9}"#,
+            r#"{"say":{"never":"written"}}"#,
+        ],
+    );
+    let mut fake = FakeAcp::start(&root, &path);
+    assert!(fake.next_value().is_some());
+    assert_eq!(fake.next_value(), None);
+    assert_eq!(
+        fake.finish().code,
+        None,
+        "a child ended by a signal has no code"
+    );
+}
+
+#[test]
 fn a_comment_and_a_blank_line_are_skipped() {
     let (lines, ended) = run(
         &[
@@ -371,8 +392,8 @@ fn a_sleep_step_holds_the_steps_after_it_for_that_long() {
 
 // ---- the recordings -------------------------------------------------------------------------------------------------
 
-const STEP_KEYS: [&str; 7] = [
-    "say", "say_text", "stderr", "expect", "wait_eof", "sleep", "exit",
+const STEP_KEYS: [&str; 8] = [
+    "say", "say_text", "stderr", "expect", "wait_eof", "sleep", "exit", "signal",
 ];
 
 /// Every `{"$id": name}` in `value`, as the names.
@@ -429,7 +450,7 @@ fn every_recording_is_json_on_each_line_says_something_and_holds_only_steps_the_
         }
         seen += 1;
     }
-    assert_eq!(seen, 14, "the recordings: add a test for a new one");
+    assert_eq!(seen, 20, "the recordings: add a test for a new one");
 }
 
 /// What a recording says in answer to `initialize` and to `session/new`.

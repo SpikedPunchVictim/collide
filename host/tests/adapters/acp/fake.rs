@@ -268,6 +268,27 @@ pub fn play(
     recording: &Path,
     options: AcpOptions,
     turns: &[&str],
+    react: impl FnMut(&mut AcpSession, &AgentEvent) -> Step,
+) -> Played {
+    run(recording, options, turns, None, react)
+}
+
+/// Like [`play`], for a child that goes away before its turn ends. The session reads `lines` lines of the child's and
+/// writes what it writes; stdin is then closed and the child is waited for. Its exit and the journal are what is left.
+pub fn play_until_exit(
+    recording: &Path,
+    options: AcpOptions,
+    lines: usize,
+    react: impl FnMut(&mut AcpSession, &AgentEvent) -> Step,
+) -> Played {
+    run(recording, options, &[], Some(lines), react)
+}
+
+fn run(
+    recording: &Path,
+    options: AcpOptions,
+    turns: &[&str],
+    lines: Option<usize>,
     mut react: impl FnMut(&mut AcpSession, &AgentEvent) -> Step,
 ) -> Played {
     let root = TempRoot::new();
@@ -333,8 +354,13 @@ pub fn play(
     };
     let mut turns = turns.iter();
     drive(&mut |session| session.start());
+    let mut read = 0;
     'run: loop {
+        if lines == Some(read) {
+            break;
+        }
         let step = steps.recv_timeout(PATIENCE).expect("a line from the child");
+        read += 1;
         for bytes in &step.writes {
             shim().write_to_child(bytes).expect("the child reads stdin");
         }

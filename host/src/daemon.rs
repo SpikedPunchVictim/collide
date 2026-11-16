@@ -1897,6 +1897,7 @@ fn run_record(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
         run: run.clone(),
         state,
         failure: record.failure,
+        failure_evidence: record.failure_evidence,
         report: record.report,
         workspace: shared
             .file_runs

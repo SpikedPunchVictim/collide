@@ -23,7 +23,7 @@ use collide_core::adapter::{
     AgentAdapter, AgentSession, CommandSpec, ConfigPath, LaunchError, LaunchRequest, LaunchSpec,
     SessionRef, refuse_unmet_capabilities,
 };
-use collide_core::agent::{Capabilities, SessionStart};
+use collide_core::agent::{Capabilities, SessionStart, UsageQuality};
 use collide_core::resolve::is_safe_token;
 use options::{AcpOptions, McpServer};
 use probe::Probed;
@@ -121,7 +121,14 @@ impl AgentAdapter for AcpAdapter {
     /// An [`session::AcpSession`] for the request's working folder, first prompt and model, with the adapter's servers.
     fn session(&self, request: &LaunchRequest) -> Box<dyn AgentSession + Send> {
         let mut options = AcpOptions::new(request.cwd.clone(), request.prompt.clone())
-            .with_mcp_servers(self.mcp_servers.clone());
+            .with_mcp_servers(self.mcp_servers.clone())
+            .with_usage(
+                self.profile
+                    .usage_report
+                    .quality
+                    .unwrap_or(UsageQuality::Unreported),
+                self.profile.output_includes_thoughts,
+            );
         // The id is only data for a JSON-RPC body: the session checks it against the agent's own list.
         if let Some(model) = &request.model {
             options = options.with_model(model.adapter_id());

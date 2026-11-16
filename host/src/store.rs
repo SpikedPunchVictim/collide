@@ -67,7 +67,7 @@ pub struct Migration {
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
 /// written with, and `line` is its JSON.
-pub const MIGRATIONS: [Migration; 6] = [
+pub const MIGRATIONS: [Migration; 7] = [
     Migration {
         version: 1,
         name: "events",
@@ -116,6 +116,11 @@ pub const MIGRATIONS: [Migration; 6] = [
         version: 6,
         name: "runs",
         sql: RUNS_SQL,
+    },
+    Migration {
+        version: 7,
+        name: "phase_record_failure_evidence",
+        sql: "ALTER TABLE phase_records ADD COLUMN failure_evidence TEXT",
     },
 ];
 
@@ -324,6 +329,10 @@ pub struct PhaseRecord {
     /// (the agent does not offer the model the role names): what the session said the failure was. Core's
     /// `PhaseState::Failed` carries only `disk`, so the cause is kept here.
     pub failure: Option<String>,
+    /// What backs `failure` when the session had some: the end of the agent's stderr for an `empty_turn`, the error
+    /// code for an error response. At most [`collide_core::adapter::EVIDENCE_BYTES`], from the end, on a character
+    /// boundary. It is untrusted text and may hold what the person did not expect to be kept.
+    pub failure_evidence: Option<String>,
     /// The text of the session's final report.
     pub report: Option<String>,
 }
@@ -473,10 +482,19 @@ impl Store {
             })?;
         self.connect()?
             .execute(
-                "INSERT INTO phase_records (run, phase, usage, failure, report) VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO phase_records (run, phase, usage, failure, failure_evidence, report)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (run, phase) DO UPDATE SET
-                     usage = excluded.usage, failure = excluded.failure, report = excluded.report",
-                params![run, phase, usage, record.failure, record.report],
+                     usage = excluded.usage, failure = excluded.failure,
+                     failure_evidence = excluded.failure_evidence, report = excluded.report",
+                params![
+                    run,
+                    phase,
+                    usage,
+                    record.failure,
+                    record.failure_evidence,
+                    record.report
+                ],
             )
             .map_err(|e| sql_error("writing a phase record", e))?;
         Ok(())
@@ -560,17 +578,18 @@ impl Store {
     pub fn phase_record(&self, run: &str, phase: &str) -> Result<Option<PhaseRecord>, StoreError> {
         let conn = self.connect()?;
         let row = conn.query_row(
-            "SELECT usage, failure, report FROM phase_records WHERE run = ?1 AND phase = ?2",
+            "SELECT usage, failure, failure_evidence, report FROM phase_records WHERE run = ?1 AND phase = ?2",
             params![run, phase],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                 ))
             },
         );
-        let (usage, failure, report) = match row {
+        let (usage, failure, failure_evidence, report) = match row {
             Ok(row) => row,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
             Err(error) => return Err(sql_error("reading a phase record", error)),
@@ -585,6 +604,7 @@ impl Store {
         Ok(Some(PhaseRecord {
             usage,
             failure,
+            failure_evidence,
             report,
         }))
     }
@@ -1164,6 +1184,7 @@ mod tests {
         let first = PhaseRecord {
             usage: Some(usage(5)),
             failure: None,
+            failure_evidence: None,
             report: None,
         };
         store.set_phase_record("r", "p", &first).unwrap();
@@ -1171,11 +1192,53 @@ mod tests {
         let last = PhaseRecord {
             usage: Some(usage(9)),
             failure: Some("no_result".to_string()),
+            failure_evidence: Some("the end of stderr".to_string()),
             report: Some("done".to_string()),
         };
         store.set_phase_record("r", "p", &last).unwrap();
         assert_eq!(store.phase_record("r", "p").unwrap(), Some(last));
         assert_eq!(store.phase_record("r", "other").unwrap(), None);
+    }
+
+    #[test]
+    fn a_phase_record_without_evidence_reads_back_without_it() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let record = PhaseRecord {
+            failure: Some("no_result".to_string()),
+            ..PhaseRecord::default()
+        };
+        store.set_phase_record("r", "p", &record).unwrap();
+        assert_eq!(store.phase_record("r", "p").unwrap(), Some(record));
+    }
+
+    #[test]
+    fn a_store_at_version_six_gains_the_failure_evidence_column_and_keeps_its_records() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 6);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        conn.execute(
+            "INSERT INTO phase_records (run, phase, usage, failure, report) VALUES ('r', 'p', NULL, 'empty_turn', 'x')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(user_version(&raw(&store)), known_version());
+        assert_eq!(
+            MIGRATIONS.get(6).map(|migration| migration.name),
+            Some("phase_record_failure_evidence")
+        );
+        let old = store.phase_record("r", "p").unwrap().unwrap();
+        assert_eq!(old.failure.as_deref(), Some("empty_turn"));
+        assert_eq!(old.failure_evidence, None, "a record from before has none");
+        let record = PhaseRecord {
+            failure: Some("empty_turn".to_string()),
+            failure_evidence: Some("model not found".to_string()),
+            ..PhaseRecord::default()
+        };
+        store.set_phase_record("r", "p", &record).unwrap();
+        assert_eq!(store.phase_record("r", "p").unwrap(), Some(record));
     }
 
     #[test]

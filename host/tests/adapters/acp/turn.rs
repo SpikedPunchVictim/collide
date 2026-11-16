@@ -219,7 +219,7 @@ fn each_stop_reason_ends_the_turn_with_the_reason_of_the_same_meaning() {
     ] {
         let mut session = ready();
         let step = session.feed(&prompt_response(2, word, None), 600);
-        assert_eq!(turn_end_of(&step), (reason, false, false), "{word}");
+        assert_eq!(turn_end_of(&step), (reason, false, true), "{word}");
         assert_eq!(step.events.last().unwrap().wall_ns, Some(600));
         assert!(step.writes.is_empty());
     }
@@ -239,7 +239,7 @@ fn an_unknown_stop_reason_a_missing_one_and_an_error_response_are_each_an_error_
         let step = session.feed(&response, 600);
         assert_eq!(
             turn_end_of(&step),
-            (error.clone(), false, false),
+            (error.clone(), false, true),
             "{response:?}"
         );
         let kept = format!("{:?}", step.events);
@@ -297,15 +297,16 @@ fn the_final_report_holds_the_words_after_the_last_tool_call_and_comes_before_th
     session.feed(&message_chunk(SESSION, "say hello."), 550);
     let step = session.feed(&prompt_response(2, "end_turn", None), 560);
     let events = events_of(&step);
-    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events.len(), 3, "{events:?}");
+    assert!(matches!(events[0], AgentEvent::Usage { .. }));
     assert_eq!(
-        events[0],
+        events[1],
         AgentEvent::FinalReport {
             text: "The notes say hello.".into(),
             source: FinalReportSource::Reconstructed
         }
     );
-    assert!(matches!(events[1], AgentEvent::TurnEnd { .. }));
+    assert!(matches!(events[2], AgentEvent::TurnEnd { .. }));
 }
 
 #[test]
@@ -316,7 +317,7 @@ fn a_turn_with_no_words_after_its_last_tool_call_has_no_final_report() {
     let step = session.feed(&prompt_response(2, "end_turn", None), 560);
     assert!(matches!(
         events_of(&step).as_slice(),
-        [AgentEvent::TurnEnd { .. }]
+        [AgentEvent::Usage { .. }, AgentEvent::TurnEnd { .. }]
     ));
 }
 
@@ -327,7 +328,7 @@ fn a_turn_with_no_tool_call_reports_all_its_words() {
     session.feed(&message_chunk(SESSION, "of it."), 510);
     let step = session.feed(&prompt_response(2, "end_turn", None), 560);
     assert!(matches!(
-        &events_of(&step)[0],
+        &events_of(&step)[1],
         AgentEvent::FinalReport { text, .. } if text == "All of it."
     ));
 }
@@ -339,7 +340,7 @@ fn an_error_response_gives_no_final_report_and_the_next_turn_starts_with_no_word
     let step = session.feed(&prompt_error(2, -32603, "Internal error"), 560);
     assert!(matches!(
         events_of(&step).as_slice(),
-        [AgentEvent::TurnEnd { .. }]
+        [AgentEvent::Usage { .. }, AgentEvent::TurnEnd { .. }]
     ));
 
     let next = session.send_turn("again");
@@ -347,7 +348,7 @@ fn an_error_response_gives_no_final_report_and_the_next_turn_starts_with_no_word
     session.feed(&message_chunk(SESSION, "fresh"), 600);
     let step = session.feed(&prompt_response(3, "end_turn", None), 610);
     assert!(matches!(
-        &events_of(&step)[0],
+        &events_of(&step)[1],
         AgentEvent::FinalReport { text, .. } if text == "fresh"
     ));
 }
@@ -370,6 +371,7 @@ fn a_prompt_turn_under_the_real_shim_gives_its_events_in_order_with_their_stored
             AgentEvent::SessionBound { .. } => "bound",
             AgentEvent::Message { .. } => "message",
             AgentEvent::ToolCall { .. } => "tool_call",
+            AgentEvent::Usage { .. } => "usage",
             AgentEvent::FinalReport { .. } => "final_report",
             AgentEvent::TurnEnd { .. } => "turn_end",
             other => panic!("an event the turn does not make: {other:?}"),
@@ -382,6 +384,7 @@ fn a_prompt_turn_under_the_real_shim_gives_its_events_in_order_with_their_stored
             "message",
             "tool_call",
             "message",
+            "usage",
             "final_report",
             "turn_end"
         ]
@@ -402,7 +405,7 @@ fn a_prompt_turn_under_the_real_shim_gives_its_events_in_order_with_their_stored
         }
     ));
     assert_eq!(
-        events[4],
+        events[5],
         AgentEvent::FinalReport {
             text: "The notes say hello.".into(),
             source: FinalReportSource::Reconstructed
@@ -410,7 +413,7 @@ fn a_prompt_turn_under_the_real_shim_gives_its_events_in_order_with_their_stored
         "only the words after the tool call"
     );
     assert!(matches!(
-        &events[5],
+        &events[6],
         AgentEvent::TurnEnd {
             reason: TurnEndReason::EndTurn {},
             cancel_requested: false,
@@ -431,7 +434,7 @@ fn a_prompt_turn_under_the_real_shim_gives_its_events_in_order_with_their_stored
         .iter()
         .map(|stamped| stamped.wall_ns.unwrap())
         .collect();
-    assert_eq!(times.len(), 6);
+    assert_eq!(times.len(), 7);
     assert!(times.iter().all(|time| stored.contains(time)), "{times:?}");
     assert!(times.windows(2).all(|pair| pair[0] <= pair[1]), "{times:?}");
     assert_eq!(

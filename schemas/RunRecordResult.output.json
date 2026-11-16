@@ -229,7 +229,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`run.record` result: what `collide run` prints at the end, and what it shows when it reattaches. `state` is the\nrun's state as the daemon last recorded it. `failure` is why a phase failed when its session could say (`no_result`,\n`budget`, `disk`, `api_500`, ...). `report` is the final report. `calls` are the model calls in the order they were\nrecorded. `wall_ms` is the run's length (absent while it has none to give), and `workspace` the worktree.",
+  "description": "`run.record` result: what `collide run` prints at the end, and what it shows when it reattaches. `state` is the\nrun's state as the daemon last recorded it. `failure` is why a phase failed when its session could say (`no_result`,\n`budget`, `disk`, `api_500`, ...). `failure_evidence` is the text that backs it when the session had some (the end\nof an ACP agent's stderr for an `empty_turn`, an error response's code), at most 2 KiB and untrusted. `report` is\nthe final report. `calls` are the model calls in the order they were\nrecorded. `wall_ms` is the run's length (absent while it has none to give), and `workspace` the worktree.",
   "properties": {
     "calls": {
       "default": [],
@@ -239,6 +239,12 @@
       "type": "array"
     },
     "failure": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "failure_evidence": {
       "type": [
         "string",
         "null"

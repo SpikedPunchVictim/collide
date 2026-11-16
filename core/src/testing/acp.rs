@@ -475,6 +475,7 @@ impl AgentSession for AcpSession {
         Finished {
             step: Step::default(),
             outcome,
+            evidence: None,
         }
     }
 

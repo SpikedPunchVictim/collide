@@ -1,0 +1,9 @@
+# Built for the tests: an agent whose model is missing. It answers the prompt `end_turn` with no words, no tool call
+# and no usage, and its error text is on stderr only (S7, O4). The text is a stand-in, as the ids are.
+{"expect":{"method":"initialize","params":{"protocolVersion":1}},"as":"init"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"init"},"result":{"protocolVersion":1,"agentCapabilities":{},"authMethods":[]}}}
+{"expect":{"method":"session/new"},"as":"new"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"new"},"result":{"sessionId":"ses-stand-in-1"}}}
+{"expect":{"method":"session/prompt","params":{"sessionId":"ses-stand-in-1","prompt":[{"type":"text"}]}},"as":"prompt"}
+{"stderr":"AI_APICallError: model 'stand-in-model:1b' not found"}
+{"say":{"jsonrpc":"2.0","id":{"$id":"prompt"},"result":{"stopReason":"end_turn"}}}

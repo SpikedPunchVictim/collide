@@ -414,6 +414,11 @@ fn total_cost(calls: &[RecordedCall]) -> String {
     }
 }
 
+/// A line of the agent's own words with its control characters dropped, so a terminal is not driven by them.
+fn printable(line: &str) -> String {
+    line.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// The record of a run, as it is printed at the end and when the command reattaches to a run that is over.
 pub fn record_text(record: &RunRecordResult) -> String {
     let mut text = format!("run {}: {}\n", record.run, state_words(&record.state));
@@ -425,6 +430,12 @@ pub fn record_text(record: &RunRecordResult) -> String {
     }
     if let Some(failure) = &record.failure {
         text.push_str(&format!("failure: {failure}\n"));
+        if let Some(evidence) = &record.failure_evidence {
+            text.push_str("evidence:\n");
+            for line in evidence.lines() {
+                text.push_str(&format!("  {}\n", printable(line)));
+            }
+        }
     }
     match &record.report {
         Some(report) => {
@@ -1199,5 +1210,117 @@ mod tests {
         );
         assert_eq!(final_code(&RunState::Failed {}), exit::RUN_FAILED);
         assert_eq!(final_code(&RunState::Stopped {}), exit::RUN_STOPPED);
+    }
+
+    // ---- an ACP phase (ts-0091-pz) -------------------------------------------------------------------------------
+
+    use crate::adapters::acp::options::AcpOptions;
+    use crate::adapters::acp::session::AcpSession;
+    use crate::metrics_store::UsageRow;
+    use collide_core::adapter::AgentSession;
+    use collide_core::agent::AgentEvent;
+    use collide_core::testing::acp::{initialize_response, new_session_response, prompt_response};
+    use serde_json::json;
+
+    /// The record of a run whose one phase was an ACP turn that ended with `usage` in its response (`None`: no
+    /// `usage`), as the daemon stores and `run.record` gives it, for a profile that claims `quality`.
+    fn acp_record(quality: UsageQuality, usage: Option<serde_json::Value>) -> RunRecordResult {
+        let mut session =
+            AcpSession::new(AcpOptions::new("/work", "go").with_usage(quality, false));
+        session.start();
+        session.feed(&initialize_response(0), 1);
+        session.feed(&new_session_response(1, "ses-stand-in-1"), 2);
+        let step = session.feed(&prompt_response(2, "end_turn", usage), 3);
+        let rows: Vec<UsageRow> = step
+            .events
+            .into_iter()
+            .filter_map(|stamped| match stamped.event {
+                AgentEvent::Usage { usage } => Some(UsageRow {
+                    phase: "build".to_string(),
+                    turn: None,
+                    usage,
+                }),
+                _ => None,
+            })
+            .collect();
+        RunRecordResult {
+            run: "r".to_string(),
+            state: RunState::Failed {},
+            failure: None,
+            failure_evidence: None,
+            report: None,
+            workspace: None,
+            wall_ms: None,
+            calls: crate::run_record::recorded_calls(&[], &rows, 0),
+        }
+    }
+
+    #[test]
+    fn an_acp_phase_with_partial_usage_prints_at_least_and_never_a_zero_for_what_it_lacks() {
+        let usage = json!({ "inputTokens": 34, "outputTokens": 49, "cachedReadTokens": 9331 });
+        let text = record_text(&acp_record(UsageQuality::Partial, Some(usage)));
+        assert!(
+            text.contains(
+                "turn 1: wall not reported, model time not reported, input at least 34, output at least 49, \
+                 cache read at least 9,331, cache write not reported, cost not reported"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "total: wall not reported, input at least 34, output at least 49, cache read at least 9,331, \
+                 cache write not reported, cost not reported"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("cache write 0"), "{text}");
+    }
+
+    #[test]
+    fn an_acp_phase_with_no_usage_prints_not_reported_in_every_figure_and_never_a_zero() {
+        let text = record_text(&acp_record(UsageQuality::Partial, None));
+        assert!(
+            text.contains(
+                "turn 1: wall not reported, model time not reported, input not reported, output not reported, \
+                 cache read not reported, cache write not reported, cost not reported"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "total: wall not reported, input not reported, output not reported, cache read not reported, \
+                 cache write not reported, cost not reported"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_failure_with_evidence_prints_the_evidence_after_it_and_a_failure_without_prints_none() {
+        let mut record = acp_record(UsageQuality::Partial, None);
+        record.failure = Some("empty_turn".to_string());
+        assert!(!record_text(&record).contains("evidence"));
+        record.failure_evidence = Some("AI_APICallError: model not found\nsecond line".to_string());
+        let text = record_text(&record);
+        assert!(
+            text.contains(
+                "failure: empty_turn\nevidence:\n  AI_APICallError: model not found\n  second line\n"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn evidence_is_untrusted_so_its_control_characters_are_not_printed() {
+        let mut record = acp_record(UsageQuality::Partial, None);
+        record.failure = Some("empty_turn".to_string());
+        record.failure_evidence =
+            Some("red \u{1b}[31mtext\u{7} bell\r\n\u{1b}]0;title".to_string());
+        let text = record_text(&record);
+        assert!(
+            !text.contains('\u{1b}') && !text.contains('\u{7}') && !text.contains('\r'),
+            "{text:?}"
+        );
+        assert!(text.contains("  red [31mtext bell\n"), "{text:?}");
     }
 }

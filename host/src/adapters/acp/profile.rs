@@ -25,6 +25,9 @@ pub struct AcpProfile {
     /// What the agent's usage reports give. A profile that says nothing gives `Unknown` and no scope, so usage is
     /// reported as not reported (S7: opencode's was `Partial`, with no cost and the last step only).
     pub usage_report: UsageReport,
+    /// Whether the agent's `outputTokens` already include its thought tokens. `false` unless the profile says so: a
+    /// thought figure is then dropped, because it could be a part of the output or an addition to it (0.3, Usage).
+    pub output_includes_thoughts: bool,
     /// Whether the agent reports a usage limit with a reset time. `Unknown` unless the profile says.
     pub limit_signal: Support,
 }
@@ -41,6 +44,7 @@ impl AcpProfile {
             config_paths: Vec::new(),
             resume_argv: None,
             usage_report: UsageReport::default(),
+            output_includes_thoughts: false,
             limit_signal: Support::Unknown,
         }
     }

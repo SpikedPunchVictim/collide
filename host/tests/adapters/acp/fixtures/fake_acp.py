@@ -16,6 +16,7 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
     {"wait_eof": true}      read stdin until it closes
     {"sleep": SECONDS}      do nothing for that long
     {"exit": N}             exit with code N now
+    {"signal": N}           end this process with signal N now, as a child that was killed ends
 
 `{"$id": "name"}` anywhere inside a later `say` or `expect` is replaced by the id remembered under the name, so a
 recording can answer a request whatever id the host gave it (an ACP client numbers its own requests). The agent's own
@@ -34,6 +35,7 @@ while it is idle (S7, measured).
 """
 
 import json
+import os
 import sys
 import time
 
@@ -130,6 +132,11 @@ def main():
         elif "exit" in step:
             sys.stdout.flush()
             sys.exit(step["exit"])
+        elif "signal" in step:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.kill(os.getpid(), step["signal"])
+            time.sleep(60)
         else:
             stop(EXIT_STEP_UNKNOWN, "step %d is not a step: %s" % (number, compact(step)))
     sys.stdin.read()

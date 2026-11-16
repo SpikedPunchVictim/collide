@@ -658,7 +658,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     and a `Step` is for context per response and is never added to a `Turn` either), every number an `Option`, a
     cost with its currency, `model_time_ms` (the model time, a difference of `duration_api_ms` for Claude), and a
     `quality`: `Exact`, `Partial` or `Unreported`. A total built from partial figures is shown as "at least" and never summed
-    with exact ones (0.13).
+    with exact ones (0.13). An ACP turn's usage is `Unreported`, every figure absent, when the agent sends none or
+    its profile claims none; a figure never shows as 0 unless the agent said 0 (ts-0091).
   - **A turn ends with** `TurnEnd { reason, cancel_requested, empty }`. `reason` is `EndTurn`, `MaxTokens`,
     `MaxTurns`, `Refusal`, `Cancelled`, `Error { status }`, `Blocked { reason }` (a prompt a hook refused) or
     `Budget` (the native budget ran out; the session is kept). `empty` is true when the turn gave no message, no tool
@@ -765,7 +766,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     fails the phase, with the status;
   - **an adapter whose protocol has no failure flag (ACP) fails an empty turn.** A turn that ends `end_turn` with no
     output and no usage is a failed phase, cause `empty_turn`, and the record keeps the agent's stderr tail as the
-    evidence. Measured S7: a model Ollama lacked gave `end_turn`, zero usage and no message, and its error text
+    evidence (`failure_evidence`, at most 2 KiB from the end; a JSON-RPC error keeps its code there; ts-0091).
+    Measured S7: a model Ollama lacked gave `end_turn`, zero usage and no message, and its error text
     appeared only on stderr. A turn that ends `refusal` or `max_tokens` fails the phase with that cause;
   - an error `result` still carries its spend, and the spend counts (measured S1: a budget error with
     `total_cost_usd` 0.00353);

@@ -81,8 +81,33 @@
 //! in the turn with the same id; else `other`. The agent may ask before it announces the call (S7, O6), and a call
 //! announced after the request changes nothing already given.
 //!
-//! Left to the item after this one, which hardens what the double had: empty turns, lost children and usage
-//! (`ts-0091-pz`). Until then `TurnEnd.empty` is `false`, and no `Usage` event is made.
+//! **How a phase ends** (0.3, The stream protocol; S7, O1, O4, O7; `finish`). The `session/prompt` response is the
+//! outcome, and exit is not:
+//!
+//! | the last turn | `finish` says | evidence kept |
+//! |---|---|---|
+//! | no response (stdout ended first), whatever the exit | `Lost` | none |
+//! | cancelled by the host, whatever the agent said | `Stopped` | none |
+//! | `end_turn` with no message, no tool call and no usage | `Failed{EmptyTurn}` | the end of stderr, 2 KiB |
+//! | `end_turn` otherwise | `Ended` | none |
+//! | `refusal`, `max_tokens`, `max_turn_requests` | `Failed` with that cause | none |
+//! | a JSON-RPC error | `Failed{Api{status: None}}` | the error's code, never its text |
+//! | a stop reason this version does not know | `Failed{Api{status: None}}` | none |
+//!
+//! A turn has output when the agent sent a message chunk with text, a tool call, or a request for permission (the ask
+//! is the call, S7, O6). Usage counts when any figure the agent sent is above 0: zeros are what opencode sent for a
+//! model it did not have (S7, O4). A turn is judged on the whole turn, not on its last chunk. A prompt written starts
+//! the next turn with nothing, so a second turn with no response is `Lost` and not the first turn's outcome.
+//!
+//! **Usage** (0.3, Usage; S7, O2). Each prompt response gives one `Usage` event of scope `Turn`, before the final
+//! report and the turn end. Its quality is the profile's claim and not a measurement
+//! ([`AcpOptions::usage_quality`]): `Partial` for an agent whose figures may leave something out (opencode reports its
+//! last step only), `Exact` when the profile says so. A response with no `usage`, a `usage` with no figure this
+//! session reads, and a profile that claims nothing give an `Unreported` event with every figure absent: a figure
+//! under `Unreported` would read as exact in a total. A figure the agent did not send, or sent as something other
+//! than a whole non-negative number, is absent, and is never 0. There is no cost, no model time and no context
+//! figure. `thoughtTokens` is kept only when the profile says the output includes it
+//! ([`AcpOptions::output_includes_thoughts`]), and then only as `thought`: the output is never changed.
 //!
 //! `PermissionRequest` carries no paths (`core/src/agent.rs`); ACP's `toolCall.locations` has them and is left out.
 
@@ -90,10 +115,11 @@ use super::model::{self, ModelForm, ModelPlan};
 use super::options::{AcpOptions, McpServer};
 use collide_core::adapter::{
     AgentSession, ExitInfo, Finished, PhaseFailure, PhaseOutcome, ReplayError, StampedEvent, Step,
+    evidence_tail,
 };
 use collide_core::agent::{
     AgentEvent, FinalReportSource, PermissionOption, PermissionOptionKind, PermissionReply,
-    PermissionRequest, ToolKind, TurnEndReason,
+    PermissionRequest, ToolKind, TurnEndReason, Usage, UsageQuality, UsageScope,
 };
 use collide_core::journal::JournalRecord;
 use collide_core::replay::{Replayable, replay_records};
@@ -124,6 +150,16 @@ enum Awaiting {
 struct HeldRequest {
     raw_id: Value,
     request: PermissionRequest,
+}
+
+/// How the last turn ended, as `finish` needs it.
+#[derive(Debug, Clone, PartialEq)]
+struct EndedTurn {
+    reason: TurnEndReason,
+    /// No message, no tool call and no usage in the whole turn.
+    empty: bool,
+    /// The JSON-RPC error code when the response was an error.
+    error_code: Option<i64>,
 }
 
 /// What reading a line makes the session write next, if anything.
@@ -169,7 +205,10 @@ pub struct AcpSession {
     handshake_failed: bool,
     /// The model the request named cannot be had, so no prompt was or will be written.
     model_refused: bool,
-    last_turn: Option<TurnEndReason>,
+    /// How the last turn ended; `None` while the open turn has had no response.
+    last_turn: Option<EndedTurn>,
+    /// The open turn has had a message with text, a tool call or a request.
+    turn_had_output: bool,
 }
 
 impl AcpSession {
@@ -187,6 +226,7 @@ impl AcpSession {
             handshake_failed: false,
             model_refused: false,
             last_turn: None,
+            turn_had_output: false,
         }
     }
 
@@ -248,6 +288,7 @@ impl AcpSession {
             Some("agent_message_chunk") => {
                 let text = update.pointer("/content/text").and_then(Value::as_str);
                 text.map(|text| {
+                    self.turn_had_output |= !text.is_empty();
                     self.turn_report.push_str(text);
                     AgentEvent::Message { text: text.into() }
                 })
@@ -255,6 +296,7 @@ impl AcpSession {
             Some("tool_call") => {
                 // The report is what the agent says after its last tool call.
                 self.turn_report.clear();
+                self.turn_had_output = true;
                 let id = text_of(update, "toolCallId");
                 let kind = tool_kind(update.get("kind"));
                 self.tool_kinds.retain(|(known, _)| *known != id);
@@ -280,6 +322,7 @@ impl AcpSession {
     /// could not end otherwise. The event is an `Other`, not a `PermissionRequest`, so no one is asked.
     fn read_request(&mut self, message: &Value, wall_ns: u64) -> Reading {
         let at = |event| stamped(Some(wall_ns), event);
+        self.turn_had_output = true;
         if self.cancel_requested && self.turn_open() {
             return Reading {
                 events: vec![at(named("permission_request_after_cancel"))],
@@ -489,6 +532,8 @@ impl AcpSession {
             .map(|held| Outgoing::Reply(cancelled_reply(&held.raw_id)))
             .collect();
         let failed = message.get("error").is_some();
+        let (usage, spent) = self.read_usage(message);
+        events.push(at(AgentEvent::Usage { usage }));
         if !failed && !self.turn_report.is_empty() {
             events.push(at(AgentEvent::FinalReport {
                 text: std::mem::take(&mut self.turn_report),
@@ -514,13 +559,77 @@ impl AcpSession {
         } else {
             reason
         };
-        self.last_turn = Some(reason.clone());
+        let empty = !self.turn_had_output && !spent;
+        self.last_turn = Some(EndedTurn {
+            reason: reason.clone(),
+            empty,
+            error_code: message.pointer("/error/code").and_then(Value::as_i64),
+        });
         events.push(at(AgentEvent::TurnEnd {
             reason,
             cancel_requested: self.cancel_requested,
-            empty: false,
+            empty,
         }));
         Reading { events, writes }
+    }
+
+    /// The usage of a prompt response, and whether the agent spent anything: any figure it sent is above 0, thought
+    /// tokens too, whatever the profile claims. The event holds only what the profile's claim and the agent's figures
+    /// allow: `Unreported` with no figure, as the module says.
+    fn read_usage(&self, message: &Value) -> (Usage, bool) {
+        let figure = |key: &str| {
+            message
+                .pointer("/result/usage")
+                .and_then(|usage| usage.get(key))
+                .and_then(Value::as_u64)
+        };
+        let thought = figure("thoughtTokens");
+        let mut usage = Usage {
+            scope: UsageScope::Turn,
+            input: figure("inputTokens"),
+            output: figure("outputTokens"),
+            cache_read: figure("cachedReadTokens"),
+            cache_write: figure("cachedWriteTokens"),
+            cache_write_1h: None,
+            cache_write_5m: None,
+            thought: thought.filter(|_| self.options.output_includes_thoughts),
+            context_used: None,
+            context_size: None,
+            cost: None,
+            model_time_ms: None,
+            quality: self.options.usage_quality,
+        };
+        let spent = [
+            usage.input,
+            usage.output,
+            usage.cache_read,
+            usage.cache_write,
+            thought,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|count| count > 0);
+        let reads_a_figure = [
+            usage.input,
+            usage.output,
+            usage.cache_read,
+            usage.cache_write,
+            usage.thought,
+        ]
+        .iter()
+        .any(Option::is_some);
+        if usage.quality == UsageQuality::Unreported || !reads_a_figure {
+            usage = Usage {
+                input: None,
+                output: None,
+                cache_read: None,
+                cache_write: None,
+                thought: None,
+                quality: UsageQuality::Unreported,
+                ..usage
+            };
+        }
+        (usage, spent)
     }
 }
 
@@ -550,6 +659,8 @@ impl Replayable for AcpSession {
                         self.turn_report.clear();
                         self.tool_kinds.clear();
                         self.cancel_requested = false;
+                        self.turn_had_output = false;
+                        self.last_turn = None;
                         Awaiting::Prompt
                     }
                 };
@@ -705,20 +816,27 @@ impl AgentSession for AcpSession {
     fn finish(&mut self, exit: &ExitInfo) -> Finished {
         // Exit alone is not an outcome in ACP: the prompt response is (S7). A child that went away with no
         // response, a pending request or not, leaves nothing known about its work.
-        let outcome = match (&exit.record, &self.last_turn) {
-            (None, _) => PhaseOutcome::Lost,
-            (Some(_), _) if self.model_refused => PhaseOutcome::Failed {
-                cause: PhaseFailure::ModelUnavailable,
-            },
-            (Some(_), _) if self.handshake_failed => PhaseOutcome::Failed {
-                cause: PhaseFailure::Api { status: None },
-            },
-            (Some(_), Some(reason)) => outcome_of(reason),
-            (Some(_), None) => PhaseOutcome::Lost,
+        let (outcome, evidence) = match (&exit.record, &self.last_turn) {
+            (None, _) => (PhaseOutcome::Lost, None),
+            (Some(_), _) if self.model_refused => (
+                PhaseOutcome::Failed {
+                    cause: PhaseFailure::ModelUnavailable,
+                },
+                None,
+            ),
+            (Some(_), _) if self.handshake_failed => (
+                PhaseOutcome::Failed {
+                    cause: PhaseFailure::Api { status: None },
+                },
+                None,
+            ),
+            (Some(_), Some(turn)) => (outcome_of(turn), evidence_of(turn, &exit.stderr_tail)),
+            (Some(_), None) => (PhaseOutcome::Lost, None),
         };
         Finished {
             step: Step::default(),
             outcome,
+            evidence,
         }
     }
 
@@ -728,10 +846,11 @@ impl AgentSession for AcpSession {
 }
 
 /// What a phase came to, from how its last turn ended.
-fn outcome_of(reason: &TurnEndReason) -> PhaseOutcome {
+fn outcome_of(turn: &EndedTurn) -> PhaseOutcome {
     let failed = |cause| PhaseOutcome::Failed { cause };
-    match reason {
+    match &turn.reason {
         TurnEndReason::Cancelled {} => PhaseOutcome::Stopped,
+        TurnEndReason::EndTurn {} if turn.empty => failed(PhaseFailure::EmptyTurn),
         TurnEndReason::EndTurn {} => PhaseOutcome::Ended,
         TurnEndReason::MaxTokens {} => failed(PhaseFailure::MaxTokens),
         TurnEndReason::MaxTurns {} => failed(PhaseFailure::MaxTurns),
@@ -741,6 +860,16 @@ fn outcome_of(reason: &TurnEndReason) -> PhaseOutcome {
         TurnEndReason::Blocked { reason } => failed(PhaseFailure::Blocked {
             reason: reason.clone(),
         }),
+    }
+}
+
+/// What a failed turn leaves to show why. An empty turn has the child's own words on stderr (S7, O4). An error
+/// response has its code: its message is the agent's text and may hold anything, so it is not kept.
+fn evidence_of(turn: &EndedTurn, stderr: &str) -> Option<String> {
+    match (&turn.reason, turn.error_code) {
+        (TurnEndReason::Error { .. }, Some(code)) => Some(format!("JSON-RPC error code {code}")),
+        (TurnEndReason::EndTurn {}, _) if turn.empty => evidence_tail(stderr),
+        _ => None,
     }
 }
 

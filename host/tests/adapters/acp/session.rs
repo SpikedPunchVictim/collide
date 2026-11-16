@@ -20,7 +20,12 @@ pub fn session() -> AcpSession {
 
 /// A session that is started and has read the handshake (ids 0 and 1), so the first prompt (id 2) is out.
 pub fn ready() -> AcpSession {
-    let mut session = session();
+    ready_with(AcpOptions::new("/work/repo", "do the task"))
+}
+
+/// [`ready`] for a session built from `options`.
+pub fn ready_with(options: AcpOptions) -> AcpSession {
+    let mut session = AcpSession::new(options);
     session.start();
     session.feed(&initialize_response(0), 100);
     session.feed(&new_session_response(1, SESSION), 110);

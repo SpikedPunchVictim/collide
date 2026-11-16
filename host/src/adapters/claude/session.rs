@@ -1037,6 +1037,7 @@ impl AgentSession for ClaudeSession {
                 writes: Vec::new(),
             },
             outcome,
+            evidence: None,
         }
     }
 

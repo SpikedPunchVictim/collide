@@ -45,12 +45,15 @@ export type PauseCause = 'ask_human' | 'usage_limit' | 'disk'
 /**
  * `run.record` result: what `collide run` prints at the end, and what it shows when it reattaches. `state` is the
  * run's state as the daemon last recorded it. `failure` is why a phase failed when its session could say (`no_result`,
- * `budget`, `disk`, `api_500`, ...). `report` is the final report. `calls` are the model calls in the order they were
+ * `budget`, `disk`, `api_500`, ...). `failure_evidence` is the text that backs it when the session had some (the end
+ * of an ACP agent's stderr for an `empty_turn`, an error response's code), at most 2 KiB and untrusted. `report` is
+ * the final report. `calls` are the model calls in the order they were
  * recorded. `wall_ms` is the run's length (absent while it has none to give), and `workspace` the worktree.
  */
 export interface RunRecordResult {
   calls?: RecordedCall[]
   failure?: string | null
+  failure_evidence?: string | null
   report?: string | null
   run: string
   state: RunState

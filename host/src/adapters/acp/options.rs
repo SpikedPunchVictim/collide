@@ -1,6 +1,7 @@
 //! The data an ACP session is built from. A session holds all of it itself, so a session rebuilt from the journal has
 //! the first prompt it must have written (it is not queued by a `send_turn` that a restart would lose).
 
+use collide_core::agent::UsageQuality;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -63,6 +64,10 @@ pub struct AcpOptions {
     /// The model the request names, as the agent knows it (`ModelRef::adapter_id`). It is data for a JSON-RPC body
     /// only: it is in no argument, variable or file name, so it needs no safe token. `None` keeps the agent's own.
     pub model: Option<String>,
+    /// The quality the profile claims for the agent's usage figures. `Unreported` when the profile says nothing.
+    pub usage_quality: UsageQuality,
+    /// Whether the profile says the agent's `outputTokens` already include its thought tokens.
+    pub output_includes_thoughts: bool,
 }
 
 impl AcpOptions {
@@ -73,6 +78,8 @@ impl AcpOptions {
             first_prompt: first_prompt.into(),
             mcp_servers: Vec::new(),
             model: None,
+            usage_quality: UsageQuality::Unreported,
+            output_includes_thoughts: false,
         }
     }
 
@@ -85,6 +92,13 @@ impl AcpOptions {
     /// The same options that ask the agent for this model after `session/new`.
     pub fn with_model(mut self, id: impl Into<String>) -> Self {
         self.model = Some(id.into());
+        self
+    }
+
+    /// The same options with the profile's claims about usage.
+    pub fn with_usage(mut self, quality: UsageQuality, output_includes_thoughts: bool) -> Self {
+        self.usage_quality = quality;
+        self.output_includes_thoughts = output_includes_thoughts;
         self
     }
 }

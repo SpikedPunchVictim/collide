@@ -5,7 +5,7 @@
 
 use super::fake::{play, recording};
 use super::session::{SESSION, events_of, exited, line, ready, session, written};
-use collide_core::adapter::{AgentSession, PhaseFailure, PhaseOutcome, Step};
+use collide_core::adapter::{AgentSession, PhaseFailure, PhaseOutcome, StampedEvent, Step};
 use collide_core::agent::{
     AgentEvent, PermissionOption, PermissionOptionKind, PermissionReply, PermissionRequest,
     ToolKind, TurnEndReason,
@@ -782,7 +782,20 @@ fn the_request_is_dropped_before_the_turn_end_event_and_the_events_are_the_same(
     let mut without = ready();
     let held = with_request.feed(&prompt_response(2, "end_turn", None), 600);
     let none = without.feed(&prompt_response(2, "end_turn", None), 600);
-    assert_eq!(held.events, none.events, "no event for the answer");
+    // The ask counts as output, so only `empty` differs: nothing else is made for the answer.
+    let as_if_empty = |mut events: Vec<StampedEvent>| {
+        for stamped in &mut events {
+            if let AgentEvent::TurnEnd { empty, .. } = &mut stamped.event {
+                *empty = true;
+            }
+        }
+        events
+    };
+    assert_eq!(
+        as_if_empty(held.events.clone()),
+        none.events,
+        "no event for the answer"
+    );
     assert!(matches!(
         events_of(&held).last(),
         Some(AgentEvent::TurnEnd { .. })
@@ -910,6 +923,7 @@ fn kinds(events: &[AgentEvent]) -> Vec<&'static str> {
             AgentEvent::ToolCall { .. } => "tool_call",
             AgentEvent::PermissionRequest { .. } => "permission_request",
             AgentEvent::PermissionUnanswerable { .. } => "unanswerable",
+            AgentEvent::Usage { .. } => "usage",
             AgentEvent::FinalReport { .. } => "final_report",
             AgentEvent::TurnEnd { .. } => "turn_end",
             other => panic!("an event the turn does not make: {other:?}"),
@@ -938,6 +952,7 @@ fn a_request_answered_allow_lets_the_child_go_on_to_the_end_of_its_turn() {
             "permission_request",
             "tool_call",
             "message",
+            "usage",
             "final_report",
             "turn_end"
         ]

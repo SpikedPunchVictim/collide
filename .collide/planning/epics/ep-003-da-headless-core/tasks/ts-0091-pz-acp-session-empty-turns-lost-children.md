@@ -123,3 +123,132 @@ Write these first:
 - Owner decisions (2026-11-15, at the split): the decisions for the owner above, taken as recommended under the
   owner's delegation; the owner may change them before the item is built. The ACP protocol is written by hand: no ACP
   crate is added.
+
+### Built
+
+The ACP session now judges how a phase ended, and reports what a turn spent. No crate or dependency was added. A wire
+type changed (`RunRecordResult` gained `failure_evidence`); `pnpm gen` was run and its output kept.
+
+**Outcome.** `AcpSession::finish` follows the table in the session's module doc:
+
+- `Lost`: stdout ended with no response to the open prompt, whatever the exit (code 0 with a request pending, code 1,
+  a signal, a death in the handshake, a shim with no exit record). A prompt written starts a new turn, so a second turn
+  with no response is `Lost` and not the first turn's outcome (`last_turn` is cleared in `note_written`).
+- `Stopped`: the host cancelled the turn, even when the agent said `end_turn` with nothing.
+- `Failed { EmptyTurn }`: `end_turn` with no message text, no tool call, no permission request and no usage figure
+  above 0 over the whole turn. The evidence is the end of the child's stderr.
+- `Refusal`, `MaxTokens`, `MaxTurns` keep their causes even when the turn is empty. An error response and an unknown
+  stop reason are `Api { status: None }`; the error response keeps its code as evidence.
+- Evidence: `core/src/adapter.rs`, `Finished::evidence`, `EVIDENCE_BYTES` (2048) and `evidence_tail` (trim, keep the
+  end, start on a char boundary, `None` when empty).
+
+**Usage.** `read_usage` in `host/src/adapters/acp/session.rs`. One `Usage` event per prompt response, scope `Turn`,
+before the final report and the turn end. Quality is the profile's claim (`AcpOptions::usage_quality`, from
+`profile.usage_report.quality`). Every figure is an `Option`: only a whole non-negative number the agent sent is kept.
+No cost, model time or context figure. A response with no `usage`, one with no figure the session reads, and a profile
+that claims nothing give `Unreported` with every figure absent. `AcpProfile::output_includes_thoughts` (new, default
+false) decides whether `thoughtTokens` goes to `Usage.thought`.
+
+**The record.**
+- `host/src/store.rs`: migration 7 `phase_record_failure_evidence` (`ALTER TABLE phase_records ADD COLUMN
+  failure_evidence TEXT`), `PhaseRecord::failure_evidence`, and the read and write SQL.
+- `host/src/agent_feed.rs`, `AgentFeed::settle`: copies `Finished::evidence` into the record.
+- `core/src/owner/run.rs`, `RunRecordResult::failure_evidence` (optional, skipped when none); `host/src/daemon.rs`,
+  `run_record` fills it. Regenerated: `schemas/RunRecordResult.{input,output}.json` and
+  `packages/pack-sdk/src/generated/RunRecordResult.{input,output}.ts`. No TS code reads the field.
+- `host/src/run_cli.rs`, `record_text`: prints `evidence:` after `failure:`, each line indented, control characters
+  dropped (the text is the agent's). The "at least" and "not reported" figures needed no change; tests show them for
+  an ACP phase.
+
+**Harness.** `fake_acp.py` has a `{"signal": N}` step; `play_until_exit` (new, in `host/tests/adapters/acp/fake.rs`)
+stops after N lines; six new recordings: `empty-turn`, `prompt-turn-no-usage`, `lost-request-pending`, `lost-exit-1`,
+`lost-signaled`, `lost-in-handshake`. `session.rs` (test helper) has `ready_with(options)`.
+
+**Tests, written first.** Red before the code, seen by running them:
+
+- `host/tests/adapters/acp/outcome.rs` (new; run as `cargo test -p collide-host --test acp_adapter`). Red, among
+  them:
+  `an_end_turn_with_no_words_no_tool_call_and_no_usage_is_an_empty_turn`,
+  `an_empty_turn_keeps_the_end_of_the_childs_stderr_as_its_evidence`, `an_empty_turn_with_no_stderr_has_no_evidence`,
+  `a_chunk_with_no_text_is_not_output`, `a_usage_of_zeros_with_no_output_is_still_an_empty_turn`,
+  `the_next_turn_starts_with_no_output`,
+  `an_error_response_is_an_api_failure_that_keeps_the_errors_code_and_nothing_else`,
+  `a_second_turn_with_no_response_is_lost_and_not_the_first_turns_outcome`, the three `evidence_*` bound tests, the two
+  replay tests, the shim test for an empty turn with its stderr, the journal-replay test of an empty turn, and the
+  three `record::` tests (stderr text in the record, long stderr bounded, usage never 0). Green from the start, as the
+  old code already did it: the `Lost` cases (exit 0, 1, signal, handshake, request pending), `Stopped`, and the
+  refusal, max-tokens and max-turn-requests causes. They pin the behavior now.
+- `host/tests/adapters/acp/usage.rs` (new). Red: every test that reads a figure or an event (19 of its 22), including
+  `the_adapters_session_has_the_profiles_usage_quality`, `..._thought_rule`,
+  `thought_tokens_are_dropped_unless_the_profile_says_the_output_includes_them`,
+  `a_response_with_no_usage_gives_an_unreported_event_with_every_figure_absent`,
+  `a_profile_that_says_nothing_gives_unreported_for_all_and_drops_the_figures`,
+  `a_figure_that_is_not_a_whole_non_negative_number_is_absent`, `each_turn_gives_its_own_usage_event`,
+  `the_usage_comes_before_the_final_report_and_the_turn_end_and_has_the_lines_time`, and the two recordings under the
+  shim.
+- `core/tests/evidence_tail.rs` (new, 5 tests): 4 red, `nothing_but_white_space_is_no_evidence` green on the stub.
+- `host/src/store.rs`: `a_store_at_version_six_gains_the_failure_evidence_column_and_keeps_its_records` and the
+  round-trip test red; `a_phase_record_without_evidence_reads_back_without_it` guards the old shape.
+- `host/src/run_cli.rs`: `an_acp_phase_with_partial_usage_prints_at_least_and_never_a_zero_for_what_it_lacks`,
+  `an_acp_phase_with_no_usage_prints_not_reported_in_every_figure_and_never_a_zero`,
+  `a_failure_with_evidence_prints_the_evidence_after_it_and_a_failure_without_prints_none` and
+  `evidence_is_untrusted_so_its_control_characters_are_not_printed`: red on the missing field and the missing session
+  usage.
+- `fake_acp.rs`: `a_signal_step_ends_it_by_that_signal_with_no_exit_code`; the recording count is 20.
+
+**Existing tests changed** because the semantics changed (a `Usage` event now comes at every turn end, and a turn with
+nothing is empty): `turn.rs` (stop reasons and error turns give `empty: true`; the events list holds `Usage`),
+`permission.rs` (the event lists; the "events are the same" test compares with `empty` set, since an ask is output),
+`model.rs` (two turns that ended with no words now feed a message first, or they are `EmptyTurn`).
+
+**Checks** (each run in the foreground, after the last edit): `cargo build --workspace`; `cargo test --workspace
+--no-fail-fast` (2890 passed, 0 failed); `cargo clippy --workspace --all-targets -- -D warnings`;
+`cargo fmt --all --check`; `pnpm test`; `pnpm typecheck`; `pnpm --filter @collide/app build`; `pnpm build:packs`;
+`pnpm check`. All pass. Code and comment lines in the files written are 120 columns or fewer.
+
+### Decisions for the owner
+
+1. **The evidence column (the item's decision).** Taken as recommended: option 1, an optional `failure_evidence` on the
+   record, with migration 7, capped at 2 KiB. Alternative: keep it in the stderr log only (needs a plan change).
+   Recommend keeping. The text is the child's stderr and may hold what the person did not expect to be stored.
+2. **Thought tokens.** The item's note says `Usage` has no field for them; it has `thought`. So with
+   `output_includes_thoughts` true the session sets `thought`, and `output` stays as the agent reported it (nothing is
+   added). With it false the figure is dropped. Alternative: add it to `output` as the note says. Recommend keeping:
+   a sum the agent did not report is worse than a separate figure.
+3. **An `Unreported` claim drops all figures.** A profile claim of `Unreported` (or none) gives an event with no
+   figure, even if the agent sent some. A figure under `Unreported` would print as exact in `count_text`. Alternative:
+   keep the figures under `Unreported`. Recommend keeping.
+4. **Zeros count as no usage for "empty".** A usage whose figures are all 0 with no output is an empty turn, as S7 O4
+   measured. A usage with any figure above 0 (thought tokens too, whatever the profile does with them) is not.
+   Alternative: any `usage` object at all means not empty; that would hide the opencode missing-model case. Recommend
+   keeping.
+5. **A permission request counts as a tool call.** The agent may ask before announcing the call (S7, O6). Alternative:
+   count only `tool_call` updates. Recommend keeping; a turn that asked for a tool did something.
+6. **An error response keeps its code only.** The evidence is `JSON-RPC error code <n>`; the message is the agent's
+   free text and is not kept. A handshake error keeps no evidence at all. Alternative: keep the message, bounded.
+   Recommend keeping, as events hold no content by rule.
+7. **A second turn with no response is `Lost`.** A prompt written clears the last turn's end, so the first turn's
+   outcome never stands for a second one. Alternative: keep the last response. Recommend keeping.
+8. **A cancelled turn with no output has `empty: true` on its `TurnEnd`** and is `Stopped` (cancel wins). The flag
+   says only what the turn gave. Alternative: force `false` on cancel. Recommend keeping.
+9. **The usage event does not name the model** (carried from `ts-0090-jd`). No `Usage` field holds one. Alternative: a
+   new field. Recommend leaving it until a record needs it.
+10. **Plan text, proposed (0.3, Usage):** "an ACP turn's usage is `Unreported` with every figure absent when the agent
+    sends none or the profile claims none; a figure never shows as 0 unless the agent said 0." And (The stream
+    protocol): "the evidence kept with a failed phase is at most 2 KiB, from the end of stderr, or the code of a
+    JSON-RPC error."
+
+- Owner decisions (2026-11-16, at the build): decisions 1 to 9 taken under the owner's delegation, as recommended.
+  Decision 10's plan text applied to 0.3 (the Usage bullet and the empty-turn bullet). The app shows no evidence yet;
+  `collide run` prints it, with control characters dropped.
+
+### Not done, by design
+
+- No daemon wiring, no owed writes after a journal cut, and nothing that closes the child's stdin after a turn:
+  `ts-0092-tw`.
+- No real ACP profile and no real agent; no profile sets `usage_report.quality` or `output_includes_thoughts` yet:
+  Stage 6b.
+- No display of `failure_evidence` in the app: no TS reads `RunRecordResult.failure` yet either. The generated types
+  carry the field.
+- No cost, model time, context or per-model usage figure for an ACP turn.
+- A handshake that fails keeps no evidence, though stderr may say why.

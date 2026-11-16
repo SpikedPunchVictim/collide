@@ -12,7 +12,7 @@ use collide_core::agent::{AgentEvent, ModelRef, TurnEndReason};
 use collide_core::journal::{Direction, encode_record, read_journal};
 use collide_core::replay::replay_journal_bytes;
 use collide_core::shim::ExitEnd;
-use collide_core::testing::acp::{initialize_response, prompt_response, update};
+use collide_core::testing::acp::{initialize_response, message_chunk, prompt_response, update};
 use collide_core::testing::sample_launch_request;
 use collide_host::adapters::acp::AcpAdapter;
 use collide_host::adapters::acp::options::AcpOptions;
@@ -444,6 +444,7 @@ fn an_agent_with_no_list_and_no_way_to_set_one_fails_the_phase_when_a_model_is_a
 fn an_agent_with_no_list_runs_when_no_model_is_asked_for() {
     let (mut session, step) = new_step(None, &new_response(json!({})));
     assert_eq!(written(&step), vec![first_prompt(2)]);
+    session.feed(&message_chunk(SESSION, "done"), 150);
     session.feed(&prompt_response(2, "end_turn", None), 200);
     assert_eq!(session.finish(&exited()).outcome, PhaseOutcome::Ended);
 }
@@ -563,6 +564,7 @@ fn a_turn_sent_after_the_model_was_set_and_the_first_turn_ended_is_written() {
 fn a_model_that_was_set_gives_an_ended_phase_when_the_turn_ends_well() {
     let (mut session, _) = new_step(Some(B), &with_draft_models(A, &[A, B]));
     session.feed(&answer(2, json!({})), 120);
+    session.feed(&message_chunk(SESSION, "done"), 150);
     let step = session.feed(&prompt_response(3, "end_turn", None), 200);
     assert!(matches!(
         events_of(&step).last(),
