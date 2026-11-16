@@ -604,7 +604,7 @@ fn check_path(path: &str) -> Result<(), GitError> {
 }
 
 /// A full object id: 40 hex digits (SHA-1) or 64 (SHA-256), lower case, as git prints it.
-fn check_id(what: &'static str, id: &str) -> Result<(), GitError> {
+pub(crate) fn check_id(what: &'static str, id: &str) -> Result<(), GitError> {
     let hex = id
         .bytes()
         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));

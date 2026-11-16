@@ -1,6 +1,6 @@
 //! Tests for the rule that finds the built-in packs bundle from a checkout or an install (ts-0020).
 
-use collide_host::pack_location::{Inputs, locate_bundle};
+use collide_host::pack_location::{Inputs, bundle_sdk, locate_bundle};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -176,4 +176,51 @@ fn an_unknown_executable_path_says_so() {
         error.contains("the executable's path is unknown"),
         "{error}"
     );
+}
+
+/// Puts a compiled SDK where `scripts/build-packs.ts` puts it: in the `node_modules` of the pack that depends on it.
+fn make_sdk(bundle: &Path, pack: &str) -> PathBuf {
+    let sdk = bundle.join(pack).join("node_modules/@collide/pack-sdk");
+    fs::create_dir_all(sdk.join("dist")).unwrap();
+    fs::write(sdk.join("package.json"), "{\"version\":\"0.1.0\"}").unwrap();
+    sdk
+}
+
+#[test]
+fn the_sdk_is_found_in_the_pack_that_holds_it() {
+    let base = fresh("sdk-found");
+    let _cleanup = Cleanup(base.clone());
+    make_bundle(&base);
+    let sdk = make_sdk(&base, "plan");
+    assert_eq!(bundle_sdk(&base).unwrap(), sdk);
+}
+
+#[test]
+fn the_first_pack_in_name_order_that_holds_an_sdk_gives_it() {
+    let base = fresh("sdk-order");
+    let _cleanup = Cleanup(base.clone());
+    make_bundle(&base);
+    fs::create_dir_all(base.join("collide")).unwrap();
+    let sdk = make_sdk(&base, "other");
+    make_sdk(&base, "plan");
+    assert_eq!(bundle_sdk(&base).unwrap(), sdk);
+}
+
+#[test]
+fn a_bundle_with_no_sdk_is_an_error_that_names_the_bundle_folder() {
+    let base = fresh("sdk-none");
+    let _cleanup = Cleanup(base.clone());
+    make_bundle(&base);
+    fs::create_dir_all(base.join("plan/node_modules/@collide/pack-sdk")).unwrap();
+    let error = bundle_sdk(&base).unwrap_err().to_string();
+    assert!(error.contains(&base.display().to_string()), "{error}");
+    assert!(error.contains("pack-sdk"), "{error}");
+}
+
+#[test]
+fn a_bundle_folder_that_is_not_there_is_an_error_that_names_it() {
+    let base = fresh("sdk-missing");
+    let _cleanup = Cleanup(base.clone());
+    let error = bundle_sdk(&base.join("nowhere")).unwrap_err().to_string();
+    assert!(error.contains("nowhere"), "{error}");
 }

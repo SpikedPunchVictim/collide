@@ -106,3 +106,43 @@ pub fn locate_bundle(inputs: &Inputs) -> Result<PathBuf, NotFound> {
         }),
     }
 }
+
+/// Where `scripts/build-packs.ts` puts the compiled SDK: in the `node_modules` of each pack that depends on it.
+const SDK_IN_PACK: &str = "node_modules/@collide/pack-sdk";
+
+/// No compiled SDK was found in a bundle.
+#[derive(Debug)]
+pub struct NoSdk {
+    pub bundle: PathBuf,
+}
+
+impl fmt::Display for NoSdk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the bundle {} holds no compiled SDK (a pack's {SDK_IN_PACK}/package.json). \
+             Run `pnpm build:packs` in the Collide checkout",
+            self.bundle.display()
+        )
+    }
+}
+
+impl std::error::Error for NoSdk {}
+
+/// The compiled SDK a bundle holds: `<pack>/node_modules/@collide/pack-sdk` of the first pack, in name order, that has
+/// one. Every pack that depends on the SDK carries the same build, so which one is read does not matter.
+pub fn bundle_sdk(bundle: &Path) -> Result<PathBuf, NoSdk> {
+    let none = || NoSdk {
+        bundle: bundle.to_path_buf(),
+    };
+    let mut packs: Vec<PathBuf> = std::fs::read_dir(bundle)
+        .map_err(|_| none())?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
+    packs.sort();
+    packs
+        .iter()
+        .map(|pack| pack.join(SDK_IN_PACK))
+        .find(|sdk| sdk.join("package.json").is_file())
+        .ok_or_else(none)
+}

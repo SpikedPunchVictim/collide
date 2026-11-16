@@ -540,9 +540,10 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     error count (0.10) and is kept.
   - **One summary.** What a catch-up found notifies once, as "While Collide was closed", with counts of tasks
     changed, added and removed and a lens of them on the Field; never one notification for each.
-  - **Caches on disk** need no clearing. Packs are keyed by git tree id and the SDK by version (0.6), so a changed
-    pack is a new entry, and a `git:` pack stays at the tree its lock pins, so nothing is fetched at start. The agent
-    tool's version, its tested range and the store's schema are checked as at any start (0.3, Stage 3a).
+  - **Caches on disk** need no clearing. Packs are keyed by git tree id and SDK version, and the SDK by version (0.6),
+    so a changed pack is a new entry, and a `git:` pack stays at the tree its lock pins, so nothing is fetched at
+    start. The agent tool's version, its tested range and the store's schema are checked as at any start (0.3, Stage
+    3a).
   - **Limit.** A child that survived a daemon restart keeps sending telemetry to the receiver port it was given; when
     the new daemon binds another, that run's telemetry from then on is lost, and the run says so.
 - **The UI-tools endpoint** (owner, 2026-11-14; S6's in-app agent section). It lets an agent change what the window
@@ -1530,9 +1531,10 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   with a warm `NODE_COMPILE_CACHE`.
 - **Node refuses to strip types under `node_modules`** (measured by R1: `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
   So `@collide/pack-sdk` ships as compiled JS + `.d.ts`, with zero runtime dependencies, and Collide supplies it:
-  - Collide materializes the pack into `~/.cache/collide/packs/<tree id>/`, keyed by the pack's git tree id,
-    whatever the pack's source (0.7). An entry never changes, and lines share it whenever their pack content matches. It
-    holds:
+  - Collide materializes the pack into `~/.cache/collide/packs/<tree id>-<SDK version>/`, keyed by the pack's git
+    tree id, whatever the pack's source (0.7), and by the SDK it links, so a new SDK makes new entries and a pack
+    runs with the SDK its `requires.sdk` was checked against (ts-0095-kp). An entry never changes, and lines share it
+    whenever their pack content matches. It holds:
     - `pack/`, a read-only, verified copy of the pack directory;
     - Collide's own `package.json` (`{"private": true, "type": "module"}`), so a hook's module type never depends
       on a `package.json` above the cache (measured S4);

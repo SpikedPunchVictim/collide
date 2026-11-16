@@ -27,6 +27,7 @@ pub mod metrics_store;
 pub mod models;
 pub mod otlp;
 pub mod owner_client;
+pub mod pack_cache;
 pub mod pack_location;
 pub mod phases;
 pub mod provider_client;
