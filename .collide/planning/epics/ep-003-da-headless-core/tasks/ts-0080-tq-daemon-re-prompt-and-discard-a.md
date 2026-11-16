@@ -1,7 +1,7 @@
 ---
 id: ts-0080-tq
 kind: task
-status: active
+status: done
 title: "Daemon: re-prompt and discard a quick run"
 owners: []
 links:
