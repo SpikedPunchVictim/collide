@@ -19,6 +19,14 @@
       },
       "type": "object"
     },
+    "RepoInstructions": {
+      "description": "`repo_instructions: worktree | none`: whether the agent tool loads the repository's own instructions (`CLAUDE.md`,\nskills, commands) from the worktree (0.3, Context options; revision 21). Absent means `worktree`.",
+      "enum": [
+        "worktree",
+        "none"
+      ],
+      "type": "string"
+    },
     "RoleConfig": {
       "description": "`config: user | none`: which settings the agent tool reads (0.3, Context options).",
       "enum": [
@@ -63,6 +71,16 @@
           "type": [
             "integer",
             "null"
+          ]
+        },
+        "repo_instructions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RepoInstructions"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },

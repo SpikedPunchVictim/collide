@@ -231,7 +231,7 @@ fn schema_lists_the_pack_keys_points_and_checklists() {
         ["gate", "match", "point", "script", "timeout", "when"]
     );
     assert_eq!(keys(&types, "ObserverEntry"), ["events", "script"]);
-    assert_eq!(keys(&types, "ToolRequirement"), ["name", "version"]);
+    assert_eq!(keys(&types, "ToolRequirement"), ["hint", "name", "version"]);
     assert_eq!(keys(&types, "ProviderEntry"), ["script"]);
     assert_eq!(keys(&types, "DerivedPoint"), ["match", "on", "when"]);
 }
@@ -259,7 +259,10 @@ fn schema_lists_the_board_config_agents_ask_and_pointer_keys() {
         ["categories", "status_field"]
     );
     assert_eq!(keys(&types, "CollidePointer"), ["dir"]);
-    assert_eq!(keys(&types, "ConfigFile"), ["agents", "ask", "config"]);
+    assert_eq!(
+        keys(&types, "ConfigFile"),
+        ["agents", "ask", "claude", "config", "disk"]
+    );
     assert_eq!(
         keys(&types, "AgentEntry"),
         [

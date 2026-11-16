@@ -24,6 +24,7 @@ export interface ConfigFile {
     [k: string]: AgentEntry
   }
   ask?: Ask
+  claude?: ClaudeSettings
   /**
    * Pack settings: pack name, then key, then value. A pack's schema checks each value (Stage 4a), and a key
    * the pack marks `secret: true` is refused here ([`secrets_in_file`]).
@@ -33,6 +34,7 @@ export interface ConfigFile {
       [k: string]: unknown
     }
   }
+  disk?: DiskSettings
 }
 /**
  * One entry of `agents:`. Every key is optional, because a layer may change the built-in entry field by field
@@ -91,4 +93,16 @@ export interface Ask {
   agent?: string | null
   budget_usd?: number | null
   timeout_s?: number | null
+}
+/**
+ * `claude:`. `check_published` turns the fetch of the published `claude` version off (0.3). A per-user key.
+ */
+export interface ClaudeSettings {
+  check_published?: boolean | null
+}
+/**
+ * `disk:`. `floor_gib` is the free space under which Collide pauses runs, in GiB.
+ */
+export interface DiskSettings {
+  floor_gib?: number | null
 }

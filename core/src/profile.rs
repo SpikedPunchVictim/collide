@@ -37,6 +37,15 @@ pub enum RoleConfig {
     None,
 }
 
+/// `repo_instructions: worktree | none`: whether the agent tool loads the repository's own instructions (`CLAUDE.md`,
+/// skills, commands) from the worktree (0.3, Context options; revision 21). Absent means `worktree`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RepoInstructions {
+    Worktree,
+    None,
+}
+
 /// A role's context options (0.3), as a profile overrides them.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +54,8 @@ pub struct RoleOptions {
     pub compact_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<RoleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_instructions: Option<RepoInstructions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bash_output_max: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

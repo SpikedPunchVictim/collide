@@ -31,6 +31,7 @@ pub mod run_rules;
 pub mod schema;
 pub mod section;
 pub mod settings;
+pub mod settings_registry;
 pub mod shim;
 pub mod short_id;
 pub mod span;
@@ -44,5 +45,6 @@ pub mod view;
 pub mod workflow;
 pub mod workflow_check;
 pub mod yaml;
+pub mod yaml_out;
 
 pub const NAME: &str = "collide-core";

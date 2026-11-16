@@ -13,7 +13,7 @@
 use crate::duration::Duration;
 use crate::item::Category;
 use crate::points::DerivedPoint;
-use crate::profile::{Profile, RoleConfig};
+use crate::profile::{Profile, RepoInstructions, RoleConfig};
 use crate::view::View;
 use crate::workflow::Workflow;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
@@ -27,7 +27,8 @@ use std::fmt;
 
 /// One JSON Schema, as a pack writes it for a setting (`config:`), a launch parameter (`launch:`) or a hook's
 /// output. It is a mapping and its contents are the schema's own, so unknown keys are not refused inside it. A
-/// setting may also carry `secret: true` and `overridable: true` beside its schema keywords (0.7, Settings).
+/// setting may also carry `secret: true`, `overridable: true` and `repoOnly: true` beside its schema keywords (0.7,
+/// Settings); `repoOnly` excludes the other two.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SchemaObject(pub Value);
@@ -40,7 +41,10 @@ impl JsonSchema for SchemaObject {
     fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
         json_schema!({
             "type": "object",
-            "description": "A JSON Schema. Its own keywords are not checked here; a setting may add `secret` and `overridable`, both booleans."
+            "description": concat!(
+                "A JSON Schema, its keywords not checked here. A setting may add the booleans ",
+                "`secret`, `overridable` and `repoOnly`."
+            )
         })
     }
 }
@@ -78,7 +82,8 @@ pub struct ChecklistTemplate {
 }
 
 /// A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `">=22.18"`; it is
-/// optional, as in `- { name: pnpm }`. Checking it is Stage 4.
+/// optional, as in `- { name: pnpm }`. `hint` is the pack's install advice, shown when the tool is missing (0.7: "a
+/// missing tool fails the load with the pack's install `hint:`"). Checking the tool is Stage 4a.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToolRequirement {
@@ -86,6 +91,8 @@ pub struct ToolRequirement {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 /// `requires:` in a manifest (0.7). Whether the running Collide, its SDK, the tools and the agents satisfy it is
@@ -288,10 +295,21 @@ pub struct Role {
     pub compact_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<RoleConfig>,
+    /// `worktree` (the default when absent) or `none`: whether the repository's own instructions load (0.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_instructions: Option<RepoInstructions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bash_output_max: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_output_max: Option<u64>,
+    /// The capabilities the role needs (0.3): each a name of [`crate::agent::CAPABILITY_NAMES`], or a name with a
+    /// sub-flag (`permission_host.deny_message`). A tool that lacks one is refused at launch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub require: Vec<String>,
+    /// Tools the role asks for among the ones Collide disallows by default (0.3, Disallowed tools), as plain names.
+    /// Which names an adapter disallows is the adapter's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_tools: Vec<String>,
 }
 
 /// One entry of `bindings:` (0.4): a handler attached to a named point. It names either a `gate` of this pack,
@@ -348,7 +366,7 @@ pub struct PackManifest {
     /// Launch parameters, asked in the run preview; they reach prompts and hooks as `launch` (0.7).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub launch: BTreeMap<String, SchemaObject>,
-    /// Settings, one JSON Schema per key, with `secret` and `overridable` (0.7, Settings).
+    /// Settings, one JSON Schema per key, with `secret`, `overridable` and `repoOnly` (0.7, Settings).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub config: BTreeMap<String, SchemaObject>,
     /// Named workspace implementations, as `pack/name` in a workflow's `workspace:` (0.4).

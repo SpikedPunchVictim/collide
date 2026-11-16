@@ -10,10 +10,10 @@ use collide_core::lock::SourceError;
 use collide_core::profile::RoleConfig;
 use collide_core::schema;
 use collide_core::settings::{
-    AgentKind, BUILTIN_AGENT_ID, COLLIDE_OVERRIDABLE_KEYS, ConfigFile, REPO_FILE_AGENT_ASK_KEYS,
-    SettingsError, ToolKind, builtin_agents, check_config_file, refused_acp_args,
-    repo_file_refusals, secrets_in_file,
+    AgentKind, BUILTIN_AGENT_ID, ConfigFile, SettingsError, ToolKind, builtin_agents,
+    check_config_file, refused_acp_args, repo_file_refusals, secrets_in_file,
 };
+use collide_core::settings_registry::{overridable_keys, repo_file_keys};
 use collide_core::view::MAX_CEL_SOURCE_BYTES;
 use collide_core::yaml::{load_yaml, load_yaml_file};
 use serde::de::DeserializeOwned;
@@ -682,12 +682,12 @@ fn a_user_may_change_the_built_in_entry_field_by_field() {
 // The repo-file rule.
 
 #[test]
-fn the_keys_a_repo_file_may_set_are_data() {
+fn the_keys_a_repo_file_may_set_are_data_read_from_the_registry() {
     assert_eq!(
-        REPO_FILE_AGENT_ASK_KEYS,
-        ["ask.budget_usd", "ask.timeout_s"]
+        repo_file_keys(),
+        ["ask.timeout_s", "ask.budget_usd", "disk.floor_gib"]
     );
-    assert_eq!(COLLIDE_OVERRIDABLE_KEYS, ["ask.timeout_s"]);
+    assert_eq!(overridable_keys(), ["ask.timeout_s", "disk.floor_gib"]);
 }
 
 #[test]
@@ -718,6 +718,27 @@ fn a_repo_file_that_sets_an_agent_field_or_ask_agent_is_refused_naming_each_key(
         "{first}"
     );
     assert!(first.to_string().contains("ask.budget_usd"), "{first}");
+}
+
+#[test]
+fn a_repo_file_that_sets_a_per_user_key_is_refused_naming_it_and_a_team_key_is_allowed() {
+    let file: ConfigFile = load_fixture("config/invalid/repo-sets-check-published.yaml");
+    assert_eq!(check_config_file(&file), Ok(()));
+    let refusals = repo_file_refusals(&file);
+    let keys: Vec<&str> = refusals.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(keys, ["claude.check_published"]);
+    let message = refusals[0].to_string();
+    assert!(message.contains("claude.check_published"), "{message}");
+    assert!(
+        message.contains("disk.floor_gib"),
+        "the allowed keys are named: {message}"
+    );
+}
+
+#[test]
+fn a_repo_file_may_set_disk_floor_gib() {
+    let file: ConfigFile = load("disk: { floor_gib: 10 }\n");
+    assert_eq!(repo_file_refusals(&file), []);
 }
 
 #[test]
@@ -788,6 +809,96 @@ fn a_secret_pack_key_in_a_settings_file_is_found_in_either_file() {
     assert_eq!(secrets_in_file(&other_pack, &secrets), []);
 }
 
+// The disk and claude sections.
+
+#[test]
+fn a_file_with_a_disk_and_a_claude_section_loads() {
+    let file: ConfigFile = load_fixture("config/disk-and-claude.yaml");
+    assert_eq!(check_config_file(&file), Ok(()));
+    assert_eq!(file.disk.floor_gib, Some(8));
+    assert_eq!(file.claude.check_published, Some(false));
+    assert_eq!(
+        file.collide_keys_set(),
+        ["disk.floor_gib", "claude.check_published"]
+    );
+}
+
+#[test]
+fn a_file_with_no_disk_or_claude_section_sets_neither_and_writes_neither() {
+    let file: ConfigFile = load("ask: { timeout_s: 60 }\n");
+    assert_eq!(file.disk.floor_gib, None);
+    assert_eq!(file.claude.check_published, None);
+    let written = serde_json::to_string(&file).unwrap();
+    assert!(
+        !written.contains("disk") && !written.contains("claude"),
+        "{written}"
+    );
+}
+
+#[test]
+fn a_floor_of_zero_fails_naming_the_key_and_the_minimum() {
+    let errors = config_errors("config/invalid/disk-floor-zero.yaml");
+    assert_eq!(
+        errors,
+        [SettingsError::BelowMinimum {
+            key: "disk.floor_gib",
+            value: 0,
+            min: 1
+        }]
+    );
+    let message = errors[0].to_string();
+    assert!(
+        message.contains("disk.floor_gib") && message.contains('0'),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_floor_of_one_is_valid() {
+    let file: ConfigFile = load("disk: { floor_gib: 1 }\n");
+    assert_eq!(check_config_file(&file), Ok(()));
+}
+
+#[test]
+fn an_unknown_key_in_disk_or_claude_fails_naming_it() {
+    let error = fixture_error::<ConfigFile>("config/invalid/disk-unknown-key.yaml");
+    assert!(error.contains("other"), "{error}");
+    let error = fixture_error::<ConfigFile>("config/invalid/claude-unknown-key.yaml");
+    assert!(error.contains("check_unpublished"), "{error}");
+}
+
+#[test]
+fn a_value_of_the_wrong_type_in_disk_or_claude_fails() {
+    for text in [
+        "disk: { floor_gib: 1.5 }\n",
+        "disk: { floor_gib: -1 }\n",
+        "claude: { check_published: \"yes\" }\n",
+        "claude: { check_published: 1 }\n",
+    ] {
+        parse_error::<ConfigFile>(text);
+    }
+}
+
+#[test]
+fn the_disk_and_claude_sections_are_in_the_generated_schema_and_closed() {
+    let schema = schema_file("ConfigFile.input.json");
+    let keys: BTreeSet<&str> = schema["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        BTreeSet::from(["agents", "ask", "claude", "config", "disk"])
+    );
+    assert_eq!(
+        schema["$defs"]["DiskSettings"]["properties"]["floor_gib"]["minimum"],
+        json!(1)
+    );
+    assert!(schema["$defs"]["ClaudeSettings"]["properties"]["check_published"].is_object());
+}
+
 // Schemas.
 
 #[test]
@@ -808,7 +919,10 @@ fn the_board_config_and_pointer_schemas_are_registered_with_agents_and_ask() {
         .keys()
         .map(String::as_str)
         .collect();
-    assert_eq!(keys, BTreeSet::from(["agents", "ask", "config"]));
+    assert_eq!(
+        keys,
+        BTreeSet::from(["agents", "ask", "claude", "config", "disk"])
+    );
     let agent_keys: BTreeSet<&str> = config["$defs"]["AgentEntry"]["properties"]
         .as_object()
         .unwrap()

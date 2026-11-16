@@ -13,6 +13,11 @@ export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dro
  */
 export type RoleConfig = 'user' | 'none'
 /**
+ * `repo_instructions: worktree | none`: whether the agent tool loads the repository's own instructions (`CLAUDE.md`,
+ * skills, commands) from the worktree (0.3, Context options; revision 21). Absent means `worktree`.
+ */
+export type RepoInstructions = 'worktree' | 'none'
+/**
  * `protectedPaths:` (0.9): a list of repo globs, whose changes are flagged in review, or
  * `{ paths: [...], at: phase-end }`, which also fails the phase at its end. It is read by what it holds (a list
  * or a mapping), so that an unknown key in the mapping is refused by name, not as "no variant matched".
@@ -56,7 +61,7 @@ export interface PackManifest {
     [k: string]: ChecklistTemplate
   }
   /**
-   * Settings, one JSON Schema per key, with `secret` and `overridable` (0.7, Settings).
+   * Settings, one JSON Schema per key, with `secret`, `overridable` and `repoOnly` (0.7, Settings).
    */
   config?: {
     [k: string]: SchemaObject
@@ -172,7 +177,7 @@ export interface ChecklistTemplateItem {
   when?: string | null
 }
 /**
- * A JSON Schema. Its own keywords are not checked here; a setting may add `secret` and `overridable`, both booleans.
+ * A JSON Schema, its keywords not checked here. A setting may add the booleans `secret`, `overridable` and `repoOnly`.
  */
 export interface SchemaObject {
   [k: string]: unknown
@@ -293,6 +298,7 @@ export interface RoleOptions {
   compact_at?: number | null
   config?: RoleConfig | null
   mcp_output_max?: number | null
+  repo_instructions?: RepoInstructions | null
 }
 export interface ProtectedPathsAt {
   at: ProtectedAt
@@ -333,9 +339,11 @@ export interface Requires {
 }
 /**
  * A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `">=22.18"`; it is
- * optional, as in `- { name: pnpm }`. Checking it is Stage 4.
+ * optional, as in `- { name: pnpm }`. `hint` is the pack's install advice, shown when the tool is missing (0.7: "a
+ * missing tool fails the load with the pack's install `hint:`"). Checking the tool is Stage 4a.
  */
 export interface ToolRequirement {
+  hint?: string | null
   name: string
   version?: string | null
 }
@@ -347,6 +355,11 @@ export interface Role {
    * The agent kind, one of `requires.agents` (`claude`).
    */
   agent: string
+  /**
+   * Tools the role asks for among the ones Collide disallows by default (0.3, Disallowed tools), as plain names.
+   * Which names an adapter disallows is the adapter's.
+   */
+  allow_tools?: string[]
   bash_output_max?: number | null
   budget?: RunBudget | null
   /**
@@ -367,6 +380,15 @@ export interface Role {
    */
   model?: string | null
   readOnly?: boolean
+  /**
+   * `worktree` (the default when absent) or `none`: whether the repository's own instructions load (0.3).
+   */
+  repo_instructions?: RepoInstructions | null
+  /**
+   * The capabilities the role needs (0.3): each a name of [`crate::agent::CAPABILITY_NAMES`], or a name with a
+   * sub-flag (`permission_host.deny_message`). A tool that lacks one is refused at launch.
+   */
+  require?: string[]
 }
 /**
  * A budget in US dollars: a run's total (at the total, the run goes to `ask_human` with cause budget), or one

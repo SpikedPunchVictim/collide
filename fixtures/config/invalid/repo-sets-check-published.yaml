@@ -1,0 +1,3 @@
+# Parses. claude.check_published is per user; disk.floor_gib is a team's to set.
+disk: { floor_gib: 10 }
+claude: { check_published: false }

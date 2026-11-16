@@ -695,7 +695,7 @@ fn the_pack_keys_points_and_checklists_are_in_the_schema() {
     );
     assert_eq!(
         keys_of("PackManifest", Some("ToolRequirement")),
-        set(&["name", "version"])
+        set(&["hint", "name", "version"])
     );
     assert_eq!(
         keys_of("PackManifest", Some("ProviderEntry")),

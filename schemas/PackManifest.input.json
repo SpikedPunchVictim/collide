@@ -790,6 +790,14 @@
       ],
       "type": "object"
     },
+    "RepoInstructions": {
+      "description": "`repo_instructions: worktree | none`: whether the agent tool loads the repository's own instructions (`CLAUDE.md`,\nskills, commands) from the worktree (0.3, Context options; revision 21). Absent means `worktree`.",
+      "enum": [
+        "worktree",
+        "none"
+      ],
+      "type": "string"
+    },
     "Requires": {
       "additionalProperties": false,
       "description": "`requires:` in a manifest (0.7). Whether the running Collide, its SDK, the tools and the agents satisfy it is\nchecked when a board loads the pack (Stage 4).",
@@ -832,6 +840,13 @@
           "description": "The agent kind, one of `requires.agents` (`claude`).",
           "minLength": 1,
           "type": "string"
+        },
+        "allow_tools": {
+          "description": "Tools the role asks for among the ones Collide disallows by default (0.3, Disallowed tools), as plain names.\nWhich names an adapter disallows is the adapter's.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "bash_output_max": {
           "format": "uint64",
@@ -900,6 +915,24 @@
         },
         "readOnly": {
           "type": "boolean"
+        },
+        "repo_instructions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RepoInstructions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`worktree` (the default when absent) or `none`: whether the repository's own instructions load (0.3)."
+        },
+        "require": {
+          "description": "The capabilities the role needs (0.3): each a name of [`crate::agent::CAPABILITY_NAMES`], or a name with a\nsub-flag (`permission_host.deny_message`). A tool that lacks one is refused at launch.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -952,6 +985,16 @@
             "integer",
             "null"
           ]
+        },
+        "repo_instructions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RepoInstructions"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "type": "object"
@@ -987,7 +1030,7 @@
       "type": "object"
     },
     "SchemaObject": {
-      "description": "A JSON Schema. Its own keywords are not checked here; a setting may add `secret` and `overridable`, both booleans.",
+      "description": "A JSON Schema, its keywords not checked here. A setting may add the booleans `secret`, `overridable` and `repoOnly`.",
       "type": "object"
     },
     "ScriptPhase": {
@@ -1097,8 +1140,14 @@
     },
     "ToolRequirement": {
       "additionalProperties": false,
-      "description": "A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `\">=22.18\"`; it is\noptional, as in `- { name: pnpm }`. Checking it is Stage 4.",
+      "description": "A tool the pack needs on `PATH` (0.7, `requires.tools`). `version` is a range such as `\">=22.18\"`; it is\noptional, as in `- { name: pnpm }`. `hint` is the pack's install advice, shown when the tool is missing (0.7: \"a\nmissing tool fails the load with the pack's install `hint:`\"). Checking the tool is Stage 4a.",
       "properties": {
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "minLength": 1,
           "type": "string"
@@ -1413,7 +1462,7 @@
       "additionalProperties": {
         "$ref": "#/$defs/SchemaObject"
       },
-      "description": "Settings, one JSON Schema per key, with `secret` and `overridable` (0.7, Settings).",
+      "description": "Settings, one JSON Schema per key, with `secret`, `overridable` and `repoOnly` (0.7, Settings).",
       "type": "object"
     },
     "experiment": {

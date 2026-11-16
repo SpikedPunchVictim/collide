@@ -1,0 +1,2 @@
+# Parses. disk.floor_gib starts at 1.
+disk: { floor_gib: 0 }

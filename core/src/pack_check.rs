@@ -6,6 +6,8 @@
 //! - the identity strings are not empty, and a name used in `pack/name` is one word;
 //! - a path is relative to the pack directory, or `repo:<path>` for the line's snapshot ([`parse_pack_path`]);
 //! - a gate bound to an `after_*` point is refused, naming the point (0.4: gates bind only to `before_*`);
+//! - a role's `require` names capabilities of the table, and its `allow_tools` names are plain (0.3);
+//! - a setting's `secret`, `overridable` and `repoOnly` are booleans, and `repoOnly` excludes the other two (0.7);
 //! - a view's key is its name, and a pack's profile covers only that pack (0.7, Profiles);
 //! - every `workflows:` entry passes [`crate::workflow_check::validate`], and every view, profile and derived
 //!   point passes its own check.
@@ -14,13 +16,15 @@
 //! pack or against this pack's roles, prompts and implementations, parse CEL, or layer settings. Those belong to
 //! the load of a board (Stage 4), the workflow engine (Stage 8) and the settings stage.
 
+use crate::agent::Capabilities;
 use crate::duration::Duration;
-use crate::pack::{Binding, HookEntry, PackManifest, SchemaObject};
+use crate::pack::{Binding, HookEntry, PackManifest, Role, SchemaObject};
 use crate::points::{Point, PointError, check_derived_points, side};
 use crate::profile::{MIN_COMPACT_AT, ProfileError, check_profile};
 use crate::view::{MAX_CEL_SOURCE_BYTES, ViewError, check_view};
 use crate::workflow::{Phase, Prompt, Then, Workflow};
 use crate::workflow_check::{self, WorkflowError};
+use serde_json::Value;
 use std::fmt;
 
 /// Why a path in a manifest is refused.
@@ -153,10 +157,25 @@ pub enum ManifestError {
     NotASchema {
         at: String,
     },
-    /// A setting's `secret` or `overridable` that is not a boolean.
+    /// A setting's `secret`, `overridable` or `repoOnly` that is not a boolean.
     NotABoolean {
         at: String,
         flag: &'static str,
+    },
+    /// A setting with `repoOnly: true` and also `overridable: true` or `secret: true`. `flag` is the other flag.
+    RepoOnlyConflict {
+        at: String,
+        flag: &'static str,
+    },
+    /// A role's `require` entry that is not a capability of the table.
+    UnknownCapability {
+        role: String,
+        name: String,
+    },
+    /// A role's `allow_tools` entry that is empty or has white space or a quote in it.
+    BadAllowedTool {
+        role: String,
+        name: String,
     },
     CompactAtBelowFloor {
         role: String,
@@ -216,6 +235,25 @@ impl fmt::Display for ManifestError {
             ManifestError::NotABoolean { at, flag } => {
                 write!(f, "`{at}`: `{flag}` must be true or false")
             }
+            ManifestError::RepoOnlyConflict { at, flag } => write!(
+                f,
+                "`{at}`: `repoOnly` and `{flag}` cannot both be true; {}",
+                if *flag == "secret" {
+                    "a secret is never in a repo file"
+                } else {
+                    "a key the repo owns cannot be the user's to override"
+                }
+            ),
+            ManifestError::UnknownCapability { role, name } => write!(
+                f,
+                "role `{role}`: `require` names `{name}`, which is not a capability; write a name of the capability \
+                 table, or a name with its sub-flag, as `permission_host.deny_message`"
+            ),
+            ManifestError::BadAllowedTool { role, name } => write!(
+                f,
+                "role `{role}`: `allow_tools` entry {name:?} is not a plain tool name; it is empty or has white \
+                 space or a quote"
+            ),
             ManifestError::CompactAtBelowFloor { role, value } => write!(
                 f,
                 "role `{role}`: `compact_at: {value}` is under the floor of {MIN_COMPACT_AT}"
@@ -337,11 +375,45 @@ impl Check {
     fn setting(&mut self, key: &str, schema: &SchemaObject) {
         let at = format!("config.{key}");
         self.schema(&at, schema);
-        for flag in ["secret", "overridable"] {
+        for flag in ["secret", "overridable", "repoOnly"] {
             if schema.0.get(flag).is_some_and(|value| !value.is_boolean()) {
                 self.errors.push(ManifestError::NotABoolean {
                     at: at.clone(),
                     flag,
+                });
+            }
+        }
+        // A key the repo owns is not the user's to override, and a secret is never in a repo file.
+        if schema.0.get("repoOnly") == Some(&Value::Bool(true)) {
+            for flag in ["overridable", "secret"] {
+                if schema.0.get(flag) == Some(&Value::Bool(true)) {
+                    self.errors.push(ManifestError::RepoOnlyConflict {
+                        at: at.clone(),
+                        flag,
+                    });
+                }
+            }
+        }
+    }
+
+    /// A role's `require` and `allow_tools`.
+    fn role_lists(&mut self, name: &str, role: &Role) {
+        let capabilities = Capabilities::default();
+        for entry in &role.require {
+            if capabilities.support_of(entry).is_none() {
+                self.errors.push(ManifestError::UnknownCapability {
+                    role: name.to_string(),
+                    name: entry.clone(),
+                });
+            }
+        }
+        for tool in &role.allow_tools {
+            if tool.is_empty()
+                || tool.contains(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            {
+                self.errors.push(ManifestError::BadAllowedTool {
+                    role: name.to_string(),
+                    name: tool.clone(),
                 });
             }
         }
@@ -462,6 +534,9 @@ pub fn check_manifest(manifest: &PackManifest) -> Result<(), Vec<ManifestError>>
             if let Some(version) = &tool.version {
                 check.empty(&format!("requires.tools[{index}].version"), version);
             }
+            if let Some(hint) = &tool.hint {
+                check.empty(&format!("requires.tools[{index}].hint"), hint);
+            }
         }
         for (index, agent) in requires.agents.iter().enumerate() {
             check.empty(&format!("requires.agents[{index}]"), agent);
@@ -550,6 +625,7 @@ pub fn check_manifest(manifest: &PackManifest) -> Result<(), Vec<ManifestError>>
                 value,
             });
         }
+        check.role_lists(name, role);
     }
     for (name, path) in &manifest.prompts {
         check.name("prompt", name);

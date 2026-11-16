@@ -1,0 +1,4 @@
+apiVersion: collide/v0
+name: demo
+roles:
+  builder: { agent: claude, require: [headless_stream, teleport] }

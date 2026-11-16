@@ -147,6 +147,34 @@
       },
       "type": "object"
     },
+    "ClaudeSettings": {
+      "additionalProperties": false,
+      "description": "`claude:`. `check_published` turns the fetch of the published `claude` version off (0.3). A per-user key.",
+      "properties": {
+        "check_published": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DiskSettings": {
+      "additionalProperties": false,
+      "description": "`disk:`. `floor_gib` is the free space under which Collide pauses runs, in GiB.",
+      "properties": {
+        "floor_gib": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "RoleConfig": {
       "description": "`config: user | none`: which settings the agent tool reads (0.3, Context options).",
       "enum": [
@@ -178,6 +206,9 @@
     "ask": {
       "$ref": "#/$defs/Ask"
     },
+    "claude": {
+      "$ref": "#/$defs/ClaudeSettings"
+    },
     "config": {
       "additionalProperties": {
         "additionalProperties": true,
@@ -185,6 +216,9 @@
       },
       "description": "Pack settings: pack name, then key, then value. A pack's schema checks each value (Stage 4a), and a key\nthe pack marks `secret: true` is refused here ([`secrets_in_file`]).",
       "type": "object"
+    },
+    "disk": {
+      "$ref": "#/$defs/DiskSettings"
     }
   },
   "title": "ConfigFile",

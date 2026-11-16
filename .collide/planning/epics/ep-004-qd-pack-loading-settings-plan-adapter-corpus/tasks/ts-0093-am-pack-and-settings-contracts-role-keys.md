@@ -131,3 +131,157 @@ Write these first:
   they share `core`, `host` and the generated files.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.
+
+### Built
+
+The role keys, the tool `hint`, `repoOnly`, the settings registry, the `disk` and `claude` sections and the YAML
+writer. No file is read at run time and no process runs. No crate was added. `pnpm gen` was run and its output kept
+(`schemas/` and `packages/pack-sdk/src/generated/`); a second run changes nothing.
+
+- `core/src/pack.rs`: `Role` gains `require` and `allow_tools` (lists of text, skipped when empty) and
+  `repo_instructions` (`Option<RepoInstructions>`). `ToolRequirement` gains an optional `hint`. The docs of
+  `SchemaObject` and `PackManifest::config` name `repoOnly`.
+- `core/src/profile.rs`: `RepoInstructions` (`worktree` or `none`, as `RoleConfig` is written) and
+  `RoleOptions::repo_instructions`. Absent stays `None`; the default `worktree` is the launch's (`ts-0104-gx`).
+- `core/src/pack_check.rs`: three `ManifestError` variants. `UnknownCapability { role, name }` for a `require` entry
+  that `Capabilities::support_of` does not know (it is the table the run-time check reads, so the two cannot drift).
+  `BadAllowedTool { role, name }` for an `allow_tools` entry that is empty or has white space, `"` or `'`.
+  `RepoOnlyConflict { at, flag }` for `repoOnly: true` with `overridable: true` or `secret: true`, naming the key and
+  both flags. `Check::setting` also checks that `repoOnly` is a boolean (`NotABoolean`). `Check::role_lists` is new.
+  `requires.tools[i].hint` is refused when empty, as `version` is.
+- `core/src/settings_registry.rs` (new): `COLLIDE_SETTINGS` (a slice of `CollideSetting`: `key`, `value_type`, `min`,
+  `max`, `default`, `overridable`, `repo_only`, `per_user`), `ValueType`, `SettingDefault`, `collide_setting(key)`,
+  `overridable_keys()`, `repo_file_keys()` and `MIN_FLOOR_GIB`. The five keys, as the item lists them.
+- `core/src/settings.rs`: `DiskSettings` and `ClaudeSettings` and the `disk` and `claude` fields of `ConfigFile`
+  (closed; skipped when empty). `ConfigFile::collide_keys_set()`. `SettingsError::BelowMinimum` and its check in
+  `check_config_file` (`disk.floor_gib: 0`). `repo_file_refusals` now refuses every set key the registry marks per
+  user, so `claude.check_published` is refused and `disk.floor_gib` is allowed. `REPO_FILE_AGENT_ASK_KEYS` and
+  `COLLIDE_OVERRIDABLE_KEYS` are gone, replaced by `repo_file_keys()` and `overridable_keys()`.
+- `core/src/yaml_out.rs` (new): `to_yaml(&value, header) -> Result<String, serde_json::Error>`. See the rules in the
+  module doc: every string double-quoted, plain word keys only, block style, `{}` and `[]`, floats keep `.0`, fields in
+  declaration order. The value is written as JSON text and read into an ordered tree, so no `Serializer` is written
+  and no map is sorted. `core/src/lib.rs` lists both modules.
+- Fixtures: `fixtures/manifests/invalid/` (eight: `role-require-unknown-capability`, `role-allow-tools-empty`,
+  `role-allow-tools-space`, `role-repo-instructions-bad`, `tool-hint-not-a-string`, `setting-repo-only-not-boolean`,
+  `setting-repo-only-overridable`, `setting-repo-only-secret`), `fixtures/config/disk-and-claude.yaml` and four under
+  `fixtures/config/invalid/` (`disk-floor-zero`, `disk-unknown-key`, `claude-unknown-key`,
+  `repo-sets-check-published`).
+- Two existing tests lists changed with the schema: `core/tests/planning_contracts.rs` (`ToolRequirement` keys) and
+  `host/tests/schema_command.rs` (`ToolRequirement` and `ConfigFile` keys). `board_config_settings.rs`'s test of the
+  two removed constants became `the_keys_a_repo_file_may_set_are_data_read_from_the_registry`.
+
+**Tests.** None starts a process, reads a settings file of the owner's or touches a home: they are pure functions
+over fixtures and strings, so no `env_clear()` is needed.
+
+- `core/tests/pack_manifest.rs` (16 new, and 8 rows of the `INVALID` table):
+  `a_role_that_requires_known_capabilities_and_sub_flags_loads`,
+  `a_role_that_requires_a_capability_the_table_lacks_is_refused_naming_the_role_and_the_entry`,
+  `a_sub_flag_the_table_lacks_and_an_empty_entry_are_refused_as_unknown_capabilities`,
+  `every_capability_name_of_the_table_is_a_valid_require_entry`,
+  `a_role_with_no_require_has_an_empty_list_and_writes_none`, `a_role_that_allows_a_tool_loads`,
+  `an_allowed_tool_that_is_empty_or_has_a_space_or_a_quote_is_refused_naming_the_role`,
+  `repo_instructions_is_worktree_or_none_and_absent_is_none_set`,
+  `repo_instructions_and_the_role_keys_are_in_the_generated_role_schema`,
+  `a_tool_requirement_has_an_optional_hint_that_round_trips`,
+  `a_hint_that_is_not_a_string_fails_at_load_and_an_empty_one_is_refused`,
+  `a_repo_only_setting_loads_and_the_flag_is_false_by_default`, `a_repo_only_flag_must_be_a_boolean`,
+  `a_repo_only_setting_that_is_also_overridable_or_secret_is_refused_naming_the_key_and_both_flags`,
+  `a_repo_only_setting_with_the_other_flags_false_is_fine`, `a_profile_role_of_a_pack_takes_repo_instructions`.
+- `core/tests/views_profiles_locks.rs` (2): `a_profile_role_takes_repo_instructions_worktree_or_none`,
+  `a_profile_role_with_a_bad_repo_instructions_fails_naming_the_key`.
+- `core/tests/settings_registry.rs` (new, 13): `the_registry_holds_the_five_keys_in_order`,
+  `each_key_has_its_type_range_and_default`, `a_default_is_written_as_the_json_value_a_file_would_hold`,
+  `a_value_type_is_named_as_json_schema_names_it`, `the_keys_of_each_flag_are_listed_so_a_change_is_deliberate`,
+  `the_helpers_read_the_flags`, `a_key_is_found_by_its_path_and_an_unknown_one_is_not`, `no_key_contradicts_itself`,
+  `keys_are_unique`, `the_timeout_range_is_the_one_the_file_check_uses`,
+  `every_key_collide_owns_in_config_file_is_in_the_registry_and_the_other_way` (reads `ConfigFile`'s generated schema),
+  `a_file_that_sets_every_key_reports_exactly_the_registry_keys`, `the_registry_ranges_are_in_the_generated_schema`.
+- `core/tests/board_config_settings.rs` (10 new, 1 rewritten): `a_file_with_a_disk_and_a_claude_section_loads`,
+  `a_file_with_no_disk_or_claude_section_sets_neither_and_writes_neither`,
+  `a_floor_of_zero_fails_naming_the_key_and_the_minimum`, `a_floor_of_one_is_valid`,
+  `an_unknown_key_in_disk_or_claude_fails_naming_it`, `a_value_of_the_wrong_type_in_disk_or_claude_fails`,
+  `the_disk_and_claude_sections_are_in_the_generated_schema_and_closed`,
+  `a_repo_file_that_sets_a_per_user_key_is_refused_naming_it_and_a_team_key_is_allowed`,
+  `a_repo_file_may_set_disk_floor_gib`; the schema-keys test now lists `claude` and `disk`.
+- `core/tests/yaml_out.rs` (new, 25): the round trip of `Board`, the smallest and the empty `Board`, `PackLock` (order
+  of fields, empty, exact text with a header), `UserPacks`, `ConfigFile` (three fixtures and a full one), `Profile`;
+  `every_awkward_string_comes_back_as_the_same_string` (the item's table and about 50 more: control
+   characters, `\u{85}`,
+  `\u{2028}`, a BOM, emoji, `.inf`, `~`, `---`), the same strings as map values and as untyped values, a root string,
+  the key rule, keys in nested maps, empty map and list, nesting, a list of maps, scalars and floats, untyped values,
+  determinism, the final newline, a header that changes nothing read, a header that cannot break out, an empty
+  header, and an error for a map with a key that is not text.
+- **Seen red.** The skeleton (types, variants and fields with `todo!()` bodies) was compiled first, so the tests
+  compiled. Red on that run: in `pack_manifest` 7 (`a_repo_only_flag_must_be_a_boolean`,
+  `a_hint_that_is_not_a_string_fails_at_load_and_an_empty_one_is_refused`, the two `repo_only`/conflict tests, the
+  three `require` and `allow_tools` refusal tests and
+  `every_invalid_fixture_fails_where_the_table_says_and_names_what_is_wrong`);
+  in `board_config_settings` 5 (floor of zero, the disk and claude section load, the per-user refusal, the wrong
+  type, the registry keys); in `settings_registry` 10 of 13; in `yaml_out` all 25. Not red, because the key or type
+  was part of the skeleton and has no behaviour to fail: the two `views_profiles_locks` tests and the loading cases
+  of `pack_manifest` (`require`, `allow_tools`, `repo_instructions` and `hint` load and round-trip).
+  `every_key_collide_owns_in_config_file_is_in_the_registry_and_the_other_way` was red against the empty registry.
+- Checks: `cargo build --workspace`; `cargo test --workspace --no-fail-fast` (2994 passed, 0 failed; no flaky test
+  failed this time); `cargo clippy --workspace --all-targets -- -D warnings`; `cargo fmt --all --check`; `pnpm test`;
+  `pnpm typecheck`; `pnpm --filter @collide/app build`; `pnpm build:packs`; `pnpm check` all pass. A first full test
+  run failed two `schema_command` tests in `host` that list the generated keys; they were updated (above).
+
+### Decisions for the owner
+
+1. **The registry's name and shape.** `core/src/settings_registry.rs`, a `const` slice of plain data with three small
+   functions. The item said "derived from the registry or replaced by it": the two constants are replaced by
+   `repo_file_keys()` and `overridable_keys()`, because a `const` array cannot be filtered at compile time. Anything
+   that read the constants (only one test did) reads the functions. Alternative: keep both constants and add a test
+   that they equal the registry. Recommend what is built: one list, no copy to drift.
+2. **How the writer is built.** Value to JSON text to an ordered tree to YAML, about 200 lines with the docs. The
+   item said about 80. A `serde::Serializer` is longer; going through `serde_json::Value` would sort every key
+   (`packs.lock` would read `commit`, `source`, `tree`). Going through text keeps the order of the type's fields.
+   Cost: a value is written twice in memory, which no file here makes matter. Recommend keeping.
+3. **A plain key is stricter than the item's rule.** The item says plain when `[A-Za-z0-9_-]+`. Written so, the keys
+   `true`, `null`, `1` and `-` could be read as a boolean, `null`, a number and a list marker (not measured for keys:
+   the rule is cautious, and the tests only hold that quoted keys read back). So a key is plain only when it
+   starts with a letter or `_`, and is not `true`, `false`, `null`, `yes`, `no`, `on`, `off`, `y` or `n` in
+   any case. Any other key is quoted. Recommend the stricter rule; the output differs only for those keys.
+4. **`to_yaml` returns `serde_json::Error`.** Its only failures are a map key that is not text and a float that is
+   not finite, both bugs in the caller's type. Alternative: an error type of our own. Recommend keeping until a
+   caller needs to tell the cases apart.
+5. **The refusal text of `repo_file_refusals` changed.** The refused keys and their order are as before. The message
+   now lists the allowed keys from the registry (`ask.timeout_s`, `ask.budget_usd`, `disk.floor_gib`) and says a
+   per-user key is one person's, since `claude.check_published` is not "an agent". Every test that read the message
+   still passes. Alternative: keep the old sentence and let it be wrong for per-user keys. Recommend the change.
+6. **`disk.floor_gib: 0` fails in `check_config_file`, not at load.** As `timeout_s` does: serde has no range, so the
+   file loads and the check refuses it (`SettingsError::BelowMinimum`, naming the key). The schema has `minimum: 1`.
+   A test holds the schema's and the registry's ranges equal. `floor_gib: 1.5` and `-1` fail at load.
+7. **Section types are `DiskSettings` and `ClaudeSettings`.** `Ask` is the older, shorter name. Recommend these names
+   so a `Claude` type in `core` is not read as the adapter. They are in the schemas and the SDK's types.
+8. **`require` accepts what `Capabilities::support_of` accepts.** That includes the aliases it reads
+   (`permission_host.support`, `usage_report.support`, `context_options.support`, `mcp_servers.support`). A sub-flag
+   the table lacks (`permission_host.telepathy`) and an empty entry are refused. Alternative: a separate list of
+   names in `pack_check`. Recommend the single source.
+9. **`allow_tools` checks the form only.** White space of any kind, `"`, `'` and the empty name are refused; a name
+   twice is not. Whether a name is one the adapter disallows is `ts-0104-gx`. Alternative: refuse a repeat.
+   Recommend leaving repeats be: they change nothing at launch.
+10. **`repoOnly: false` beside `overridable: true` is fine.** Only `true` is a conflict. Recommend.
+11. **`claude.check_published` is read twice for now.** `host/src/claude_versions.rs` keeps its own reader (as
+    `ts-0098-nx` decides), and a user file with a `claude:` section now also loads as a `ConfigFile`. Both read the
+    same key and agree.
+12. **Plan text, proposed:** none for the plan's design. If the owner wants the writer's rules in the plan, one line
+    under 0.7, Layers and sources: "Collide writes its own YAML files with every string double-quoted and keys quoted
+    unless they are plain words."
+
+- Owner decisions (2026-11-16, at the build): decisions 1 to 11 taken as recommended, under the owner's delegation.
+  Decision 12's plan line is not applied: the writer's rules are the code's, and the plan names none. The registry's
+  `ask.budget_usd` is not `overridable`, so the repo's value wins, as the owner chose at the split.
+
+### Not done, by design
+
+- Nothing reads `require`, `allow_tools` or `repo_instructions` at launch: `launch_spec` and `check_agent` still pass
+  none (`ts-0104-gx`). A role's `allow_tools` names are not checked against any adapter's list.
+- No layers, and no refusal of a `repoOnly` key in the user's file or a user profile (`ts-0098-nx`). This item only
+  makes the flag loadable and refuses its bad pairs.
+- `packs/plan/pack.yaml` has no `layout` setting yet, so no built-in pack uses `repoOnly`; adding it belongs with the
+  plan pack's settings.
+- No `agents.<id>.<field>` entries in the registry (`ts-0099-bw`), and none of the later stages' keys.
+- `to_yaml` writes no file. The atomic write, the mode, and what to do about a comment in a file a person edited are
+  the callers' (`ts-0097-kw`, `ts-0099-bw`, `ts-0100-pu`, `ts-0101-bd`).
+- `host/src/claude_versions.rs` is not changed.

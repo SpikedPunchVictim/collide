@@ -4,6 +4,11 @@
  * `config: user | none`: which settings the agent tool reads (0.3, Context options).
  */
 export type RoleConfig = 'user' | 'none'
+/**
+ * `repo_instructions: worktree | none`: whether the agent tool loads the repository's own instructions (`CLAUDE.md`,
+ * skills, commands) from the worktree (0.3, Context options; revision 21). Absent means `worktree`.
+ */
+export type RepoInstructions = 'worktree' | 'none'
 
 export interface Profile {
   /**
@@ -55,4 +60,5 @@ export interface RoleOptions {
   compact_at?: number | null
   config?: RoleConfig | null
   mcp_output_max?: number | null
+  repo_instructions?: RepoInstructions | null
 }

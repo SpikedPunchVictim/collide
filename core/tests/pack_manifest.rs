@@ -8,6 +8,7 @@ use collide_core::pack::{PackManifest, ProtectedAt, ProtectedPaths};
 use collide_core::pack_check::{
     BindingProblem, ManifestError, PackPath, PathProblem, check_manifest, parse_pack_path,
 };
+use collide_core::profile::RepoInstructions;
 use collide_core::schema;
 use collide_core::workflow::Phase;
 use collide_core::workflow_check::WorkflowError;
@@ -301,6 +302,38 @@ const INVALID: &[(&str, Fails, &str)] = &[
         Fails::AtCheck,
         "observers.notify.events",
     ),
+    (
+        "role-require-unknown-capability.yaml",
+        Fails::AtCheck,
+        "teleport",
+    ),
+    (
+        "role-allow-tools-empty.yaml",
+        Fails::AtCheck,
+        "role `builder`: `allow_tools` entry \"\"",
+    ),
+    ("role-allow-tools-space.yaml", Fails::AtCheck, "a b"),
+    (
+        "role-repo-instructions-bad.yaml",
+        Fails::AtLoad,
+        "repo_instructions",
+    ),
+    ("tool-hint-not-a-string.yaml", Fails::AtLoad, "hint"),
+    (
+        "setting-repo-only-not-boolean.yaml",
+        Fails::AtCheck,
+        "config.layout",
+    ),
+    (
+        "setting-repo-only-overridable.yaml",
+        Fails::AtCheck,
+        "`repoOnly` and `overridable`",
+    ),
+    (
+        "setting-repo-only-secret.yaml",
+        Fails::AtCheck,
+        "`repoOnly` and `secret`",
+    ),
     ("duplicate-key.yaml", Fails::AtLoad, "duplicate"),
     ("alias-bomb.yaml", Fails::AtLoad, "anchor"),
     ("merge-key.yaml", Fails::AtLoad, "merge"),
@@ -373,6 +406,7 @@ fn the_schema_rejects_what_serde_rejects_for_the_keys_and_values_that_load() {
         "missing-api-version.yaml",
         "empty-name.yaml",
         "empty-role-agent.yaml",
+        "role-repo-instructions-bad.yaml",
     ] {
         let doc: Value =
             load_yaml_file(&repo(&format!("fixtures/manifests/invalid/{file}"))).unwrap();
@@ -1086,5 +1120,223 @@ fn the_collide_pack_declares_quick_as_one_builder_phase_that_moves_the_task_by_c
         ops(&quick.on_end),
         [("setStatus".to_string(), "review".into(), None)],
         "every end of a quick run goes to review, failed and stopped too"
+    );
+}
+
+// Role keys, the tool hint and `repoOnly` (ts-0093).
+
+fn role_body(keys: &str) -> String {
+    format!("roles:\n  builder: {{ agent: claude, {keys} }}\n")
+}
+
+#[test]
+fn a_role_that_requires_known_capabilities_and_sub_flags_loads() {
+    let loaded = load(&manifest(&role_body(
+        "require: [mcp_servers.http, permission_host.deny_message, headless_stream]",
+    )));
+    assert_eq!(
+        loaded.roles["builder"].require,
+        [
+            "mcp_servers.http",
+            "permission_host.deny_message",
+            "headless_stream"
+        ]
+    );
+    assert_eq!(check_manifest(&loaded), Ok(()));
+}
+
+#[test]
+fn a_role_that_requires_a_capability_the_table_lacks_is_refused_naming_the_role_and_the_entry() {
+    let errors = refusals(&role_body("require: [headless_stream, teleport]"));
+    assert_eq!(
+        errors,
+        [ManifestError::UnknownCapability {
+            role: "builder".into(),
+            name: "teleport".into()
+        }]
+    );
+    let text = errors[0].to_string();
+    assert!(
+        text.contains("builder") && text.contains("teleport"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_sub_flag_the_table_lacks_and_an_empty_entry_are_refused_as_unknown_capabilities() {
+    for name in ["permission_host.telepathy", ""] {
+        let errors = refusals(&role_body(&format!("require: [{name:?}]")));
+        assert_eq!(
+            errors,
+            [ManifestError::UnknownCapability {
+                role: "builder".into(),
+                name: name.into()
+            }],
+            "{name:?}"
+        );
+    }
+}
+
+#[test]
+fn every_capability_name_of_the_table_is_a_valid_require_entry() {
+    for name in collide_core::agent::CAPABILITY_NAMES {
+        let loaded = load(&manifest(&role_body(&format!("require: [{name}]"))));
+        assert_eq!(check_manifest(&loaded), Ok(()), "{name}");
+    }
+}
+
+#[test]
+fn a_role_with_no_require_has_an_empty_list_and_writes_none() {
+    let loaded = load(&manifest(&role_body("model: fast")));
+    assert!(loaded.roles["builder"].require.is_empty());
+    assert!(loaded.roles["builder"].allow_tools.is_empty());
+    assert_eq!(loaded.roles["builder"].repo_instructions, None);
+    let written = serde_json::to_string(&loaded).unwrap();
+    for key in ["require", "allow_tools", "repo_instructions"] {
+        assert!(!written.contains(key), "{key} in {written}");
+    }
+}
+
+#[test]
+fn a_role_that_allows_a_tool_loads() {
+    let loaded = load(&manifest(&role_body(
+        "allow_tools: [CronCreate, SendMessage]",
+    )));
+    assert_eq!(
+        loaded.roles["builder"].allow_tools,
+        ["CronCreate", "SendMessage"]
+    );
+    assert_eq!(check_manifest(&loaded), Ok(()));
+}
+
+#[test]
+fn an_allowed_tool_that_is_empty_or_has_a_space_or_a_quote_is_refused_naming_the_role() {
+    for name in ["", "a b", "a\\tb", "it's", "say \\\"x\\\""] {
+        let errors = refusals(&role_body(&format!("allow_tools: [\"{name}\"]")));
+        assert!(
+            matches!(errors.as_slice(), [ManifestError::BadAllowedTool { role, .. }] if role == "builder"),
+            "{name:?}: {errors:?}"
+        );
+        assert!(errors[0].to_string().contains("builder"), "{name:?}");
+    }
+}
+
+#[test]
+fn repo_instructions_is_worktree_or_none_and_absent_is_none_set() {
+    for (text, expected) in [
+        ("worktree", RepoInstructions::Worktree),
+        ("none", RepoInstructions::None),
+    ] {
+        let loaded = load(&manifest(&role_body(&format!("repo_instructions: {text}"))));
+        assert_eq!(
+            loaded.roles["builder"].repo_instructions,
+            Some(expected),
+            "{text}"
+        );
+        assert_eq!(check_manifest(&loaded), Ok(()));
+    }
+    let absent = load(&manifest(&role_body("model: fast")));
+    assert_eq!(absent.roles["builder"].repo_instructions, None);
+}
+
+#[test]
+fn repo_instructions_and_the_role_keys_are_in_the_generated_role_schema() {
+    let input = schema_file("PackManifest.input.json");
+    let role = &input["$defs"]["Role"]["properties"];
+    for key in ["require", "allow_tools", "repo_instructions"] {
+        assert!(role.get(key).is_some(), "{key}");
+    }
+    assert_eq!(
+        input["$defs"]["RepoInstructions"]["enum"],
+        serde_json::json!(["worktree", "none"])
+    );
+}
+
+#[test]
+fn a_tool_requirement_has_an_optional_hint_that_round_trips() {
+    let loaded = load(&manifest(
+        "requires:\n  tools:\n    - { name: pnpm, hint: \"run corepack enable\" }\n    - { name: node }\n",
+    ));
+    let tools = &loaded.requires.as_ref().unwrap().tools;
+    assert_eq!(tools[0].hint.as_deref(), Some("run corepack enable"));
+    assert_eq!(tools[1].hint, None);
+    assert_eq!(check_manifest(&loaded), Ok(()));
+    let written = serde_json::to_string(&loaded).unwrap();
+    let back: PackManifest = serde_json::from_str(&written).unwrap();
+    assert_eq!(back, loaded);
+    assert_eq!(written.matches("hint").count(), 1, "{written}");
+}
+
+#[test]
+fn a_hint_that_is_not_a_string_fails_at_load_and_an_empty_one_is_refused() {
+    let text = manifest("requires: { tools: [{ name: pnpm, hint: 3 }] }\n");
+    let error = load_yaml::<PackManifest>(text.as_bytes(), "t.yaml").unwrap_err();
+    assert!(error.to_string().contains("hint"), "{error}");
+    let text = refusal_text("requires: { tools: [{ name: pnpm, hint: \"\" }] }\n");
+    assert!(text.contains("requires.tools[0].hint"), "{text}");
+}
+
+#[test]
+fn a_repo_only_setting_loads_and_the_flag_is_false_by_default() {
+    let loaded = load(&manifest(
+        "config:\n  layout: { type: string, repoOnly: true, default: plain }\n  \
+         other: { type: string, repoOnly: false }\n",
+    ));
+    assert_eq!(check_manifest(&loaded), Ok(()));
+    assert_eq!(loaded.config["layout"].0["repoOnly"], true);
+}
+
+#[test]
+fn a_repo_only_flag_must_be_a_boolean() {
+    let errors = refusals("config: { layout: { type: string, repoOnly: \"yes\" } }\n");
+    assert_eq!(
+        errors,
+        [ManifestError::NotABoolean {
+            at: "config.layout".into(),
+            flag: "repoOnly"
+        }]
+    );
+}
+
+#[test]
+fn a_repo_only_setting_that_is_also_overridable_or_secret_is_refused_naming_the_key_and_both_flags()
+{
+    for flag in ["overridable", "secret"] {
+        let errors = refusals(&format!(
+            "config: {{ layout: {{ type: string, repoOnly: true, {flag}: true }} }}\n"
+        ));
+        assert_eq!(
+            errors,
+            [ManifestError::RepoOnlyConflict {
+                at: "config.layout".into(),
+                flag
+            }],
+            "{flag}"
+        );
+        let text = errors[0].to_string();
+        assert!(
+            text.contains("config.layout") && text.contains("repoOnly") && text.contains(flag),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_repo_only_setting_with_the_other_flags_false_is_fine() {
+    let loaded = load(&manifest(
+        "config: { layout: { type: string, repoOnly: true, overridable: false, secret: false } }\n",
+    ));
+    assert_eq!(check_manifest(&loaded), Ok(()));
+}
+
+#[test]
+fn a_profile_role_of_a_pack_takes_repo_instructions() {
+    let loaded = load(&manifest(
+        "profiles:\n  quiet:\n    roles:\n      demo/builder: { repo_instructions: none }\n",
+    ));
+    assert_eq!(check_manifest(&loaded), Ok(()));
+    assert_eq!(
+        loaded.profiles["quiet"].roles["demo/builder"].repo_instructions,
+        Some(RepoInstructions::None)
     );
 }

@@ -7,8 +7,8 @@ use collide_core::lock::{
 };
 use collide_core::pack::PackManifest;
 use collide_core::profile::{
-    MIN_COMPACT_AT, Profile, ProfileError, ProfileKey, RoleConfig, USER_PROFILE_KEYS,
-    check_profile, user_profile_refusals,
+    MIN_COMPACT_AT, Profile, ProfileError, ProfileKey, RepoInstructions, RoleConfig,
+    USER_PROFILE_KEYS, check_profile, user_profile_refusals,
 };
 use collide_core::schema;
 use collide_core::view::{
@@ -292,6 +292,42 @@ fn the_plan_example_profile_validates() {
     assert_eq!(
         profile.config.values().next().unwrap()["lanePool"],
         json!(1)
+    );
+}
+
+#[test]
+fn a_profile_role_takes_repo_instructions_worktree_or_none() {
+    for (text, expected) in [
+        ("none", RepoInstructions::None),
+        ("worktree", RepoInstructions::Worktree),
+    ] {
+        let profile: Profile = load(&format!(
+            "roles:\n  collide/builder: {{ repo_instructions: {text} }}\n"
+        ));
+        assert_eq!(check_profile(&profile), Ok(()), "{text}");
+        assert_eq!(
+            profile.roles["collide/builder"].repo_instructions,
+            Some(expected),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_profile_role_with_a_bad_repo_instructions_fails_naming_the_key() {
+    let error =
+        parse_error::<Profile>("roles:\n  collide/builder: { repo_instructions: sometimes }\n");
+    assert!(error.contains("repo_instructions"), "{error}");
+    assert!(error.contains("sometimes"), "{error}");
+    let schema = schema_file("Profile.input.json");
+    assert_eq!(
+        schema["$defs"]["RepoInstructions"]["enum"],
+        json!(["worktree", "none"])
+    );
+    assert!(
+        schema["$defs"]["RoleOptions"]["properties"]
+            .get("repo_instructions")
+            .is_some()
     );
 }
 

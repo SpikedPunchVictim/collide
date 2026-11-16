@@ -1,22 +1,25 @@
 //! Collide's settings files and the agent entries (0.7, Settings and Agent entries; 0.9; Stage 2, Contracts).
 //!
 //! [`ConfigFile`] is `.collide/config.yaml` (committed, in the trust hash) and, the same shape, the user's
-//! `~/.config/collide/config.yaml`. It holds Collide's own settings, `agents` and `ask`, and the pack settings
-//! (`config:`, pack name, then key, then value, as a profile writes them).
+//! `~/.config/collide/config.yaml`. It holds Collide's own settings, `agents`, `ask`, `disk` and `claude`, and the
+//! pack settings (`config:`, pack name, then key, then value, as a profile writes them). The keys of `ask`, `disk`
+//! and `claude` are listed, with their ranges, defaults and flags, in [`crate::settings_registry`].
 //!
 //! The checks are pure functions over a parsed file. Reading the layers (the schema defaults, the user's file, the
 //! repo's file, the run's profile), merging them, checking a pack's values against its schema, and the keychain
 //! are Stage 4a's. What lives here is each rule that needs only one file:
-//! - [`check_config_file`]: the range of `timeout_s`, which agent kinds need a `command`, a budget on a kind that
-//!   cannot enforce one, a literal secret in `env`, and an ACP agent's refused flags;
+//! - [`check_config_file`]: the range of `timeout_s` and the minimum of `disk.floor_gib`, which agent kinds need a
+//!   `command`, a budget on a kind that cannot enforce one, a literal secret in `env`, and an ACP agent's refused
+//!   flags;
 //! - [`repo_file_refusals`]: which keys a repo `config.yaml` may not set (0.7, Layers and sources), as data
-//!   ([`REPO_FILE_AGENT_ASK_KEYS`]) and as a function over a parsed file;
+//!   ([`crate::settings_registry::repo_file_keys`]) and as a function over a parsed file;
 //! - [`secrets_in_file`]: a `secret: true` pack key written in either file.
 //!
 //! A tool kind other than `read` and `search` does not parse: [`ToolKind`] has two variants, so the load error
 //! names the key.
 
 use crate::profile::RoleConfig;
+use crate::settings_registry::{MIN_FLOOR_GIB, repo_file_keys};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,14 +35,6 @@ pub const MAX_TIMEOUT_S: u64 = 1800;
 
 /// The id of the one built-in agent entry: Claude Code with haiku (0.7, Agent entries).
 pub const BUILTIN_AGENT_ID: &str = "claude-haiku";
-
-/// The only keys of `agents` and `ask` a repo `config.yaml` may set (0.7, Layers and sources): the two defaults
-/// for every ask. A team has a say in cost and not in what runs on a developer's machine.
-pub const REPO_FILE_AGENT_ASK_KEYS: [&str; 2] = ["ask.budget_usd", "ask.timeout_s"];
-
-/// The keys of Collide's own settings that are `overridable` (0.7: a slow local model is a fact about one
-/// machine): the user's value wins over the repo's. The others a repo file sets win over the user's.
-pub const COLLIDE_OVERRIDABLE_KEYS: [&str; 1] = ["ask.timeout_s"];
 
 /// A name that, at the end of an `env` variable's name, marks it as a secret (0.7, Secrets are names).
 pub const SECRET_NAME_ENDINGS: [&str; 4] = ["KEY", "TOKEN", "SECRET", "PASSWORD"];
@@ -188,6 +183,35 @@ impl Ask {
     }
 }
 
+/// `disk:`. `floor_gib` is the free space under which Collide pauses runs, in GiB.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiskSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub floor_gib: Option<u64>,
+}
+
+impl DiskSettings {
+    fn is_empty(&self) -> bool {
+        *self == DiskSettings::default()
+    }
+}
+
+/// `claude:`. `check_published` turns the fetch of the published `claude` version off (0.3). A per-user key.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClaudeSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_published: Option<bool>,
+}
+
+impl ClaudeSettings {
+    fn is_empty(&self) -> bool {
+        *self == ClaudeSettings::default()
+    }
+}
+
 /// `.collide/config.yaml` and `~/.config/collide/config.yaml`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -197,10 +221,29 @@ pub struct ConfigFile {
     pub agents: BTreeMap<String, AgentEntry>,
     #[serde(default, skip_serializing_if = "Ask::is_empty")]
     pub ask: Ask,
+    #[serde(default, skip_serializing_if = "DiskSettings::is_empty")]
+    pub disk: DiskSettings,
+    #[serde(default, skip_serializing_if = "ClaudeSettings::is_empty")]
+    pub claude: ClaudeSettings,
     /// Pack settings: pack name, then key, then value. A pack's schema checks each value (Stage 4a), and a key
     /// the pack marks `secret: true` is refused here ([`secrets_in_file`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub config: BTreeMap<String, BTreeMap<String, Value>>,
+}
+
+impl ConfigFile {
+    /// The keys of Collide's own settings this file sets (`ask`, `disk` and `claude`; not `agents` or `config`), as
+    /// `section.key`.
+    pub fn collide_keys_set(&self) -> Vec<&'static str> {
+        let mut keys = self.ask.keys_set();
+        if self.disk.floor_gib.is_some() {
+            keys.push("disk.floor_gib");
+        }
+        if self.claude.check_published.is_some() {
+            keys.push("claude.check_published");
+        }
+        keys
+    }
 }
 
 /// The built-in entry, written as 0.7 shows it with every field it has. The first settings layer holds it, and the
@@ -246,6 +289,12 @@ pub enum SettingsError {
     EmptyAskAgent,
     /// A pack name in `config:` that is empty.
     EmptyConfigPack,
+    /// A whole-number setting under its minimum, as `disk.floor_gib: 0`.
+    BelowMinimum {
+        key: &'static str,
+        value: u64,
+        min: u64,
+    },
 }
 
 impl fmt::Display for SettingsError {
@@ -279,6 +328,9 @@ impl fmt::Display for SettingsError {
             }
             SettingsError::EmptyAskAgent => write!(f, "`ask.agent` is empty"),
             SettingsError::EmptyConfigPack => write!(f, "`config:` has an entry with no pack name"),
+            SettingsError::BelowMinimum { key, value, min } => {
+                write!(f, "`{key}: {value}` is under the minimum of {min}")
+            }
         }
     }
 }
@@ -379,8 +431,8 @@ fn check_agent(id: &str, entry: &AgentEntry, errors: &mut Vec<SettingsError>) {
 }
 
 /// Checks one settings file on its own, whichever file it is. Returns every refusal: the entries in the order of
-/// their ids, then `ask`, then `config:`. Which keys the file's place allows is [`repo_file_refusals`]; whether
-/// `ask.agent` names an entry, and every merged value, is Stage 4a's.
+/// their ids, then `ask`, then `disk`, then `config:`. Which keys the file's place allows is
+/// [`repo_file_refusals`]; whether `ask.agent` names an entry, and every merged value, is Stage 4a's.
 pub fn check_config_file(file: &ConfigFile) -> Result<(), Vec<SettingsError>> {
     let mut errors = Vec::new();
     for (id, entry) in &file.agents {
@@ -395,6 +447,15 @@ pub fn check_config_file(file: &ConfigFile) -> Result<(), Vec<SettingsError>> {
         errors.push(SettingsError::EmptyAskAgent);
     }
     check_timeout("ask.timeout_s".into(), file.ask.timeout_s, &mut errors);
+    if let Some(value) = file.disk.floor_gib
+        && value < MIN_FLOOR_GIB
+    {
+        errors.push(SettingsError::BelowMinimum {
+            key: "disk.floor_gib",
+            value,
+            min: MIN_FLOOR_GIB,
+        });
+    }
     if file.config.keys().any(|pack| pack.trim().is_empty()) {
         errors.push(SettingsError::EmptyConfigPack);
     }
@@ -417,20 +478,23 @@ impl fmt::Display for RepoFileRefusal {
         write!(
             f,
             "the repo's config may not set `{}`: only {} are a team's to set, because a committed \
-             agent would be code that Collide runs on the strength of a trust prompt",
+             agent would be code that Collide runs on the strength of a trust prompt, and a per-user \
+             key is one person's",
             self.key,
-            REPO_FILE_AGENT_ASK_KEYS
+            repo_file_keys()
+                .iter()
                 .map(|key| format!("`{key}`"))
-                .join(" and ")
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     }
 }
 
 impl std::error::Error for RepoFileRefusal {}
 
-/// The `agents` and `ask` keys of a repo `config.yaml` that are not in [`REPO_FILE_AGENT_ASK_KEYS`], one refusal
-/// each: every field of every `agents` entry, and `ask.agent`. A budget that later reaches an agent which cannot
-/// enforce one is no load error (0.7), and is not looked at here.
+/// The keys of a repo `config.yaml` that it may not set, one refusal each: every field of every `agents` entry, and
+/// every key of Collide's own that the registry marks per user (`ask.agent`, `claude.check_published`). A budget that
+/// later reaches an agent which cannot enforce one is no load error (0.7), and is not looked at here.
 pub fn repo_file_refusals(file: &ConfigFile) -> Vec<RepoFileRefusal> {
     let mut refusals = Vec::new();
     for (id, entry) in &file.agents {
@@ -446,11 +510,11 @@ pub fn repo_file_refusals(file: &ConfigFile) -> Vec<RepoFileRefusal> {
             });
         }
     }
+    let allowed = repo_file_keys();
     refusals.extend(
-        file.ask
-            .keys_set()
+        file.collide_keys_set()
             .into_iter()
-            .filter(|key| !REPO_FILE_AGENT_ASK_KEYS.contains(key))
+            .filter(|key| !allowed.contains(key))
             .map(|key| RepoFileRefusal { key: key.into() }),
     );
     refusals
