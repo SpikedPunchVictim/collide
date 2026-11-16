@@ -26,10 +26,11 @@ fn main() -> ExitCode {
         }
         Some("help" | "--help" | "-h") => {
             println!(
-                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}",
+                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}\n\n{}",
                 commands::tree_text(),
                 collide_host::run_cli::USAGE,
-                collide_host::run_cli::HELP
+                collide_host::run_cli::HELP,
+                collide_host::config_cli::USAGE
             );
             return ExitCode::SUCCESS;
         }

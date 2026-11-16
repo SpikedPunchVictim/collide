@@ -1146,6 +1146,35 @@ fn a_pack_named_like_a_built_in_fails_naming_the_built_in() {
 }
 
 #[test]
+fn a_pack_named_like_a_root_of_collides_own_settings_fails_naming_both() {
+    for root in ["agents", "ask", "disk", "claude"] {
+        let line = Line::basic();
+        line.write(".collide/packs/ferry/pack.yaml", &manifest(root, ""));
+        line.commit();
+        let problems = line.problems();
+        assert_problem(
+            &problems,
+            &[
+                &format!("`{root}`"),
+                "Collide's own",
+                "repo:.collide/packs/ferry",
+            ],
+        );
+        assert_eq!(problems.len(), 1, "{root}: {problems:?}");
+    }
+}
+
+#[test]
+fn a_pack_whose_name_only_starts_like_a_root_loads() {
+    for name in ["asking", "disks", "agent", "claude-extras"] {
+        let line = Line::basic();
+        line.write(".collide/packs/ferry/pack.yaml", &manifest(name, ""));
+        line.commit();
+        assert!(names(&line.ok()).contains(&name), "{name}");
+    }
+}
+
+#[test]
 fn a_pack_name_that_is_not_a_safe_token_is_refused() {
     for name in ["bad;name", "x..y", "-flag", "collide/plan", "a/b"] {
         let line = Line::basic();

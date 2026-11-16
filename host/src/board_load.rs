@@ -26,6 +26,7 @@ use collide_core::pack_check::{ManifestError, check_manifest};
 use collide_core::profile::{Profile, check_profile};
 use collide_core::resolve::is_safe_token;
 use collide_core::settings::{ConfigFile, check_config_file, repo_file_refusals};
+use collide_core::settings_registry::collide_roots;
 use collide_core::version_range::{Version, VersionRange};
 use collide_core::yaml::{MAX_YAML_BYTES, YamlError, load_yaml};
 use serde::de::DeserializeOwned;
@@ -197,6 +198,12 @@ pub fn load_line(
         None => Files::default(),
     };
     let mut names = Names::default();
+    // A pack's setting is `<pack>.<key>`, so a pack named like a root of Collide's own keys would name two things.
+    for root in collide_roots() {
+        names
+            .0
+            .push((root.to_string(), format!("Collide's own `{root}` settings")));
+    }
     let mut packs = load.builtin_packs(&mut names);
     if let (Some(dir), Some(board)) = (&dir, &files.board) {
         load.board_packs(dir, board, &files.lock, &mut names, &mut packs);

@@ -281,3 +281,114 @@ pub fn check_profile(profile: &Profile) -> Result<(), Vec<ProfileError>> {
         Err(errors)
     }
 }
+
+/// Where a named profile was found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileSource {
+    /// A file of the snapshot's `.collide/profiles/`.
+    Repo,
+    /// A file of `~/.config/collide/profiles/`.
+    User,
+    /// An entry of the named pack's `profiles:`.
+    Pack(String),
+}
+
+/// The folder a repo's profiles are in, and the user's: where a lookup says it looked.
+pub const REPO_PROFILES_DIR: &str = ".collide/profiles";
+pub const USER_PROFILES_DIR: &str = "~/.config/collide/profiles";
+
+/// Why a profile name found no single profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileLookupError {
+    /// Nothing is called `name`. `looked` lists the places searched.
+    NotFound { name: String, looked: Vec<String> },
+    /// More than one place has `name`, and Collide will not pick one.
+    InTwoPlaces { name: String, places: Vec<String> },
+}
+
+impl fmt::Display for ProfileLookupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProfileLookupError::NotFound { name, looked } => write!(
+                f,
+                "no profile is named `{name}`; looked in {} (a pack's profile is written `<pack>/<profile>`)",
+                looked.join(", ")
+            ),
+            ProfileLookupError::InTwoPlaces { name, places } => write!(
+                f,
+                "the profile `{name}` is in {}: rename one, so that the name says which is meant",
+                places.join(" and ")
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProfileLookupError {}
+
+/// A profile and where it was found.
+#[derive(Debug, Clone)]
+pub struct FoundProfile<'a> {
+    pub source: ProfileSource,
+    pub profile: &'a Profile,
+}
+
+/// Finds `name` among the repo's profiles, the user's, and the packs' (`<pack>/<profile>`). A name in two places is
+/// an error naming both, and one in none is an error naming where it looked.
+pub fn find_profile<'a>(
+    name: &str,
+    repo: &'a BTreeMap<String, Profile>,
+    user: &'a BTreeMap<String, Profile>,
+    packs: &'a [(String, BTreeMap<String, Profile>)],
+) -> Result<FoundProfile<'a>, ProfileLookupError> {
+    let mut found: Vec<(String, FoundProfile<'a>)> = Vec::new();
+    if let Some(profile) = repo.get(name) {
+        found.push((
+            format!("{REPO_PROFILES_DIR} (repo)"),
+            FoundProfile {
+                source: ProfileSource::Repo,
+                profile,
+            },
+        ));
+    }
+    if let Some(profile) = user.get(name) {
+        found.push((
+            format!("{USER_PROFILES_DIR} (user)"),
+            FoundProfile {
+                source: ProfileSource::User,
+                profile,
+            },
+        ));
+    }
+    for (pack, profiles) in packs {
+        let Some(own) = name
+            .strip_prefix(pack.as_str())
+            .and_then(|rest| rest.strip_prefix('/'))
+        else {
+            continue;
+        };
+        if let Some(profile) = profiles.get(own) {
+            found.push((
+                format!("the pack `{pack}`"),
+                FoundProfile {
+                    source: ProfileSource::Pack(pack.clone()),
+                    profile,
+                },
+            ));
+        }
+    }
+    match found.len() {
+        1 => Ok(found.remove(0).1),
+        0 => {
+            let mut looked = vec![REPO_PROFILES_DIR.to_string(), USER_PROFILES_DIR.to_string()];
+            looked.extend(packs.iter().map(|(pack, _)| format!("the pack `{pack}`")));
+            Err(ProfileLookupError::NotFound {
+                name: name.to_string(),
+                looked,
+            })
+        }
+        _ => Err(ProfileLookupError::InTwoPlaces {
+            name: name.to_string(),
+            places: found.into_iter().map(|(place, _)| place).collect(),
+        }),
+    }
+}

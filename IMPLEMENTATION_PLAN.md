@@ -1531,15 +1531,16 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   with a warm `NODE_COMPILE_CACHE`.
 - **Node refuses to strip types under `node_modules`** (measured by R1: `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
   So `@collide/pack-sdk` ships as compiled JS + `.d.ts`, with zero runtime dependencies, and Collide supplies it:
-  - Collide materializes the pack into `~/.cache/collide/packs/<tree id>-<SDK version>/`, keyed by the pack's git
-    tree id, whatever the pack's source (0.7), and by the SDK it links, so a new SDK makes new entries and a pack
-    runs with the SDK its `requires.sdk` was checked against (ts-0095-kp). An entry never changes, and lines share it
-    whenever their pack content matches. It holds:
+  - Collide materializes the pack into `~/Library/Application Support/Collide/cache/packs/<tree id>-<SDK version>/`,
+    keyed by the pack's git tree id, whatever the pack's source (0.7), and by the SDK it links, so a new SDK makes new
+    entries and a pack runs with the SDK its `requires.sdk` was checked against (ts-0095-kp). An entry never changes,
+    and lines share it whenever their pack content matches. It holds:
     - `pack/`, a read-only, verified copy of the pack directory;
     - Collide's own `package.json` (`{"private": true, "type": "module"}`), so a hook's module type never depends
       on a `package.json` above the cache (measured S4);
     - `node_modules/@collide/pack-sdk`, a symlink to a versioned compiled SDK outside the app bundle
-      (`~/.cache/collide/sdk/<version>/`). Node checks the realpath, so a `.ts` SDK is never shipped (measured S4);
+      (`~/Library/Application Support/Collide/cache/sdk/<version>/`). Node checks the realpath, so a `.ts` SDK is never
+      shipped (measured S4);
     - a marker, written last. The entry is built in a staging directory and renamed into place.
   - **A pack that contains a `node_modules` path or a `package.json` is refused at load.** A committed
     `node_modules/@collide/pack-sdk` shadows Collide's SDK (measured S4; R2's "a snapshot has no `node_modules`" was
@@ -1740,9 +1741,9 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   | `git:` | `git:github.com/org/ferry-pack//pack@v1.2`; any git URL, a repo on disk included (`git:~/dev/ferry-pack//pack@main`) | the commit, and the tree at the path |
   | `dev:` | `dev:~/dev/ferry-pack`, a folder being developed; per user only | nothing: re-hashed at each load |
 
-  - `git:` fetches into a bare mirror under `~/.cache/collide/git/` with the user's own git credentials, and reads
-    the tree from git objects with the same reader as `repo:`. GitHub, GitLab and self-hosted servers all work. A
-    tag is a version.
+  - `git:` fetches into a bare mirror under `~/Library/Application Support/Collide/cache/git/` with the user's own git
+    credentials, and reads the tree from git objects with the same reader as `repo:`. GitHub, GitLab and self-hosted
+    servers all work. A tag is a version.
   - **Fetch rules** (R5). A fetch is a command that talks to a host the pack's author chose, so:
     - the first fetch from a host Collide has not fetched from before asks the user, naming the host;
     - git runs with `GIT_TERMINAL_PROMPT=0`, an allowlist of protocols (`https`, `ssh` and `file`), `--` before the
@@ -4148,9 +4149,10 @@ yet.
   - The built-in `collide` pack loads from the app, trusted with it (0.4).
 - **Pack sources and scope (0.7):**
   - sources `repo:`, `git:` (any git URL, a repo on disk included) and `dev:`, each resolved to a git tree id and
-    materialized by one code path. `git:` fetches into a bare mirror under `~/.cache/collide/git/` with the user's
-    git credentials, under the fetch rules of 0.7 (R5): a new host asks first, git runs with `GIT_TERMINAL_PROMPT=0`, a
-    protocol allowlist, `--` before the URL and a timeout, and a URL that starts with `-` is refused;
+    materialized by one code path. `git:` fetches into a bare mirror under
+    `~/Library/Application Support/Collide/cache/git/` with the user's git credentials, under the fetch rules of 0.7
+    (R5): a new host asks first, git runs with `GIT_TERMINAL_PROMPT=0`, a protocol allowlist, `--` before the URL and a
+    timeout, and a URL that starts with `-` is refused;
   - user packs in `~/.config/collide/packs.yaml` and their lock, switched on per board;
   - trust per source (0.9);
   - working copies (0.7): `collide pack link <name>` with no folder, and new `.collide/packs/` folders in the

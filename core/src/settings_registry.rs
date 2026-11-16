@@ -132,6 +132,36 @@ pub const COLLIDE_SETTINGS: &[CollideSetting] = &[
     },
 ];
 
+impl CollideSetting {
+    /// The registry's type and range as a JSON Schema, so a value from a profile is checked as a pack's is.
+    pub fn schema(&self) -> Value {
+        let mut schema = json!({ "type": self.value_type.as_str() });
+        if let Some(min) = self.min {
+            schema["minimum"] = json!(min);
+        }
+        if let Some(max) = self.max {
+            schema["maximum"] = json!(max);
+        }
+        schema
+    }
+}
+
+/// The first part of every key Collide owns: `agents`, `ask`, `disk` and `claude`. A pack may not take one as its
+/// name, because `<pack>.<key>` would then name two things.
+pub fn collide_roots() -> Vec<&'static str> {
+    let mut roots = vec![AGENTS_ROOT];
+    for setting in COLLIDE_SETTINGS {
+        let root = setting.key.split('.').next().unwrap_or(setting.key);
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots
+}
+
+/// The root of the agent entries (`agents.<id>.<field>`), which have rules of their own and are not in the registry.
+pub const AGENTS_ROOT: &str = "agents";
+
 /// The entry for `key` (`disk.floor_gib`), or `None` for a key that is not one of Collide's own.
 pub fn collide_setting(key: &str) -> Option<&'static CollideSetting> {
     COLLIDE_SETTINGS.iter().find(|setting| setting.key == key)

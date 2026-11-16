@@ -1,0 +1,152 @@
+//! A daemon over a fixture checkout, for the tests of `config.get` and `collide config get` (ts-0098-nx). The daemon
+//! runs in the test's own process under the temp root, which is also the home, so `~/.config/collide` is a folder of
+//! the test's. The loader's context is built over fixtures: a cache and an SDK stand-in in the root, and the source
+//! packs as the built-in bundle, so no test depends on a staged bundle.
+
+use super::git_repo::GitRepo;
+use super::{repo_root, test_process_tree};
+use collide_core::owner::{BoardOpenParams, BoardOpenResult};
+use collide_host::base_env::CaptureOptions;
+use collide_host::board_load::LoadContext;
+use collide_host::builtin_packs::{BuiltinPacks, Environment};
+use collide_host::config_get::LoadContextFactory;
+use collide_host::daemon::{Daemon, DaemonOptions, DaemonPaths};
+use collide_host::owner_client::OwnerClient;
+use collide_host::settings_files::user_config_dir;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+pub struct Fixture {
+    pub repo: GitRepo,
+    pub daemon: Daemon,
+}
+
+fn make_sdk(dir: &Path) {
+    fs::create_dir_all(dir.join("dist")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        "{\"name\":\"@collide/pack-sdk\",\"version\":\"0.1.0\",\"type\":\"module\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("dist/index.js"),
+        "export const name = 'stand-in'\n",
+    )
+    .unwrap();
+}
+
+impl Fixture {
+    /// A checkout on `main` with one commit, and a daemon that has not been told of it yet.
+    pub fn new() -> Fixture {
+        let repo = GitRepo::new();
+        repo.write("README.md", b"fixture\n");
+        repo.commit_all("start");
+        let root = repo.root().path().to_path_buf();
+        let cache = root.join("cache");
+        let sdk = root.join("sdk-copy");
+        make_sdk(&sdk);
+        let shell = root.join("fake-shell");
+        fs::write(&shell, "#!/bin/sh\neval \"$4\"\n").unwrap();
+        fs::set_permissions(&shell, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let mut options = DaemonOptions::new(
+            DaemonPaths::under(&root),
+            shell.to_str().unwrap().to_string(),
+            Box::new(std::io::sink()),
+        );
+        options.process_tree = test_process_tree();
+        options.capture = CaptureOptions {
+            timeout: Duration::from_secs(10),
+            cap_bytes: 1024 * 1024,
+            fallback: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
+        };
+        options.home = Some(root.to_str().unwrap().to_string());
+        options.git_env = vec![
+            ("HOME".to_string(), root.to_str().unwrap().to_string()),
+            ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
+            ("GIT_CONFIG_SYSTEM".to_string(), "/dev/null".to_string()),
+            ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
+        ];
+        let factory: LoadContextFactory = Arc::new(move |path| {
+            Ok(LoadContext::new(
+                cache.clone(),
+                sdk.clone(),
+                Environment {
+                    path: path.to_os_string(),
+                },
+                BuiltinPacks::new(repo_root().join("packs")),
+            ))
+        });
+        options.load_context = Some(factory);
+        let daemon = Daemon::start(options).expect("the daemon starts");
+        Fixture { repo, daemon }
+    }
+
+    pub fn home(&self) -> &Path {
+        self.repo.root().path()
+    }
+
+    /// Writes a file of the checkout, to be committed with [`Fixture::commit`].
+    pub fn write(&self, rel: &str, text: &str) {
+        self.repo.write(rel, text.as_bytes());
+    }
+
+    pub fn commit(&self) {
+        self.repo.commit_all("change");
+    }
+
+    /// Writes `~/.config/collide/<rel>`.
+    pub fn write_user(&self, rel: &str, text: &str) {
+        let path = user_config_dir(self.home()).join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    pub fn client(&self) -> OwnerClient {
+        OwnerClient::connect(self.daemon.paths(), "config-test").expect("the client connects")
+    }
+
+    /// Opens the checkout as a board and returns its id (`board-N`).
+    pub fn board(&self) -> String {
+        let result: BoardOpenResult = self
+            .client()
+            .call(
+                "board.open",
+                &BoardOpenParams {
+                    root: fs::canonicalize(self.repo.work())
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                    init_git: false,
+                },
+                Some(Duration::from_secs(10)),
+            )
+            .expect("board.open answers");
+        result.board.expect("the checkout is a board").id
+    }
+
+    /// The pack `ferry`, a repo pack with settings of each kind, listed in `board.yaml`.
+    pub fn ferry(&self) {
+        self.ferry_with(
+            "config:\n\
+             \x20 lanePool: { type: integer, minimum: 1, default: 2, overridable: true }\n\
+             \x20 greeting: { type: string, default: hello }\n\
+             \x20 layout: { type: string, repoOnly: true, default: plain }\n\
+             \x20 notifyHook: { type: string, secret: true }\n",
+        );
+    }
+
+    pub fn ferry_with(&self, config: &str) {
+        self.write(
+            ".collide/board.yaml",
+            "packs:\n  - source: repo:.collide/packs/ferry\n",
+        );
+        self.write(
+            ".collide/packs/ferry/pack.yaml",
+            &format!("apiVersion: collide/v0\nname: ferry\nversion: 1.0.0\n{config}"),
+        );
+    }
+}

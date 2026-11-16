@@ -470,9 +470,41 @@ fn an_unknown_key_fails_at_every_depth_of_the_manifest() {
 }
 
 #[test]
-fn a_setting_is_a_json_schema_and_its_own_keywords_are_not_closed() {
+fn a_setting_is_a_json_schema_with_its_own_flags_beside_the_keywords() {
     let loaded = load(&manifest(
-        "config:\n  lanePool: { type: integer, minimum: 1, default: 2, overridable: true, x-note: fine }\n",
+        "config:\n  lanePool: { type: integer, minimum: 1, default: 2, overridable: true, title: Lanes }\n",
+    ));
+    assert_eq!(check_manifest(&loaded), Ok(()));
+}
+
+#[test]
+fn a_setting_with_a_keyword_outside_the_supported_subset_is_refused_naming_the_keyword() {
+    for keyword in ["$ref", "oneOf", "format", "x-note"] {
+        let errors = refusals(&format!(
+            "config:\n  lanePool: {{ type: integer, {keyword}: 1 }}\n"
+        ));
+        assert_eq!(errors.len(), 1, "{keyword}: {errors:?}");
+        let text = errors[0].to_string();
+        assert!(
+            text.contains(keyword) && text.contains("config.lanePool"),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_setting_default_that_fails_its_own_schema_is_refused_naming_the_key() {
+    let text = refusal_text("config:\n  lanePool: { type: integer, minimum: 1, default: 0 }\n");
+    assert!(
+        text.contains("config.lanePool") && text.contains("default") && text.contains("minimum"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_launch_parameter_and_a_hook_output_keep_every_keyword_of_their_schema() {
+    let loaded = load(&manifest(
+        "launch:\n  maxRounds: { type: integer, format: int32, oneOf: [] }\n",
     ));
     assert_eq!(check_manifest(&loaded), Ok(()));
 }

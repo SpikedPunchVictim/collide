@@ -65,6 +65,17 @@ pub fn checkout_of(folder: &Path, env: &[(String, String)]) -> Result<Checkout, 
     Ok(Checkout { root, branch })
 }
 
+/// The git directory of the checkout at `root`, as an absolute path (for a linked worktree it is not `root/.git`).
+pub fn git_dir_of(root: &Path, env: &[(String, String)]) -> Result<PathBuf, String> {
+    match git(root, env, &["rev-parse", "--absolute-git-dir"])? {
+        Some(dir) if !dir.is_empty() => Ok(PathBuf::from(dir)),
+        _ => Err(format!(
+            "`{}` has no git directory; is it still a git checkout?",
+            root.display()
+        )),
+    }
+}
+
 /// The `git_repo` check, passed.
 pub fn git_repo_ok(checkout: &Checkout) -> FirstRunCheck {
     git_repo_check(

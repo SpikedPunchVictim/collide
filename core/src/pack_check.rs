@@ -21,6 +21,7 @@ use crate::duration::Duration;
 use crate::pack::{Binding, HookEntry, PackManifest, Role, SchemaObject};
 use crate::points::{Point, PointError, check_derived_points, side};
 use crate::profile::{MIN_COMPACT_AT, ProfileError, check_profile};
+use crate::setting_value::{SchemaProblem, check_setting_schema};
 use crate::view::{MAX_CEL_SOURCE_BYTES, ViewError, check_view};
 use crate::workflow::{Phase, Prompt, Then, Workflow};
 use crate::workflow_check::{self, WorkflowError};
@@ -167,6 +168,9 @@ pub enum ManifestError {
         at: String,
         flag: &'static str,
     },
+    /// A setting's schema that the value check cannot run: a keyword outside its subset, a keyword of the wrong
+    /// shape, or a `default` that fails its own schema (`crate::setting_value`).
+    SettingSchema(SchemaProblem),
     /// A role's `require` entry that is not a capability of the table.
     UnknownCapability {
         role: String,
@@ -244,6 +248,7 @@ impl fmt::Display for ManifestError {
                     "a key the repo owns cannot be the user's to override"
                 }
             ),
+            ManifestError::SettingSchema(problem) => write!(f, "{problem}"),
             ManifestError::UnknownCapability { role, name } => write!(
                 f,
                 "role `{role}`: `require` names `{name}`, which is not a capability; write a name of the capability \
@@ -375,6 +380,11 @@ impl Check {
     fn setting(&mut self, key: &str, schema: &SchemaObject) {
         let at = format!("config.{key}");
         self.schema(&at, schema);
+        self.errors.extend(
+            check_setting_schema(&at, &schema.0)
+                .into_iter()
+                .map(ManifestError::SettingSchema),
+        );
         for flag in ["secret", "overridable", "repoOnly"] {
             if schema.0.get(flag).is_some_and(|value| !value.is_boolean()) {
                 self.errors.push(ManifestError::NotABoolean {

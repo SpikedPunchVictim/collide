@@ -21,9 +21,9 @@ the mirror as it reads any git directory.
   is the text after the last `@` that follows the path. Without a ref it is `HEAD`. A URL that starts with `-` is
   refused (the parser already does; the loader and the lock check keep the message), and so is a locator with a NUL or
   a newline, an empty URL, and a path with a `..` part.
-- **The mirror**: `~/.cache/collide/git/<name>/`, a bare repository, `<name>` the URL made safe for a folder (letters,
-  digits, `.`, `-` kept; the rest `_`; at most 100 characters) followed by 8 hex characters of the URL's own hash, so
-  two URLs never share a folder. One fetch updates it.
+- **The mirror**: `~/Library/Application Support/Collide/cache/git/<name>/`, a bare repository, `<name>` the URL made
+  safe for a folder (letters, digits, `.`, `-` kept; the rest `_`; at most 100 characters) followed by 8 hex characters
+  of the URL's own hash, so two URLs never share a folder. One fetch updates it.
 - **The fetch rules**, in one function, `fetch(mirror, url, hosts)`:
   - the first fetch from a host Collide has not fetched from before asks, naming the host: `KnownHosts`
     (`~/.config/collide/hosts.yaml`, through `yaml_out`) says whether it is known, and an unknown host returns

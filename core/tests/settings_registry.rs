@@ -4,8 +4,8 @@
 use collide_core::schema;
 use collide_core::settings::{ConfigFile, MAX_TIMEOUT_S, MIN_TIMEOUT_S};
 use collide_core::settings_registry::{
-    COLLIDE_SETTINGS, CollideSetting, SettingDefault, ValueType, collide_setting, overridable_keys,
-    repo_file_keys,
+    COLLIDE_SETTINGS, CollideSetting, SettingDefault, ValueType, collide_roots, collide_setting,
+    overridable_keys, repo_file_keys,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -246,4 +246,70 @@ fn the_registry_ranges_are_in_the_generated_schema() {
             setting.key
         );
     }
+}
+
+// The layers read the registry (ts-0098-nx).
+
+#[test]
+fn the_roots_of_collides_own_keys_are_agents_ask_disk_and_claude() {
+    let mut roots = collide_roots();
+    roots.sort_unstable();
+    assert_eq!(roots, ["agents", "ask", "claude", "disk"]);
+}
+
+#[test]
+fn every_root_that_a_registry_key_starts_with_is_a_root() {
+    let roots = collide_roots();
+    for setting in COLLIDE_SETTINGS {
+        let root = setting.key.split('.').next().unwrap();
+        assert!(roots.contains(&root), "{}", setting.key);
+    }
+}
+
+#[test]
+fn a_file_that_sets_a_key_gives_its_value_and_one_that_does_not_gives_none() {
+    let all: ConfigFile = collide_core::yaml::load_yaml(
+        b"ask: { agent: mine, timeout_s: 60, budget_usd: 1.5 }\ndisk: { floor_gib: 3 }\n\
+          claude: { check_published: false }\n",
+        "t.yaml",
+    )
+    .unwrap();
+    let expected = [
+        ("ask.agent", json!("mine")),
+        ("ask.timeout_s", json!(60)),
+        ("ask.budget_usd", json!(1.5)),
+        ("disk.floor_gib", json!(3)),
+        ("claude.check_published", json!(false)),
+    ];
+    for (key, value) in expected {
+        assert_eq!(all.collide_value(key), Some(value), "{key}");
+    }
+    let none = ConfigFile::default();
+    for setting in COLLIDE_SETTINGS {
+        assert_eq!(none.collide_value(setting.key), None, "{}", setting.key);
+    }
+    assert_eq!(all.collide_value("ask.nope"), None);
+}
+
+#[test]
+fn the_schema_of_a_key_holds_its_type_and_range() {
+    let floor = collide_setting("disk.floor_gib").unwrap().schema();
+    assert_eq!(floor, json!({ "type": "integer", "minimum": 1 }));
+    let timeout = collide_setting("ask.timeout_s").unwrap().schema();
+    assert_eq!(
+        timeout,
+        json!({ "type": "integer", "minimum": 5, "maximum": 1800 })
+    );
+    assert_eq!(
+        collide_setting("ask.budget_usd").unwrap().schema(),
+        json!({ "type": "number" })
+    );
+    assert_eq!(
+        collide_setting("ask.agent").unwrap().schema(),
+        json!({ "type": "string" })
+    );
+    assert_eq!(
+        collide_setting("claude.check_published").unwrap().schema(),
+        json!({ "type": "boolean" })
+    );
 }

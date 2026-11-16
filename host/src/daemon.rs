@@ -112,6 +112,9 @@ use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::boards;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
+use crate::config_get::{
+    BoardRef, ConfigService, GetError, LoadContextFactory, system_load_context,
+};
 use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
 use crate::file_run::quick_run::RunDiffError;
@@ -119,6 +122,7 @@ use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::metrics::Metrics;
+use crate::pack_location::Inputs;
 use crate::phases::{
     BIND_WAIT, ExitJson, FeedRebuilder, PhaseEndHook, PhaseKey, PhaseOptions, PhasePauseHook,
     Phases, PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
@@ -133,14 +137,15 @@ use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
-    BoardListResult, BoardOpenParams, BoardOpenResult, DaemonRecaptureEnvironmentResult,
-    DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture,
-    MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams,
-    QueueItem, QueueListParams, QueueListResult, Request, Response, Routed, RpcError,
-    RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
-    RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams,
-    RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
-    TaskGetParams, TaskGetResult, code, encode_line, parse_request, route,
+    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams,
+    DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
+    DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
+    OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams, QueueListResult, Request,
+    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
+    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
+    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
+    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code, encode_line,
+    parse_request, route,
 };
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{ApplyResult, GetParams};
@@ -529,6 +534,9 @@ pub struct DaemonOptions {
     /// default, leaves a phase that is not a file run's with no session. A test passes the ACP adapter's here, until
     /// Stage 6b chooses the adapter of a run.
     pub feed_rebuilder: Option<FeedRebuilder>,
+    /// Makes the loader's context for `config.get` (the cache, the SDK, the built-in packs). `None`, the default,
+    /// finds the bundle from the process and keeps the cache beside the runs. A test passes one over fixtures.
+    pub load_context: Option<LoadContextFactory>,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -584,6 +592,7 @@ impl DaemonOptions {
             claude_refresh_every: REFRESH_EVERY,
             subscriber_queue: SUBSCRIBER_QUEUE,
             feed_rebuilder: None,
+            load_context: None,
         }
     }
 }
@@ -622,6 +631,8 @@ struct Shared {
     /// The version of `claude` and the published one; the thread that refreshes the second.
     claude: Arc<ClaudeVersions>,
     claude_refresher: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// What `config.get` reads: the user's files and the loader.
+    config: ConfigService,
 }
 
 impl Shared {
@@ -701,6 +712,7 @@ impl Daemon {
             claude_refresh_every,
             subscriber_queue,
             feed_rebuilder,
+            load_context,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -793,7 +805,7 @@ impl Daemon {
             runs_dir: paths.runs_dir.clone(),
             workspaces_dir: workspaces_dir
                 .unwrap_or_else(|| paths.runs_dir.with_file_name("workspaces")),
-            home,
+            home: home.clone(),
             clocks: clocks.clone(),
             free_space: free_space.clone(),
             floor,
@@ -881,6 +893,17 @@ impl Daemon {
             bind_socket(&paths).inspect_err(|e| log.line(&format!("cannot start: {e}")))?;
         log.line(&format!("listening on {}", paths.socket.display()));
 
+        // `config.get` reads the repo's layer through the loader. The cache is beside the runs, like the workspaces.
+        let config = ConfigService::new(
+            home,
+            load_context.unwrap_or_else(|| {
+                system_load_context(
+                    paths.runs_dir.with_file_name("cache"),
+                    Inputs::from_process(),
+                )
+            }),
+            git_env.clone(),
+        );
         let uid = auth::daemon_uid();
         let tree =
             process_tree.unwrap_or_else(|| Arc::new(system_process_tree(&paths, app_executable)));
@@ -912,6 +935,7 @@ impl Daemon {
             hub,
             claude,
             claude_refresher: Mutex::new(None),
+            config,
         });
 
         let capturing = shared.clone();
@@ -1764,6 +1788,7 @@ fn call(
         Method::RunGet => run_get(shared, params),
         Method::QueueList => queue_list(shared, params),
         Method::QueueAnswer => queue_answer(shared, session, params),
+        Method::ConfigGet => config_get(shared, params),
         Method::BoardOpen => board_open(shared, params),
         Method::BoardList => board_list(shared),
         Method::TaskGet => task_get(shared, params),
@@ -2107,6 +2132,43 @@ fn board_root(shared: &Shared, board: &str) -> Result<String, RpcError> {
                 format!("the daemon has no board {board:?}; open its folder with board.open first"),
             )
         })
+}
+
+/// `config.get` (ts-0098-nx): the settings of a board (the user's layers alone with no board), each with the layer it
+/// came from. A problem in a file or a pack is a `CONFLICT` whose message has one line for each, and a key, a profile
+/// or a board that is not there is `NOT_FOUND` ([`crate::config_get`]).
+fn config_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigGetParams = read_params("config.get", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let root = match &params.board {
+        Some(id) => Some(std::path::PathBuf::from(board_root(shared, id)?)),
+        None => None,
+    };
+    let board = params
+        .board
+        .as_deref()
+        .zip(root.as_deref())
+        .map(|(id, root)| BoardRef { id, root });
+    // The tools a pack needs are looked for where the user's login shell finds them, once it has been captured.
+    let path = shared
+        .env
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|env| env.vars.get("PATH").cloned())
+        .map(std::ffi::OsString::from)
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    match shared.config.get(&params, board, &path) {
+        Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
+        Err(GetError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
+        Err(GetError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
+    }
 }
 
 /// `board.open` (ts-0075-hj): any folder in a git checkout becomes the board of that checkout's top level, and the same

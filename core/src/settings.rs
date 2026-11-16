@@ -22,7 +22,7 @@ use crate::profile::RoleConfig;
 use crate::settings_registry::{MIN_FLOOR_GIB, repo_file_keys};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::net::IpAddr;
@@ -243,6 +243,21 @@ impl ConfigFile {
             keys.push("claude.check_published");
         }
         keys
+    }
+}
+
+impl ConfigFile {
+    /// The value this file sets for the Collide key `key` (`disk.floor_gib`), as JSON. `None` when it is not set, or
+    /// is not one of Collide's own keys.
+    pub fn collide_value(&self, key: &str) -> Option<Value> {
+        match key {
+            "ask.agent" => self.ask.agent.as_ref().map(|value| json!(value)),
+            "ask.timeout_s" => self.ask.timeout_s.map(|value| json!(value)),
+            "ask.budget_usd" => self.ask.budget_usd.map(|value| json!(value)),
+            "disk.floor_gib" => self.disk.floor_gib.map(|value| json!(value)),
+            "claude.check_published" => self.claude.check_published.map(|value| json!(value)),
+            _ => None,
+        }
     }
 }
 

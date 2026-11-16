@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+pub mod config_fixture;
 pub mod detached;
 pub mod git_repo;
 pub mod procs;

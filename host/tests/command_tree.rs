@@ -17,7 +17,7 @@ const TREE: [&str; 9] = [
 /// `tests/adapters/claude/run_command.rs` and `run_process.rs`), with the tag and stage that fills each.
 const STUBBED: [(&str, &str, &str); 3] = [
     ("report", "cli: report", "7"),
-    ("config", "cli: config", "4b"),
+    ("config", "cli: config", "4a"),
     ("pack", "cli: pack", "4b"),
 ];
 
@@ -130,6 +130,15 @@ fn a_stubbed_command_with_arguments_still_names_its_tag_and_prints_no_backtrace(
     assert!(stderr.contains("(cli: pack, Stage 4b)"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("RUST_BACKTRACE"), "{stderr}");
+}
+
+#[test]
+fn config_set_is_still_a_stub_at_stage_4a_and_prints_no_backtrace() {
+    let output = collide(&["config", "set", "disk.floor_gib", "3"]);
+    assert_eq!(output.status.code(), Some(6));
+    let stderr = text(output.stderr);
+    assert!(stderr.contains("(cli: config, Stage 4a)"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
 }
 
 #[test]

@@ -133,3 +133,58 @@ Write these first:
   they share `core`, `host` and the generated files.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.
+
+### Built
+
+- `core/src/setting_value.rs`: the hand-written JSON Schema subset (`check_setting_schema`, `check_value`). An unknown
+  keyword fails closed. Violation messages never include the value, so a secret cannot leak through one.
+  `pack_check.rs` calls it for every pack setting, and a `default` that fails its own schema is refused at load.
+- `core/src/settings_layers.rs`: the pure merge. Order, lowest first: schema defaults, user file (the board's user
+  file wins within it), repo file (wins except `overridable` keys), the run's profile. Every refusal in the item names
+  its key.
+- `core/src/profile.rs`: `find_profile` looks in three places (repo, user, pack as `<pack>/<name>`). A name in two is
+  an error naming both, and an unknown name says where it looked.
+- `core/src/settings_registry.rs`: `schema()`, `collide_roots()`. A pack named `agents`, `ask`, `disk` or `claude` is
+  refused at load, naming both (`host/src/board_load.rs` seeds its name check from `collide_roots()`).
+- `host/src/settings_files.rs`: reads `~/.config/collide/{config.yaml,profiles/*.yaml}` and
+  `boards/<board-id>/config.yaml` through the hardened loader.
+- `host/src/config_get.rs`: `ConfigService`. It loads the line at the checkout's `HEAD`, resolves the profile, runs the
+  merge and narrows to one key. `DaemonOptions.load_context` lets tests inject the loader's context; the default finds
+  the bundle from the process.
+- `host/src/daemon.rs`: the `config.get` arm. `NOT_FOUND` for an unknown key, profile or board, `CONFLICT` for
+  problems, one per line of the message. No wire type changed (`pnpm gen` changes nothing).
+- `host/src/config_cli.rs` and `commands.rs`: `collide config get [<key>] [--profile <name>]`, printing
+  `key = value  (layer)`. A secret prints `<secret, in the keychain>`. A refusal goes to standard error with exit 1,
+  not found exits 3 (`exit::ID`), usage exits 2. With no checkout it shows the user layers and says so.
+- The `cli: config` tag moved 4b to 4a in `stub-tags.json`, `commands.rs`, `command_tree.rs` and `real_tree.rs`.
+  The stub stays for `set` (ts-0099-bw).
+- Tests (written first, run red, then green): `core/tests/setting_value.rs` (25), `core/tests/settings_layers.rs`
+  (49), `core/tests/settings_registry.rs` (+4), `core/tests/pack_manifest.rs` (+4), `host/tests/settings_files.rs`
+  (19), `host/tests/board_load.rs` (+2), `host/tests/config_get.rs` (36; 34 of 35 were red against the daemon with no
+  arm), `host/tests/config_command.rs` (22; 20 red against the stub), `host/tests/config_process.rs` (6, real binary and
+  real daemon under a temp root), `host/tests/command_tree.rs` (+1).
+
+### Decisions for the owner
+
+- **Values print as JSON** (a string is quoted, a number or boolean is not). Alternative: bare text. Recommend JSON: it
+  tells `"5"` from `5` and is unambiguous for a value with spaces.
+- **The repo layer is the committed `HEAD`**, like everything the loader reads. An edit not yet committed is not shown.
+  Recommend keeping: it matches what a run would see in its worktree.
+- **`collide config get` calls `board.open`** to turn the working folder into a board id. It is idempotent but it does
+  register the board. Alternative: a read-only lookup method (a wire change). Recommend keeping.
+- **`config.get` problems ride in the error message**, not a result field, so no wire type changed. Alternative: add
+  `problems` to `ConfigGetResult`. Recommend revisiting when the app shows them (Stage 6).
+- **`claude.check_published` keeps its own reader** in `claude_versions.rs` (as the item recommended).
+
+- Owner decisions (2026-11-16, at the build): the five decisions above are taken on delegation (JSON values, the repo
+  layer at `HEAD`, `board.open` from the CLI, problems in the error message until Stage 6, `claude.check_published`'s
+  own reader). Review: the daemon's default pack cache is `~/Library/Application Support/Collide/cache/`, beside the
+  runs, which follows revision 20 (everything Collide writes for itself is there); the plan's 0.6 and 0.7 text and
+  `ts-0100-pu`'s mirror path said `~/.cache/collide/` and now say the same. Over-width lines rewrapped.
+
+### Not done, by design
+
+- `config set`, agent entries and secrets storage/keychain: ts-0099-bw.
+- The `git:` mirror: ts-0100. User packs and switches: ts-0101-bd. Daemon lines and the trust prompt: ts-0102.
+- A repo-layer read from the working tree (uncommitted edits), and a process-level test with the real bundle
+  (`config_process.rs` covers only cases that need no packs).
