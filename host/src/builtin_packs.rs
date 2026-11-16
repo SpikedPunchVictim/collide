@@ -5,7 +5,7 @@
 //!
 //! The loader reads the whole `pack.yaml` through the hardened YAML loader and runs the manifest check
 //! ([`collide_core::pack_check::check_manifest`]) before it uses a provider entry or the `node` line of
-//! `requires.tools`. Checking the tool's version is Stage 4.
+//! `requires.tools`. Checking a tool's version is the board loader's (`board_load`, Stage 4a).
 
 use collide_core::pack::PackManifest;
 use collide_core::pack_check::{ManifestError, check_manifest};
@@ -30,6 +30,19 @@ impl Environment {
         Self {
             path: std::env::var_os("PATH").unwrap_or_default(),
         }
+    }
+
+    /// The first executable file called `tool` in the absolute `PATH` directories. `None` for a name that is not
+    /// one plain file name (it has a `/`, or is `.` or `..`), so a pack's `requires.tools` cannot reach outside them.
+    pub fn find(&self, tool: &str) -> Option<PathBuf> {
+        if !is_plain_file_name(tool) {
+            return None;
+        }
+        let name = format!("{tool}{}", std::env::consts::EXE_SUFFIX);
+        path_dirs(&self.path)
+            .into_iter()
+            .map(|dir| dir.join(&name))
+            .find(|candidate| is_executable_file(candidate))
     }
 }
 
@@ -147,21 +160,24 @@ impl BuiltinPacks {
         Self { root: root.into() }
     }
 
-    /// The command that starts `provider` of the built-in pack `pack`, with `node` found on `env`'s `PATH`.
-    /// The bundle holds compiled JavaScript, so a `.ts` script in `pack.yaml` (what the pack runs from source
-    /// as) names the `.js` file beside it.
-    pub fn provider(
-        &self,
-        pack: &str,
-        provider: &str,
-        env: &Environment,
-    ) -> Result<ProviderLaunch, BuiltinPackError> {
-        let folder = BUILTIN
+    /// The names of the built-in packs, in the order they load.
+    pub fn names() -> [&'static str; 2] {
+        [BUILTIN[0].0, BUILTIN[1].0]
+    }
+
+    /// The folder of the built-in pack `pack` in the bundle.
+    pub fn dir(&self, pack: &str) -> Result<PathBuf, BuiltinPackError> {
+        BUILTIN
             .iter()
             .find(|(name, _)| *name == pack)
-            .map(|(_, folder)| *folder)
-            .ok_or_else(|| BuiltinPackError::UnknownPack(pack.to_string()))?;
-        let pack_dir = self.root.join(folder);
+            .map(|(_, folder)| self.root.join(folder))
+            .ok_or_else(|| BuiltinPackError::UnknownPack(pack.to_string()))
+    }
+
+    /// The manifest of the built-in pack `pack`, read with the hardened loader and checked: it must pass
+    /// [`check_manifest`] and carry the pack's own name.
+    pub fn manifest(&self, pack: &str) -> Result<PackManifest, BuiltinPackError> {
+        let pack_dir = self.dir(pack)?;
         let manifest: PackManifest =
             load_yaml_file(&pack_dir.join("pack.yaml")).map_err(BuiltinPackError::Manifest)?;
         check_manifest(&manifest).map_err(|errors| BuiltinPackError::InvalidManifest {
@@ -174,6 +190,20 @@ impl BuiltinPacks {
                 found: manifest.name,
             });
         }
+        Ok(manifest)
+    }
+
+    /// The command that starts `provider` of the built-in pack `pack`, with `node` found on `env`'s `PATH`.
+    /// The bundle holds compiled JavaScript, so a `.ts` script in `pack.yaml` (what the pack runs from source
+    /// as) names the `.js` file beside it.
+    pub fn provider(
+        &self,
+        pack: &str,
+        provider: &str,
+        env: &Environment,
+    ) -> Result<ProviderLaunch, BuiltinPackError> {
+        let pack_dir = self.dir(pack)?;
+        let manifest = self.manifest(pack)?;
         let script = &manifest
             .providers
             .get(provider)
@@ -225,18 +255,27 @@ fn compiled_script(pack: &str, script: &str) -> Result<PathBuf, BuiltinPackError
     })
 }
 
-/// The first executable file named `node` in the `PATH` directories, and the directories searched. An empty
-/// entry is skipped: it would mean the current directory.
+/// Whether `name` is one plain file name: not empty, with no `/` and no NUL, and not `.` or `..`. A tool a pack
+/// `requires` is looked for as a file of that name in the `PATH` folders, so a name with a path in it is never one.
+pub fn is_plain_file_name(name: &str) -> bool {
+    let one_part = Path::new(name)
+        .components()
+        .eq([Component::Normal(name.as_ref())]);
+    one_part && !name.contains('\0')
+}
+
+/// The first executable file named `node` in the `PATH` directories, and the directories searched.
 fn find_node(path: &OsString) -> (Option<PathBuf>, Vec<PathBuf>) {
-    let name = format!("node{}", std::env::consts::EXE_SUFFIX);
-    let dirs: Vec<PathBuf> = std::env::split_paths(path)
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .collect();
-    let found = dirs
-        .iter()
-        .map(|dir| dir.join(&name))
-        .find(|candidate| is_executable_file(candidate));
-    (found, dirs)
+    let found = Environment { path: path.clone() }.find("node");
+    (found, path_dirs(path))
+}
+
+/// The absolute directories of `path`. A relative entry, the empty one included, is skipped: it would be read from
+/// whatever folder the daemon runs in.
+fn path_dirs(path: &OsString) -> Vec<PathBuf> {
+    std::env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
+        .collect()
 }
 
 #[cfg(unix)]

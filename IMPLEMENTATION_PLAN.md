@@ -1550,6 +1550,8 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     into the app bundle with their own copy of the SDK, read-only, with no cache entry, no trust prompt and no tree
     id to pin (the app's version is the pin, and the fingerprint records it). They run with `node` from the captured
     environment (0.2), and a missing `node` fails with a message that names the built-in pack and what it needs.
+    Their `requires` are not checked at load, so a line with no `node` still loads; the provider's start reports
+    it (ts-0096-ph).
 - **The context object.** `defineHook(async (input, ctx) => …)` gives:
   - `ctx.state`, to read state;
   - `ctx.config`, the pack's settings, and `ctx.dataDir`, its data directory (0.7);
@@ -1564,7 +1566,9 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   (about 30 MB) or uses the pack repo's own is decided in the second-pack stage.
 - `requires.tools` (e.g. `node >= 22.18`) is checked when a pack loads. A missing tool fails the load with the
   pack's install `hint:`. Collide never installs anything (owner, 2026-11-13). A pack that drives another CLI, as a
-  Ferry pack would drive Ferry, declares it here.
+  Ferry pack would drive Ferry, declares it here. A tool's version is the first `major.minor[.patch]` that
+  `<tool> --version` prints, run once per load with a 5 s limit and a cleared environment; a range is comparators
+  joined by spaces (`>=0.1 <0.2`), each with a `major.minor[.patch]` version (ts-0096-ph).
 - Rejected: embedding a JS engine. Hooks start CLIs anyway, so a sandbox would buy little and cost Node and npm.
 - **Types** (S5, `sp-0005-fv-schema-expressions`; owner, 2026-11-14): Rust serde types → `schemars` → JSON Schema →
   TypeScript types with `json-schema-to-typescript`, which is a Node step in the build. Not `specta` (a release

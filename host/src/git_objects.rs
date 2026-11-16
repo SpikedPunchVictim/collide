@@ -356,6 +356,82 @@ impl GitObjects {
         Ok(bodies.pop())
     }
 
+    /// The commit `rev` names, as a full id. A line is loaded at this id, so a ref that moves during a load cannot
+    /// give one load two snapshots.
+    pub fn resolve_commit(&self, repo: &Path, rev: &str) -> Result<String, GitError> {
+        check_rev(rev)?;
+        self.commit_of(repo, rev)
+    }
+
+    /// The entry at `<rev>:<path>` with its mode, so a symlink is told from a file: `None` when the path is not
+    /// there. `path` is not empty (the commit's own tree has no entry; use [`GitObjects::tree_at`]), and does not
+    /// start with `:`, which `ls-tree` would read as pathspec magic.
+    pub fn entry_at(
+        &self,
+        repo: &Path,
+        rev: &str,
+        path: &str,
+    ) -> Result<Option<TreeEntry>, GitError> {
+        check_rev(rev)?;
+        check_path(path)?;
+        if path.is_empty() {
+            return Err(refused(
+                "path",
+                path,
+                "it is empty; the commit's own tree has no entry",
+            ));
+        }
+        if path.starts_with(':') {
+            return Err(refused("path", path, "it starts with `:`"));
+        }
+        let commit = self.commit_of(repo, rev)?;
+        let mut command = self.command(repo);
+        command
+            .env("GIT_LITERAL_PATHSPECS", "1")
+            .args(["ls-tree", "-z", "-l", "--full-tree", &commit, "--"])
+            .arg(path);
+        let out = self.run_ok(command, "git ls-tree", None)?;
+        let mut records = out
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty());
+        let Some(record) = records.next() else {
+            return Ok(None);
+        };
+        let entry = parse_entry(record)?;
+        if records.next().is_some() || entry.path != path {
+            return Err(GitError::BadReply {
+                command: "git ls-tree".to_string(),
+                detail: format!("asked for {path:?}, got more than that"),
+            });
+        }
+        Ok(Some(entry))
+    }
+
+    /// The entries directly in `tree` (a full hex id), one level, sorted by name. Refused above
+    /// [`MAX_TREE_ENTRIES`] entries. A blob's size is as `ls-tree` gives it and is not capped here.
+    pub fn list_dir(&self, repo: &Path, tree: &str) -> Result<Vec<TreeEntry>, GitError> {
+        check_id("tree id", tree)?;
+        let mut command = self.command(repo);
+        command.args(["ls-tree", "-z", "-l", "--full-tree", tree]);
+        let out = self.run_ok(command, "git ls-tree", None)?;
+        let records: Vec<&[u8]> = out
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty())
+            .collect();
+        if records.len() > MAX_TREE_ENTRIES {
+            return Err(GitError::TooManyEntries {
+                count: records.len(),
+                cap: MAX_TREE_ENTRIES,
+            });
+        }
+        let mut entries = records
+            .into_iter()
+            .map(parse_entry)
+            .collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(entries)
+    }
+
     /// The tree id git would give the files in `folder`, computed by git in a temporary bare repository that is
     /// removed afterwards. The folder's own repository, config, ignore files and attributes are never consulted, and
     /// an ignored file or a `node_modules` folder is counted. Empty folders are absent, as git has them. The id is a

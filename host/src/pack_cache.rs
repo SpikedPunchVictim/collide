@@ -348,6 +348,18 @@ pub fn entry_name(tree: &str, sdk_version: &str) -> String {
     format!("{tree}-{sdk_version}")
 }
 
+/// The entry of `tree` for the SDK version `sdk_version`, when it is already in the cache and complete: no git, no
+/// hash, no write. `None` when it is not there. A `git:` pack that is "in the cache" is this entry.
+pub fn cached_entry(
+    cache: &Path,
+    tree: &str,
+    sdk_version: &str,
+) -> Result<Option<PathBuf>, CacheError> {
+    check_id("tree id", tree)?;
+    let entry = cache.join("packs").join(entry_name(tree, sdk_version));
+    Ok(is_complete(&entry).then_some(entry))
+}
+
 /// The SDK folder as the entry's symlink will name it: absolute, and a folder with a `package.json`.
 fn absolute_sdk(sdk: &Path) -> Result<PathBuf, CacheError> {
     let bad = |reason: String| CacheError::BadSdk {
@@ -360,8 +372,9 @@ fn absolute_sdk(sdk: &Path) -> Result<PathBuf, CacheError> {
     std::path::absolute(sdk).map_err(|error| bad(error.to_string()))
 }
 
-/// The `version` of `<sdk>/package.json`, checked to be safe as a folder name.
-fn sdk_version(sdk: &Path) -> Result<String, CacheError> {
+/// The `version` of `<sdk>/package.json`, checked to be safe as a folder name. It is the version a pack's
+/// `requires.sdk` is checked against.
+pub fn sdk_version(sdk: &Path) -> Result<String, CacheError> {
     let bad = |reason: String| CacheError::BadSdk {
         folder: sdk.to_path_buf(),
         reason,

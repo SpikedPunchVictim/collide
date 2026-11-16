@@ -126,3 +126,79 @@ root:
   they share `core`, `host` and the generated files.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.
+
+### Built
+
+`core/src/version_range.rs` (new, pure): `Version`, `VersionRange::parse` and `contains`, `version_in_range`,
+`RangeError`. Five operators, joined by spaces, versions `major.minor[.patch]`. `Version::find_in` finds the first
+version in a tool's output.
+
+`host/src/git_objects.rs`: `GitObjects::resolve_commit`, `entry_at` (mode, kind and id of one path; literal pathspec, so
+a symlink is told from a file) and `list_dir` (one level of a tree, capped).
+
+`host/src/pack_cache.rs`: `cached_entry` (the entry of a tree if complete, no git, no write); `sdk_version` is now
+`pub`.
+
+`host/src/builtin_packs.rs`: `Environment::find`, `is_plain_file_name`, `BuiltinPacks::names`, `dir` and `manifest`;
+`provider` and `find_node` now use them.
+
+`host/src/board_load.rs` (new): `load_line`, `LoadContext`, `LoadedLine` (with `trust_inputs`), `LoadedPack`,
+`PackOrigin`, `ViewFile`, `LoadProblem`, `pack_data_dir`, `PackDataError`. The ref is resolved to a commit once; every
+read is of that commit. Problems come in file order and the load goes on after one.
+
+Tests (114 new). Written first. Red runs: `core/tests/version_range.rs` 9 of 10 failed against a stub;
+`host/tests/git_objects.rs` 13 of 13 new; `host/tests/pack_cache.rs` 3 of 5 (the bad-id test passed because the stub
+errored, and the `sdk_version` test because the function was made `pub`); `host/tests/builtin_packs.rs` 4 of 8 (the
+names test and the "none" tests passed on the stub); `host/tests/board_load.rs` 76 of 78 against a stub that returns an
+empty error list (the two that passed are the `pack_data_dir` refusal tests, which an error stub satisfies). After the
+build all pass.
+- `core/tests/version_range.rs`: 10 tests (the five operators, joined comparators, numeric compare, missing patch,
+  unknown form named, empty range, version forms, first version found).
+- `host/tests/git_objects.rs`: 13 tests named `resolve_commit_*`, `entry_at_*`, `list_dir_*`.
+- `host/tests/pack_cache.rs`: `cached_entry_*` (4) and `sdk_version_reads_the_version_of_the_sdk_folder`.
+- `host/tests/builtin_packs.rs`: the built-in names, manifest and folder tests, and four `Environment::find` tests.
+- `host/tests/board_load.rs`: 78 tests. Snapshot-not-workspace for `pack.yaml`, a hook, `board.yaml` and `config.yaml`;
+  the ref asked for and not the checked-out branch; trust inputs; the pointer cases (every refusal names `.collide` and
+  the `dir`); file checks through the existing fixtures; symlink and folder in place of a file; profiles and views;
+  built-ins first and never cached; repo and git packs; safe tokens (pack, role, workflow, prompt, template field);
+  names; `requires` (missing tool, range, once per tool, cleared environment, timeout, SDK range); problem order; and
+  `pack_data_dir`.
+
+Checks, all run in the foreground and green: `cargo build --workspace`; `cargo test --workspace`;
+`cargo clippy --workspace --all-targets -- -D warnings`; `cargo fmt --all --check`; `pnpm test`; `pnpm typecheck`;
+`pnpm --filter @collide/app build`; `pnpm build:packs`; `pnpm check`. No wire type changed, so no `pnpm gen`. No
+dependency added.
+
+### Decisions for the owner
+
+1. **`requires` of a built-in pack is not checked at load.** Alternative: check it, which fails every line on a machine
+   with no `node`. Recommend not: the provider's start already reports `NodeNotFound`. Plan 0.6 should say so.
+2. **A version range needs `major.minor[.patch]`.** `>=22` is refused with the example `>=0.1 <0.2`. Alternative:
+   accept a bare major. Recommend as built: one form, no surprises.
+3. **A tool's version is the first version in its `--version` output** (stdout, then stderr). A non-zero exit, no
+   version, or no end within 5 s is a problem naming the tool. Recommend as built.
+4. **A pack's `name` must be a safe token and unique** among the other packs and the built-in names (`collide`,
+   `collide/plan`). Alternative: let the board alias a pack. Recommend not now.
+5. **`pack_data_dir` stores `collide/plan` as `collide~plan`.** `~` is not a safe-token character, so no user pack can
+   share it. Alternative: nested folders (`collide/plan`), which a pack named `collide` would collide with.
+6. **Trust inputs are per file** (blob ids) plus `pack <source>` tree ids; built-ins are not in them. Alternative: one
+   tree id for the whole Collide directory, which would change on a view edit. Recommend as built.
+7. **A missing `board.yaml`, `packs.lock` or `config.yaml` loads as the default; non-`.yaml` files in `profiles/` and
+   `views/` are ignored.** Alternative: refuse strays. Recommend as built.
+8. **A `git:` pack is read from the cache by the lock's tree**, and a miss is a problem naming the pack and commit,
+   until the mirror (ts-0100-pu).
+9. **A bad SDK folder is one problem for the line**, and no pack is loaded from the cache without it.
+10. **`secrets_in_file` is not run here** (ts-0098-nx owns the settings layers); `repo_file_refusals` is.
+11. Plan text to propose for 0.7: "A pack's `requires.tools` version is read from `<tool> --version` with a 5 s limit."
+
+- Owner decisions (2026-11-16, at the build): decisions 1 to 11 taken as recommended, under the owner's delegation.
+  The plan text of decisions 1 and 11 is applied to 0.6 (Built-in packs) and 0.7 (`requires.tools`). One change in
+  review: `Environment::find` and `find_node` skip a relative `PATH` entry, not only the empty one, through
+  `path_dirs`: a relative entry would be read from whatever folder the daemon runs in. Test:
+  `a_relative_path_entry_is_skipped_even_when_it_leads_to_the_tool`, red before.
+
+### Not done, by design
+
+Trust hashing (ts-0097-kw), settings layers (ts-0098-nx), agent entries and keychain (ts-0099), the `git:` mirror
+and fetch (ts-0100-pu), user packs (ts-0101-bd) and the daemon wiring that calls `load_line` and `pack_data_dir`
+(ts-0102-vu). Views are listed and not parsed (Stage 4b). `dev:` packs are refused by `check_board` and not loaded.

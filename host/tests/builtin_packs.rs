@@ -356,3 +356,114 @@ fn a_test_that_needs_node_fails_naming_node_and_the_path_when_the_path_has_none(
     );
     let _ = fs::remove_dir_all(&empty);
 }
+
+// ---- the names, the manifest and the folder of a built-in pack, and tool lookup (ts-0096-ph) ------------------------
+
+#[test]
+fn the_built_in_names_are_collide_then_collide_plan() {
+    assert_eq!(BuiltinPacks::names(), ["collide", "collide/plan"]);
+}
+
+#[test]
+fn the_manifest_of_each_built_in_pack_loads_with_its_own_name() {
+    let bundle = bundle();
+    let packs = packs(&bundle);
+    for name in BuiltinPacks::names() {
+        assert_eq!(packs.manifest(name).unwrap().name, name);
+    }
+}
+
+#[test]
+fn the_folder_of_a_built_in_pack_is_its_folder_in_the_bundle() {
+    let bundle = bundle();
+    let packs = packs(&bundle);
+    assert_eq!(packs.dir("collide").unwrap(), bundle.join("collide"));
+    assert_eq!(packs.dir("collide/plan").unwrap(), bundle.join("plan"));
+}
+
+#[test]
+fn the_manifest_and_folder_of_a_pack_that_is_not_built_in_are_refused_by_name() {
+    let bundle = bundle();
+    let packs = packs(&bundle);
+    let error = packs.manifest("ferry").unwrap_err().to_string();
+    assert!(error.contains("`ferry` is not a built-in pack"), "{error}");
+    assert!(matches!(
+        packs.dir("ferry"),
+        Err(BuiltinPackError::UnknownPack(_))
+    ));
+}
+
+fn tool_in(root: &common::TempRoot, folder: &str, name: &str, mode: u32) -> PathBuf {
+    let dir = root.join(folder);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    fs::write(&path, "#!/bin/sh\n").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+    path
+}
+
+#[test]
+fn a_tool_is_found_in_the_first_path_folder_that_has_it_as_an_executable() {
+    let root = common::TempRoot::new();
+    tool_in(&root, "plain", "mytool", 0o644);
+    let first = tool_in(&root, "first", "mytool", 0o755);
+    tool_in(&root, "second", "mytool", 0o755);
+    let path = std::env::join_paths([root.join("plain"), root.join("first"), root.join("second")])
+        .unwrap();
+    assert_eq!(Environment { path }.find("mytool"), Some(first));
+}
+
+#[test]
+fn a_tool_that_is_not_on_the_path_is_none() {
+    let root = common::TempRoot::new();
+    tool_in(&root, "bin", "other", 0o755);
+    let path = std::env::join_paths([root.join("bin")]).unwrap();
+    assert_eq!(Environment { path }.find("mytool"), None);
+}
+
+#[test]
+fn a_tool_name_with_a_slash_or_a_dot_part_is_none_even_when_the_file_is_there() {
+    let root = common::TempRoot::new();
+    tool_in(&root, "bin", "mytool", 0o755);
+    tool_in(&root, "other", "x", 0o755);
+    let path = std::env::join_paths([root.join("bin")]).unwrap();
+    let env = Environment { path };
+    for name in [
+        "../other/x",
+        "other/x",
+        "/tmp/anything",
+        ".",
+        "..",
+        "",
+        "my\0tool",
+    ] {
+        assert_eq!(env.find(name), None, "{name:?}");
+    }
+}
+
+#[test]
+fn a_relative_path_entry_is_skipped_even_when_it_leads_to_the_tool() {
+    let root = common::TempRoot::new();
+    let tool = tool_in(&root, "bin", "mytool", 0o755);
+    let cwd = std::env::current_dir().unwrap();
+    let up = "../".repeat(cwd.components().count() - 1);
+    let relative = PathBuf::from(up).join(root.join("bin").strip_prefix("/").unwrap());
+    assert!(
+        relative.join("mytool").is_file(),
+        "the relative entry reaches {}",
+        tool.display()
+    );
+    let path = std::env::join_paths([relative]).unwrap();
+    assert_eq!(Environment { path }.find("mytool"), None);
+}
+
+#[test]
+fn an_empty_path_entry_is_skipped_and_never_means_the_current_folder() {
+    let root = common::TempRoot::new();
+    let in_cwd = std::env::current_dir()
+        .unwrap()
+        .join("collide-no-such-tool-here");
+    assert!(!in_cwd.exists());
+    let path = std::env::join_paths([PathBuf::new(), root.join("none")]).unwrap();
+    assert_eq!(Environment { path }.find("collide-no-such-tool-here"), None);
+}

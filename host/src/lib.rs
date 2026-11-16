@@ -3,6 +3,7 @@ pub mod adapters;
 pub mod agent_feed;
 pub mod auth;
 pub mod base_env;
+pub mod board_load;
 pub mod boards;
 pub mod bounded_run;
 pub mod builtin_packs;

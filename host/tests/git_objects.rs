@@ -973,3 +973,211 @@ fn a_missing_git_is_an_error_naming_the_command() {
     );
     assert!(error.contains("git rev-parse"), "{error}");
 }
+
+// ---- resolve_commit, entry_at and list_dir (ts-0096-ph) ----
+
+/// `a/b/c.txt`, an executable, a symlink and a folder with two files.
+fn modes() -> GitRepo {
+    let repo = GitRepo::new();
+    repo.write("a/b/c.txt", b"deep\n");
+    repo.write_executable("run.sh", b"#!/bin/sh\n");
+    repo.symlink("link", "a/b");
+    repo.write("dir/one.txt", b"1\n");
+    repo.write("dir/two.txt", b"22\n");
+    repo.commit_all("one");
+    repo
+}
+
+#[test]
+fn resolve_commit_gives_the_full_commit_id_of_a_branch() {
+    let repo = nested();
+    let id = reader().resolve_commit(&repo.git_dir(), "main").unwrap();
+    assert_eq!(id, repo.git(&["rev-parse", "HEAD"]));
+}
+
+#[test]
+fn resolve_commit_of_a_commit_id_is_that_id() {
+    let repo = nested();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    assert_eq!(
+        reader().resolve_commit(&repo.git_dir(), &head).unwrap(),
+        head
+    );
+}
+
+#[test]
+fn resolve_commit_of_a_missing_ref_names_the_ref() {
+    let repo = nested();
+    let error = reader()
+        .resolve_commit(&repo.git_dir(), "nope")
+        .unwrap_err();
+    assert!(text(error).contains("nope"));
+}
+
+#[test]
+fn resolve_commit_refuses_a_rev_that_starts_with_a_dash() {
+    let repo = nested();
+    let error = reader()
+        .resolve_commit(&repo.git_dir(), "--all")
+        .unwrap_err();
+    assert!(matches!(error, GitError::Refused { .. }), "{error}");
+}
+
+#[test]
+fn entry_at_gives_the_mode_kind_and_id_of_a_folder_a_file_an_executable_and_a_symlink() {
+    let repo = modes();
+    let git_dir = repo.git_dir();
+    let at = |path: &str| reader().entry_at(&git_dir, "main", path).unwrap().unwrap();
+    let folder = at("a/b");
+    assert_eq!(
+        (folder.mode.as_str(), folder.kind, folder.id.as_str()),
+        (
+            "040000",
+            ObjectKind::Tree,
+            repo.git(&["rev-parse", "main:a/b"]).as_str()
+        )
+    );
+    assert_eq!(folder.path, "a/b");
+    assert_eq!(at("a/b/c.txt").mode, "100644");
+    assert_eq!(at("run.sh").mode, "100755");
+    let link = at("link");
+    assert_eq!(
+        (link.mode.as_str(), link.kind),
+        ("120000", ObjectKind::Blob)
+    );
+}
+
+#[test]
+fn entry_at_a_missing_path_or_below_a_symlink_or_a_file_is_none() {
+    let repo = modes();
+    let git_dir = repo.git_dir();
+    for path in ["nope", "a/nope", "link/c.txt", "run.sh/x"] {
+        assert_eq!(
+            reader().entry_at(&git_dir, "main", path).unwrap(),
+            None,
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn entry_at_reads_the_commit_and_not_the_working_tree() {
+    let repo = modes();
+    repo.write("dir/one.txt", b"edited and not committed\n");
+    repo.remove("run.sh");
+    let git_dir = repo.git_dir();
+    assert!(
+        reader()
+            .entry_at(&git_dir, "main", "run.sh")
+            .unwrap()
+            .is_some()
+    );
+    let one = reader()
+        .entry_at(&git_dir, "main", "dir/one.txt")
+        .unwrap()
+        .unwrap();
+    assert_eq!(one.id, repo.git(&["rev-parse", "main:dir/one.txt"]));
+}
+
+#[test]
+fn entry_at_refuses_a_path_that_could_be_read_as_an_option_a_pathspec_or_the_commit_tree() {
+    let repo = modes();
+    for path in [
+        "",
+        "..",
+        "a/../b",
+        "/a",
+        "a//b",
+        ":(top)dir",
+        ":/dir",
+        "a\nb",
+    ] {
+        let error = reader()
+            .entry_at(&repo.git_dir(), "main", path)
+            .unwrap_err();
+        assert!(
+            matches!(error, GitError::Refused { .. }),
+            "{path:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn entry_at_takes_a_name_with_a_glob_character_literally() {
+    let repo = GitRepo::new();
+    repo.write("dir/a*b.txt", b"star\n");
+    repo.write("dir/axb.txt", b"x\n");
+    repo.commit_all("one");
+    let found = reader()
+        .entry_at(&repo.git_dir(), "main", "dir/a*b.txt")
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.path, "dir/a*b.txt");
+    assert_eq!(
+        reader()
+            .entry_at(&repo.git_dir(), "main", "dir/a?b.txt")
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn entry_at_a_missing_ref_is_an_error_naming_the_ref() {
+    let repo = modes();
+    let error = reader()
+        .entry_at(&repo.git_dir(), "nope", "dir")
+        .unwrap_err();
+    assert!(text(error).contains("nope"));
+}
+
+#[test]
+fn list_dir_gives_one_level_with_modes_and_sizes_sorted_by_name() {
+    let repo = modes();
+    let tree = repo.git(&["rev-parse", "main^{tree}"]);
+    let entries = reader().list_dir(&repo.git_dir(), &tree).unwrap();
+    let shown: Vec<(&str, &str)> = entries
+        .iter()
+        .map(|entry| (entry.path.as_str(), entry.mode.as_str()))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("a", "040000"),
+            ("dir", "040000"),
+            ("link", "120000"),
+            ("run.sh", "100755")
+        ]
+    );
+    let dir = repo.git(&["rev-parse", "main:dir"]);
+    let inner = reader().list_dir(&repo.git_dir(), &dir).unwrap();
+    assert_eq!(inner.len(), 2);
+    assert_eq!((inner[0].path.as_str(), inner[0].size), ("one.txt", 2));
+    assert_eq!((inner[1].path.as_str(), inner[1].size), ("two.txt", 3));
+}
+
+#[test]
+fn list_dir_of_a_blob_id_or_a_bad_id_is_an_error() {
+    let repo = modes();
+    let blob = repo.git(&["rev-parse", "main:run.sh"]);
+    assert!(reader().list_dir(&repo.git_dir(), &blob).is_err());
+    assert!(matches!(
+        reader().list_dir(&repo.git_dir(), "main").unwrap_err(),
+        GitError::Refused { .. }
+    ));
+}
+
+#[test]
+fn list_dir_refuses_a_folder_over_the_entry_cap() {
+    let repo = GitRepo::new();
+    let blob = repo.blob(b"x\n");
+    let names: Vec<Vec<u8>> = (0..MAX_TREE_ENTRIES + 1)
+        .map(|n| format!("f{n:05}").into_bytes())
+        .collect();
+    let entries: Vec<(&str, &str, &[u8])> = names
+        .iter()
+        .map(|n| ("100644", blob.as_str(), n.as_slice()))
+        .collect();
+    let tree = repo.tree_of(&entries);
+    let error = reader().list_dir(&repo.git_dir(), &tree).unwrap_err();
+    assert!(matches!(error, GitError::TooManyEntries { .. }), "{error}");
+}

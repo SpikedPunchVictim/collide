@@ -5,8 +5,8 @@
 
 use collide_host::git_objects::{GitObjects, MAX_TREE_ENTRIES, TreeEntry, tree_of_folder};
 use collide_host::pack_cache::{
-    CacheError, FsWriter, MARKER, Materializer, PackWriter, check_entries, ensure_sdk, entry_name,
-    materialize,
+    CacheError, FsWriter, MARKER, Materializer, PackWriter, cached_entry, check_entries,
+    ensure_sdk, entry_name, materialize, sdk_version,
 };
 use collide_host::pack_location::bundle_sdk;
 use std::collections::BTreeMap;
@@ -1110,4 +1110,53 @@ fn the_staging_folder_of_a_dead_sdk_copy_is_swept_after_an_hour() {
     age(&old, Duration::from_secs(2 * 3600));
     ensure_sdk(&fixture.cache, &bundled).unwrap();
     assert_eq!(names_in(&fixture.cache.join("sdk")), ["1.2.3"]);
+}
+
+// ---- cached_entry and sdk_version (ts-0096-ph) ----
+
+#[test]
+fn cached_entry_is_none_before_the_pack_is_materialized_and_the_entry_after() {
+    let fixture = Fixture::ordinary();
+    let tree = fixture.tree();
+    assert_eq!(cached_entry(&fixture.cache, &tree, "0.1.0").unwrap(), None);
+    let built = fixture.materialize(&tree).unwrap();
+    assert_eq!(
+        cached_entry(&fixture.cache, &tree, "0.1.0").unwrap(),
+        Some(built)
+    );
+}
+
+#[test]
+fn cached_entry_for_another_sdk_version_is_none() {
+    let fixture = Fixture::ordinary();
+    let tree = fixture.tree();
+    fixture.materialize(&tree).unwrap();
+    assert_eq!(cached_entry(&fixture.cache, &tree, "0.2.0").unwrap(), None);
+}
+
+#[test]
+fn cached_entry_without_the_marker_is_none_and_nothing_is_written() {
+    let fixture = Fixture::ordinary();
+    let tree = fixture.tree();
+    let entry = fixture.entry(&tree);
+    fs::create_dir_all(&entry).unwrap();
+    assert_eq!(cached_entry(&fixture.cache, &tree, "0.1.0").unwrap(), None);
+    assert_eq!(names_in(&entry), Vec::<String>::new());
+}
+
+#[test]
+fn cached_entry_refuses_a_tree_id_that_is_not_hex_so_it_cannot_climb_out_of_the_cache() {
+    let fixture = Fixture::new();
+    for bad in ["../x", "main", "", "ABCDEF"] {
+        assert!(
+            cached_entry(&fixture.cache, bad, "0.1.0").is_err(),
+            "{bad:?}"
+        );
+    }
+}
+
+#[test]
+fn sdk_version_reads_the_version_of_the_sdk_folder() {
+    let fixture = Fixture::new();
+    assert_eq!(sdk_version(&fixture.sdk).unwrap(), "0.1.0");
 }
