@@ -5,9 +5,11 @@
 #[path = "../../common/mod.rs"]
 mod common;
 
+mod adapter;
 mod contract;
 mod fake;
 mod fake_acp;
+mod probe;
 mod replay;
 mod session;
 mod turn;

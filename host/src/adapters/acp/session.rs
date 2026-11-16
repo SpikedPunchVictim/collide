@@ -5,9 +5,10 @@
 //!
 //! The session holds what an ACP conversation needs held:
 //!
-//! - **the handshake:** `start` writes `initialize`; its response makes the session write `session/new`; that
-//!   response gives `SessionBound` and makes it write the first `session/prompt`. The first prompt is the session's
-//!   own data ([`AcpOptions`]), not a turn queued by `send_turn`, so a session rebuilt from the journal still has it;
+//! - **the handshake:** `start` writes `initialize`, with `clientInfo` (`collide` and this crate's version). Its
+//!   response makes the session write `session/new`; that response gives `SessionBound` and makes it write the first
+//!   `session/prompt`. The first prompt is the session's own data ([`AcpOptions`]), not a turn queued by `send_turn`,
+//!   so a session rebuilt from the journal still has it;
 //! - **request ids:** the requests it writes count from 0. A response is matched to its request by id, and one that
 //!   matches nothing changes nothing;
 //! - **the turn:** the `session/prompt` response ends it. A turn the host cancelled is `Cancelled` whatever
@@ -53,6 +54,9 @@ use serde_json::{Value, json};
 
 /// The JSON-RPC error for a method the client does not have.
 const METHOD_NOT_FOUND: i64 = -32601;
+
+/// What the client calls itself in `initialize`. The same for every agent, so it is not in a profile.
+const CLIENT_NAME: &str = "collide";
 
 /// The longest name an `Other` event carries, in characters.
 const NAME_LIMIT: usize = 64;
@@ -423,6 +427,7 @@ impl AgentSession for AcpSession {
             "initialize",
             json!({
                 "protocolVersion": 1,
+                "clientInfo": { "name": CLIENT_NAME, "version": env!("CARGO_PKG_VERSION") },
                 "clientCapabilities": {
                     "session": { "notices": {}, "compaction": {}, "configOptions": {} }
                 }

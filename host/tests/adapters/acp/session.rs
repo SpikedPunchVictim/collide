@@ -74,7 +74,7 @@ fn error_response(id: u64, code: i64, message: &str) -> Vec<u8> {
 // ---- what the session writes ---------------------------------------------------------------------------------------
 
 #[test]
-fn start_writes_initialize_with_protocol_version_1_and_the_session_flags() {
+fn start_writes_initialize_with_protocol_version_1_the_client_and_the_session_flags() {
     let step = session().start();
     assert!(step.events.is_empty());
     assert_eq!(
@@ -83,11 +83,22 @@ fn start_writes_initialize_with_protocol_version_1_and_the_session_flags() {
             "jsonrpc": "2.0", "id": 0, "method": "initialize",
             "params": {
                 "protocolVersion": 1,
+                "clientInfo": { "name": "collide", "version": env!("CARGO_PKG_VERSION") },
                 "clientCapabilities": {
                     "session": { "notices": {}, "compaction": {}, "configOptions": {} }
                 }
             }
         })]
+    );
+}
+
+#[test]
+fn initialize_names_the_client_and_its_version_and_nothing_else_about_it() {
+    let step = session().start();
+    let info = written(&step)[0]["params"]["clientInfo"].clone();
+    assert_eq!(
+        info,
+        json!({ "name": "collide", "version": env!("CARGO_PKG_VERSION") })
     );
 }
 
