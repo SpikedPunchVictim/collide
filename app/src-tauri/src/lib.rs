@@ -3,10 +3,17 @@ pub mod shell;
 use collide_core::owner::{RpcError, code};
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::SystemClocks;
+use collide_host::daemon::{DaemonPaths, ROOT_ENV};
 use collide_host::ui_tools::{KeychainTokens, UiToolsEndpoint};
 use serde_json::Value;
-use shell::{ChannelEvent, ChannelWindow, EventChannel, Shell, ShellHandle, SocketLink};
+use shell::{
+    ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, LaunchStarter, Shell, ShellHandle,
+    SocketLink, pump_daemon_events,
+};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::thread;
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 
 pub const NAME: &str = "collide-app";
@@ -61,7 +68,7 @@ async fn rpc(
         })?
 }
 
-fn build_shell(channel: Arc<dyn EventChannel>) -> Shell {
+fn build_shell(channel: Arc<dyn EventChannel>, access: Arc<DaemonAccess>) -> Shell {
     // The manifest is empty until the generator of Stage 6 writes the real one from the tools' TypeScript.
     let endpoint = UiToolsEndpoint::new(
         UNBOUND_PORT,
@@ -71,14 +78,45 @@ fn build_shell(channel: Arc<dyn EventChannel>) -> Shell {
         Box::new(SystemClocks),
     )
     .expect("an empty manifest is valid");
-    Shell::new(endpoint, Box::new(SocketLink))
+    Shell::new(endpoint, Box::new(SocketLink::new(access)))
 }
+
+/// The files of the daemon and the way to start it, from this process's environment (0.2, Starting the daemon).
+fn daemon_access() -> Result<Arc<DaemonAccess>, String> {
+    let root = std::env::var(ROOT_ENV).ok();
+    let home = std::env::var("HOME").ok();
+    let paths = DaemonPaths::from_env(root.as_deref(), home.as_deref())?;
+    let exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| format!("could not find the app's own executable: {error}"))?;
+    Ok(Arc::new(DaemonAccess::new(
+        paths.clone(),
+        Box::new(LaunchStarter::new(paths)),
+        Arc::new(SystemClocks),
+        exe,
+    )))
+}
+
+/// How long the event pump waits before it connects again when the stream ends.
+const EVENT_RETRY: Duration = Duration::from_secs(1);
 
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let channel: Arc<dyn EventChannel> = Arc::new(WebviewChannel(app.handle().clone()));
-            app.manage(Arc::new(ShellHandle::spawn(move || build_shell(channel))));
+            let access = daemon_access()?;
+            let shell_access = Arc::clone(&access);
+            let shell_channel = Arc::clone(&channel);
+            app.manage(Arc::new(ShellHandle::spawn(move || {
+                build_shell(shell_channel, shell_access)
+            })));
+            // The pump lives as long as the app does, so its stop flag is never set.
+            thread::Builder::new()
+                .name("collide-events".into())
+                .spawn(move || {
+                    let stop = AtomicBool::new(false);
+                    pump_daemon_events(&access, channel.as_ref(), &stop, EVENT_RETRY);
+                })?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![rpc])

@@ -70,6 +70,9 @@ pub const RUN_MARKER: &str = "COLLIDE_RUN";
 /// the limit is for a table that loops or a walk that never ends.
 pub const MAX_TREE_DEPTH: usize = 64;
 
+/// The mode of the file the app writes its executable path to: the user's alone, as the token file is.
+const APP_FILE_MODE: u32 = 0o600;
+
 /// The bytes of randomness in a token ([`mint_token`]): 256 bits.
 pub const TOKEN_BYTES: usize = 32;
 
@@ -557,9 +560,11 @@ pub fn daemon_uid() -> u32 {
 /// The real [`ProcessTree`], from the system. The app is known by its executable: the daemon is told the path of
 /// the app's binary, and a process is the app when the system says it runs that file. A process cannot take the
 /// app's path without writing to the app's files, which is stronger than a marker in an environment that any child
-/// can copy; it is still a guardrail, not a boundary (0.1).
+/// can copy; it is still a guardrail, not a boundary (0.1). The path comes from the daemon's options, or from the file
+/// the app writes ([`write_app_executable`]).
 pub struct SystemProcessTree {
     app_executable: Option<PathBuf>,
+    app_file: Option<DaemonPaths>,
 }
 
 impl SystemProcessTree {
@@ -569,8 +574,55 @@ impl SystemProcessTree {
     pub fn new(app_executable: Option<PathBuf>) -> SystemProcessTree {
         SystemProcessTree {
             app_executable: app_executable.map(|path| fs::canonicalize(&path).unwrap_or(path)),
+            app_file: None,
         }
     }
+
+    /// Also takes the app to be the executable that the app wrote to its file in `paths`' run folder
+    /// ([`write_app_executable`]), when no path was given to [`SystemProcessTree::new`].
+    pub fn with_app_file(mut self, paths: &DaemonPaths) -> SystemProcessTree {
+        self.app_file = Some(paths.clone());
+        self
+    }
+}
+
+/// Writes the app's executable path to its file in the run folder, for the daemon to read when it checks a peer. The
+/// folder is made `0700` when it is missing and refused when it is not the user's own or not `0700`, as for the socket
+/// ([`check_socket_dir`]), so only the user can put a path there. The file is written beside itself and renamed over,
+/// so
+/// a daemon never reads half a path, and it is mode `0600`.
+pub fn write_app_executable(paths: &DaemonPaths, executable: &Path) -> Result<(), SocketError> {
+    check_socket_dir(&StdFs, daemon_uid(), &paths.socket_dir)?;
+    let file = paths.app_executable_file();
+    let temporary = file.with_extension("tmp");
+    let io_error = |what: &str, path: &Path| {
+        let context = format!("could not {what} {}", path.display());
+        move |source| SocketError::Io { context, source }
+    };
+    let mut open = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(APP_FILE_MODE)
+        .open(&temporary)
+        .map_err(io_error("write", &temporary))?;
+    open.set_permissions(fs::Permissions::from_mode(APP_FILE_MODE))
+        .and_then(|()| open.write_all(executable.as_os_str().as_bytes()))
+        .map_err(io_error("write", &temporary))?;
+    fs::rename(&temporary, &file).map_err(io_error("replace", &file))
+}
+
+/// Reads the app's executable path from its file. The file is trusted only when it is a plain file (not a link) of
+/// mode `0600` that `daemon_uid` owns, and holds a path; anything else names no app, which is the safe side (a
+/// person-only operation then waits for a Queue confirmation).
+pub fn read_app_executable(paths: &DaemonPaths, daemon_uid: u32) -> Option<PathBuf> {
+    let file = paths.app_executable_file();
+    let meta = fs::symlink_metadata(&file).ok()?;
+    if !meta.is_file() || meta.mode() & MODE_MASK != APP_FILE_MODE || meta.uid() != daemon_uid {
+        return None;
+    }
+    let bytes = fs::read(&file).ok()?;
+    (!bytes.is_empty()).then(|| PathBuf::from(std::ffi::OsStr::from_bytes(&bytes)))
 }
 
 impl ProcessTree for SystemProcessTree {
@@ -583,8 +635,14 @@ impl ProcessTree for SystemProcessTree {
     }
 
     fn is_app(&self, pid: u32) -> bool {
-        match &self.app_executable {
-            Some(app) => sysproc::executable_of(pid).is_some_and(|exe| exe == *app),
+        let app = self.app_executable.clone().or_else(|| {
+            // Read at each check, so a daemon the CLI started first knows an app that came later.
+            let paths = self.app_file.as_ref()?;
+            let path = read_app_executable(paths, daemon_uid())?;
+            Some(fs::canonicalize(&path).unwrap_or(path))
+        });
+        match app {
+            Some(app) => sysproc::executable_of(pid).is_some_and(|exe| exe == app),
             None => false,
         }
     }

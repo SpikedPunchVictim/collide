@@ -71,7 +71,10 @@
 //! A peer's pid is read with `LOCAL_PEERPID`, and the daemon walks that process's parents looking for the markers:
 //! `COLLIDE_RUN` makes a run's agent, the app's process makes the app, and anything else is the CLI from a terminal
 //! ([`crate::auth::Caller`]). The result is the `actor` recorded on every event, and only the app does the person-only
-//! operations ([`crate::auth::judge`]). This is a guardrail (0.1), not a boundary.
+//! operations ([`crate::auth::judge`]). This is a guardrail (0.1), not a boundary. The daemon knows which executable is
+//! the app from the file the app writes in the run folder before each connection
+//! ([`crate::auth::write_app_executable`]),
+//! which it reads at each check, so a daemon that the CLI started first still takes the app as the app.
 //!
 //! ## Stopping a run, and stopping the daemon
 //!
@@ -242,6 +245,11 @@ impl DaemonPaths {
             store_dir: data.join("store"),
             log_file: data.join("daemon.log"),
         }
+    }
+
+    /// The file the app writes its own executable path to, in the run folder ([`crate::auth::write_app_executable`]).
+    pub fn app_executable_file(&self) -> PathBuf {
+        self.socket_dir.join("app-executable")
     }
 
     /// The paths named by [`ROOT_ENV`] when it is set, and the user's own otherwise. `home` is `$HOME`.
@@ -453,7 +461,9 @@ pub struct DaemonOptions {
     /// The login shell the base environment is captured from (`$SHELL`).
     pub shell: String,
     pub capture: CaptureOptions,
-    /// The app's executable, so a peer below it is the app ([`crate::auth::SystemProcessTree`]).
+    /// The app's executable, so a peer below it is the app ([`crate::auth::SystemProcessTree`]). `None`, the default,
+    /// is
+    /// the app that writes its own path to the run folder ([`system_process_tree`]).
     pub app_executable: Option<PathBuf>,
     /// Who is asking is read from this tree of processes. `None` is the system's own ([`SystemProcessTree`] over
     /// `app_executable`). A test that runs the daemon in its own process gives a tree that stops at the test, because
@@ -512,6 +522,16 @@ pub struct DaemonOptions {
     /// How many notices a subscriber may have waiting before the daemon ends its subscription ([`SUBSCRIBER_QUEUE`]).
     /// A test passes a small one.
     pub subscriber_queue: usize,
+}
+
+/// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
+/// `app_executable` when the options name it, and otherwise by the file the app writes in the run folder
+/// ([`auth::write_app_executable`]). A test that runs the daemon in its own process wraps this to stop at the test.
+pub fn system_process_tree(
+    paths: &DaemonPaths,
+    app_executable: Option<PathBuf>,
+) -> SystemProcessTree {
+    SystemProcessTree::new(app_executable).with_app_file(paths)
 }
 
 /// How many notices a subscribed connection may have waiting ([`DaemonOptions::subscriber_queue`]).
@@ -848,6 +868,8 @@ impl Daemon {
         log.line(&format!("listening on {}", paths.socket.display()));
 
         let uid = auth::daemon_uid();
+        let tree =
+            process_tree.unwrap_or_else(|| Arc::new(system_process_tree(&paths, app_executable)));
         let shared = Arc::new(Shared {
             paths,
             token,
@@ -858,7 +880,7 @@ impl Daemon {
             file_runs,
             shell,
             capture,
-            tree: process_tree.unwrap_or_else(|| Arc::new(SystemProcessTree::new(app_executable))),
+            tree,
             uid,
             started_wall_ms: clocks.read(Clock::Wall).nanos / 1_000_000,
             started_uptime: clocks.read(Clock::Uptime),
@@ -1373,7 +1395,7 @@ fn serve_connection(shared: &Shared, mut stream: UnixStream) {
     shared.log.line(&format!(
         "pid {} connected as {:?}",
         pid.map_or("?".to_string(), |p| p.to_string()),
-        session.actor().kind
+        session.caller()
     ));
     let conn = Arc::new(Conn {
         id: shared.next_connection.fetch_add(1, Ordering::SeqCst),

@@ -1,5 +1,9 @@
 //! The shell's `rpc` command and event channel (0.2, The UI speaks the owner's protocol; ts-0017-qb), over a fake
-//! daemon link and a fake event channel: no Tauri runtime and no socket. The real link is a tagged stub (Stage 3c).
+//! daemon link and a fake event channel: no Tauri runtime and no socket. The last tests put the real link, over a
+//! daemon
+//! in this process under a root of the test's own (`tests/common`), behind the shell, to see what the webview gets.
+
+mod common;
 
 use collide_app::shell::{
     ChannelEvent, ChannelWindow, DaemonLink, EventChannel, Shell, ShellHandle,
@@ -360,4 +364,122 @@ fn a_shell_thread_that_panicked_fails_the_call_instead_of_hanging() {
     });
     let error = failure(handle.rpc("daemon.status".into(), None));
     assert_eq!(error.code, code::INTERNAL_ERROR);
+}
+
+// ---- the token never reaches the webview ------------------------------------------------------------------------
+
+/// Everything the webview would receive from `calls`: each result and each error, as the command rejects or resolves
+/// it.
+fn what_the_webview_gets(shell: &mut Shell, calls: &[(&str, Option<Value>)]) -> String {
+    calls
+        .iter()
+        .map(|(method, params)| match shell.rpc(method, params.clone()) {
+            Ok(value) => serde_json::to_string(&value).unwrap(),
+            Err(error) => serde_json::to_string(&error).unwrap(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn real_shell(root: &common::TempRoot, channel: &FakeChannel) -> Shell {
+    let access = common::access(root, common::AlreadyThere, &common::TestClocks::default());
+    Shell::new(
+        endpoint(channel),
+        Box::new(collide_app::shell::SocketLink::new(access)),
+    )
+}
+
+#[test]
+fn nothing_the_webview_receives_holds_the_token() {
+    let root = common::TempRoot::new();
+    let daemon = common::start_daemon(&root, Box::new(std::io::sink()), None);
+    let token = std::fs::read_to_string(&root.paths().token_file).unwrap();
+    let token = token.trim();
+    assert!(
+        token.len() >= 32,
+        "a real token, or the check means nothing"
+    );
+
+    // The pump's channel: the webview's event channel, with the daemon's notices on it.
+    let events = common::Channel::default();
+    let pump = common::PumpRun::start(
+        common::access(&root, common::AlreadyThere, &common::TestClocks::default()),
+        events.clone(),
+        std::time::Duration::from_millis(50),
+    );
+    common::wait_until(
+        "the pump is subscribed",
+        std::time::Duration::from_secs(10),
+        || {
+            common::append(&daemon, 1);
+            !events.seqs().is_empty()
+        },
+    );
+    common::wait_until(
+        "the Queue and the log are read",
+        std::time::Duration::from_secs(10),
+        || {
+            events.seqs().len() >= 2 || {
+                common::append(&daemon, 1);
+                false
+            }
+        },
+    );
+    pump.stop();
+
+    let channel = FakeChannel::open();
+    let mut shell = real_shell(&root, &channel);
+    let seen = what_the_webview_gets(
+        &mut shell,
+        &[
+            ("daemon.status", None),
+            ("daemon.status", Some(json!({ "extra": token }))),
+            ("nothing.here", None),
+            ("run.get", Some(json!({ "run": "none" }))),
+            (
+                "initialize",
+                Some(json!({ "protocol": 1, "token": "guess" })),
+            ),
+        ],
+    );
+    let notices = serde_json::to_string(&events.events()).unwrap();
+    assert!(
+        !seen.contains(token),
+        "a result or an error holds the token: {seen}"
+    );
+    assert!(!notices.contains(token), "an event holds the token");
+    assert!(seen.contains("pid"), "the calls were answered: {seen}");
+}
+
+#[test]
+fn a_token_the_daemon_refuses_is_not_echoed_to_the_webview() {
+    let root = common::TempRoot::new();
+    let _daemon = common::start_daemon(&root, Box::new(std::io::sink()), None);
+    let paths = root.paths();
+    // The file now holds another token, as a daemon that was replaced would leave it.
+    let wrong = "a-token-the-daemon-does-not-know-0123456789";
+    std::fs::remove_file(&paths.token_file).unwrap();
+    collide_host::auth::create_token_file(&paths.token_file, wrong).unwrap();
+    let channel = FakeChannel::open();
+    let mut shell = real_shell(&root, &channel);
+    let seen = what_the_webview_gets(&mut shell, &[("daemon.status", None)]);
+    assert!(
+        seen.contains("-32004") || seen.contains("token"),
+        "refused: {seen}"
+    );
+    assert!(!seen.contains(wrong), "the token is in the error: {seen}");
+}
+
+// ---- the capability the webview's listen needs ------------------------------------------------------------------
+
+#[test]
+fn the_main_window_may_listen_and_unlisten_and_nothing_else() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/main.json");
+    let text = std::fs::read_to_string(path).expect("a capability file for the main window");
+    let capability: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(capability["windows"], json!(["main"]));
+    assert_eq!(
+        capability["permissions"],
+        json!(["core:event:allow-listen", "core:event:allow-unlisten"])
+    );
 }

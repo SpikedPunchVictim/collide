@@ -95,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 38] = [
+const FILLED_TAGS: [(&str, &str, &str); 40] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -134,6 +134,8 @@ const FILLED_TAGS: [(&str, &str, &str); 38] = [
     ("claude: smoke check", "3b", "ts-0068-wx"),
     ("claude: settings canary", "3b", "ts-0068-wx"),
     ("cli: run", "3b", "ts-0069-bn"),
+    ("shell: daemon connection", "3c", "ts-0077-ws"),
+    ("shell: daemon events", "3c", "ts-0077-ws"),
 ];
 
 #[test]
@@ -210,13 +212,10 @@ fn every_ui_tools_tag_names_its_stage_and_counts_at_least_one_stub() {
 }
 
 /// The tags of the shell's `rpc` command and event channel (ts-0017-qb) and the stage that fills each one: the minimal
-/// shell of Stage 3c connects to the daemon and carries its notices to the window, and Stage 6b adds the ask token. Each
-/// must count at least one stub today.
-const SHELL_TAGS: [(&str, &str); 3] = [
-    ("shell: daemon connection", "3c"),
-    ("shell: daemon events", "3c"),
-    ("shell: ask token", "6b"),
-];
+/// shell of Stage 3c connects to the daemon and carries its notices to the window (`ts-0077-ws`, so those two tags are
+/// in
+/// [`FILLED_TAGS`]), and Stage 6b adds the ask token. It must count at least one stub today.
+const SHELL_TAGS: [(&str, &str); 1] = [("shell: ask token", "6b")];
 
 #[test]
 fn every_shell_tag_names_its_stage_and_counts_at_least_one_stub() {

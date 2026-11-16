@@ -416,6 +416,9 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   `actor` the daemon records on every event. Only the app may do the person-only operations (0.10); the CLI asks for
   them as a Queue confirmation instead. Processes whose environment macOS hides are found through their parents, as
   in the sweep (below). This is a guardrail (0.1).
+  The app names itself: before it connects, it writes its executable path to `app-executable` in the daemon's run
+  folder (mode 0600), and the daemon reads that file at each check, so a daemon the CLI started first still knows
+  the app. The run marker is checked first, so the file never makes a run's agent the app (ts-0077-ws).
 - **Clocks** (R5). macOS has three clocks, and a wrong choice breaks a timeout or a countdown the first time a laptop
   sleeps. Collide never uses one where another is meant:
 

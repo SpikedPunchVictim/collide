@@ -84,6 +84,9 @@ Write these first, in vitest with no browser, as `app/test/ui-reducer.test.ts` d
   (`env_clear()`) and sets `HOME` and `COLLIDE_DAEMON_ROOT` to a temp root, as `host/tests/common/mod.rs` `TempRoot`
   does. Settings files are fixtures, never the owner's own `settings.json`. This item's tests use `FakeOwner` and no
   daemon.
+- Carried from `ts-0077-ws` (review): the shell tells the page when the event stream ends and when it comes back, as
+  a notice on the one event channel. On its return the page reloads its runs and Queue with `run.list` and `run.get`,
+  so a gap the daemon's log no longer holds never leaves the page behind. Test it with a daemon restart.
 - Stage 3c item (revision 22 scope, split 2026-11-15). Items of Stage 3c run one at a time, in id order, because
   they share `host`, the app and the generated files.
 - Owner decisions (2026-11-15, at the split): the repository picker (`board.list` plus a typed path) and one page

@@ -6,8 +6,8 @@
 use crate::auth;
 use crate::daemon::DaemonPaths;
 use collide_core::owner::{
-    JsonRpc2, MAX_MESSAGE_BYTES, OWNER_PROTOCOL, OwnerInitializeParams, OwnerInitializeResult,
-    Request, RequestId, Response, RpcError, encode_line,
+    JsonRpc2, MAX_MESSAGE_BYTES, Notification, OWNER_PROTOCOL, OwnerInitializeParams,
+    OwnerInitializeResult, Request, RequestId, Response, RpcError, encode_line,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -41,11 +41,23 @@ impl fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
+/// What reading the next notice found.
+#[derive(Debug)]
+pub enum Incoming {
+    Notice(Notification),
+    /// Nothing came within the wait ([`OwnerClient::set_read_wait`]).
+    Quiet,
+    /// The daemon ended the stream: it closed the connection, after the notices it had already sent.
+    Closed,
+}
+
 /// One connection that has done `initialize`.
 pub struct OwnerClient {
     writer: UnixStream,
     reader: BufReader<UnixStream>,
     next_id: i64,
+    /// The start of a notice that a wait that ran out left ([`OwnerClient::next_notice`]).
+    partial: String,
 }
 
 impl OwnerClient {
@@ -67,6 +79,7 @@ impl OwnerClient {
             writer: stream,
             reader: BufReader::new(reader),
             next_id: 1,
+            partial: String::new(),
         };
         let _: OwnerInitializeResult = connected.call(
             "initialize",
@@ -78,6 +91,62 @@ impl OwnerClient {
             Some(Duration::from_secs(10)),
         )?;
         Ok(connected)
+    }
+
+    /// Whether the daemon has closed the connection, asked of the socket without waiting. A socket that cannot be asked
+    /// is taken to be closed. Bytes waiting on it are not read or lost.
+    pub fn is_closed(&mut self) -> bool {
+        if self.reader.get_ref().set_nonblocking(true).is_err() {
+            return true;
+        }
+        let ended = match self.reader.fill_buf() {
+            // The end of the stream is nothing to read. Bytes that are waiting mean it is open, and stay unread.
+            Ok(bytes) => bytes.is_empty(),
+            Err(e) => !would_wait(&e),
+        };
+        ended || self.reader.get_ref().set_nonblocking(false).is_err()
+    }
+
+    /// How long [`OwnerClient::next_notice`] waits for a notice (`None` waits for as long as it takes). Set it once,
+    /// right after the answer to `daemon.subscribe`. On macOS a socket option cannot be set after the daemon has shut
+    /// the stream down, so the error is the client's to ignore: it then reads the notices that were sent and the end of
+    /// the stream, which it needs to do anyway.
+    pub fn set_read_wait(&self, wait: Option<Duration>) -> io::Result<()> {
+        self.reader.get_ref().set_read_timeout(wait)
+    }
+
+    /// The next notice the daemon sends unasked, for a client that subscribed. A notice whose first half arrived before
+    /// the wait ran out is kept and finished by the next read.
+    pub fn next_notice(&mut self) -> Result<Incoming, ClientError> {
+        let io_error = |source| ClientError::Io {
+            context: "reading a notice from the daemon".to_string(),
+            source,
+        };
+        match (&mut self.reader)
+            .take(MAX_MESSAGE_BYTES as u64 + 1)
+            .read_line(&mut self.partial)
+        {
+            Ok(0) => Ok(Incoming::Closed),
+            Ok(_) if !self.partial.ends_with('\n') => {
+                if self.partial.len() > MAX_MESSAGE_BYTES {
+                    Err(ClientError::Protocol(
+                        "a notice is over the size limit".to_string(),
+                    ))
+                } else {
+                    // The stream ended in the middle of a line.
+                    Ok(Incoming::Closed)
+                }
+            }
+            Ok(_) => {
+                let line = std::mem::take(&mut self.partial);
+                serde_json::from_str::<Notification>(&line)
+                    .map(Incoming::Notice)
+                    .map_err(|e| ClientError::Protocol(format!("a notice: {e}")))
+            }
+            Err(e) if would_wait(&e) => Ok(Incoming::Quiet),
+            Err(e) if e.kind() == io::ErrorKind::ConnectionReset => Ok(Incoming::Closed),
+            Err(e) => Err(io_error(e)),
+        }
     }
 
     /// One call: sends the request and reads its answer, waiting up to `wait` for it (`None` waits for as long as the
@@ -128,4 +197,12 @@ impl OwnerClient {
             Response::Failure { error, .. } => Err(ClientError::Rpc(error)),
         }
     }
+}
+
+/// A read that found nothing yet, because its wait ran out.
+fn would_wait(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
