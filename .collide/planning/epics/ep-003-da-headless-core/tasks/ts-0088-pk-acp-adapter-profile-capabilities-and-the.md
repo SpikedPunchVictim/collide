@@ -1,7 +1,7 @@
 ---
 id: ts-0088-pk
 kind: task
-status: ready
+status: active
 title: "ACP adapter: profile, capabilities and the initialize probe"
 owners: []
 links:
