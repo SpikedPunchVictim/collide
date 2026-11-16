@@ -4076,8 +4076,10 @@ the 3c tests are rewritten against the engine. The cost is accepted for an earli
 - After this stage, the owner's Collide work that fits a prompt goes through the thin loop (dogfooding).
 
 **Tests**: The loop over `rpc` in a browser against the fake Claude; permission answer; accept, re-prompt and discard
-against a fixture repo; window close and reopen; scratch-task create and status.
-**Status**: Not Started. Items from revision 22, split on 2026-11-15: `ts-0075-hj` to `ts-0083-uf`, in epic
+against a fixture repo; window close and reopen; scratch-task create and status. The browser tests drive the page
+against a real daemon through a test-only bridge, a binary behind the cargo feature `test-bridge` that the app never
+builds; the page's own tests stay over `FakeOwner` (ts-0082-fp).
+**Status**: In Progress. Items from revision 22, split on 2026-11-15: `ts-0075-hj` to `ts-0083-uf`, in epic
 `ep-003-da`, built one at a time in id order (part L). It runs after 3b. The ACP engine (3d) follows it; the thin
 loop needs only Claude.
 

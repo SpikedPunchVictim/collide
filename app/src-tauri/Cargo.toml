@@ -13,3 +13,14 @@ tauri = "2"
 
 [build-dependencies]
 tauri-build = "2"
+
+[features]
+# The test-only bridge (ts-0082-fp): a program that hosts the shell's `Shell` behind loopback HTTP, so a browser test
+# can drive the page over a real daemon. Only the browser tests' own build turns this on (`app/browser/global-setup.ts`);
+# the app build never does, and the bridge is not part of the app or its bundle.
+test-bridge = []
+
+[[bin]]
+name = "collide-bridge"
+path = "src/bin/collide-bridge/main.rs"
+required-features = ["test-bridge"]

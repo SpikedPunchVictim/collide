@@ -57,6 +57,17 @@ describe('the repository', () => {
     expect(loop.getState().boards.map((b) => b.id)).toEqual(['b-1', 'b-9'])
   })
 
+  test('a method handed to a component as a callback still works, as the page hands them', async () => {
+    const world = oneBoard()
+    world.folders.set('/work/new', board('b-9', '/work/new'))
+    const loop = await pageOf(world)
+    const { openFolder, chooseBoard } = loop
+    await openFolder('/work/new')
+    expect(loop.getState().boardId).toBe('b-9')
+    chooseBoard('b-1')
+    expect(loop.getState().boardId).toBe('b-1')
+  })
+
   test('a folder that is not a checkout says what is wrong and chooses nothing', async () => {
     const world = oneBoard()
     const loop = await pageOf(world)

@@ -86,7 +86,20 @@ class LoopController implements Loop {
   /** A task made for a prompt whose run was refused, so the same prompt again makes no second task. */
   private unstarted: { board: string; prompt: string; key: string } | null = null
 
-  constructor(private readonly owner: OwnerClient) {}
+  constructor(private readonly owner: OwnerClient) {
+    // The page hands these to components as callbacks (`LoopActions`), so each keeps its `this`.
+    this.chooseBoard = this.chooseBoard.bind(this)
+    this.openFolder = this.openFolder.bind(this)
+    this.startRun = this.startRun.bind(this)
+    this.allowOnce = this.allowOnce.bind(this)
+    this.deny = this.deny.bind(this)
+    this.accept = this.accept.bind(this)
+    this.reprompt = this.reprompt.bind(this)
+    this.discard = this.discard.bind(this)
+    this.keep = this.keep.bind(this)
+    this.pickFile = this.pickFile.bind(this)
+    this.openItem = this.openItem.bind(this)
+  }
 
   getState(): LoopState {
     return this.state
