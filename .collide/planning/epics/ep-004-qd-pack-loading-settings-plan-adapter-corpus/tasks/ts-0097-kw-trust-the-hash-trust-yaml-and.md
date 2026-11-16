@@ -1,7 +1,7 @@
 ---
 id: ts-0097-kw
 kind: task
-status: active
+status: done
 title: "Trust: the hash, trust.yaml and the diff"
 owners: []
 links:
