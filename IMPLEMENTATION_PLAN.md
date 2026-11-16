@@ -4103,8 +4103,10 @@ loop needs only Claude.
 
 **Tests**: The fake ACP child, with the same scenarios as the fake Claude where they apply; the `configOptions` and
 `set_model` paths; `Usage.quality`; `TurnEnd` reasons.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-003-da`, items lettered `3d`
-(part L).
+**Status**: Not Started. Split on 2026-11-15 into `ts-0086-tm` to `ts-0092-tw` (revision 23 scope), in epic
+`ep-003-da`, built one at a time in id order (part L). It runs after 3c. Every item runs against a scripted fake ACP
+child, and the protocol is written by hand. A real ACP agent, its first profile and an ACP agent in file runs come
+with Stage 6b.
 
 ## Stage 4: Pack loading, settings, plan adapter, corpus and views
 
