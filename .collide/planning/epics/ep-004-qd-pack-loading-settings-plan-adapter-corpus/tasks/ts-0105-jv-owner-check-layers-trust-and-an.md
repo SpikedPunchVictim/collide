@@ -1,7 +1,7 @@
 ---
 id: ts-0105-jv
 kind: task
-status: ready
+status: active
 title: "Owner check: layers, trust and an agent entry read back"
 owners: []
 links:
