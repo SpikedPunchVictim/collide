@@ -1,7 +1,7 @@
 ---
 id: ts-0107-rj
 kind: task
-status: active
+status: done
 title: "Skill frontmatter through the snapshot plugin: measure"
 owners: []
 links:
