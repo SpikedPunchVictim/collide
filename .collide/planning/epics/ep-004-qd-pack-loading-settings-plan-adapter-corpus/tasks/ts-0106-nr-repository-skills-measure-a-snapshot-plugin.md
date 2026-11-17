@@ -1,7 +1,7 @@
 ---
 id: ts-0106-nr
 kind: task
-status: active
+status: done
 title: "Repository skills: measure a snapshot plugin"
 owners: []
 links:
