@@ -1,7 +1,7 @@
 ---
 id: ts-0108-dq
 kind: task
-status: ready
+status: done
 title: "Provider supervisor: start from a snapshot, calls, restart with backoff"
 owners: []
 links:
