@@ -98,15 +98,36 @@ impl FakeClaude {
         emulate_hooks: bool,
         words: &[&str],
     ) -> FakeClaude {
+        FakeClaude::start_on_line(
+            root,
+            path,
+            emulate_hooks,
+            words,
+            root.path(),
+            &BTreeMap::new(),
+        )
+    }
+
+    /// Starts it as [`FakeClaude::start_as_claude`] does, in the folder `cwd` and with `env` added to the environment
+    /// it has (`PATH`, and `HOME` in `root`): the working directory and variables of a launch line (ts-0103-sa).
+    pub fn start_on_line(
+        root: &TempRoot,
+        path: &PathBuf,
+        emulate_hooks: bool,
+        words: &[&str],
+        cwd: &std::path::Path,
+        env: &BTreeMap<String, String>,
+    ) -> FakeClaude {
         let mut child = Command::new(PYTHON)
             .arg(fake_claude_script())
             .args(emulate_hooks.then_some("--emulate-hooks"))
             .arg(path)
             .args(words)
-            .current_dir(root.path())
+            .current_dir(cwd)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", root.path())
+            .envs(env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

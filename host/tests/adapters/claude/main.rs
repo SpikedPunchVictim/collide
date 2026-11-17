@@ -34,6 +34,8 @@ mod quick_run;
 mod real;
 mod real_claude;
 mod replay;
+mod repo_instructions;
+mod repo_instructions_live;
 mod reprompt;
 mod results;
 mod run_command;

@@ -16,6 +16,9 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
     {"expect": {...}}       read one line of stdin and check it holds this JSON (see below)
     {"wait_eof": true}      read stdin until it closes
     {"dump_env": "path"}    write this process's environment to the file, as one JSON object
+    {"dump_launch": "path"} write what `claude` was started with to the file, as one JSON object: `argv` (the words of
+                            claude's own line, after the recording), `env` (the environment) and `cwd` (the working
+                            folder), as the repository-instructions measurement reads them (ts-0103-sa)
     {"grandchild_dump_env": "path"}
                             start a child that writes its own environment to the file, and wait for it
     {"sleep": SECONDS}      do nothing for that long (a child that holds on until it is signalled)
@@ -168,6 +171,9 @@ def main():
         elif "dump_env" in step:
             with open(step["dump_env"], "w") as out:
                 json.dump(dict(os.environ), out)
+        elif "dump_launch" in step:
+            with open(step["dump_launch"], "w") as out:
+                json.dump({"argv": words[1:], "env": dict(os.environ), "cwd": os.getcwd()}, out)
         elif "grandchild_dump_env" in step:
             subprocess.run(
                 [sys.executable, "-c", "import json, os, sys; json.dump(dict(os.environ), open(sys.argv[1], 'w'))", step["grandchild_dump_env"]],

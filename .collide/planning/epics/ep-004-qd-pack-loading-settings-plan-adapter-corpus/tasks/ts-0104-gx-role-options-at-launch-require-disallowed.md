@@ -6,6 +6,7 @@ title: "Role options at launch: require, disallowed tools, config and repo_instr
 owners: []
 links:
   - { type: blocked-by, to: ts-0103-sa }
+  - { type: blocked-by, to: ts-0106-nr }
 ---
 
 ## Goal
@@ -114,3 +115,7 @@ Write these first:
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built. `repo_instructions` defaults to `worktree`, as revision 21 of the plan
   says (owner).
+- Owner decisions (2026-11-16, after `ts-0103-sa`): the `worktree` line is candidate 2, `--add-dir <the folder the
+  phase starts in>` with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; it loads the root `CLAUDE.md` and its
+  imports, and no nested `CLAUDE.md`. Skills follow `ts-0106-nr`: its plugin is added to the line if it works,
+  otherwise skills do not load and the Roles page says so. The contract test pins the variable.

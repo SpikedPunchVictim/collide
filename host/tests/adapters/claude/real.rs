@@ -92,17 +92,34 @@ fn ledger_total(path: &Path) -> f64 {
         .sum()
 }
 
+/// Why a run of `name` with `cap` is refused: `cap` added to what the ledger at `ledger` has spent is over `limit`.
+/// `None` when it may run.
+pub fn ledger_refusal(ledger: &Path, name: &str, cap: f64, limit: f64) -> Option<String> {
+    let spent = ledger_total(ledger);
+    (spent + cap > limit + 1e-9).then(|| {
+        format!("`{name}` is not run: ${spent:.4} spent and a cap of ${cap} would pass ${limit}")
+    })
+}
+
 /// Refuses (panics) when `cap` added to what the ledger has spent is over [`LEDGER_LIMIT_USD`]. No ledger, no check.
 pub fn check_ledger(name: &str, cap: f64) {
     let Some(path) = std::env::var_os(LEDGER_ENV) else {
         println!("no {LEDGER_ENV}: the spend of `{name}` is not added up");
         return;
     };
-    let spent = ledger_total(Path::new(&path));
-    assert!(
-        spent + cap <= LEDGER_LIMIT_USD + 1e-9,
-        "`{name}` is not run: ${spent:.4} spent and a cap of ${cap} would pass ${LEDGER_LIMIT_USD}"
-    );
+    if let Some(refusal) = ledger_refusal(Path::new(&path), name, cap, LEDGER_LIMIT_USD) {
+        panic!("{refusal}");
+    }
+}
+
+/// [`check_ledger`] against a limit of the item's own (`ts-0103-sa`: $0.50), and with a ledger required: a run that
+/// cannot be added up is not run.
+pub fn check_ledger_within(name: &str, cap: f64, limit: f64) {
+    let path = std::env::var_os(LEDGER_ENV)
+        .unwrap_or_else(|| panic!("`{name}` is not run: {LEDGER_ENV} names no ledger"));
+    if let Some(refusal) = ledger_refusal(Path::new(&path), name, cap, limit) {
+        panic!("{refusal}");
+    }
 }
 
 /// Adds one run to the ledger.

@@ -4,6 +4,7 @@
 use super::common::TempRoot;
 use super::fake::{FakeClaude, recording, said, value_of_line};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -201,6 +202,29 @@ fn a_dump_env_step_and_a_grandchild_dump_env_step_write_the_environment_each_pro
         let env: Value = serde_json::from_str(&fs::read_to_string(dumped).unwrap()).unwrap();
         assert!(env.get("HOME").is_some(), "{dumped:?}: {env}");
     }
+}
+
+#[test]
+fn a_dump_launch_step_writes_the_words_the_environment_and_the_working_folder_it_was_started_with()
+{
+    let root = TempRoot::new();
+    let dumped = root.join("launch.json");
+    let path = script(&root, &[&json!({"dump_launch": dumped}).to_string()]);
+    let cwd = root.join("elsewhere");
+    fs::create_dir(&cwd).unwrap();
+    let env = BTreeMap::from([("A_MARKER".to_string(), "1".to_string())]);
+    let mut fake =
+        FakeClaude::start_on_line(&root, &path, false, &["-p", "--model", "haiku"], &cwd, &env);
+    fake.close_stdin();
+    assert_eq!(fake.finish().code, Some(0));
+    let seen: Value = serde_json::from_str(&fs::read_to_string(&dumped).unwrap()).unwrap();
+    assert_eq!(seen["argv"], json!(["-p", "--model", "haiku"]));
+    assert_eq!(seen["env"]["A_MARKER"], "1");
+    assert_eq!(seen["env"]["HOME"], json!(root.path()));
+    assert_eq!(
+        fs::canonicalize(seen["cwd"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(&cwd).unwrap()
+    );
 }
 
 // ---- session-start hooks (ts-0068-wx) ------------------------------------------------------------------------------

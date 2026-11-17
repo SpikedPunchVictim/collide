@@ -859,8 +859,12 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       - A phase that starts after its run changed an instruction file shows a warning that names the files, on the
         run in Tracks and in the run record. The acknowledgement before `integrate` (below) is unchanged.
       - A role may set `repo_instructions: none`, and experiment arms do (S1).
-      - Unmeasured: which launch line loads the worktree's instructions while settings, hooks and MCP config stay
-        from the snapshot. Stage 4a measures it before the change is built.
+      - **The line** (measured `ts-0103-sa`, `claude` 2.1.326; owner, 2026-11-16): `--add-dir <the folder the phase
+        starts in>` with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` loads that folder's `CLAUDE.md` and its `@`
+        imports through `claude`'s own loader, while settings, hooks, MCP servers and agents stay from the snapshot
+        and auto memory stays off. A nested `CLAUDE.md` does not load. The variable is not in `claude --help`, so the
+        contract test pins it. No tested line loads skills; a snapshot plugin that points at the worktree's skills
+        is measured next (`ts-0106-nr`), before the line is built.
     - **Auto memory is off for every phase** (`autoMemoryEnabled: false` in the snapshot settings; owner,
       2026-11-13). It is shared by every worktree of a repo, keyed to the main checkout, so it would carry one run's
       notes into another. A role may turn it on.
@@ -892,7 +896,7 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     - `config: user | none`, which picks `--setting-sources user` or `""`. Both keep `--strict-mcp-config`: with
       `""` alone, one of S9's five runs still listed the user's claude.ai connectors (measured S9);
     - `repo_instructions: worktree | none` (default `worktree`), the repository's own instructions (above;
-      revision 21);
+      revision 21): `worktree` adds the measured line, `none` leaves it out;
     - `bash_output_max`, in characters, which sets `BASH_MAX_OUTPUT_LENGTH` (default 30,000). Longer output is saved
       to a file that the model reads in parts (measured S9);
     - `mcp_output_max`, in tokens, which sets `MAX_MCP_OUTPUT_TOKENS` (default 25,000). A longer MCP result is
@@ -1119,7 +1123,7 @@ How packs share points:
   - The run preview says where each phase starts, and warns when that is the person's checkout and the workflow may
     merge into its branch there.
   - **The root session** launches with the snapshot's flags like any phase (0.3, 0.7), so untracked local settings
-    and MCP servers in the person's checkout are not loaded. Stage 4a measures it.
+    and MCP servers in the person's checkout are not loaded (measured, `ts-0103-sa`).
   - **Collide's writes at a root with a live phase** do not wait (0.10's queue is for workspaces). A task write and
     its `record` run as one step under the line lock, retrying while git's index lock is held, so no uncommitted
     Collide edit is left for the agent's `git add` or merge to sweep up.
@@ -4187,7 +4191,9 @@ yet.
   instruction file. Measure also (revision 22): that a session started at the person's checkout with the snapshot's
   flags loads none of its untracked local settings or MCP servers; and what a `claude` that the agent starts itself,
   inside a worktree it made, loads from that worktree, since the snapshot's flags reach only the session Collide
-  starts.
+  starts. Measured in `ts-0103-sa`: the checkout session loads none of them; the agent's own `claude` loads all of
+  its worktree's settings, hooks, MCP servers, agents, skills and instructions, with auto memory on. Skills through
+  a snapshot plugin are measured in `ts-0106-nr` (owner, 2026-11-16) before `ts-0104-gx` builds the line.
 
 This sub-stage checks agent entries at load only. Launching an agent, and the secrets test at launch, are in 6b.
 
@@ -4239,7 +4245,8 @@ This sub-stage checks agent entries at load only. Launching an agent, and the se
 **Status**: Not Started. Split on 2026-11-16 into `ts-0093-am` to `ts-0105-jv` (revision 23 scope), in epic
 `ep-004-qd`, built one at a time in id order (part L). It runs after 3d. The keychain uses `security-framework`
 (owner, 2026-11-16). `ts-0103-sa`'s one real `claude` run is approved ($0.50 in all); the real keychain and the
-trust prompt over a real repository are the owner's (`ts-0105-jv`).
+trust prompt over a real repository are the owner's (`ts-0105-jv`). `ts-0106-nr` (skills through a snapshot plugin,
+one real session at $0.10; owner, 2026-11-16) is built before `ts-0104-gx`.
 
 ### Stage 4b: Providers, plan adapter, corpus and views
 
