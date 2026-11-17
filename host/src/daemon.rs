@@ -2003,6 +2003,10 @@ fn run_record(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
             .map(|path| path.to_string_lossy().into_owned()),
         wall_ms: crate::run_record::run_wall_ms(&spans, now_ns),
         calls: crate::run_record::recorded_calls(&spans, &rows, now_ns),
+        warnings: shared
+            .store
+            .run_warnings(&run)
+            .map_err(|e| unreadable("warnings", e))?,
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
@@ -2022,12 +2026,10 @@ fn summary_of(
         .file_runs
         .workspace_path(&row.run)
         .map(|path| path.to_string_lossy().into_owned());
-    Ok(summarize(
-        row,
-        &shared.phases.run_phases(&row.run),
-        &spans,
-        workspace,
-    ))
+    let (mut summary, rounds) =
+        summarize(row, &shared.phases.run_phases(&row.run), &spans, workspace);
+    summary.warnings = shared.store.run_warnings(&row.run).map_err(store_failed)?;
+    Ok((summary, rounds))
 }
 
 /// `run.list` (ts-0076-cw): the runs of the store, newest first, by board, task and scope, a page at a time. A run

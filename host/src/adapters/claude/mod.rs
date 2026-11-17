@@ -29,6 +29,7 @@ use collide_core::agent::{
     SystemPrompt, UsageQuality, UsageReport, UsageScope,
 };
 
+pub mod instructions;
 pub mod launch;
 pub mod session;
 pub mod snapshot;

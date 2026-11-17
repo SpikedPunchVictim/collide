@@ -225,6 +225,7 @@ impl FileRuns {
                 followed_by: None,
             }),
             follows: None,
+            config: None,
         })
     }
 

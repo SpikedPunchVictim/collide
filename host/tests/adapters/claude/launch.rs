@@ -198,6 +198,58 @@ fn a_tool_a_role_asks_for_is_left_off_the_list_and_asking_for_all_drops_the_flag
     assert!(disallowed_tools_without(&every).is_empty());
 }
 
+/// The words that follow `--disallowed-tools` up to the next flag.
+fn disallowed_in(argv: &[String]) -> Vec<&str> {
+    let at = argv.iter().position(|w| w == "--disallowed-tools").unwrap();
+    argv[at + 1..]
+        .iter()
+        .take_while(|word| !word.starts_with("--"))
+        .map(String::as_str)
+        .collect()
+}
+
+#[test]
+fn a_role_with_no_allow_tools_disallows_all_eight_in_their_order() {
+    let argv = ClaudeAdapter.launch(&request(plain_role())).unwrap().argv;
+    assert_eq!(disallowed_in(&argv), DISALLOWED_TOOLS);
+}
+
+#[test]
+fn allow_tools_with_one_tool_leaves_the_other_seven_in_their_order() {
+    let role =
+        json!({ "agent": "claude", "repo_instructions": "none", "allow_tools": ["CronCreate"] });
+    let argv = ClaudeAdapter.launch(&request(role)).unwrap().argv;
+    let expected: Vec<&str> = DISALLOWED_TOOLS
+        .into_iter()
+        .filter(|tool| *tool != "CronCreate")
+        .collect();
+    assert_eq!(expected.len(), 7);
+    assert_eq!(disallowed_in(&argv), expected);
+}
+
+#[test]
+fn allow_tools_with_all_eight_drops_the_flag() {
+    let role =
+        json!({ "agent": "claude", "repo_instructions": "none", "allow_tools": DISALLOWED_TOOLS });
+    let argv = ClaudeAdapter.launch(&request(role)).unwrap().argv;
+    assert!(!argv.iter().any(|word| word == "--disallowed-tools"));
+}
+
+#[test]
+fn an_allow_tools_name_that_is_not_disallowed_is_refused_naming_the_tool_and_the_role() {
+    let message = refusal_message(json!({ "agent": "claude", "allow_tools": ["NotATool"] }));
+    assert!(message.contains("NotATool"), "{message}");
+    assert!(message.contains("demo/builder"), "{message}");
+}
+
+#[test]
+fn one_unknown_name_among_known_ones_refuses_the_whole_request() {
+    let message = refusal_message(
+        json!({ "agent": "claude", "allow_tools": ["Workflow", "Bash", "SendMessage"] }),
+    );
+    assert!(message.contains("allows the tool `Bash`"), "{message}");
+}
+
 #[test]
 fn a_role_name_that_is_not_pack_slash_role_is_refused() {
     for name in [

@@ -30,6 +30,7 @@ pub mod git_objects;
 pub mod hooks;
 pub mod hosts;
 pub mod http_get;
+pub mod instruction_warning;
 pub mod launch;
 pub mod log_cap;
 pub mod login;

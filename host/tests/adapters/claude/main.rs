@@ -24,6 +24,8 @@ mod fake;
 mod fake_claude;
 mod file_run;
 mod hooks;
+mod instruction_warnings;
+mod instructions;
 mod launch;
 mod launchd_run;
 mod limits;
@@ -40,6 +42,7 @@ mod reprompt;
 mod results;
 mod run_command;
 mod run_env;
+mod run_options;
 mod run_process;
 mod session;
 mod settings_schema;
@@ -66,7 +69,13 @@ pub fn request(role: Value) -> LaunchRequest {
     request
 }
 
+/// A role with no options but `repo_instructions: none`, which is the launch line before ts-0104-gx: the tests that
+/// pin that line use it. `default_role` has no `repo_instructions` key, so it gets the default (`worktree`).
 pub fn plain_role() -> Value {
+    json!({ "agent": "claude", "repo_instructions": "none" })
+}
+
+pub fn default_role() -> Value {
     json!({ "agent": "claude" })
 }
 

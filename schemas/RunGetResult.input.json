@@ -373,6 +373,14 @@
           },
           "type": "array"
         },
+        "warnings": {
+          "default": [],
+          "description": "What the run did that the person should look at, oldest first. Empty for most runs.",
+          "items": {
+            "$ref": "#/$defs/RunWarning"
+          },
+          "type": "array"
+        },
         "workflow": {
           "description": "`pack/workflow`.",
           "type": "string"
@@ -411,6 +419,40 @@
         "status"
       ],
       "type": "object"
+    },
+    "RunWarning": {
+      "additionalProperties": false,
+      "description": "A warning on a run: a phase and the instruction files it started after the run changed.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunWarningKind"
+        },
+        "phase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "phase",
+        "files"
+      ],
+      "type": "object"
+    },
+    "RunWarningKind": {
+      "description": "What a run warning is about.",
+      "oneOf": [
+        {
+          "const": "instruction_files_changed",
+          "description": "The phase read an instruction file the run changed.",
+          "type": "string"
+        }
+      ]
     },
     "TakeOverState": {
       "description": "Whether a take-over's terminal is open (0.11, Talking to an agent): closing the view detaches, and the session\ngoes on in its shim.",

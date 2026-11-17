@@ -85,6 +85,10 @@ export type RunState =
   | {
       state: 'stopped'
     }
+/**
+ * What a run warning is about.
+ */
+export type RunWarningKind = 'instruction_files_changed'
 
 /**
  * `run.get` result: the summary and what the run pinned at launch (0.8, Run). `implementations` maps `workspace` and
@@ -119,6 +123,10 @@ export interface RunSummary {
   started_ms: number
   state: RunState
   tasks: RunTaskRef[]
+  /**
+   * What the run did that the person should look at, oldest first. Empty for most runs.
+   */
+  warnings: RunWarning[]
   /**
    * `pack/workflow`.
    */
@@ -158,4 +166,12 @@ export interface InstanceSummary {
 export interface RunTaskRef {
   key: string
   status: string
+}
+/**
+ * A warning on a run: a phase and the instruction files it started after the run changed.
+ */
+export interface RunWarning {
+  files: string[]
+  kind: RunWarningKind
+  phase: string
 }

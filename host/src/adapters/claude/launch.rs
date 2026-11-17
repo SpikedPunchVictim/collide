@@ -9,9 +9,14 @@
 //!   --agents <snapshot>/agents.json --agent collide-<pack>-<role>
 //!   --setting-sources user --settings <snapshot>/settings.json
 //!   --mcp-config <snapshot>/mcp.json --strict-mcp-config
-//!   --disallowed-tools <scheduling, worktree and messaging tools>
-//!   [--plugin-dir <snapshot>/plugins/<name> ...] [--permission-mode <mode>]
+//!   --disallowed-tools <scheduling, worktree and messaging tools, but the ones the role allows>
+//!   [--add-dir <the folder the phase starts in> [--plugin-dir <snapshot>/plugins/repo-skills]]   # worktree
+//!   [--permission-mode <mode>]
 //! ```
+//!
+//! The `--add-dir` part is the role's `repo_instructions` (`worktree`, the default; `none` leaves it off). It comes
+//! with one variable ([`super::instructions::ADD_DIR_VAR`]), and the plugin only when the snapshot holds it and
+//! [`PLUGIN_ON_THE_LINE`] is on.
 //!
 //! Prompt text never appears in argv or in `ps`: the definitions go in a file, the first turn on stdin.
 //!
@@ -20,10 +25,13 @@
 //! | `claude: launch line` | [`launch_spec`] | argv, env, working directory and the variables to strip |
 
 use super::env_strip;
+use super::instructions::{
+    ADD_DIR_VAR, PLUGIN_NAME, PLUGIN_ON_THE_LINE, PLUGINS_DIR, skills_plugin_dir,
+};
 use collide_core::adapter::{LaunchError, LaunchRequest, LaunchSpec};
 use collide_core::agent::SessionStart;
 use collide_core::pack::Role;
-use collide_core::profile::RoleConfig;
+use collide_core::profile::{RepoInstructions, RoleConfig};
 use collide_core::resolve::is_safe_token;
 use std::collections::BTreeMap;
 
@@ -90,7 +98,7 @@ pub const COMPACT_AT_FLOOR: u64 = 100_000;
 /// The first turn is not in the spec. It goes on stdin as a `user` message, written by the session.
 pub fn launch_spec(request: &LaunchRequest) -> Result<LaunchSpec, LaunchError> {
     let role = &request.role;
-    let env = context_env(role)?;
+    let mut env = context_env(role)?;
 
     let mut argv: Vec<String> = FIXED_ARGV.map(String::from).to_vec();
     argv.extend(session_args(&request.session)?);
@@ -127,10 +135,29 @@ pub fn launch_spec(request: &LaunchRequest) -> Result<LaunchSpec, LaunchError> {
         "--mcp-config".into(),
         snapshot(MCP_FILE)?,
     ]);
-    let disallowed = disallowed_tools_without(&[]);
+    check_allowed_tools(&request.role_name, &role.allow_tools)?;
+    let disallowed = disallowed_tools_without(&role.allow_tools);
     if !disallowed.is_empty() {
         argv.push("--disallowed-tools".into());
         argv.extend(disallowed.into_iter().map(String::from));
+    }
+    if role.repo_instructions.unwrap_or(RepoInstructions::Worktree) == RepoInstructions::Worktree {
+        let Some(start) = request.cwd.to_str() else {
+            return invalid(format!(
+                "the folder the phase starts in, {}, is not valid UTF-8, so the repository's instructions cannot \
+                 be added to the line (set `repo_instructions: none` to leave them off)",
+                request.cwd.display()
+            ));
+        };
+        argv.extend(["--add-dir".into(), start.to_string()]);
+        let plugin = skills_plugin_dir(&request.snapshot_dir);
+        if PLUGIN_ON_THE_LINE && plugin.is_dir() {
+            argv.extend([
+                "--plugin-dir".into(),
+                snapshot(&format!("{PLUGINS_DIR}/{PLUGIN_NAME}"))?,
+            ]);
+        }
+        env.insert(ADD_DIR_VAR.to_string(), "1".to_string());
     }
 
     Ok(LaunchSpec {
@@ -192,12 +219,28 @@ fn setting_sources(config: Option<RoleConfig>) -> &'static str {
     }
 }
 
-/// [`DISALLOWED_TOOLS`] but the ones a role asks for. A role has no key to ask with yet, so [`launch_spec`] passes none.
+/// [`DISALLOWED_TOOLS`] but the ones a role asks for with `allow_tools`.
 pub fn disallowed_tools_without(asked_for: &[String]) -> Vec<&'static str> {
     DISALLOWED_TOOLS
         .into_iter()
         .filter(|tool| !asked_for.iter().any(|asked| asked == tool))
         .collect()
+}
+
+/// A name in `allow_tools` that is not one of [`DISALLOWED_TOOLS`] is refused, naming the tool and the role: allowing
+/// a tool that was never disallowed does nothing, and a typo must not look as if it worked.
+fn check_allowed_tools(role_name: &str, allow_tools: &[String]) -> Result<(), LaunchError> {
+    match allow_tools
+        .iter()
+        .find(|tool| !DISALLOWED_TOOLS.contains(&tool.as_str()))
+    {
+        None => Ok(()),
+        Some(tool) => invalid(format!(
+            "the role `{role_name}` allows the tool `{tool}`, which is not one of the tools the line disallows ({}), \
+             so there is nothing to allow",
+            DISALLOWED_TOOLS.join(", ")
+        )),
+    }
 }
 
 /// The variables the role's context options set, after the strip, so they beat an inherited value. An unusable value

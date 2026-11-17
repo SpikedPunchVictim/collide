@@ -6,6 +6,7 @@ title: "Owner check: layers, trust and an agent entry read back"
 owners: []
 links:
   - { type: blocked-by, to: ts-0104-gx }
+  - { type: blocked-by, to: ts-0107-rj }
 ---
 
 ## Goal

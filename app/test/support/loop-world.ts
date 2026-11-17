@@ -43,6 +43,7 @@ export function run(id: string, task: string, over: Partial<Run> = {}): Run {
     state: { state: 'running' },
     started_ms: 1_000,
     workspace: `/tmp/work/${id}`,
+    warnings: [],
     phases: [
       {
         name: 'agent',

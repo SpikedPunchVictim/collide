@@ -84,6 +84,10 @@ fn run_summary() -> Value {
             "instances": [{ "id": "i1", "session_id": "s-1", "state": { "state": "running" } }],
             "started_ms": 1_700_000_001_000u64,
             "gate_results": { "tests": "ok" }
+        }],
+        "warnings": [{
+            "kind": "instruction_files_changed", "phase": "build",
+            "files": [".claude/skills/stand-in/SKILL.md", "CLAUDE.md"]
         }]
     })
 }
@@ -296,7 +300,10 @@ fn samples() -> Vec<(Method, Value, Value)> {
         ),
         (
             Method::RunStartFile,
-            json!({ "repo": "/work/repo", "task_file": "/work/task.md", "alias": "sonnet", "budget_usd": 1.5 }),
+            json!({
+                "repo": "/work/repo", "task_file": "/work/task.md", "alias": "sonnet", "budget_usd": 1.5,
+                "config": "none"
+            }),
             json!({ "outcome": "started", "run": "R-119" }),
         ),
         (
@@ -337,6 +344,9 @@ fn samples() -> Vec<(Method, Value, Value)> {
                 "report": "Added a line to README.",
                 "workspace": "/data/workspaces/R-119",
                 "wall_ms": 3100,
+                "warnings": [{
+                    "kind": "instruction_files_changed", "phase": "build", "files": ["CLAUDE.md"]
+                }],
                 "calls": [{
                     "scope": "turn", "quality": "exact", "wall_ms": 3100, "model_ms": 2300,
                     "input": 4, "output": 270, "cache_read": 46000, "cache_write": 38000,
@@ -1212,4 +1222,47 @@ fn no_two_methods_share_a_request_schema_unless_by_design() {
         "only run.preview shares run.start's request: {shared:?}"
     );
     assert_eq!(shared[0].1, &vec!["run.start", "run.preview"]);
+}
+
+#[test]
+fn a_file_run_request_without_config_leaves_it_out_and_a_bad_config_is_refused() {
+    use collide_core::owner::RunStartFileParams;
+    use collide_core::profile::RoleConfig;
+    let plain: RunStartFileParams =
+        serde_json::from_value(json!({ "repo": "/r", "task_file": "/t.md" })).unwrap();
+    assert_eq!(plain.config, None);
+    assert!(
+        !serde_json::to_value(&plain)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("config")
+    );
+    for (word, config) in [("none", RoleConfig::None), ("user", RoleConfig::User)] {
+        let asked: RunStartFileParams =
+            serde_json::from_value(json!({ "repo": "/r", "task_file": "/t.md", "config": word }))
+                .unwrap();
+        assert_eq!(asked.config, Some(config));
+    }
+    let bad = serde_json::from_value::<RunStartFileParams>(
+        json!({ "repo": "/r", "task_file": "/t.md", "config": "project" }),
+    );
+    assert!(bad.is_err());
+}
+
+#[test]
+fn a_run_without_warnings_reads_as_an_empty_list_and_a_warning_refuses_an_unknown_key() {
+    use collide_core::owner::{RunSummary, RunWarning};
+    let mut written = run_summary();
+    written.as_object_mut().unwrap().remove("warnings");
+    let summary: RunSummary = serde_json::from_value(written).unwrap();
+    assert!(summary.warnings.is_empty());
+    let bad = serde_json::from_value::<RunWarning>(
+        json!({ "kind": "instruction_files_changed", "phase": "build", "files": [], "extra": 1 }),
+    );
+    assert!(bad.is_err());
+    let unknown_kind = serde_json::from_value::<RunWarning>(
+        json!({ "kind": "something_else", "phase": "build", "files": [] }),
+    );
+    assert!(unknown_kind.is_err());
 }

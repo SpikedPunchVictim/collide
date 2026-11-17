@@ -135,3 +135,115 @@ all (a ledger with that limit; one re-run if a fixture fault needs it), on the t
 nothing from the owner's account or home is written down. The fixture skill's frontmatter has a `hooks` entry that
 writes a marker in the temp root and an `allowed-tools` entry, and the prompt asks the model to use the skill. The
 session goes through `run_session_within` of `ts-0106-nr`; no guard is stubbed.
+
+### Built
+
+- **`require`.** `host/src/file_run.rs` `check_role` (new, public) checks one role against a capability table and
+  returns the refusal texts; `check_agent` calls it with the built-in role and `capabilities()`. A refusal names the
+  role, the capability and what the adapter said. Tests: `host/tests/adapters/claude/capabilities.rs` (`Yes`, `No`,
+  `Unknown`, empty; the `No` case clones the table, since Claude's own has no `No`).
+- **`allow_tools`.** `host/src/adapters/claude/launch.rs` `check_allowed_tools` refuses a name that is not in
+  `DISALLOWED_TOOLS` with `LaunchError::Invalid` (the tool and the role named); `disallowed_tools_without` gets the
+  role's `allow_tools`. Tests in `host/tests/adapters/claude/launch.rs`: none, one, an unknown name, one unknown among
+  known names (the whole request is refused), and the order of the other seven.
+- **`--config`.** `core/src/owner/run.rs` `RunStartFileParams.config` (optional `RoleConfig`); `host/src/run_cli.rs`
+  parses `--config none|user`, refuses other values naming the value, and refuses it with `--resume`. The file run
+  keeps it in `RunContext` (a re-prompt run copies the prior run's). `pnpm gen` was run. Tests:
+  `run_cli` (parse, bad value, `--resume`), `core/tests/owner_protocol.rs` (round trip, old payload),
+  `host/tests/adapters/claude/run_options.rs` (the argv through the daemon and fake `claude`).
+- **`repo_instructions`.** `host/src/adapters/claude/instructions.rs` (new): `is_instruction_path`,
+  `write_skills_plugin`, and the constants of the line, with `PLUGIN_ON_THE_LINE` as the seam for the plugin.
+  `launch_spec` adds, for `worktree` (the default), `--add-dir <cwd>` after `--disallowed-tools`, `--plugin-dir
+  <snapshot>/plugins/repo-skills` when that folder exists, and `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`. `none`
+  is the old line, word for word. The plugin sits in the run's own snapshot folder (`runs_dir/<run>/snapshot`; a run
+  has one phase, so it is that phase's own, and a resumed attempt rewrites it). It is a manifest and a `skills` link to
+  `<start folder>/.claude/skills`, written only when that folder exists. `file_run.rs` `write_snapshot` writes it
+  unless the role says `none`. Tests: `host/tests/adapters/claude/instructions.rs`; `repo_instructions.rs` builds its
+  candidate lines on `none` now, and the default line is asserted equal to the chosen candidate (argv, environment,
+  working directory), also through the fake `claude`.
+- **The warning.** `host/src/instruction_warning.rs`: `changed_instruction_files` (git diff against the base, plus
+  untracked files that are not ignored; each name once, in path order), `instruction_warning` and `not_yet_warned`.
+  `file_run.rs` records the base commit in `RunContext` after provisioning (`QuickRun::base_commit` for prompt runs)
+  and warns when an attempt starts. `core/src/owner/run.rs`: `RunWarning`, `RunWarningKind::InstructionFilesChanged`,
+  `RunSummary.warnings`, `RunRecordResult.warnings`. `host/src/store.rs`: migration 8 `run_warnings`, with
+  `add_run_warning` and `run_warnings`; `daemon.rs` fills `run.get`, `run.list` and the run record. `run_cli.rs`
+  prints `warning: phase <phase> started after instruction files changed in the worktree: <files>`, with control
+  characters of a file name removed. The app's fixtures (`app/src/components/placeholders.ts`,
+  `app/test/support/loop-world.ts`) gain `warnings: []` so the app still type-checks; the display is 6a's. Tests:
+  `instruction_warnings.rs` (git cases, re-prompt, nested file, deleted skill, uncommitted edit, `none`, list, record
+  and restart), `store.rs` (migration from version 7, round trip, reopen), `run_cli.rs` (the printed lines).
+- **The gated session.** `repo_instructions_live.rs`: the test
+  `live_a_skills_own_frontmatter_through_the_snapshot_plugin` (constants
+  `FRONTMATTER_*`: cap $0.05, ledger limit $0.10), `frontmatter_skill_text`, `frontmatter_line`, and the `Findings`
+  fields for it. Its offline tests check the fixture text, the line (haiku, `0.05`, config none, the plugin),
+  the ledger and what `findings` records (only the fixture's names; other tool and skill names are counted at most).
+- **Seen red at runtime** (against the old behaviour or a stub): the four `run_cli` tests (unknown option `--config`,
+  no warning text); three of the four `run_options` tests (with the request's `config` ignored and the default line
+  without `--add-dir`); three of the four offline frontmatter tests and the findings test (by changing the cap, the
+  fixture text and the permission count); the tests of the path list, the plugin writer, the warning function,
+  `check_role` and `allow_tools` against stubs, before their code was written. Red was not recorded for the store
+  migration tests. Not red, by nature:
+  `config_user_and_no_config_both_give_user` (it states today's behaviour). Unseen: the gated test (with its gate in
+  place it skips; it ran for real once, below).
+- **Checks, last run:** `cargo build --workspace`, `cargo test --workspace` (no failures), `cargo clippy --workspace
+  --all-targets -- -D warnings`, `cargo fmt --all --check`, `pnpm test`, `pnpm typecheck`, `pnpm --filter @collide/app
+  build`, `pnpm build:packs` and `pnpm check` all pass.
+
+### Decisions for the owner
+
+1. **The plugin stays on the line, but the gated session did not answer its question.** See Measured. The rule of the
+   brief (plugin off only if the hook ran or `allowed-tools` took effect) keeps it on. Alternative: take it off now,
+   which is the safe side if a skill's `hooks` run outside the snapshot's control. Recommend one more gated session,
+   $0.05, with a fixture that answers the host permission request for `Skill` and refuses `Write` (the harness of
+   `real.rs` `run` has an `answer`), and keep the plugin on the line until it shows a hook or `allowed-tools` at work.
+   If either takes effect, the choice is: strip `hooks` and `allowed-tools` from a per-phase copy of the skill (more
+   code, one more thing that can drift from the repository), or accept them as plain `claude` would (the repository's
+   own skills do what they say). Recommend accepting them, since a person's own `claude` runs them the same way.
+2. **Ignored files do not count as changed.** The warning uses git's standard ignore rules for untracked files, so a
+   file in `.gitignore` is not named. Alternative: name them too. Recommend the standard rules: ignored files are the
+   person's own and do not arrive from the repository.
+3. **A missing base does not stop a phase.** An old run context without a base commit logs and skips the warning. A git
+   failure while reading changes does stop the phase, with the message. Alternative: warn nothing on any failure.
+   Recommend this split: an unreadable workspace is a real fault.
+4. **A re-prompt run measures against the base of the first run's workspace,** so it names every instruction file the
+   work changed so far, once per run, not only the last attempt's. A file already named in this run is not named again
+   (`not_yet_warned`).
+5. **Plan text to propose** (Stage 4a, "The repository's own instructions"): the warning's list is `CLAUDE.md` at any
+   depth and `.claude/skills/**` (commands are out); `AGENTS.md` and `@` imports are not followed; the line carries
+   `--add-dir`, the variable and the skills plugin, and the plugin's skills are listed as `repo-skills:<name>`.
+
+### Measured
+
+One gated session on the terms of `### Owner approval`, and one re-run, which the terms allow for a fixture fault.
+`claude` 2.1.326, `haiku`, `--max-budget-usd 0.05`, config none, `child_env()`, through `run_session_within`, a fresh
+ledger with a limit of $0.10. Spend: $0.003419 and $0.001914, $0.005333 in all. Both ran with the opt-in and the
+ledger in place.
+
+- The fixture skill was listed as `repo-skills:frontmatter-canary-skill`: the plugin lists a skill with its prefix.
+- The model called `Skill` three times in each session. Every call was an error result that held the word
+  `permission`. No `can_use_tool` request came, `Write` was never called, no `PreToolUse` hook started, and neither
+  the hook's marker nor the output file was written.
+- The first session's prompt named the skill without the prefix. The re-run used the prefix, and the result was the
+  same, so the prefix was not the cause. The likely cause is that the `Skill` call itself needs a permission that no
+  host answers: `run_session_within` closes stdin after the first turn.
+- Result: neither the hook nor `allowed-tools` was seen to take effect, and neither was seen not to. The skill never
+  ran, so the question is open. The ledger holds $0.094667 of its limit, and the one re-run is used.
+- Folders `claude` wrote under the real home are in the report to the caller, not here.
+
+- Owner decisions (2026-11-17, at the build): 1 is overridden by the owner: the plugin is off the line
+  (`PLUGIN_ON_THE_LINE = false`) until a session shows whether a skill's frontmatter takes effect through it; that
+  session is `ts-0107-rj` (one more haiku session, $0.05, inside this item's $0.10), whose harness answers the
+  `Skill` permission request. The strip-or-accept choice waits for its result. 2 to 4 as recommended, on delegation;
+  5 applied to the plan with the plugin off. At review: the tests that pinned the plugin on the line now follow the
+  seam, and `frontmatter_line` names the plugin by hand while the seam is off, since the plugin is what it measures.
+  The two folders `claude` wrote under `~/.claude/projects/` were removed by exact name with the owner's OK.
+
+### Not done, by design
+
+- The app's display of warnings on Tracks (6a); the acknowledgement before `integrate` is unchanged.
+- No real `claude` run of the default line beyond the gated session; the contract tests of `ts-0070-mk` with the
+  default role are `ts-0105-jv`'s.
+- `@` imports and `AGENTS.md` are not followed or listed. `.claude/commands/**` is not in the list.
+- No per-phase copy of a skill with `hooks` and `allowed-tools` removed (Decision 1).
+- `IMPLEMENTATION_PLAN.md` is unchanged; the text is proposed in Decision 5.
+

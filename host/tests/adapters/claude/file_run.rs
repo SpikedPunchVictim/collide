@@ -230,6 +230,7 @@ impl Fixture {
             task_file: self.task.to_str().unwrap().to_string(),
             alias: None,
             budget_usd: None,
+            config: None,
         }
     }
 

@@ -4,6 +4,7 @@
 
 use crate::agent::{AgentEvent, Money, UsageQuality, UsageScope};
 use crate::hook::HookStatus;
+use crate::profile::RoleConfig;
 use crate::state::{PhaseState, RunState};
 use crate::workflow::PhaseKind;
 use schemars::JsonSchema;
@@ -85,6 +86,9 @@ pub struct RunStartFileParams {
     /// The phase's budget in US dollars, passed to the tool when it enforces one itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_usd: Option<f64>,
+    /// Overrides the role's `config` for this run: `none` loads none of the user's settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<RoleConfig>,
 }
 
 /// `run.preview` params: the same call as `run.start`, so the preview is what the start would do.
@@ -252,6 +256,23 @@ pub struct PhaseSummary {
     pub take_over: Option<TakeOverState>,
 }
 
+/// What a run warning is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunWarningKind {
+    /// The phase read an instruction file the run changed.
+    InstructionFilesChanged,
+}
+
+/// A warning on a run: a phase and the instruction files it started after the run changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunWarning {
+    pub kind: RunWarningKind,
+    pub phase: String,
+    pub files: Vec<String>,
+}
+
 /// A run for a track and for a list: the domain record's wire form (the record is plain Rust). Times are on the wall
 /// clock; the spans and metrics of a run are Stage 9c's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -269,6 +290,9 @@ pub struct RunSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
     pub phases: Vec<PhaseSummary>,
+    /// What the run did that the person should look at, oldest first. Empty for most runs.
+    #[serde(default)]
+    pub warnings: Vec<RunWarning>,
 }
 
 /// Which runs `run.list` returns.
@@ -419,6 +443,9 @@ pub struct RunRecordResult {
     pub wall_ms: Option<u64>,
     #[serde(default)]
     pub calls: Vec<RecordedCall>,
+    /// The same warnings as the run's summary.
+    #[serde(default)]
+    pub warnings: Vec<RunWarning>,
 }
 
 /// `run.diff` params: a run's diff for Review (0.11, Drill-down). With `path`, that file's patch is in the result.

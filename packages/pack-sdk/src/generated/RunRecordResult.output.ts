@@ -41,6 +41,10 @@ export type RunState =
  * account's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).
  */
 export type PauseCause = 'ask_human' | 'usage_limit' | 'disk'
+/**
+ * What a run warning is about.
+ */
+export type RunWarningKind = 'instruction_files_changed'
 
 /**
  * `run.record` result: what `collide run` prints at the end, and what it shows when it reattaches. `state` is the
@@ -58,6 +62,10 @@ export interface RunRecordResult {
   run: string
   state: RunState
   wall_ms?: number | null
+  /**
+   * The same warnings as the run's summary.
+   */
+  warnings: RunWarning[]
   workspace?: string | null
 }
 /**
@@ -85,4 +93,12 @@ export interface RecordedCall {
 export interface Money {
   amount: number
   currency: string
+}
+/**
+ * A warning on a run: a phase and the instruction files it started after the run changed.
+ */
+export interface RunWarning {
+  files: string[]
+  kind: RunWarningKind
+  phase: string
 }

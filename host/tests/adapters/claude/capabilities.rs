@@ -5,7 +5,10 @@ use collide_core::adapter::{AgentAdapter, refuse_unmet_capabilities};
 use collide_core::agent::{
     CAPABILITY_NAMES, ModelSelect, SessionResume, Support, UsageQuality, UsageScope,
 };
+use collide_core::pack::Role;
 use collide_host::adapters::claude::ClaudeAdapter;
+use collide_host::file_run::check_role;
+use serde_json::json;
 
 #[test]
 fn every_measured_capability_is_yes() {
@@ -94,4 +97,68 @@ fn a_role_that_requires_an_unknown_capability_is_refused_and_one_that_requires_a
     assert_eq!(refusals.len(), 1);
     assert_eq!(refusals[0].capability, "background");
     assert_eq!(refusals[0].support, Support::Unknown);
+}
+
+// ---- a role's `require` before a run starts (ts-0104-gx) ----------------------------------------------------------
+
+fn role_requiring(names: &[&str]) -> Role {
+    serde_json::from_value(json!({ "agent": "claude", "require": names })).expect("a role")
+}
+
+#[test]
+fn a_role_that_requires_only_what_the_adapter_says_yes_for_is_not_refused() {
+    let table = ClaudeAdapter.capabilities();
+    let role = role_requiring(&[
+        "hook_events",
+        "headless_stream",
+        "permission_host.deny_message",
+    ]);
+    assert_eq!(
+        check_role("demo/builder", &role, &table),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_role_that_requires_nothing_is_not_refused() {
+    let table = ClaudeAdapter.capabilities();
+    assert_eq!(
+        check_role("demo/builder", &role_requiring(&[]), &table),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_role_that_requires_an_unknown_capability_is_refused_naming_the_role_and_unknown() {
+    let table = ClaudeAdapter.capabilities();
+    let refused = check_role("demo/builder", &role_requiring(&["background"]), &table);
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    for part in ["demo/builder", "background", "unknown"] {
+        assert!(refused[0].contains(part), "{part}: {}", refused[0]);
+    }
+}
+
+#[test]
+fn a_role_that_requires_a_capability_the_adapter_says_no_for_is_refused_naming_the_role_and_no() {
+    let mut table = ClaudeAdapter.capabilities();
+    table.take_over = Support::No;
+    let refused = check_role("demo/builder", &role_requiring(&["take_over"]), &table);
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    for part in ["demo/builder", "take_over", "says no"] {
+        assert!(refused[0].contains(part), "{part}: {}", refused[0]);
+    }
+}
+
+#[test]
+fn every_unmet_capability_is_named_once_and_the_met_one_is_not() {
+    let table = ClaudeAdapter.capabilities();
+    let role = role_requiring(&["background", "hook_events", "mcp_servers.sse", "background"]);
+    let refused = check_role("demo/builder", &role, &table);
+    assert_eq!(refused.len(), 2, "{refused:?}");
+    assert!(refused[0].contains("background") && refused[1].contains("mcp_servers.sse"));
+    assert!(
+        refused
+            .iter()
+            .all(|message| !message.contains("hook_events"))
+    );
 }

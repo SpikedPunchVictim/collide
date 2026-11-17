@@ -28,6 +28,7 @@ use super::common::git_repo::GitRepo;
 use super::fake::FakeClaude;
 use super::{plain_role, request, value_of};
 use collide_core::adapter::{AgentAdapter, LaunchRequest, LaunchSpec};
+use collide_core::profile::RepoInstructions;
 use collide_host::adapters::claude::ClaudeAdapter;
 use collide_host::adapters::claude::launch::{MCP_FILE, SETTINGS_FILE};
 use collide_host::adapters::claude::snapshot::snapshot_files;
@@ -292,7 +293,10 @@ pub enum Candidate {
 /// snapshot.
 pub fn candidate_line(fixture: &Fixture, candidate: Candidate, request: &LaunchRequest) -> Line {
     let cwd = request.cwd.as_path();
-    let mut line = Line::of(ClaudeAdapter.launch(request).expect("the launch line"));
+    // The candidates are built on the line without repository instructions: the line itself adds them now.
+    let mut bare = request.clone();
+    bare.role.repo_instructions = Some(RepoInstructions::None);
+    let mut line = Line::of(ClaudeAdapter.launch(&bare).expect("the launch line"));
     match candidate {
         Candidate::Baseline => {}
         Candidate::AddDir => {

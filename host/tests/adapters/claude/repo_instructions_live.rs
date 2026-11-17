@@ -26,9 +26,13 @@ use super::repo_instructions::{
 };
 use collide_core::adapter::{AgentAdapter, LaunchRequest};
 use collide_host::adapters::claude::ClaudeAdapter;
+use collide_host::adapters::claude::instructions::{
+    PLUGIN_ON_THE_LINE, skills_plugin_dir, write_skills_plugin,
+};
 use collide_host::adapters::claude::version::CANARY_MARKER;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -40,6 +44,35 @@ pub const ITEM_LEDGER_LIMIT_USD: f64 = 0.50;
 /// The same for ts-0106-nr (owner, 2026-11-16): one haiku session capped at five cents, and ten cents in all.
 pub const PLUGIN_CAP_USD: f64 = 0.05;
 pub const PLUGIN_LEDGER_LIMIT_USD: f64 = 0.10;
+
+/// ts-0104-gx (owner, 2026-11-17): one haiku session capped at five cents, and ten cents in all, on the `worktree` line
+/// as it is built: does a skill's own frontmatter (`hooks`, `allowed-tools`) take effect through the snapshot plugin?
+pub const FRONTMATTER_CAP_USD: f64 = 0.05;
+pub const FRONTMATTER_LEDGER_LIMIT_USD: f64 = 0.10;
+
+/// The fixture skill of that session. Its `hooks` entry writes [`FRONTMATTER_HOOK_MARKER`] in the fixture's markers
+/// folder before a `Write`, its `allowed-tools` entry names `Write` (which the line asks permission for), and its text
+/// asks for [`FRONTMATTER_WORD`] to be written to [`FRONTMATTER_OUTPUT_FILE`] in the working folder.
+pub const FRONTMATTER_SKILL_NAME: &str = "frontmatter-canary-skill";
+pub const FRONTMATTER_HOOK_MARKER: &str = "skill-hook";
+pub const FRONTMATTER_OUTPUT_FILE: &str = "skill-output.txt";
+pub const FRONTMATTER_WORD: &str = "pear-5521";
+pub const FRONTMATTER_PROMPT: &str = "Use the Skill tool to run the skill named repo-skills:frontmatter-canary-skill, \
+    and do what it says. Then reply with the single word DONE.";
+
+/// Words whose presence in an error result is recorded (as present or not; the text itself is never kept).
+const ERROR_WORDS: [&str; 6] = [
+    "unknown",
+    "not found",
+    "permission",
+    "denied",
+    "disabled",
+    "invalid",
+];
+
+/// The tools whose names a finding may record: the stream names the others the owner's account has, and those are
+/// only counted.
+const NAMED_TOOLS: [&str; 5] = ["Skill", "Write", "Read", "Bash", "Edit"];
 
 /// How long a session may take before it is ended.
 const SESSION_TIMEOUT: Duration = Duration::from_secs(180);
@@ -123,8 +156,13 @@ pub fn agents_own_line(cwd: &Path) -> Line {
 
 /// The first turn as Collide's session writes it on stdin.
 fn first_turn(request: &LaunchRequest) -> Vec<u8> {
+    first_turn_of(request, PROMPT)
+}
+
+/// [`first_turn`] for a prompt of the test's own.
+fn first_turn_of(request: &LaunchRequest, prompt: &str) -> Vec<u8> {
     let mut session = ClaudeAdapter.session(request);
-    session.send_turn(PROMPT).writes.concat()
+    session.send_turn(prompt).writes.concat()
 }
 
 // ---- what a session leaves ---------------------------------------------------------------------------------------
@@ -153,6 +191,21 @@ pub struct Findings {
     pub hook_texts: Vec<&'static str>,
     pub markers: Vec<&'static str>,
     pub cost: f64,
+    /// The fixture skill of ts-0104-gx as `init` lists it (the plugin's prefix, if any, is the fixture's own).
+    pub frontmatter_skill_listed_as: Option<String>,
+    /// The tools of [`NAMED_TOOLS`] the session asked the host for permission to use (`can_use_tool`), once each.
+    pub permission_asked: Vec<&'static str>,
+    /// The tools of [`NAMED_TOOLS`] the model called, once each, and how many tool results were errors.
+    pub tools_used: Vec<&'static str>,
+    pub tool_errors: usize,
+    /// The words of [`ERROR_WORDS`] some error result held, and whether one held the fixture skill's name.
+    pub error_words: Vec<&'static str>,
+    pub error_names_the_skill: bool,
+    /// How the `Skill` calls named the fixture skill: `prefixed` (as the plugin lists it), `bare`, or `other` (not
+    /// named: another name the model tried, which is never kept).
+    pub skill_calls: Vec<&'static str>,
+    /// How many `PreToolUse` hooks started. The snapshot has none, so each one is a skill's own.
+    pub pre_tool_use_hooks: usize,
 }
 
 /// Whether the list `key` of `init` has an entry that is `name` or an object named `name`.
@@ -174,6 +227,35 @@ fn listed_as(init: &Value, key: &str, name: &str) -> Option<String> {
         .filter_map(|entry| entry.as_str().or_else(|| entry["name"].as_str()))
         .find(|entry| *entry == name || entry.ends_with(&suffix))
         .map(str::to_string)
+}
+
+/// Adds `name` to `list` once, when it is one of [`NAMED_TOOLS`]: the owner's own tools are never named.
+fn note_tool(list: &mut Vec<&'static str>, name: Option<&str>) {
+    let known = NAMED_TOOLS.into_iter().find(|tool| Some(*tool) == name);
+    if let Some(tool) = known.filter(|tool| !list.contains(tool)) {
+        list.push(tool);
+    }
+}
+
+/// The text of a tool result's `content`, which is a string or a list of text blocks. It is only searched.
+fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|block| block["text"].as_str())
+            .collect(),
+        _ => String::new(),
+    }
+}
+
+/// How a `Skill` call named the fixture skill, without keeping any other name.
+fn skill_call_kind(name: Option<&str>) -> &'static str {
+    match name {
+        Some(name) if name == format!("{PLUGIN_NAME}:{FRONTMATTER_SKILL_NAME}") => "prefixed",
+        Some(FRONTMATTER_SKILL_NAME) => "bare",
+        _ => "other",
+    }
 }
 
 /// `MEMORY=yes` or `MEMORY=no` in `reply`.
@@ -214,6 +296,7 @@ pub fn findings(lines: &[Value], exit: Option<i32>, markers: Vec<&'static str>) 
             found.init_has.insert(key, lists(init, key, name));
         }
         found.skill_listed_as = listed_as(init, "skills", SKILL_NAME);
+        found.frontmatter_skill_listed_as = listed_as(init, "skills", FRONTMATTER_SKILL_NAME);
         found
             .init_has
             .insert("skills", found.skill_listed_as.is_some());
@@ -236,6 +319,34 @@ pub fn findings(lines: &[Value], exit: Option<i32>, markers: Vec<&'static str>) 
     for line in lines {
         if kind(line, "system", "hook_started") && line["hook_event"] == "SessionStart" {
             found.session_start_hooks += 1;
+        }
+        if kind(line, "system", "hook_started") && line["hook_event"] == "PreToolUse" {
+            found.pre_tool_use_hooks += 1;
+        }
+        let asked = &line["request"];
+        if line["type"] == "control_request" && asked["subtype"] == "can_use_tool" {
+            note_tool(&mut found.permission_asked, asked["tool_name"].as_str());
+        }
+        let blocks = line["message"]["content"].as_array().into_iter().flatten();
+        for block in blocks {
+            if line["type"] == "assistant" && block["type"] == "tool_use" {
+                note_tool(&mut found.tools_used, block["name"].as_str());
+                if block["name"] == "Skill" {
+                    let named = block["input"]["skill"].as_str();
+                    found.skill_calls.push(skill_call_kind(named));
+                }
+            }
+            if line["type"] == "user" && block["type"] == "tool_result" && block["is_error"] == true
+            {
+                found.tool_errors += 1;
+                let text = result_text(&block["content"]).to_lowercase();
+                for word in ERROR_WORDS {
+                    if text.contains(word) && !found.error_words.contains(&word) {
+                        found.error_words.push(word);
+                    }
+                }
+                found.error_names_the_skill |= text.contains(FRONTMATTER_SKILL_NAME);
+            }
         }
         if kind(line, "system", "hook_response") && line["hook_event"] == "SessionStart" {
             let said = ["output", "stdout", "stderr"]
@@ -390,6 +501,79 @@ fn collide_session(name: &str, candidate: Candidate) -> Findings {
     found
 }
 
+// ---- ts-0104-gx: a skill's own frontmatter through the snapshot plugin ---------------------------------------------
+
+/// The text of the fixture skill: a `PreToolUse` hook on `Write` that creates `marker`, `allowed-tools: Write`, and a
+/// body that asks for one `Write` of [`FRONTMATTER_WORD`] to [`FRONTMATTER_OUTPUT_FILE`].
+pub fn frontmatter_skill_text(marker: &Path) -> String {
+    format!(
+        "---\nname: {FRONTMATTER_SKILL_NAME}\ndescription: A stand-in skill; run it when asked to run \
+         {FRONTMATTER_SKILL_NAME}.\nallowed-tools: Write\nhooks:\n  PreToolUse:\n    - matcher: Write\n      hooks:\n\
+         \x20       - type: command\n          command: \"touch '{}'\"\n---\nWrite the exact text \
+         {FRONTMATTER_WORD} to the file {FRONTMATTER_OUTPUT_FILE}\nin the current working directory, with the Write \
+         tool. Then stop.\n",
+        marker.display()
+    )
+}
+
+/// Adds the fixture skill to `worktree`'s skills (it has the committed one already) and returns the hook's marker.
+pub fn add_frontmatter_skill(fixture: &Fixture, worktree: &Path) -> std::path::PathBuf {
+    let marker = fixture.markers.join(FRONTMATTER_HOOK_MARKER);
+    let folder = worktree.join(".claude/skills").join(FRONTMATTER_SKILL_NAME);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("SKILL.md"), frontmatter_skill_text(&marker)).unwrap();
+    marker
+}
+
+/// The line Collide builds for the session of ts-0104-gx: the default role with config none and haiku, capped at
+/// [`FRONTMATTER_CAP_USD`], started in `worktree`, with the snapshot plugin written for it. The plugin is what the
+/// session measures, so while [`PLUGIN_ON_THE_LINE`] is off it is named by hand where the seam would name it, after
+/// `--add-dir <worktree>`; nothing else is added.
+pub fn frontmatter_line(fixture: &Fixture, worktree: &Path) -> (LaunchRequest, Line) {
+    let request = collide_request_capped(fixture, worktree, FRONTMATTER_CAP_USD);
+    let wrote = write_skills_plugin(&fixture.snapshot, worktree).expect("the plugin is written");
+    assert!(wrote, "the worktree has skills, so the plugin is written");
+    let mut line = Line::of(ClaudeAdapter.launch(&request).expect("the launch line"));
+    if !PLUGIN_ON_THE_LINE {
+        let at = line
+            .argv
+            .iter()
+            .position(|word| word == "--add-dir")
+            .expect("the worktree line")
+            + 2;
+        let plugin = skills_plugin_dir(&fixture.snapshot)
+            .to_str()
+            .expect("UTF-8")
+            .to_string();
+        line.argv
+            .splice(at..at, ["--plugin-dir".to_string(), plugin]);
+    }
+    (request, line)
+}
+
+/// One line of what is safe to print about the session of ts-0104-gx.
+pub fn describe_frontmatter(found: &Findings, marker: bool, output: bool) -> String {
+    let present = |yes: bool| if yes { "present" } else { "absent" };
+    format!(
+        "skill listed as {:?} | hook marker {} | output file {} | permission asked for {:?} | tools called {:?} | \
+         tool errors {} (words {:?}, names the skill {}) | Skill calls {:?} | PreToolUse hooks started {} | exit {:?} \
+         result {} | cost ${:.6}",
+        found.frontmatter_skill_listed_as,
+        present(marker),
+        present(output),
+        found.permission_asked,
+        found.tools_used,
+        found.tool_errors,
+        found.error_words,
+        found.error_names_the_skill,
+        found.skill_calls,
+        found.pre_tool_use_hooks,
+        found.exit,
+        found.result,
+        found.cost,
+    )
+}
+
 // ---- the live tests ----------------------------------------------------------------------------------------------
 
 #[test]
@@ -462,6 +646,38 @@ fn live_the_snapshot_plugin_with_the_worktrees_skills_in_the_worktree() {
     assert!(
         found.hook_texts.contains(&CANARY_MARKER),
         "`{name}`: the snapshot's canary hook did not run"
+    );
+}
+
+/// ts-0104-gx: does a skill's own frontmatter (`hooks`, `allowed-tools`) take effect when the skill comes through the
+/// snapshot plugin? Collide's own default line, config none, haiku, a cap of [`FRONTMATTER_CAP_USD`] and a ledger
+/// limit of [`FRONTMATTER_LEDGER_LIMIT_USD`]. The session may be refused a `Write` (stdin closes after the first turn),
+/// so only a session that ran is asserted; the finding is the measurement.
+#[test]
+fn live_a_skills_own_frontmatter_through_the_snapshot_plugin() {
+    if let Some(reason) = unavailable_within(FRONTMATTER_LEDGER_LIMIT_USD) {
+        println!("skipped: {reason}");
+        return;
+    }
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let marker = add_frontmatter_skill(&fixture, &worktree);
+    let (request, line) = frontmatter_line(&fixture, &worktree);
+    println!("root: {}", fixture.root().path().display());
+    let name = "frontmatter-through-the-plugin";
+    let turn = first_turn_of(&request, FRONTMATTER_PROMPT);
+    let found = run_session_within(
+        &fixture,
+        name,
+        &line,
+        &turn,
+        FRONTMATTER_CAP_USD,
+        FRONTMATTER_LEDGER_LIMIT_USD,
+    );
+    let output = worktree.join(FRONTMATTER_OUTPUT_FILE).exists();
+    println!(
+        "frontmatter finding: {}",
+        describe_frontmatter(&found, marker.exists(), output)
     );
 }
 
@@ -735,4 +951,174 @@ fn the_plugin_ledger_allows_one_session_and_refuses_a_second_that_could_pass_ten
         refused.contains("`next` is not run") && refused.contains("$0.1"),
         "{refused}"
     );
+}
+
+// ---- offline: the session of ts-0104-gx ----------------------------------------------------------------------------
+
+#[test]
+fn the_frontmatter_skill_has_a_hook_that_writes_its_marker_and_allows_write() {
+    let marker = Path::new("/root/markers/skill-hook");
+    let text = frontmatter_skill_text(marker);
+    assert!(
+        text.starts_with("---\nname: frontmatter-canary-skill\n"),
+        "{text}"
+    );
+    assert!(text.contains("\nallowed-tools: Write\n"), "{text}");
+    assert!(
+        text.contains("\nhooks:\n  PreToolUse:\n    - matcher: Write\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("command: \"touch '/root/markers/skill-hook'\""),
+        "{text}"
+    );
+    assert!(
+        text.contains(FRONTMATTER_WORD) && text.contains(FRONTMATTER_OUTPUT_FILE),
+        "{text}"
+    );
+    assert!(text.lines().all(|line| line.len() <= 120), "{text}");
+}
+
+#[test]
+fn the_frontmatter_session_is_the_built_worktree_line_haiku_five_cents_config_none() {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let marker = add_frontmatter_skill(&fixture, &worktree);
+    assert!(
+        marker.starts_with(fixture.root().path()),
+        "the marker is in the temp root"
+    );
+    let (request, line) = frontmatter_line(&fixture, &worktree);
+    assert_eq!(line.value_of("--model"), Some("haiku"));
+    assert_eq!(line.value_of("--max-budget-usd"), Some("0.05"));
+    assert_eq!(line.value_of("--setting-sources"), Some(""));
+    assert_eq!(line.value_of("--add-dir"), worktree.to_str());
+    assert_eq!(
+        line.env
+            .get("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
+            .map(String::as_str),
+        Some("1")
+    );
+    let plugin = fixture.snapshot.join("plugins").join(PLUGIN_NAME);
+    assert_eq!(line.value_of("--plugin-dir"), plugin.to_str());
+    assert_eq!(holds_only_the_skills_link(&plugin, &worktree), Ok(()));
+    assert!(
+        plugin
+            .join("skills")
+            .join(FRONTMATTER_SKILL_NAME)
+            .join("SKILL.md")
+            .is_file()
+    );
+    // Collide's own line, with only the plugin named by hand while the seam is off.
+    let mut by_collide = line.argv.clone();
+    if !PLUGIN_ON_THE_LINE {
+        let at = by_collide
+            .iter()
+            .position(|word| word == "--plugin-dir")
+            .unwrap();
+        by_collide.drain(at..at + 2);
+    }
+    let built = Line::of(ClaudeAdapter.launch(&request).unwrap());
+    assert_eq!(
+        (by_collide, &line.env, &line.cwd),
+        (built.argv, &built.env, &built.cwd)
+    );
+    assert!(first_turn_of(&request, FRONTMATTER_PROMPT).starts_with(b"{"));
+}
+
+#[test]
+fn the_frontmatter_ledger_allows_one_session_and_refuses_a_second_that_could_pass_ten_cents() {
+    let root = super::common::TempRoot::new();
+    let ledger = root.join("ledger");
+    let refusal = |spent: &str| {
+        std::fs::write(&ledger, spent).unwrap();
+        real::ledger_refusal(
+            &ledger,
+            "next",
+            FRONTMATTER_CAP_USD,
+            FRONTMATTER_LEDGER_LIMIT_USD,
+        )
+    };
+    assert_eq!(refusal(""), None);
+    assert_eq!(refusal("a\t0.05\t0.05\n"), None);
+    assert!(refusal("a\t0.05\t0.06\n").is_some());
+}
+
+#[test]
+fn findings_read_the_fixture_skills_listing_the_permission_asked_and_the_tools_called() {
+    let mut lines = made_up_stream(
+        &["x", &format!("repo-skills:{FRONTMATTER_SKILL_NAME}")],
+        "DONE",
+    );
+    lines.extend([
+        json!({"type": "system", "subtype": "hook_started", "hook_event": "PreToolUse"}),
+        json!({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Skill", "id": "1"},
+            {"type": "tool_use", "name": "mcp__owner_server__thing", "id": "2"},
+            {"type": "tool_use", "name": "Write", "id": "3"},
+            {"type": "tool_use", "name": "Write", "id": "4"}]}}),
+        json!({"type": "control_request", "request_id": "r",
+            "request": {"subtype": "can_use_tool", "tool_name": "Write", "input": {}}}),
+        json!({"type": "control_request", "request_id": "q",
+            "request": {"subtype": "can_use_tool", "tool_name": "mcp__owner_server__thing", "input": {}}}),
+        json!({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Skill", "id": "5", "input": {"skill": FRONTMATTER_SKILL_NAME}},
+            {"type": "tool_use", "name": "Skill", "id": "6", "input": {"skill": "owners-own-skill"}},
+            {"type": "tool_use", "name": "Skill", "id": "7",
+                "input": {"skill": format!("repo-skills:{FRONTMATTER_SKILL_NAME}")}}]}}),
+        json!({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "3", "is_error": true,
+                "content": format!("Unknown skill: {FRONTMATTER_SKILL_NAME}")},
+            {"type": "tool_result", "tool_use_id": "8", "is_error": true,
+                "content": [{"type": "text", "text": "Permission to use it was denied"}]},
+            {"type": "tool_result", "tool_use_id": "1"}]}}),
+    ]);
+    let found = findings(&lines, Some(0), Vec::new());
+    let listed = format!("repo-skills:{FRONTMATTER_SKILL_NAME}");
+    assert_eq!(
+        found.frontmatter_skill_listed_as.as_deref(),
+        Some(listed.as_str())
+    );
+    assert_eq!(found.permission_asked, ["Write"]);
+    assert_eq!(found.tools_used, ["Skill", "Write"]);
+    assert_eq!(found.tool_errors, 2);
+    assert_eq!(found.error_words, ["unknown", "permission", "denied"]);
+    assert!(found.error_names_the_skill);
+    // The first `Skill` call of the stream has no `skill` input at all.
+    assert_eq!(found.skill_calls, ["other", "bare", "other", "prefixed"]);
+    assert_eq!(found.pre_tool_use_hooks, 1);
+}
+
+#[test]
+fn a_stream_without_the_fixture_skill_or_any_tool_finds_nothing_of_it() {
+    let found = findings(&made_up_stream(&["x"], "DONE"), Some(0), Vec::new());
+    assert_eq!(found.frontmatter_skill_listed_as, None);
+    assert!(found.permission_asked.is_empty() && found.tools_used.is_empty());
+    assert_eq!((found.tool_errors, found.pre_tool_use_hooks), (0, 0));
+    assert!(found.error_words.is_empty() && found.skill_calls.is_empty());
+    assert!(!found.error_names_the_skill);
+}
+
+#[test]
+fn the_frontmatter_prompt_names_the_skill_as_the_plugin_lists_it() {
+    assert!(FRONTMATTER_PROMPT.contains(&format!("{PLUGIN_NAME}:{FRONTMATTER_SKILL_NAME}")));
+    assert!(!FRONTMATTER_PROMPT.contains(FRONTMATTER_WORD));
+}
+
+#[test]
+fn the_frontmatter_description_names_only_the_fixture_and_counts() {
+    let found = Findings {
+        frontmatter_skill_listed_as: Some("repo-skills:frontmatter-canary-skill".into()),
+        permission_asked: vec!["Write"],
+        tools_used: vec!["Skill", "Write"],
+        exit: Some(0),
+        result: "success".into(),
+        ..Findings::default()
+    };
+    let text = describe_frontmatter(&found, true, false);
+    assert!(
+        text.contains("hook marker present") && text.contains("output file absent"),
+        "{text}"
+    );
+    assert!(text.contains("permission asked for [\"Write\"]"), "{text}");
 }

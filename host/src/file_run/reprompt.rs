@@ -115,6 +115,7 @@ impl FileRuns {
             task_text: words.to_string(),
             model: prior.model.clone(),
             quick: Some(next.clone()),
+            config: prior.config,
             follows: Some(prior),
         };
         let claimed = RefCell::new(None);

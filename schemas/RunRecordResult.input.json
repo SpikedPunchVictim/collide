@@ -194,6 +194,40 @@
         }
       ]
     },
+    "RunWarning": {
+      "additionalProperties": false,
+      "description": "A warning on a run: a phase and the instruction files it started after the run changed.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunWarningKind"
+        },
+        "phase": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "phase",
+        "files"
+      ],
+      "type": "object"
+    },
+    "RunWarningKind": {
+      "description": "What a run warning is about.",
+      "oneOf": [
+        {
+          "const": "instruction_files_changed",
+          "description": "The phase read an instruction file the run changed.",
+          "type": "string"
+        }
+      ]
+    },
     "UsageQuality": {
       "description": "How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as \"at\nleast\" and never summed with `exact` ones (0.13).",
       "enum": [
@@ -269,6 +303,14 @@
         "integer",
         "null"
       ]
+    },
+    "warnings": {
+      "default": [],
+      "description": "The same warnings as the run's summary.",
+      "items": {
+        "$ref": "#/$defs/RunWarning"
+      },
+      "type": "array"
     },
     "workspace": {
       "type": [

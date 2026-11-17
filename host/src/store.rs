@@ -29,6 +29,7 @@
 use crate::run_store::note_transition;
 use collide_core::agent::Usage;
 use collide_core::events::{Event, EventBody};
+use collide_core::owner::RunWarning;
 use rusqlite::{Connection, ErrorCode, OpenFlags, TransactionBehavior, params};
 use std::ffi::OsString;
 use std::fmt;
@@ -66,8 +67,9 @@ pub struct Migration {
 }
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
-/// written with, and `line` is its JSON.
-pub const MIGRATIONS: [Migration; 7] = [
+/// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
+/// (ts-0104-gx): one JSON row for each warning, in the order they were written.
+pub const MIGRATIONS: [Migration; 8] = [
     Migration {
         version: 1,
         name: "events",
@@ -121,6 +123,16 @@ pub const MIGRATIONS: [Migration; 7] = [
         version: 7,
         name: "phase_record_failure_evidence",
         sql: "ALTER TABLE phase_records ADD COLUMN failure_evidence TEXT",
+    },
+    Migration {
+        version: 8,
+        name: "run_warnings",
+        sql: "CREATE TABLE run_warnings (
+              id   INTEGER PRIMARY KEY AUTOINCREMENT,
+              run  TEXT NOT NULL,
+              json TEXT NOT NULL
+          );
+          CREATE INDEX run_warnings_by_run ON run_warnings (run)",
     },
 ];
 
@@ -572,6 +584,44 @@ impl Store {
             .map_err(|e| sql_error(context, e))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| sql_error(context, e))
+    }
+
+    /// Keeps a warning of a run (ts-0104-gx), after the ones it already has. The warning is its own JSON, so a new kind
+    /// or field needs no migration.
+    pub fn add_run_warning(&self, run: &str, warning: &RunWarning) -> Result<(), StoreError> {
+        let json = serde_json::to_string(warning).map_err(|error| StoreError::Io {
+            context: format!("writing a warning of run {run}"),
+            source: io::Error::new(io::ErrorKind::InvalidData, error),
+        })?;
+        self.connect()?
+            .execute(
+                "INSERT INTO run_warnings (run, json) VALUES (?1, ?2)",
+                params![run, json],
+            )
+            .map_err(|e| sql_error("writing a run's warning", e))?;
+        Ok(())
+    }
+
+    /// The warnings of `run`, oldest first. A run with none (every run from before the table) has an empty list.
+    pub fn run_warnings(&self, run: &str) -> Result<Vec<RunWarning>, StoreError> {
+        let conn = self.connect()?;
+        let mut statement = conn
+            .prepare("SELECT json FROM run_warnings WHERE run = ?1 ORDER BY id")
+            .map_err(|e| sql_error("reading a run's warnings", e))?;
+        let rows = statement
+            .query_map(params![run], |row| row.get::<_, String>(0))
+            .map_err(|e| sql_error("reading a run's warnings", e))?;
+        let texts = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| sql_error("reading a run's warnings", e))?;
+        texts
+            .iter()
+            .map(|text| serde_json::from_str::<RunWarning>(text))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| StoreError::Io {
+                context: format!("reading the warnings of run {run}"),
+                source: io::Error::new(io::ErrorKind::InvalidData, error),
+            })
     }
 
     /// The phase's record, or `None` for a phase that has none.
@@ -1239,6 +1289,74 @@ mod tests {
         };
         store.set_phase_record("r", "p", &record).unwrap();
         assert_eq!(store.phase_record("r", "p").unwrap(), Some(record));
+    }
+
+    fn warning(phase: &str, files: &[&str]) -> RunWarning {
+        RunWarning {
+            kind: collide_core::owner::RunWarningKind::InstructionFilesChanged,
+            phase: phase.to_string(),
+            files: files.iter().map(|file| file.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_store_at_version_seven_gains_the_run_warnings_table_and_every_run_has_an_empty_list() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 7);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        conn.execute(
+            "INSERT INTO phase_records (run, phase, usage, failure, report) VALUES ('r', 'p', NULL, NULL, 'x')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(user_version(&raw(&store)), known_version());
+        assert_eq!(
+            MIGRATIONS.get(7).map(|migration| migration.name),
+            Some("run_warnings")
+        );
+        assert!(table_exists(&raw(&store), "run_warnings"));
+        assert_eq!(store.run_warnings("r").unwrap(), Vec::new());
+        assert_eq!(
+            store
+                .phase_record("r", "p")
+                .unwrap()
+                .unwrap()
+                .report
+                .as_deref(),
+            Some("x"),
+            "what the old store held is kept"
+        );
+    }
+
+    #[test]
+    fn a_runs_warnings_are_read_back_oldest_first_and_only_that_runs() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let first = warning("build", &["CLAUDE.md"]);
+        let second = warning("review", &["sub/CLAUDE.md", ".claude/skills/a/SKILL.md"]);
+        store.add_run_warning("r", &first).unwrap();
+        store
+            .add_run_warning("other", &warning("build", &["x/CLAUDE.md"]))
+            .unwrap();
+        store.add_run_warning("r", &second).unwrap();
+        assert_eq!(store.run_warnings("r").unwrap(), vec![first, second]);
+        assert_eq!(store.run_warnings("none").unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn a_runs_warnings_are_there_when_the_store_is_opened_again() {
+        let dir = TempDir::new();
+        let kept = warning("build", &["CLAUDE.md"]);
+        Store::open(dir.path())
+            .unwrap()
+            .add_run_warning("r", &kept)
+            .unwrap();
+        assert_eq!(
+            Store::open(dir.path()).unwrap().run_warnings("r").unwrap(),
+            vec![kept]
+        );
     }
 
     #[test]

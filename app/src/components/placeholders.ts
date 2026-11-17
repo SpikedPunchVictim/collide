@@ -57,6 +57,7 @@ export const PLACEHOLDER_RUNS: readonly RunSummary[] = [
     started_ms: START,
     state: { state: 'running' },
     tasks: [{ key: 'T-03-012', status: 'active' }],
+    warnings: [],
     phases: [
       phase('provision', 'script', { state: 'ended' }, { started_ms: START, ended_ms: START + 5 * MINUTE }),
       phase('build', 'agent', { state: 'ended' }, { started_ms: START + 5 * MINUTE, ended_ms: START + 25 * MINUTE }),
@@ -71,6 +72,7 @@ export const PLACEHOLDER_RUNS: readonly RunSummary[] = [
     started_ms: START + 10 * MINUTE,
     state: { state: 'paused', cause: 'ask_human' },
     tasks: [{ key: 'T-05-009', status: 'review' }],
+    warnings: [],
     phases: [
       phase('provision', 'script', { state: 'ended' }, { started_ms: START + 10 * MINUTE, ended_ms: START + 14 * MINUTE }),
       phase('build', 'agent', { state: 'paused', cause: 'ask_human' }, { started_ms: START + 14 * MINUTE }),
@@ -85,6 +87,7 @@ export const PLACEHOLDER_RUNS: readonly RunSummary[] = [
     ended_ms: START - 2 * 60 * MINUTE,
     state: { state: 'ended', outcome: 'accepted' },
     tasks: [{ key: 'T-01-001', status: 'done' }],
+    warnings: [],
     phases: [
       phase('build', 'agent', { state: 'ended' }, { started_ms: START - 180 * MINUTE, ended_ms: START - 150 * MINUTE }),
       phase('review', 'fanout', { state: 'ended' }, { started_ms: START - 150 * MINUTE, ended_ms: START - 135 * MINUTE }),
@@ -99,6 +102,7 @@ export const PLACEHOLDER_RUNS: readonly RunSummary[] = [
     ended_ms: START - 30 * MINUTE,
     state: { state: 'ended', outcome: 'accepted' },
     tasks: [{ key: 'T-01-002', status: 'done' }],
+    warnings: [],
     phases: [
       phase('build', 'agent', { state: 'ended' }, { started_ms: START - 120 * MINUTE, ended_ms: START - 95 * MINUTE }),
       phase('review', 'fanout', { state: 'ended' }, { started_ms: START - 95 * MINUTE, ended_ms: START - 80 * MINUTE }),

@@ -277,6 +277,7 @@ impl Rig {
             task_file: self.task.to_str().unwrap().to_string(),
             alias: None,
             budget_usd,
+            config: None,
         };
         match self.call("run.start_file", &params) {
             RunStartResult::Started { run } => run,

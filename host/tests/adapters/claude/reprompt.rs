@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 
 // ---- helpers ------------------------------------------------------------------------------------------------------
 
-const WORDS: &str = "Also add b.txt";
+pub(super) const WORDS: &str = "Also add b.txt";
 
 /// The turn a resumed session is told: the person's words.
 fn words_turn(words: &str) -> String {
@@ -40,12 +40,12 @@ fn words_turn(words: &str) -> String {
 }
 
 /// A recording for a resumed session: it waits for `WORDS`, does `steps` and reports.
-fn resumed_report(root: &TempRoot, steps: &[Value]) -> PathBuf {
+pub(super) fn resumed_report(root: &TempRoot, steps: &[Value]) -> PathBuf {
     report_named(root, "resumed.jsonl", &words_turn(WORDS), steps)
 }
 
 /// A fixture whose `claude` plays `first` and, started with `--resume`, `resumed`; with its board and scratch task.
-fn playing(first: &Path, resumed: Option<PathBuf>) -> (Fixture, String, String) {
+pub(super) fn playing(first: &Path, resumed: Option<PathBuf>) -> (Fixture, String, String) {
     let setup = Setup {
         resumed,
         ..Setup::default()
@@ -97,7 +97,7 @@ pub(super) fn stopped_run(root: &TempRoot, resumed: Option<PathBuf>) -> Reviewed
 }
 
 /// A run whose agent did `first`, ended; its `claude` does `second` when it is resumed.
-fn reviewed_twice(root: &TempRoot, first: &[Value], second: &[Value]) -> Reviewed {
+pub(super) fn reviewed_twice(root: &TempRoot, first: &[Value], second: &[Value]) -> Reviewed {
     reviewed_in(playing(
         &report_with(root, first),
         Some(resumed_report(root, second)),
@@ -105,9 +105,9 @@ fn reviewed_twice(root: &TempRoot, first: &[Value], second: &[Value]) -> Reviewe
 }
 
 /// What a re-prompt started: the new run and its `Review` item.
-struct Followed {
-    run: String,
-    item: QueueItem,
+pub(super) struct Followed {
+    pub(super) run: String,
+    pub(super) item: QueueItem,
 }
 
 /// The launch lines of `claude` that began a phase, in order.
@@ -156,7 +156,7 @@ impl Reviewed {
     }
 
     /// A re-prompt with `words` that is taken: the new run, once its phase has ended and its item is in the Queue.
-    fn reprompted(&mut self, words: &str) -> Followed {
+    pub(super) fn reprompted(&mut self, words: &str) -> Followed {
         let result = self.reprompt_answer(words);
         assert_eq!(result, QueueAnswerResult::Done {});
         self.newest()

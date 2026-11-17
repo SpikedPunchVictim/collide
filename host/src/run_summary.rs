@@ -62,6 +62,7 @@ pub fn summarize(
         ended_ms: row.ended_ms,
         workspace,
         phases: summaries,
+        warnings: Vec::new(),
     };
     (summary, rounds)
 }

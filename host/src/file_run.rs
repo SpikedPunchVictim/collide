@@ -5,8 +5,8 @@
 //!
 //! ## What happens, in order
 //!
-//! 1. The request is checked: the paths, the role against an empty requirement ([`refuse_unmet_capabilities`]), and the
-//!    model alias against the user's `models.yaml`. Every problem is returned together.
+//! 1. The request is checked: the paths, the role's `require` ([`check_role`]), and the model alias against the user's
+//!    `models.yaml`. Every problem is returned together.
 //! 2. **The base environment.** The run waits for the first capture of the login shell's environment (ts-0056 decision
 //!    5) and takes the newest one. A phase never starts with the daemon's own environment.
 //! 3. The run is recorded `running` (`run.transition`). That event's time is the run's start, which the stop sweep reads
@@ -55,6 +55,7 @@ mod discard;
 pub mod quick_run;
 mod reprompt;
 
+use crate::adapters::claude::instructions::write_skills_plugin;
 use crate::adapters::claude::session::ClaudeSession;
 use crate::adapters::claude::user_config::{
     endpoint_in_environment, read_user_config, user_config_fingerprint,
@@ -69,6 +70,7 @@ use crate::builtin_roles::{BUILDER_DEFINITION, BUILDER_ROLE_NAME, builder_role};
 use crate::claude_versions::{ClaudeVersions, Gate};
 use crate::clock::{Clock, Clocks};
 use crate::disk::{Before, DiskError, DiskGuard, DiskPause, FloorSource, FreeSpace};
+use crate::instruction_warning::{instruction_warning, not_yet_warned};
 use crate::metrics::Metrics;
 use crate::metrics_store::WaitKind;
 use crate::models::load_user_models;
@@ -76,9 +78,9 @@ use crate::phases::{PhaseEnd, PhaseKey, PhasePause, PhaseSpec, Phases};
 use crate::queue::Queue;
 use crate::shim::ChildStdio;
 use crate::store::Store;
-use crate::workspace::{BuiltinWorkspace, WorkspaceError, WorkspaceSpec};
+use crate::workspace::{BuiltinWorkspace, Git, WorkspaceError, WorkspaceSpec};
 use collide_core::adapter::{AgentAdapter, LaunchRequest, refuse_unmet_capabilities};
-use collide_core::agent::{ModelRef, SessionStart};
+use collide_core::agent::{Capabilities, ModelRef, SessionStart};
 use collide_core::change::{Actor, ActorKind};
 use collide_core::events::{BudgetScope, EventBody};
 use collide_core::hook::WorkspaceKind;
@@ -87,7 +89,8 @@ use collide_core::owner::{
     AnswerKind, LaunchProblem, QueueAnswer, QueueAnswerResult, QueueItem, QueueKind,
     RunStartFileParams,
 };
-use collide_core::profile::RoleConfig;
+use collide_core::pack::Role;
+use collide_core::profile::{RepoInstructions, RoleConfig};
 use collide_core::resolve::resolve_model_alias;
 use collide_core::state::{PauseCause, PhaseState, RunState, WorkspaceState};
 use collide_core::workflow::{AgentPhase, OnCold, Prompt};
@@ -103,6 +106,19 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+/// The refusals for a role that requires what `capabilities` does not promise (0.3, Capabilities): one message for each
+/// unmet capability, naming the role, the capability and what the adapter said. Empty when every required capability
+/// is `Yes`, and for a role that requires none.
+pub fn check_role(role_name: &str, role: &Role, capabilities: &Capabilities) -> Vec<String> {
+    match refuse_unmet_capabilities("claude", capabilities, &role.require) {
+        Ok(()) => Vec::new(),
+        Err(refusals) => refusals
+            .iter()
+            .map(|refusal| format!("the role `{role_name}` cannot run: {refusal}"))
+            .collect(),
+    }
+}
 
 /// The name of the one phase of a file-task run.
 pub const PHASE_NAME: &str = "build";
@@ -188,6 +204,13 @@ struct RunContext {
     /// follows, and keeps that name, so the worktree is one workspace.
     #[serde(default)]
     workspace_name: Option<String>,
+    /// `collide run --config`: the run's own `config`, in place of the role's.
+    #[serde(default)]
+    config: Option<RoleConfig>,
+    /// The commit a run that is not a prompt run (`quick` holds its own) made its worktree from, which the instruction
+    /// files' warning compares with (ts-0104-gx).
+    #[serde(default)]
+    base_commit: Option<String>,
 }
 
 impl RunContext {
@@ -219,6 +242,25 @@ impl RunContext {
             workspace_recorded: true,
             quick: Some(quick),
             workspace_name: Some(prior.workspace_name().to_string()),
+            config: prior.config,
+            base_commit: prior.base_commit.clone(),
+        }
+    }
+
+    /// The built-in builder as this run runs it: its `config` is the run's own when `collide run --config` gave one.
+    fn role(&self) -> Role {
+        let mut role = builder_role();
+        if self.config.is_some() {
+            role.config = self.config;
+        }
+        role
+    }
+
+    /// The commit the instruction files are compared with: a prompt run's, or the one recorded at the worktree.
+    fn base(&self) -> Option<&str> {
+        match &self.quick {
+            Some(quick) => Some(quick.base_commit.as_str()),
+            None => self.base_commit.as_deref(),
         }
     }
 
@@ -305,6 +347,8 @@ struct Begin {
     quick: Option<QuickRun>,
     /// The context of the run this one re-prompts: the new run takes over its worktree and resumes its session.
     follows: Option<RunContext>,
+    /// `collide run --config`, kept in the run's context.
+    config: Option<RoleConfig>,
 }
 
 fn limit_item_id(run: &str) -> String {
@@ -435,6 +479,7 @@ impl FileRuns {
             model,
             quick: None,
             follows: None,
+            config: params.config,
         };
         self.begin(phases, begin, &|_| Ok(()))
     }
@@ -484,6 +529,8 @@ impl FileRuns {
                 workspace_recorded: false,
                 quick: begin.quick,
                 workspace_name: None,
+                config: begin.config,
+                base_commit: None,
             },
         };
         if let Err(error) = self.record_run(phases, &run, None, RunState::Running {}) {
@@ -538,7 +585,7 @@ impl FileRuns {
         Some((text?, model))
     }
 
-    /// The checks every run's agent shares: the role against an empty requirement, the model alias and the budget.
+    /// The checks every run's agent shares: the role's `require` ([`check_role`]), the model alias and the budget.
     /// Returns the model, which is `None` for a role with no model and for an alias that did not resolve (the problem
     /// is then in `problems`).
     fn check_agent(
@@ -547,12 +594,10 @@ impl FileRuns {
         budget_usd: Option<f64>,
         problems: &mut Vec<LaunchProblem>,
     ) -> Option<ModelRef> {
-        if let Err(refusals) = refuse_unmet_capabilities("claude", &capabilities(), &[]) {
-            for refusal in refusals {
-                problems.push(problem(refusal.to_string()));
-            }
-        }
         let role = builder_role();
+        for message in check_role(BUILDER_ROLE_NAME, &role, &capabilities()) {
+            problems.push(problem(message));
+        }
         let alias = alias.or(role.model.as_deref());
         let model = match alias {
             None => None,
@@ -651,6 +696,9 @@ impl FileRuns {
             );
         }
 
+        if ctx.quick.is_none() && ctx.base_commit.is_none() {
+            ctx.base_commit = Some(self.worktree_head(workspace)?);
+        }
         self.disk_check(&guard, &self.config.runs_dir, Before::Phase)?;
         let workspace_before = workspace.state();
         workspace.start_phase(&guard).map_err(|error| match error {
@@ -667,6 +715,70 @@ impl FileRuns {
         );
         let first_turn = ctx.task_text.clone();
         self.start_attempt(phases, run, workspace, ctx, base, &first_turn, false)
+    }
+
+    /// The commit the worktree is at, which is the one it was made from while no phase has run in it.
+    fn worktree_head(&self, workspace: &BuiltinWorkspace) -> Result<String, Halt> {
+        let location = workspace
+            .location()
+            .ok_or_else(|| problem("the worktree has no location"))?;
+        Git::with_env(self.config.git_env.clone())
+            .text(
+                Path::new(&location.path),
+                &["rev-parse", "--verify", "HEAD^{commit}"],
+            )
+            .map_err(|error| {
+                problem(format!(
+                    "reading the commit the worktree was made from: {error}"
+                ))
+                .into()
+            })
+    }
+
+    /// Warns of the instruction files the run changed since its base, before a phase starts that will read them. A
+    /// file an earlier warning of the run named is not named again. A run that cannot say what changed is refused:
+    /// the warning is the person's only sight of text the run wrote for itself.
+    fn warn_of_changed_instructions(
+        &self,
+        run: &str,
+        ctx: &RunContext,
+        role: &Role,
+        workspace_path: &Path,
+    ) -> Result<(), Halt> {
+        let Some(base) = ctx.base() else {
+            // A run that an earlier build began has no record of its base: it gets no warning, and says so.
+            self.log(&format!(
+                "run {run}: it has no record of the commit its worktree was made from, so it has no instruction warning"
+            ));
+            return Ok(());
+        };
+        let found =
+            instruction_warning(role, &self.config.git_env, workspace_path, base, PHASE_NAME)
+                .map_err(problem)?;
+        let Some(mut warning) = found else {
+            return Ok(());
+        };
+        let store = &self.config.store;
+        let earlier = store
+            .run_warnings(run)
+            .map_err(|error| problem(format!("reading the run's warnings: {error}")))?;
+        warning.files = not_yet_warned(&earlier, warning.files);
+        if warning.files.is_empty() {
+            return Ok(());
+        }
+        store
+            .add_run_warning(run, &warning)
+            .map_err(|error| problem(format!("keeping the run's warning: {error}")))?;
+        self.log(&format!(
+            "run {run}: the phase starts after {} changed: {}",
+            if warning.files.len() == 1 {
+                "an instruction file"
+            } else {
+                "instruction files"
+            },
+            warning.files.join(", ")
+        ));
+        Ok(())
     }
 
     /// Starts the phase's agent: the first attempt (`resume` false) or a later one, which resumes the session.
@@ -694,7 +806,7 @@ impl FileRuns {
         };
         let request = LaunchRequest {
             role_name: BUILDER_ROLE_NAME.to_string(),
-            role: builder_role(),
+            role: ctx.role(),
             phase_name: PHASE_NAME.to_string(),
             phase: AgentPhase {
                 role: BUILDER_ROLE_NAME.to_string(),
@@ -716,6 +828,7 @@ impl FileRuns {
             budget_left_usd: budget_left,
         };
         write_snapshot(&request, &snapshot_dir)?;
+        self.warn_of_changed_instructions(run, ctx, &request.role, &request.cwd)?;
         let adapter = ClaudeAdapter;
         let launch = adapter
             .launch(&request)
@@ -1510,6 +1623,14 @@ fn write_snapshot(request: &LaunchRequest, dir: &Path) -> Result<(), Halt> {
         let path = dir.join(name);
         fs::write(&path, text)
             .map_err(|error| problem(format!("writing {}: {error}", path.display())))?;
+    }
+    if request.role.repo_instructions != Some(RepoInstructions::None) {
+        write_skills_plugin(dir, &request.cwd).map_err(|error| {
+            problem(format!(
+                "writing the skills plugin in {}: {error}",
+                dir.display()
+            ))
+        })?;
     }
     Ok(())
 }

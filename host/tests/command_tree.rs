@@ -63,7 +63,7 @@ fn help_keeps_the_text_of_the_built_commands() {
         "collide task <id> [--json]",
         "collide sections [--json]",
         "exit codes: 0 ok, 1 failed",
-        "collide run <task-file> [--budget <usd>] [--alias <name>]",
+        "collide run <task-file> [--budget <usd>] [--alias <name>] [--config none|user]",
         "collide run --resume <run>",
     ] {
         assert!(stdout.contains(kept), "{kept} in {stdout}");

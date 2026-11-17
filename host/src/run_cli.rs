@@ -2,7 +2,7 @@
 //! worktree, through the daemon.
 //!
 //! ```text
-//! collide run <task-file> [--budget <usd>] [--alias <name>]
+//! collide run <task-file> [--budget <usd>] [--alias <name>] [--config none|user]
 //! collide run --resume <run>
 //! ```
 //!
@@ -42,6 +42,7 @@ use collide_core::owner::{
     QueueAnswerParams, QueueAnswerResult, QueueItem, QueueKind, QueueListParams, QueueListResult,
     RecordedCall, RunRecordParams, RunRecordResult, RunStartFileParams, RunStartResult, code,
 };
+use collide_core::profile::RoleConfig;
 use collide_core::state::{PauseCause, RunState};
 use std::collections::HashSet;
 use std::io::{BufRead, Write};
@@ -49,7 +50,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-pub const USAGE: &str = "usage: collide run <task-file> [--budget <usd>] [--alias <name>]\n       collide run --resume <run>";
+pub const USAGE: &str = "usage: collide run <task-file> [--budget <usd>] [--alias <name>] [--config none|user]\n\
+                         \x20      collide run --resume <run>";
 
 /// What `collide --help` prints about `collide run`.
 pub const HELP: &str = "\
@@ -61,6 +63,8 @@ collide run <task-file>: run one Claude phase on a task file (a markdown file; a
   each turn, with \"not reported\" for a value the agent did not give. Closing it leaves the run going.
   --budget <usd>: stop the phase when its cost passes this many US dollars
   --alias <name>: the model alias (the built-in builder role's, fast, when left out), mapped in ~/.config/collide/models.yaml
+  --config none|user: which settings of yours the agent reads (user's settings, hooks and env, or none of them); the
+    built-in builder role's own choice, user, when left out
 collide run --resume <run>: come back to a run. A live run is followed again, a paused one is resumed with the Queue's
   Resume answer first, and a run that is over shows its record.
 exit codes of collide run: 0 the phase ended, 1 failed to do its work (no daemon, no repository, the daemon's own
@@ -93,6 +97,7 @@ pub struct RunArgs {
     pub target: Target,
     pub budget_usd: Option<f64>,
     pub alias: Option<String>,
+    pub config: Option<RoleConfig>,
 }
 
 /// Reads the arguments after `run`. The error is the message to print with the usage.
@@ -101,6 +106,7 @@ pub fn parse(args: &[String]) -> Result<RunArgs, String> {
     let mut resume: Option<String> = None;
     let mut budget_usd: Option<f64> = None;
     let mut alias: Option<String> = None;
+    let mut config: Option<RoleConfig> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -122,6 +128,16 @@ pub fn parse(args: &[String]) -> Result<RunArgs, String> {
                     return Err("--alias is empty".to_string());
                 }
                 alias = Some(value.clone());
+            }
+            "--config" => {
+                let value = rest.next().ok_or("--config needs `none` or `user`")?;
+                config = Some(match value.as_str() {
+                    "none" => RoleConfig::None,
+                    "user" => RoleConfig::User,
+                    other => {
+                        return Err(format!("--config {other:?} is not `none` or `user`"));
+                    }
+                });
             }
             "--resume" => {
                 let value = rest.next().ok_or("--resume needs a run")?;
@@ -146,9 +162,10 @@ pub fn parse(args: &[String]) -> Result<RunArgs, String> {
         }
         (Some(task), None) => Target::Task(task),
         (None, Some(run)) => {
-            if budget_usd.is_some() || alias.is_some() {
+            if budget_usd.is_some() || alias.is_some() || config.is_some() {
                 return Err(
-                    "--resume takes no --budget or --alias: the run has its own".to_string()
+                    "--resume takes no --budget, --alias or --config: the run has its own"
+                        .to_string(),
                 );
             }
             Target::Resume(run)
@@ -159,6 +176,7 @@ pub fn parse(args: &[String]) -> Result<RunArgs, String> {
         target,
         budget_usd,
         alias,
+        config,
     })
 }
 
@@ -426,6 +444,18 @@ pub fn record_text(record: &RunRecordResult) -> String {
         text.push_str(&format!(
             "worktree: {workspace} (branch collide/{})\n",
             record.run
+        ));
+    }
+    for warning in &record.warnings {
+        text.push_str(&format!(
+            "warning: phase {} started after instruction files changed in the worktree: {}\n",
+            printable(&warning.phase),
+            warning
+                .files
+                .iter()
+                .map(|file| printable(file))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     if let Some(failure) = &record.failure {
@@ -857,6 +887,7 @@ pub fn run_in(
                 task_file: task_file.to_string_lossy().into_owned(),
                 alias: args.alias.clone(),
                 budget_usd: args.budget_usd,
+                config: args.config,
             };
             let started: Result<RunStartResult, ClientError> =
                 client.call("run.start_file", &params, Some(START_WAIT));
@@ -929,7 +960,9 @@ pub fn run_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use collide_core::owner::{PublishedVersions, SmokeCheckResult, TestedVersions};
+    use collide_core::owner::{
+        PublishedVersions, RunWarning, RunWarningKind, SmokeCheckResult, TestedVersions,
+    };
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
@@ -972,12 +1005,95 @@ mod tests {
                 target: Target::Task("t.md".to_string()),
                 budget_usd: Some(1.5),
                 alias: Some("strong".to_string()),
+                config: None,
             }
         );
         assert_eq!(
             parse(&args(&["--resume", "r-1"])).unwrap().target,
             Target::Resume("r-1".to_string())
         );
+    }
+
+    #[test]
+    fn config_none_and_config_user_are_read_and_no_flag_leaves_the_roles() {
+        let config = |list: &[&str]| parse(&args(list)).unwrap().config;
+        assert_eq!(
+            config(&["t.md", "--config", "none"]),
+            Some(RoleConfig::None)
+        );
+        assert_eq!(
+            config(&["t.md", "--config", "user"]),
+            Some(RoleConfig::User)
+        );
+        assert_eq!(
+            config(&["--config", "none", "t.md"]),
+            Some(RoleConfig::None)
+        );
+        assert_eq!(config(&["t.md"]), None);
+    }
+
+    #[test]
+    fn a_bad_config_is_refused_by_the_command_line_naming_the_value() {
+        for bad in [
+            args(&["t.md", "--config"]),
+            args(&["t.md", "--config", "project"]),
+            args(&["t.md", "--config", "None"]),
+            args(&["t.md", "--config", ""]),
+            args(&["--resume", "r", "--config", "none"]),
+        ] {
+            assert!(parse(&bad).is_err(), "{bad:?}");
+        }
+        let error = parse(&args(&["t.md", "--config", "project"])).unwrap_err();
+        assert!(
+            error.contains("project") && error.contains("none"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_runs_warnings_are_printed_one_line_each_and_none_prints_nothing() {
+        let mut record = acp_record(UsageQuality::Partial, None);
+        assert!(!record_text(&record).contains("warning"));
+        record.warnings = vec![
+            RunWarning {
+                kind: RunWarningKind::InstructionFilesChanged,
+                phase: "build".to_string(),
+                files: vec!["CLAUDE.md".to_string(), "sub/CLAUDE.md".to_string()],
+            },
+            RunWarning {
+                kind: RunWarningKind::InstructionFilesChanged,
+                phase: "review".to_string(),
+                files: vec![".claude/skills/a/SKILL.md".to_string()],
+            },
+        ];
+        let text = record_text(&record);
+        assert!(
+            text.contains(
+                "warning: phase build started after instruction files changed in the worktree: \
+                 CLAUDE.md, sub/CLAUDE.md\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "warning: phase review started after instruction files changed in the worktree: \
+                 .claude/skills/a/SKILL.md\n"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn file_names_in_a_warning_are_untrusted_so_their_control_characters_are_not_printed() {
+        let mut record = acp_record(UsageQuality::Partial, None);
+        record.warnings = vec![RunWarning {
+            kind: RunWarningKind::InstructionFilesChanged,
+            phase: "build".to_string(),
+            files: vec!["a\u{1b}[31m/CLAUDE.md".to_string()],
+        }];
+        let text = record_text(&record);
+        assert!(!text.contains('\u{1b}'), "{text:?}");
+        assert!(text.contains("a[31m/CLAUDE.md"), "{text:?}");
     }
 
     #[test]
@@ -1252,6 +1368,7 @@ mod tests {
             workspace: None,
             wall_ms: None,
             calls: crate::run_record::recorded_calls(&[], &rows, 0),
+            warnings: Vec::new(),
         }
     }
 

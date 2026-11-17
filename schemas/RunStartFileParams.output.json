@@ -1,4 +1,14 @@
 {
+  "$defs": {
+    "RoleConfig": {
+      "description": "`config: user | none`: which settings the agent tool reads (0.3, Context options).",
+      "enum": [
+        "user",
+        "none"
+      ],
+      "type": "string"
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "`run.start_file` params: a run of one task file, with no board and no workflow (ts-0065-kx). The daemon runs the\nbuilt-in `collide/builder` role in a new worktree of `repo`, and the text of `task_file` is the first turn. It is\na call of its own, so `run.start`'s request (which `run.preview` shares) does not change.",
@@ -17,6 +27,17 @@
         "number",
         "null"
       ]
+    },
+    "config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RoleConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Overrides the role's `config` for this run: `none` loads none of the user's settings."
     },
     "repo": {
       "description": "The checkout the worktree is made from: an absolute path.",
