@@ -1,7 +1,7 @@
 ---
 id: ts-0101-bd
 kind: task
-status: ready
+status: active
 title: "User packs, working copies and collide pack"
 owners: []
 links:
