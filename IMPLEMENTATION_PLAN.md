@@ -1557,7 +1557,8 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     `node_modules/@collide/pack-sdk` shadows Collide's SDK (measured S4; R2's "a snapshot has no `node_modules`" was
     wrong). So the SDK never comes from the repo.
   - `requires.sdk` names the range the pack accepts.
-  - v0 packs have no other npm dependencies; a pack that needs one vendors it.
+  - v0 packs have no other npm dependencies but `yaml`: the SDK supplies `yaml` 2.9.1 as `@collide/pack-sdk/yaml`
+    (owner, 2026-11-17; `ts-0109-qj`). A pack that needs another dependency vendors it.
   - **Built-in packs are not materialized** (R5). `collide`, `collide/plan` and any later built-in pack are compiled
     into the app bundle with their own copy of the SDK, read-only, with no cache entry, no trust prompt and no tree
     id to pin (the app's version is the pin, and the fingerprint records it). They run with `node` from the captured
@@ -4280,7 +4281,8 @@ combined into a corpus, and filtered by views.
 - **Scratch source** (0.10): tasks in Collide's store, per user per board, with `create` and `setStatus`.
   `collide task new <prompt>` creates one.
 - **Root busy (0.4):** a write to the board root waits while a rebase, merge, cherry-pick or bisect is in progress
-  there, and says why.
+  there, and says why. The daemon stores the write, answers `queued` and applies it when the root is free, and a Queue
+  item says why; the CLI waits in place (owner, 2026-11-17; `ts-0114-hr`).
 - **Corpus** with status categories, identity and collisions.
   - A task whose status its source did not declare is listed with the source's invalid items, with the status named
     (0.10, revision 23).
@@ -4294,9 +4296,10 @@ combined into a corpus, and filtered by views.
   `cel` 0.15 with S5's step-counter patch, a per-task and a per-pass step budget, a 1 KB source cap, list caps at
   load, `catch_unwind` around compile, no corpus variable, and a static cost estimate when a view is saved and when
   it loads.
-- **CLI:** `collide init`, `collide tasks [--view <name>] [--checkout <path>]`, `collide task <id> [--json]` (one
-  item: fields, status, links one hop out, version and latest run; part K), `collide task <id> <op> …`,
-  `collide config get|set`, `collide pack …`.
+- **CLI:** `collide task new <prompt>`, `collide tasks [--view <name>] [--checkout <path>]`, `collide task <id>
+  [--json]` (one item: fields, status, links one hop out, version and latest run; part K), `collide task <id> <op> …`.
+  The new forms go through the daemon; `tasks`, `task <id>` and `task create` stay direct until 4c (owner, 2026-11-17;
+  `ts-0120-wm`). `collide init`, `collide config get|set` and `collide pack …` were built in 4a.
 
 **Success Criteria**: On the Orchard repo:
 - A task shows `doing` in one worktree and `ready` at the board root, with the divergence reported.
@@ -4328,8 +4331,9 @@ combined into a corpus, and filtered by views.
   - the static estimate on a view that cannot finish within the budget;
   - a view that names a corpus variable is refused.
 - Root busy, against a fixture repo stopped mid-rebase.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-004-qd`, items lettered `4b`
-(part L).
+**Status**: Not Started. Split into `ts-0108-dq` to `ts-0121-xp` (revision 23 scope, 2026-11-17), in epic `ep-004-qd`,
+built one at a time in id order (part L). The build does not wait for 4a's owner checks. Nothing in it runs a real
+`claude`. The "On the Orchard repo" criteria are the owner's, in `ts-0121-xp`.
 
 ### Stage 4c: Planning
 

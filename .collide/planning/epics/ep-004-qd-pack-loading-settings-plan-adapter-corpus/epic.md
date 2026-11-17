@@ -20,4 +20,6 @@ Tasks come from a ref-scoped source that can be read and written, are combined i
 
 ## Notes
 
-Stage 4a is split (2026-11-16): `ts-0093-am` to `ts-0105-jv`, built one at a time in id order. The contracts and a YAML writer come first, then the git reader, the materializer and the loader, then trust, the settings layers, agent entries and the keychain, `git:` sources and `pack update`, user packs, the daemon and CLI, and last the repository instructions: measured, built, and checked by the owner. Stages 4b and 4c are split when they start (0.10, 0.15).
+Stage 4a is split (2026-11-16): `ts-0093-am` to `ts-0105-jv`, built one at a time in id order. The contracts and a YAML writer come first, then the git reader, the materializer and the loader, then trust, the settings layers, agent entries and the keychain, `git:` sources and `pack update`, user packs, the daemon and CLI, and last the repository instructions: measured, built, and checked by the owner. Stage 4c is split when it starts (0.10, 0.15).
+
+Stage 4b is split (2026-11-17): `ts-0108-dq` to `ts-0120-wm` are built one at a time in id order, and `ts-0121-xp` is the owner's check. The provider supervisor and the SDK's hooks come first, then the plan adapter (read, write, many checkouts), the daemon's sources, the write guards, the corpus (core, then daemon), CEL, views (core, then daemon), the CLI, and last the owner's check on the Orchard repo.
