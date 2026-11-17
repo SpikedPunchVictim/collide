@@ -1,7 +1,7 @@
 ---
 id: ts-0104-gx
 kind: task
-status: active
+status: done
 title: "Role options at launch: require, disallowed tools, config and repo_instructions"
 owners: []
 links:
