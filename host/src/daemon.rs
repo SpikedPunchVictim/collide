@@ -119,7 +119,6 @@ use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
 use crate::file_run::quick_run::RunDiffError;
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
-use crate::keychain::{Keychain, MemoryKeychain};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::metrics::Metrics;
@@ -134,6 +133,7 @@ use crate::run_store::{RunFilter, RunRow};
 use crate::run_summary::summarize;
 use crate::sampler::{Sampler, TICK};
 use crate::scratch::{self, ScratchSource};
+use crate::secret_store::{MemorySecretStore, SecretStore};
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
@@ -541,8 +541,8 @@ pub struct DaemonOptions {
     pub load_context: Option<LoadContextFactory>,
     /// Where `config.set --secret` keeps a secret and the load checks look for one. [`DaemonOptions::new`] gives a
     /// store in memory, so no daemon touches the OS keychain unless it is given one: `collide-daemon` gives
-    /// [`crate::keychain::system_keychain`] when it runs for a person (ts-0099-bw).
-    pub keychain: Arc<dyn Keychain>,
+    /// [`crate::secret_store::system_secret_store`] when it runs for a person (ts-0099-bw).
+    pub secret_store: Arc<dyn SecretStore>,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -599,7 +599,7 @@ impl DaemonOptions {
             subscriber_queue: SUBSCRIBER_QUEUE,
             feed_rebuilder: None,
             load_context: None,
-            keychain: Arc::new(MemoryKeychain::new()),
+            secret_store: Arc::new(MemorySecretStore::new()),
         }
     }
 }
@@ -720,7 +720,7 @@ impl Daemon {
             subscriber_queue,
             feed_rebuilder,
             load_context,
-            keychain,
+            secret_store,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -912,7 +912,7 @@ impl Daemon {
                 )
             }),
             git_env.clone(),
-            keychain,
+            secret_store,
         );
         let uid = auth::daemon_uid();
         let tree =

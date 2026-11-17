@@ -58,7 +58,7 @@
 //!
 //! | tag | function | what it does |
 //! |---|---|---|
-//! | `ui_tools: endpoint token store` | [`KeychainTokens`] | the endpoint token in the OS keychain: made at first use, read, and rotated |
+//! | `ui_tools: endpoint token store` | [`SecretStoreTokens`] | the endpoint token in the OS keychain: made at first use, read, and rotated |
 
 use crate::clock::{Clock, Clocks, Reading};
 use collide_core::ask::AskCancelParams;
@@ -218,10 +218,10 @@ pub trait EndpointTokens {
     fn rotate(&mut self) -> String;
 }
 
-/// The real [`EndpointTokens`], in the keychain. Stage 6b builds it on the port of [`crate::keychain`].
-pub struct KeychainTokens;
+/// The real [`EndpointTokens`], in the keychain. Stage 6b builds it on [`crate::secret_store::SecretStore`].
+pub struct SecretStoreTokens;
 
-impl EndpointTokens for KeychainTokens {
+impl EndpointTokens for SecretStoreTokens {
     fn current(&self) -> String {
         todo!("ui_tools: endpoint token store")
     }

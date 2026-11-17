@@ -1,6 +1,6 @@
 //! `config.set` in the daemon (ts-0099-bw; 0.7, Settings and Secrets): a secret goes to the keychain and nowhere else,
 //! and a plain setting is written to the user's file through `yaml_out`. The daemon runs in the test's process over a
-//! fixture checkout with a `MemoryKeychain` the test holds, so no test touches the real keychain, home or launchd.
+//! fixture checkout with a `MemorySecretStore` the test holds, so no test touches the real keychain, home or launchd.
 //! `~/.config/collide` is a folder of the test's own root.
 
 mod common;
@@ -9,8 +9,8 @@ use collide_core::owner::{
     ConfigGetParams, ConfigGetResult, ConfigSetParams, ConfigSetResult, ConfigWriteLayer,
     SettingLayer, code,
 };
-use collide_host::keychain::{Keychain, MemoryKeychain, Secret};
 use collide_host::owner_client::ClientError;
+use collide_host::secret_store::{MemorySecretStore, Secret, SecretStore};
 use common::config_fixture::{CapturedLog, Fixture};
 use serde_json::{Value, json};
 use std::fs;
@@ -23,21 +23,21 @@ const CANARY: &str = "canary-6f0e2d-never-written";
 
 struct Rig {
     fixture: Fixture,
-    keychain: Arc<MemoryKeychain>,
+    secret_store: Arc<MemorySecretStore>,
     log: CapturedLog,
 }
 
 fn rig() -> Rig {
-    let keychain = Arc::new(MemoryKeychain::new());
+    let secret_store = Arc::new(MemorySecretStore::new());
     let log = CapturedLog::default();
-    let (held, writer) = (keychain.clone(), log.clone());
+    let (held, writer) = (secret_store.clone(), log.clone());
     let fixture = Fixture::with_options(move |options| {
-        options.keychain = held;
+        options.secret_store = held;
         options.log = Box::new(writer);
     });
     Rig {
         fixture,
-        keychain,
+        secret_store,
         log,
     }
 }
@@ -152,7 +152,10 @@ fn a_pack_secret_is_kept_in_the_keychain_under_the_pack_item() {
         .secret(Some(&board), "ferry.notifyHook", CANARY)
         .unwrap();
     assert_eq!(
-        rig.keychain.get("pack.ferry.notifyHook").unwrap().expose(),
+        rig.secret_store
+            .get("pack.ferry.notifyHook")
+            .unwrap()
+            .expose(),
         CANARY
     );
     assert_eq!(result.entry.key, "ferry.notifyHook");
@@ -221,7 +224,10 @@ fn a_second_secret_replaces_the_first() {
     rig.secret(Some(&board), "ferry.notifyHook", "one").unwrap();
     rig.secret(Some(&board), "ferry.notifyHook", "two").unwrap();
     assert_eq!(
-        rig.keychain.get("pack.ferry.notifyHook").unwrap().expose(),
+        rig.secret_store
+            .get("pack.ferry.notifyHook")
+            .unwrap()
+            .expose(),
         "two"
     );
 }
@@ -235,7 +241,7 @@ fn an_agents_secret_is_kept_under_the_item_its_entry_names() {
     let result = rig
         .secret(None, "agents.mine.secrets.SOME_API_KEY", CANARY)
         .unwrap();
-    assert_eq!(rig.keychain.get("my-item").unwrap().expose(), CANARY);
+    assert_eq!(rig.secret_store.get("my-item").unwrap().expose(), CANARY);
     assert!(result.entry.secret);
     assert_eq!(result.entry.value, None);
     assert_eq!(
@@ -250,7 +256,7 @@ fn an_agents_secret_works_while_its_item_is_still_missing() {
     // The load refuses an entry whose item is missing, and this is how the item gets made.
     let rig = rig();
     rig.fixture.write_user("config.yaml", AGENT);
-    assert!(rig.keychain.contains("my-item") == Ok(false));
+    assert!(rig.secret_store.contains("my-item") == Ok(false));
     rig.secret(None, "agents.mine.secrets.SOME_API_KEY", "v")
         .unwrap();
 }
@@ -284,7 +290,7 @@ fn a_key_that_is_no_secret_is_refused_with_secret_naming_the_key() {
         assert_eq!(code, code::INVALID_PARAMS, "{key}");
         assert!(message.contains(key), "{message}");
     }
-    assert_eq!(rig.keychain.contains("pack.ferry.greeting"), Ok(false));
+    assert_eq!(rig.secret_store.contains("pack.ferry.greeting"), Ok(false));
 }
 
 #[test]
@@ -314,7 +320,10 @@ fn an_empty_secret_or_one_that_is_not_text_is_refused() {
             .unwrap_err();
         assert_eq!(code, code::INVALID_PARAMS);
     }
-    assert_eq!(rig.keychain.contains("pack.ferry.notifyHook"), Ok(false));
+    assert_eq!(
+        rig.secret_store.contains("pack.ferry.notifyHook"),
+        Ok(false)
+    );
 }
 
 #[test]
@@ -340,7 +349,10 @@ fn a_secret_asked_for_with_layer_repo_is_still_a_keychain_write() {
     ))
     .unwrap();
     assert_eq!(
-        rig.keychain.get("pack.ferry.notifyHook").unwrap().expose(),
+        rig.secret_store
+            .get("pack.ferry.notifyHook")
+            .unwrap()
+            .expose(),
         "v"
     );
 }
@@ -348,27 +360,31 @@ fn a_secret_asked_for_with_layer_repo_is_still_a_keychain_write() {
 #[test]
 fn a_keychain_that_fails_is_reported_without_the_value() {
     struct Failing;
-    impl Keychain for Failing {
-        fn set(&self, item: &str, _: &Secret) -> Result<(), collide_host::keychain::KeychainError> {
-            Err(collide_host::keychain::KeychainError::Failed {
+    impl SecretStore for Failing {
+        fn set(
+            &self,
+            item: &str,
+            _: &Secret,
+        ) -> Result<(), collide_host::secret_store::SecretStoreError> {
+            Err(collide_host::secret_store::SecretStoreError::Failed {
                 item: item.to_string(),
                 what: "store",
                 reason: "locked".into(),
             })
         }
-        fn contains(&self, _: &str) -> Result<bool, collide_host::keychain::KeychainError> {
+        fn contains(&self, _: &str) -> Result<bool, collide_host::secret_store::SecretStoreError> {
             Ok(false)
         }
-        fn get(&self, item: &str) -> Result<Secret, collide_host::keychain::KeychainError> {
-            Err(collide_host::keychain::KeychainError::NotFound {
+        fn get(&self, item: &str) -> Result<Secret, collide_host::secret_store::SecretStoreError> {
+            Err(collide_host::secret_store::SecretStoreError::NotFound {
                 item: item.to_string(),
             })
         }
-        fn delete(&self, _: &str) -> Result<(), collide_host::keychain::KeychainError> {
+        fn delete(&self, _: &str) -> Result<(), collide_host::secret_store::SecretStoreError> {
             Ok(())
         }
     }
-    let fixture = Fixture::with_options(|options| options.keychain = Arc::new(Failing));
+    let fixture = Fixture::with_options(|options| options.secret_store = Arc::new(Failing));
     fixture.ferry();
     fixture.commit();
     let board = fixture.board();
@@ -578,7 +594,10 @@ fn a_secret_key_without_secret_is_refused_and_says_to_use_secret() {
         "{message}"
     );
     assert!(!message.contains(CANARY));
-    assert_eq!(rig.keychain.contains("pack.ferry.notifyHook"), Ok(false));
+    assert_eq!(
+        rig.secret_store.contains("pack.ferry.notifyHook"),
+        Ok(false)
+    );
     assert_eq!(rig.user_file(&format!("boards/{board}/config.yaml")), "");
 }
 

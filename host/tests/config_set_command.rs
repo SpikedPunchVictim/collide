@@ -1,12 +1,12 @@
 //! `collide config set` (ts-0099-bw): the command line, and the command over a daemon in the test's own process (a
-//! fixture checkout, a temp home, a `MemoryKeychain` the test holds). `--secret` reads the value from standard input
+//! fixture checkout, a temp home, a `MemorySecretStore` the test holds). `--secret` reads the value from standard input
 //! and refuses one on the command line, whose arguments other processes can read. No test touches the real keychain,
 //! home or launchd.
 
 mod common;
 
 use collide_host::config_set_cli::{SetArgs, parse_set, run_set_with};
-use collide_host::keychain::{Keychain, MemoryKeychain};
+use collide_host::secret_store::{MemorySecretStore, SecretStore};
 use collide_host::task_cli::exit;
 use common::config_fixture::Fixture;
 use std::fs;
@@ -103,15 +103,15 @@ fn a_bad_command_line_is_refused() {
 
 struct Rig {
     fixture: Fixture,
-    keychain: Arc<MemoryKeychain>,
+    secret_store: Arc<MemorySecretStore>,
 }
 
 fn rig() -> Rig {
-    let keychain = Arc::new(MemoryKeychain::new());
-    let held = keychain.clone();
+    let secret_store = Arc::new(MemorySecretStore::new());
+    let held = secret_store.clone();
     Rig {
-        fixture: Fixture::with_options(move |options| options.keychain = held),
-        keychain,
+        fixture: Fixture::with_options(move |options| options.secret_store = held),
+        secret_store,
     }
 }
 
@@ -159,7 +159,10 @@ fn a_secret_from_standard_input_is_kept_in_the_keychain_and_printed_as_set() {
     );
     assert_eq!(code, exit::OK, "{err}");
     assert_eq!(
-        rig.keychain.get("pack.ferry.notifyHook").unwrap().expose(),
+        rig.secret_store
+            .get("pack.ferry.notifyHook")
+            .unwrap()
+            .expose(),
         CANARY
     );
     assert_eq!(
@@ -184,7 +187,10 @@ fn one_trailing_newline_is_trimmed_and_no_more() {
         let (code, _, err) = rig.set(&["ferry.notifyHook", "--secret"], input.as_bytes());
         assert_eq!(code, exit::OK, "{input:?}: {err}");
         assert_eq!(
-            rig.keychain.get("pack.ferry.notifyHook").unwrap().expose(),
+            rig.secret_store
+                .get("pack.ferry.notifyHook")
+                .unwrap()
+                .expose(),
             kept,
             "{input:?}"
         );
@@ -200,7 +206,10 @@ fn a_secret_on_the_command_line_is_refused_with_the_usage_and_nothing_is_kept() 
     assert!(out.is_empty());
     assert!(err.contains("usage: collide config set"), "{err}");
     assert!(!err.contains(CANARY), "{err}");
-    assert_eq!(rig.keychain.contains("pack.ferry.notifyHook"), Ok(false));
+    assert_eq!(
+        rig.secret_store.contains("pack.ferry.notifyHook"),
+        Ok(false)
+    );
 }
 
 #[test]
@@ -212,7 +221,10 @@ fn an_empty_standard_input_is_refused_and_nothing_is_kept() {
         assert_eq!(code, exit::FAILED, "{input:?}");
         assert!(err.contains("empty"), "{err}");
     }
-    assert_eq!(rig.keychain.contains("pack.ferry.notifyHook"), Ok(false));
+    assert_eq!(
+        rig.secret_store.contains("pack.ferry.notifyHook"),
+        Ok(false)
+    );
 }
 
 #[test]
@@ -225,7 +237,10 @@ fn standard_input_that_is_not_text_or_is_far_too_long_is_refused() {
     let (code, _, err) = rig.set(&["ferry.notifyHook", "--secret"], &vec![b'a'; 70_000]);
     assert_eq!(code, exit::FAILED);
     assert!(err.contains("long"), "{err}");
-    assert_eq!(rig.keychain.contains("pack.ferry.notifyHook"), Ok(false));
+    assert_eq!(
+        rig.secret_store.contains("pack.ferry.notifyHook"),
+        Ok(false)
+    );
 }
 
 #[test]

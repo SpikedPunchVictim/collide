@@ -1,25 +1,25 @@
 //! The agent entries through `config.get` and the load checks that need the machine (ts-0099-bw; 0.7, Agent entries):
 //! the layer of every field, `ask.agent`, the notice for a default budget an agent cannot enforce, a `read` folder that
 //! is not there, and a `secrets` item the keychain does not hold. The daemon runs in the test's process over a fixture
-//! checkout with a `MemoryKeychain`; no test touches the real keychain, home or launchd.
+//! checkout with a `MemorySecretStore`; no test touches the real keychain, home or launchd.
 
 mod common;
 
 use collide_core::owner::{ConfigEntry, ConfigGetParams, ConfigGetResult, SettingLayer, code};
 use collide_core::settings::AGENT_KEYS;
-use collide_host::keychain::{Keychain, MemoryKeychain, Secret};
 use collide_host::owner_client::ClientError;
+use collide_host::secret_store::{MemorySecretStore, Secret, SecretStore};
 use common::config_fixture::Fixture;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-fn fixture() -> (Fixture, Arc<MemoryKeychain>) {
-    let keychain = Arc::new(MemoryKeychain::new());
-    let held = keychain.clone();
+fn fixture() -> (Fixture, Arc<MemorySecretStore>) {
+    let secret_store = Arc::new(MemorySecretStore::new());
+    let held = secret_store.clone();
     (
-        Fixture::with_options(move |options| options.keychain = held),
-        keychain,
+        Fixture::with_options(move |options| options.secret_store = held),
+        secret_store,
     )
 }
 
@@ -350,7 +350,7 @@ fn the_board_root_is_the_folder_of_the_board_and_exists() {
 
 #[test]
 fn a_missing_keychain_item_fails_naming_the_item_and_the_key_and_a_present_one_loads() {
-    let (fixture, keychain) = fixture();
+    let (fixture, secret_store) = fixture();
     fixture.write_user(
         "config.yaml",
         "agents:\n  mine:\n    kind: external\n    secrets: { SOME_API_KEY: my-item }\n",
@@ -361,7 +361,7 @@ fn a_missing_keychain_item_fails_naming_the_item_and_the_key_and_a_present_one_l
         message.contains("my-item") && message.contains("agents.mine.secrets.SOME_API_KEY"),
         "{message}"
     );
-    keychain.set("my-item", &Secret::new("v")).unwrap();
+    secret_store.set("my-item", &Secret::new("v")).unwrap();
     call(&fixture, None, None).unwrap();
 }
 

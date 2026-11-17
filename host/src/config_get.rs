@@ -25,10 +25,10 @@ use crate::boards;
 use crate::builtin_packs::{BuiltinPacks, Environment};
 use crate::git_fetch::{FetchEnv, GitFetch};
 use crate::hosts::KnownHosts;
-use crate::keychain::{Keychain, Secret, pack_item};
 use crate::pack_cache::ensure_sdk;
 use crate::pack_location::{Inputs, bundle_sdk, locate_bundle};
 use crate::pack_update::{PackUpdateError, UpdateSite, pack_update};
+use crate::secret_store::{Secret, SecretStore, pack_item};
 use crate::settings_files::{UserFiles, read_user_files, user_config_dir};
 use collide_core::agent_layers::{AgentInputs, AgentLayers, agent_layers};
 use collide_core::owner::{
@@ -122,7 +122,7 @@ pub struct ConfigService {
     home: Option<PathBuf>,
     load_context: LoadContextFactory,
     git_env: Vec<(String, String)>,
-    keychain: Arc<dyn Keychain>,
+    secret_store: Arc<dyn SecretStore>,
 }
 
 /// What a request starts from: the user's files, the repo's line, and the problems of reading them.
@@ -192,13 +192,13 @@ impl ConfigService {
         home: Option<String>,
         load_context: LoadContextFactory,
         git_env: Vec<(String, String)>,
-        keychain: Arc<dyn Keychain>,
+        secret_store: Arc<dyn SecretStore>,
     ) -> ConfigService {
         ConfigService {
             home: home.filter(|home| !home.is_empty()).map(PathBuf::from),
             load_context,
             git_env,
-            keychain,
+            secret_store,
         }
     }
 
@@ -276,9 +276,13 @@ impl ConfigService {
         let mut problems = resolved.problems();
         let board_root = board.map(|board| board.root);
         problems.extend(
-            check_agent_environment(&resolved.agents.agents, board_root, self.keychain.as_ref())
-                .into_iter()
-                .map(|problem| problem.message),
+            check_agent_environment(
+                &resolved.agents.agents,
+                board_root,
+                self.secret_store.as_ref(),
+            )
+            .into_iter()
+            .map(|problem| problem.message),
         );
         if !problems.is_empty() {
             return Err(GetError::Refused(problems.join("\n")));
@@ -355,7 +359,7 @@ impl ConfigService {
             }
         };
         let item = self.secret_item(key, board.is_some(), gathered)?;
-        self.keychain
+        self.secret_store
             .set(&item, &secret)
             .map_err(|error| SetError::Failed(error.to_string()))?;
         Ok(ConfigSetResult {

@@ -4,7 +4,7 @@ use collide_core::owner::{RpcError, code};
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::SystemClocks;
 use collide_host::daemon::{DaemonPaths, ROOT_ENV};
-use collide_host::ui_tools::{KeychainTokens, UiToolsEndpoint};
+use collide_host::ui_tools::{SecretStoreTokens, UiToolsEndpoint};
 use serde_json::Value;
 use shell::{
     ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, LaunchStarter, Shell, ShellHandle,
@@ -73,7 +73,7 @@ fn build_shell(channel: Arc<dyn EventChannel>, access: Arc<DaemonAccess>) -> She
     let endpoint = UiToolsEndpoint::new(
         UNBOUND_PORT,
         ToolManifest(Vec::new()),
-        Box::new(KeychainTokens),
+        Box::new(SecretStoreTokens),
         Box::new(ChannelWindow::new(channel)),
         Box::new(SystemClocks),
     )

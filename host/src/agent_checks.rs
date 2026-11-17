@@ -5,9 +5,9 @@
 //! - a `read` folder that does not exist is an error naming the key and the folder. `<board root>` stands for the
 //!   board's root, the default line's root; with no board it has no meaning and is not checked;
 //! - a `secrets` entry whose keychain item is missing is an error naming the item and the key. Only
-//!   [`Keychain::contains`] is asked: the value is read at launch (Stage 6b), never at load.
+//!   [`SecretStore::contains`] is asked: the value is read at launch (Stage 6b), never at load.
 
-use crate::keychain::Keychain;
+use crate::secret_store::SecretStore;
 use collide_core::agent_layers::AgentView;
 use collide_core::settings_layers::SettingProblem;
 use std::path::{Path, PathBuf};
@@ -31,7 +31,7 @@ fn read_folder(entry: &str, board_root: Option<&Path>) -> Option<PathBuf> {
 pub fn check_agent_environment(
     agents: &[AgentView],
     board_root: Option<&Path>,
-    keychain: &dyn Keychain,
+    secret_store: &dyn SecretStore,
 ) -> Vec<SettingProblem> {
     let mut problems = Vec::new();
     for agent in agents {
@@ -51,7 +51,7 @@ pub fn check_agent_environment(
         }
         for (name, item) in agent.entry.secrets.iter().flatten() {
             let key = format!("agents.{id}.secrets.{name}");
-            let message = match keychain.contains(item) {
+            let message = match secret_store.contains(item) {
                 Ok(true) => continue,
                 Ok(false) => format!(
                     "`{key}`: the keychain has no item `{item}`; set it with `collide config set --secret {key}`"

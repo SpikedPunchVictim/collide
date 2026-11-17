@@ -5574,6 +5574,12 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **Windows** (ConPTY, Job Objects).
 - **Linux:** a systemd user service with `KillMode=process`, `/proc/<pid>/environ` for the marker scan,
   `PR_SET_CHILD_SUBREAPER` for orphans, and `ru_maxrss` in KiB (S3, herdr-core).
+- **Secrets on Windows and Linux** (owner, 2026-11-16): each is one more store behind the `SecretStore` trait
+  (`host`), from the keyring-rs store crates: `windows-native-keyring-store` and `zbus-secret-service-keyring-store`,
+  over `keyring-core`. First check that a store can be used without `keyring-core`'s process-wide default, which the
+  injected store of the tests needs. Moving macOS onto `apple-native-keyring-store` too needs `security-framework`
+  3.7 or later (now 2.11.1): decide then. A Linux machine with no desktop keyring (headless) has no Secret Service,
+  and the kernel keyring forgets on reboot: a product question for that stage.
 
 ## Open questions (owner's call)
 

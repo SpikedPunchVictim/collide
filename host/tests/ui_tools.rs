@@ -8,7 +8,7 @@ use collide_core::ui_tools::{
 };
 use collide_host::clock::{Clock, Clocks, Reading};
 use collide_host::ui_tools::{
-    EndpointTokens, Handled, HttpRequest, HttpResponse, KeychainTokens, MAX_BODY_BYTES, Rpc,
+    EndpointTokens, Handled, HttpRequest, HttpResponse, MAX_BODY_BYTES, Rpc, SecretStoreTokens,
     UiToolsEndpoint, Window,
 };
 use serde_json::{Value, json};
@@ -1067,5 +1067,5 @@ fn a_manifest_that_fails_its_check_is_refused_at_construction() {
 #[test]
 #[should_panic(expected = "ui_tools: endpoint token store")]
 fn the_keychain_token_store_is_a_stub_tagged_for_stage_6b() {
-    let _ = KeychainTokens.current();
+    let _ = SecretStoreTokens.current();
 }
