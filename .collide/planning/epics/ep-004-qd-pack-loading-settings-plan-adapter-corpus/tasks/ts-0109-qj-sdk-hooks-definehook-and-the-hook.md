@@ -1,7 +1,7 @@
 ---
 id: ts-0109-qj
 kind: task
-status: ready
+status: done
 title: "SDK hooks: defineHook and the hook context"
 owners: []
 links:
