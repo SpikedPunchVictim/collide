@@ -2,7 +2,7 @@
   "$defs": {
     "PackEntry": {
       "additionalProperties": false,
-      "description": "One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7).",
+      "description": "One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7). `working_copy`\nmarks a repo pack whose folder in the user's checkout differs from the line's ref, so `pack link` can use it.\n`review` is what `pack add` asks the person to trust.",
       "properties": {
         "dev": {
           "type": "boolean"
@@ -16,8 +16,21 @@
         "origin": {
           "$ref": "#/$defs/PackOrigin"
         },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackReviewData"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "source": {
           "type": "string"
+        },
+        "working_copy": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -46,16 +59,115 @@
           "const": "user",
           "description": "Added with `collide pack add`, switched on per board.",
           "type": "string"
+        },
+        {
+          "const": "offered",
+          "description": "A new folder under `.collide/packs/` in the user's checkout that `board.yaml` does not list: a working copy\nthat can be linked (0.7, Working copies).",
+          "type": "string"
         }
       ]
+    },
+    "PackReviewData": {
+      "additionalProperties": false,
+      "description": "What a person is shown before trusting a pack (0.9, Per pack source): where it is from, the hooks, providers and\nobservers it runs, and what it requires.",
+      "properties": {
+        "commit": {
+          "description": "The commit a `git:` source resolved to. Absent for a `dev:` folder.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/PackReviewLine"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "observers": {
+          "description": "A key holds the events the observer gets.",
+          "items": {
+            "$ref": "#/$defs/PackReviewLine"
+          },
+          "type": "array"
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/PackReviewLine"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tree": {
+          "description": "The tree id the pack is trusted at.",
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "tree",
+        "hooks",
+        "providers",
+        "observers",
+        "requires"
+      ],
+      "type": "object"
+    },
+    "PackReviewLine": {
+      "additionalProperties": false,
+      "description": "One script or provider a pack runs, with the manifest key that names it.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "script"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The result of `config.pack_add`, `config.pack_link` and `config.pack_enable`: the pack after the change.",
+  "description": "The result of `config.pack_add`, `config.pack_link` and `config.pack_enable`: the pack after the change.\n`written` is false when nothing changed (a preview, or a change that was already made), and `note` says why.",
   "properties": {
+    "needs_host": {
+      "description": "A host never fetched from that the add needs a yes for: nothing was fetched or written.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "pack": {
       "$ref": "#/$defs/PackEntry"
+    },
+    "written": {
+      "default": false,
+      "type": "boolean"
     }
   },
   "required": [

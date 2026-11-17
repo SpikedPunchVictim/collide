@@ -160,7 +160,45 @@ fn sample_file() -> TrustFile {
     );
     file.set_pack("git:https://example.invalid/p.git", ID_A);
     file.add_dev("/work/dev-pack");
+    file.set_working_copy_seen("/work/main-repo/.collide/packs/ferry", ID_B);
+    file.note_integrated("/work/main-repo/.collide/packs/ferry", ID_C);
     file
+}
+
+#[test]
+fn a_working_copy_waits_for_an_acknowledgement_only_after_an_integrate_changed_it() {
+    let mut file = TrustFile::default();
+    let folder = "/work/main-repo/.collide/packs/ferry";
+    file.set_working_copy_seen(folder, ID_A);
+    assert_eq!(
+        file.working_copy_waiting(folder),
+        None,
+        "seen, not integrated"
+    );
+    file.note_integrated(folder, ID_B);
+    assert_eq!(file.working_copy_waiting(folder), Some((ID_A, ID_B)));
+}
+
+#[test]
+fn an_acknowledgement_clears_the_tree_it_names_and_not_a_later_one() {
+    let mut file = TrustFile::default();
+    let folder = "/work/main-repo/.collide/packs/ferry";
+    file.set_working_copy_seen(folder, ID_A);
+    file.note_integrated(folder, ID_B);
+    file.note_integrated(folder, ID_C);
+    assert!(
+        !file.acknowledge_working_copy(folder, ID_B),
+        "B is not the one waiting"
+    );
+    assert_eq!(file.working_copy_waiting(folder), Some((ID_A, ID_C)));
+    assert!(file.acknowledge_working_copy(folder, ID_C));
+    assert_eq!(file.working_copy_waiting(folder), None);
+    file.note_integrated(folder, ID_B);
+    assert_eq!(
+        file.working_copy_waiting(folder),
+        Some((ID_C, ID_B)),
+        "the next integrate asks again"
+    );
 }
 
 #[test]

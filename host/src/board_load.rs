@@ -17,8 +17,13 @@
 //! fetch reports the missing entry. A host never fetched from is a problem with [`LoadProblem::needs_host`] set, and
 //! nothing is fetched.
 //!
-//! Left to later items: trust (`ts-0097-kw` hashes [`LoadedLine::trust_inputs`]), the settings layers
-//! (`ts-0098-nx`), user packs (`ts-0101-bd`) and the daemon's use of all this (`ts-0102-vu`).
+//! With a user scope ([`LoadContext::with_user`], `ts-0101-bd`) the line also loads the user's packs after the board's
+//! ([`crate::user_packs`]): a working copy linked over a repo pack takes the repo pack's place in the order, then each
+//! `git:` or `dev:` pack the user added that this board has switched on. A user pack that is off is not fetched, read
+//! or checked. A name that two packs would share is a problem naming both sources, and so is a `dev:` folder under a
+//! Collide workspace. A user pack is not a trust input of the line: the user trusts it by its own tree id.
+//!
+//! Left to later items: the settings layers (`ts-0098-nx`) and the daemon's use of all this (`ts-0102-vu`).
 
 use crate::bounded_run::{run_bounded, tail};
 use crate::builtin_packs::{BuiltinPacks, Environment, is_plain_file_name};
@@ -26,6 +31,8 @@ use crate::git_fetch::{FetchError, GitFetch, mirror_path};
 use crate::git_objects::{GitObjects, ObjectKind, TreeEntry};
 use crate::hosts::KnownHosts;
 use crate::pack_cache::{Materializer, cached_entry, sdk_version};
+use crate::trust::check_dev_folder;
+use crate::user_packs::{PACKS_FILE, UserScope};
 use collide_core::board::{Board, CollidePointer, check_board, check_pointer};
 use collide_core::lock::{GitLocator, LockEntry, PackLock, PackSource, check_lock};
 use collide_core::pack::{PackManifest, Requires};
@@ -70,7 +77,7 @@ impl fmt::Display for LoadProblem {
 
 impl std::error::Error for LoadProblem {}
 
-/// Where a pack came from. User packs and `dev:` folders join this in `ts-0101-bd`.
+/// Where a pack came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackOrigin {
     /// In the app bundle: no pin, no cache entry, no trust (0.4).
@@ -79,6 +86,11 @@ pub enum PackOrigin {
     Repo,
     /// `git:`, pinned by the lock's tree.
     Git,
+    /// A pack the user added (`git:` pinned by the user's lock, or `dev:`), switched on for this board.
+    User,
+    /// A working copy the user linked on this board: a `dev:` folder, in the place of the repo pack it overrides or
+    /// after the board's packs.
+    Linked,
 }
 
 /// A file of `views/`, listed and not read: Stage 4b parses views.
@@ -104,6 +116,10 @@ pub struct LoadedPack {
     /// The cache entry folder. `None` for a built-in pack.
     pub entry: Option<PathBuf>,
     pub manifest: PackManifest,
+    /// A `dev:` folder, read from the folder as it is now and not from a snapshot: badged wherever it is shown.
+    pub dev: bool,
+    /// For a linked working copy, the source of the repo pack it took the place of. `None` otherwise.
+    pub overrides: Option<String>,
 }
 
 /// A line, loaded and checked.
@@ -150,6 +166,8 @@ pub struct LoadContext {
     pub tool_timeout: Duration,
     /// How a `git:` pack that is not in the cache is fetched. `None`: it is not, and the load says so.
     pub fetch: Option<FetchSetup>,
+    /// The user and board whose packs are loaded after the board's. `None`: the line's own packs only.
+    pub user: Option<UserScope>,
 }
 
 /// What fetching a pack needs: the rules ([`GitFetch`]) and the hosts the person has allowed ([`KnownHosts`]).
@@ -176,7 +194,14 @@ impl LoadContext {
             materializer: Materializer::new(),
             tool_timeout: TOOL_VERSION_TIMEOUT,
             fetch: None,
+            user: None,
         }
+    }
+
+    /// Loads `user`'s packs after the board's, for the board the scope names.
+    pub fn with_user(mut self, user: UserScope) -> LoadContext {
+        self.user = Some(user);
+        self
     }
 
     /// Lets a `git:` pack that is not in the cache be fetched, under the rules of `fetch`.
@@ -233,6 +258,9 @@ pub fn load_line(
     if let (Some(dir), Some(board)) = (&dir, &files.board) {
         load.board_packs(dir, board, &files.lock, &mut names, &mut packs);
     }
+    if let Some(scope) = &context.user {
+        load.user_packs(scope, &mut names, &mut packs);
+    }
     if !load.problems.is_empty() {
         return Err(load.problems);
     }
@@ -248,6 +276,58 @@ pub fn load_line(
         views: files.views,
         packs,
         inputs,
+    })
+}
+
+/// A `dev:` folder to load as a pack: `source` is the text shown, `folder` the path it names, `expect` the name a link
+/// gives it, and `overrides` the source of the repo pack a link took the place of.
+struct DevFolder {
+    source: String,
+    folder: String,
+    expect: Option<String>,
+    origin: PackOrigin,
+    overrides: Option<String>,
+}
+
+/// What `board.yaml` and the lock hold at a commit, read with no check and no pack loaded: the way to find a pack
+/// when the line does not load (`collide pack update` moves a pack off a pin that breaks the load).
+#[derive(Debug, Clone)]
+pub struct BoardFiles {
+    pub commit: String,
+    /// The Collide directory as a path in the repo, as the loader finds it. `None` when there is none.
+    pub collide_dir: Option<String>,
+    /// `None` when there is no `board.yaml` or it does not read.
+    pub board: Option<Board>,
+    /// Empty when there is no lock or it does not read.
+    pub lock: PackLock,
+}
+
+/// Reads the Collide directory, `board.yaml` and `packs.lock` at `rev`. Anything that does not read is left empty:
+/// [`load_line`] is the one that reports it.
+pub fn board_files(repo: &Path, rev: &str, context: &LoadContext) -> Result<BoardFiles, String> {
+    let commit = context
+        .git
+        .resolve_commit(repo, rev)
+        .map_err(|error| error.to_string())?;
+    let mut load = Load {
+        repo,
+        context,
+        commit,
+        problems: Vec::new(),
+        inputs: Vec::new(),
+        tools: BTreeMap::new(),
+        sdk: None,
+    };
+    let dir = load.collide_dir();
+    let files = match &dir {
+        Some(dir) => load.read_files(dir),
+        None => Files::default(),
+    };
+    Ok(BoardFiles {
+        commit: load.commit,
+        collide_dir: dir.map(|dir| dir.path),
+        board: files.board,
+        lock: files.lock,
     })
 }
 
@@ -361,6 +441,17 @@ impl Load<'_> {
         detail: impl fmt::Display,
     ) {
         self.problems.push(problem(pack, file, key, detail));
+    }
+
+    /// A problem whose message is already whole.
+    fn push_text(&mut self, file: &str, message: String) {
+        self.problems.push(LoadProblem {
+            pack: None,
+            file: file.to_string(),
+            key: None,
+            message,
+            needs_host: None,
+        });
     }
 
     // ---- the Collide directory ----
@@ -648,6 +739,8 @@ impl Load<'_> {
                     dir,
                     entry: None,
                     manifest,
+                    dev: false,
+                    overrides: None,
                 }),
                 Err(error) => self.push(
                     None,
@@ -692,10 +785,204 @@ impl Load<'_> {
                     None
                 }
                 Ok(PackSource::Repo { path }) => self.repo_pack(&entry.source, &path, names),
-                Ok(PackSource::Git { .. }) => self.git_pack(dir, &entry.source, lock, names),
+                Ok(PackSource::Git { .. }) => self.git_pack(
+                    &dir.file("packs.lock"),
+                    &entry.source,
+                    lock,
+                    PackOrigin::Git,
+                    names,
+                ),
             };
             packs.extend(loaded);
         }
+    }
+
+    /// The user's packs, after the board's: links first (each replaces the repo pack of its name in place, or follows
+    /// the board's packs when there is none), then the packs the user added that this board has switched on.
+    fn user_packs(&mut self, scope: &UserScope, names: &mut Names, packs: &mut Vec<LoadedPack>) {
+        let state = match scope.read() {
+            Ok(state) => state,
+            Err(errors) => {
+                for message in errors {
+                    self.push_text(PACKS_FILE, message);
+                }
+                return;
+            }
+        };
+        for (name, folder) in &state.board.links {
+            let source = format!("dev:{folder}");
+            let slot = packs
+                .iter()
+                .position(|pack| pack.name == *name && pack.origin == PackOrigin::Repo);
+            let overrides = slot.and_then(|index| packs[index].source.clone());
+            if slot.is_some() {
+                // The link takes the repo pack's name, so the name is free for it.
+                names.0.retain(|(taken, holder)| {
+                    taken != name || !holder.starts_with("the pack `repo:")
+                });
+            }
+            let dev = DevFolder {
+                source,
+                folder: folder.clone(),
+                expect: Some(name.clone()),
+                origin: PackOrigin::Linked,
+                overrides,
+            };
+            let loaded = self.dev_pack(scope, dev, names);
+            match (loaded, slot) {
+                (Some(pack), Some(index)) => packs[index] = pack,
+                (Some(pack), None) => packs.push(pack),
+                (None, _) => {}
+            }
+        }
+        let lock_path = scope.lock_file().display().to_string();
+        let known: Vec<Option<String>> = state
+            .sources
+            .iter()
+            .map(|source| {
+                scope.name_of(
+                    source,
+                    &state.lock,
+                    &self.context.git,
+                    &self.context.cache,
+                    &self.context.sdk,
+                )
+            })
+            .collect();
+        let is_on = |name: &str| state.board.on.iter().any(|on| on == name);
+        // A pack whose name cannot be read without loading it is loaded only when this board switched on a name no
+        // readable pack has, so one broken pack does not fail every board.
+        let unread_may_be_on = state
+            .board
+            .on
+            .iter()
+            .any(|on| !known.iter().flatten().any(|name| name == on));
+        for (source, known) in state.sources.iter().zip(known) {
+            match known.as_deref() {
+                Some(name) if !is_on(name) => continue,
+                None if !unread_may_be_on => continue,
+                _ => {}
+            }
+            let loaded = match PackSource::parse(source) {
+                Ok(PackSource::Git { .. }) => {
+                    self.git_pack(&lock_path, source, &state.lock, PackOrigin::User, names)
+                }
+                Ok(PackSource::Dev { path }) => {
+                    let dev = DevFolder {
+                        source: source.clone(),
+                        folder: path,
+                        expect: None,
+                        origin: PackOrigin::User,
+                        overrides: None,
+                    };
+                    self.dev_pack(scope, dev, names)
+                }
+                Ok(PackSource::Other { scheme, .. }) => {
+                    self.push_text(
+                        PACKS_FILE,
+                        format!(
+                            "{}: `{source}`: the scheme `{scheme}:` is not supported; use `git:` or `dev:`",
+                            scope.packs_file().display()
+                        ),
+                    );
+                    None
+                }
+                // `read` refused these with its own message.
+                Ok(PackSource::Repo { .. }) | Err(_) => None,
+            };
+            let Some(pack) = loaded else {
+                continue;
+            };
+            // A pack whose name was not known without loading it, and that is off: it was loaded to find out.
+            if known.is_none() && !is_on(&pack.name) {
+                let holder = format!("the pack `{source}`");
+                names.0.retain(|(_, taken_by)| *taken_by != holder);
+                continue;
+            }
+            packs.push(pack);
+        }
+    }
+
+    /// A `dev:` folder, read as it is now: no snapshot, no cache entry. It must not be under a Collide workspace, its
+    /// manifest must check, and its tree id (git's, over its files) is its pin. `expect` is the name a link gives it.
+    fn dev_pack(
+        &mut self,
+        scope: &UserScope,
+        dev: DevFolder,
+        names: &mut Names,
+    ) -> Option<LoadedPack> {
+        let DevFolder {
+            source,
+            folder,
+            expect,
+            origin,
+            overrides,
+        } = dev;
+        let (source, folder, expect) = (source.as_str(), folder.as_str(), expect.as_deref());
+        let real = match check_dev_folder(&scope.expand(folder), scope.workspaces()) {
+            Ok(real) => real,
+            Err(error) => {
+                self.push(Some(source), folder, None, error);
+                return None;
+            }
+        };
+        let manifest = self.read_manifest(source, &real.join("pack.yaml"))?;
+        if let Some(expected) = expect
+            && manifest.name != expected
+        {
+            self.push(
+                Some(source),
+                "pack.yaml",
+                Some("name"),
+                format!(
+                    "the folder {} holds the pack `{}`, not `{expected}`, so it cannot be linked as `{expected}`",
+                    real.display(),
+                    manifest.name
+                ),
+            );
+            return None;
+        }
+        let before = self.problems.len();
+        let label = format!("`{}` ({source})", manifest.name);
+        self.check_names(source, &label, &manifest, names);
+        if let Some(requires) = &manifest.requires {
+            self.check_requires(source, &label, requires);
+        }
+        if self.problems.len() > before {
+            return None;
+        }
+        let tree = match self.context.git.tree_of_folder(&real) {
+            Ok(tree) => tree,
+            Err(error) => {
+                self.push(Some(source), folder, None, error);
+                return None;
+            }
+        };
+        if origin == PackOrigin::Linked {
+            let copies = scope.working_copies(&self.context.git, &self.context.cache);
+            match copies.waiting(&real) {
+                Ok(None) => {}
+                Ok(Some(waiting)) => {
+                    self.push_text(&real.display().to_string(), waiting.render(&real));
+                    return None;
+                }
+                Err(error) => {
+                    self.push(Some(source), folder, None, error);
+                    return None;
+                }
+            }
+        }
+        Some(LoadedPack {
+            name: manifest.name.clone(),
+            origin,
+            source: Some(source.to_string()),
+            pin: Some(tree),
+            dir: real,
+            entry: None,
+            manifest,
+            dev: true,
+            overrides,
+        })
     }
 
     /// A `repo:` pack: the tree at the ref is the pin, and it is materialized.
@@ -742,12 +1029,12 @@ impl Load<'_> {
     /// mirror ([`Load::pack_from_mirror`]).
     fn git_pack(
         &mut self,
-        dir: &CollideDir,
+        lock_path: &str,
         source: &str,
         lock: &PackLock,
+        origin: PackOrigin,
         names: &mut Names,
     ) -> Option<LoadedPack> {
-        let lock_path = dir.file("packs.lock");
         let Some(locked) = lock.packs.iter().find(|locked| locked.source == source) else {
             let listed: Vec<String> = lock
                 .packs
@@ -761,7 +1048,7 @@ impl Load<'_> {
             };
             self.push(
                 Some(source),
-                &lock_path,
+                lock_path,
                 None,
                 format!("has no entry for this exact source text; the lock lists {listed}"),
             );
@@ -774,12 +1061,10 @@ impl Load<'_> {
         }
         let sdk = self.sdk()?.folder_version.clone();
         match cached_entry(&self.context.cache, &locked.tree, &sdk) {
-            Ok(Some(entry)) => {
-                self.read_pack(source, PackOrigin::Git, locked.tree.clone(), entry, names)
-            }
-            Ok(None) => self.pack_from_mirror(&lock_path, source, locked, names),
+            Ok(Some(entry)) => self.read_pack(source, origin, locked.tree.clone(), entry, names),
+            Ok(None) => self.pack_from_mirror(lock_path, source, locked, origin, names),
             Err(error) => {
-                self.push(Some(source), &lock_path, None, error);
+                self.push(Some(source), lock_path, None, error);
                 None
             }
         }
@@ -793,6 +1078,7 @@ impl Load<'_> {
         lock_path: &str,
         source: &str,
         locked: &LockEntry,
+        origin: PackOrigin,
         names: &mut Names,
     ) -> Option<LoadedPack> {
         let context = self.context;
@@ -878,7 +1164,7 @@ impl Load<'_> {
             .materializer
             .materialize(&context.cache, &context.sdk, &mirror, &locked.tree)
         {
-            Ok(entry) => self.read_pack(source, PackOrigin::Git, locked.tree.clone(), entry, names),
+            Ok(entry) => self.read_pack(source, origin, locked.tree.clone(), entry, names),
             Err(error) => {
                 self.push(Some(source), lock_path, None, error);
                 None
@@ -931,7 +1217,10 @@ impl Load<'_> {
         names: &mut Names,
     ) -> Option<LoadedPack> {
         let before = self.problems.len();
-        self.inputs.push((format!("pack {source}"), pin.clone()));
+        // The repo's trust hash covers the packs the repo lists. A user's pack is trusted by its own tree id.
+        if matches!(origin, PackOrigin::Repo | PackOrigin::Git) {
+            self.inputs.push((format!("pack {source}"), pin.clone()));
+        }
         let dir = entry.join("pack");
         let manifest = self.read_manifest(source, &dir.join("pack.yaml"))?;
         let label = format!("`{}` ({source})", manifest.name);
@@ -950,6 +1239,8 @@ impl Load<'_> {
             dir,
             entry: Some(entry),
             manifest,
+            dev: false,
+            overrides: None,
         })
     }
 

@@ -15,9 +15,9 @@ const TREE: [&str; 9] = [
 
 /// The commands whose handler is a tagged stub (`stop` is built: `tests/stop_command.rs`; `run` is built:
 /// `tests/adapters/claude/run_command.rs` and `run_process.rs`; `config` is built: `tests/config_process.rs`, which
-/// runs it with an environment of its own), with the tag and stage that fills each.
-const STUBBED: [(&str, &str, &str); 2] =
-    [("report", "cli: report", "7"), ("pack", "cli: pack", "4a")];
+/// runs it with an environment of its own; `pack` is built: `tests/pack_update.rs` and `tests/user_packs.rs`), with the
+/// tag and stage that fills each.
+const STUBBED: [(&str, &str, &str); 1] = [("report", "cli: report", "7")];
 
 /// Runs `collide` in a temp root that is also its `HOME` and its daemon root, so a stub that has since been built
 /// never reaches the real home or daemon.
@@ -129,10 +129,10 @@ fn a_stubbed_command_exits_6_with_one_line_naming_its_tag_and_stage() {
 
 #[test]
 fn a_stubbed_command_with_arguments_still_names_its_tag_and_prints_no_backtrace() {
-    let output = collide(&["pack", "add", "somewhere", "--json"]);
+    let output = collide(&["report", "span", "somewhere", "--json"]);
     assert_eq!(output.status.code(), Some(6));
     let stderr = text(output.stderr);
-    assert!(stderr.contains("(cli: pack, Stage 4a)"), "{stderr}");
+    assert!(stderr.contains("(cli: report, Stage 7)"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("RUST_BACKTRACE"), "{stderr}");
 }

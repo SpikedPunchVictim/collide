@@ -1,8 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`config.pack_add` params (`collide pack add <source>`): a `git:` or `dev:` source, added to the user's packs.",
+  "description": "`config.pack_add` params (`collide pack add <source>`): a `git:` or `dev:` source, added to the user's packs.\nWithout `confirm` nothing is written and the result carries the pack's `review`. With it the source is added, locked\nand trusted at the tree id the review showed.",
   "properties": {
+    "approve_hosts": {
+      "description": "Hosts the person has said yes to fetching from for the first time; one that is not the host this fetch needs\nis ignored, as for `config.pack_update`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "confirm": {
+      "default": false,
+      "type": "boolean"
+    },
     "source": {
       "type": "string"
     }

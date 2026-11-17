@@ -15,7 +15,7 @@
 //! | `cli: stop` | `collide stop` | built: [`crate::stop_cli`], the stop of 0.5 ([`crate::stop`]) through the daemon |
 //! | `cli: report` | `collide report` | report files for shell scripts (`span`, `metric`) |
 //! | `cli: config` | `collide config` | built: `get`, `set`, `set --secret` ([`crate::config_set_cli`]) |
-//! | `cli: pack` | `collide pack` | `update` built ([`crate::pack_cli`]); the rest is `ts-0101-bd` |
+//! | `cli: pack` | `collide pack` | built: `add`, `link`, `enable`, `disable`, `list`, `update` ([`crate::pack_cli`]) |
 
 use crate::task_cli::exit;
 use std::any::Any;
@@ -95,12 +95,8 @@ pub const COMMANDS: [Command; 9] = [
     },
     Command {
         name: "pack",
-        summary: "update a git pack (`update`); add, link, enable, disable and list are not built yet",
-        build: Build::NotBuilt(Stub {
-            tag: "cli: pack",
-            stage: "4a",
-            handler: pack,
-        }),
+        summary: "add, link, enable, disable, list and update packs",
+        build: Build::Built,
     },
     Command {
         name: "sections",
@@ -197,13 +193,6 @@ pub fn report(args: &[String]) -> u8 {
     todo!("cli: report")
 }
 
-/// `collide pack add|link|enable|disable|list` (Stage 4a, `ts-0101-bd`). `collide pack update` is built and never
-/// reaches this handler (`bin/collide.rs` runs it first).
-pub fn pack(args: &[String]) -> u8 {
-    let _ = args;
-    todo!("cli: pack")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,7 +257,7 @@ mod tests {
     #[test]
     fn the_built_commands_are_not_run_as_stubs() {
         for name in [
-            "run", "stop", "tasks", "task", "schema", "sections", "config", "nonsense",
+            "run", "stop", "tasks", "task", "schema", "sections", "config", "pack", "nonsense",
         ] {
             assert_eq!(execute_stub(name, &[]), None, "{name}");
         }

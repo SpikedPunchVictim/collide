@@ -2,7 +2,15 @@
 
 /**
  * `config.pack_add` params (`collide pack add <source>`): a `git:` or `dev:` source, added to the user's packs.
+ * Without `confirm` nothing is written and the result carries the pack's `review`. With it the source is added, locked
+ * and trusted at the tree id the review showed.
  */
 export interface ConfigPackAddParams {
+  /**
+   * Hosts the person has said yes to fetching from for the first time; one that is not the host this fetch needs
+   * is ignored, as for `config.pack_update`.
+   */
+  approve_hosts?: string[]
+  confirm?: boolean
   source: string
 }

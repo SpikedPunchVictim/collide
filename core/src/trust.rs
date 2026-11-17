@@ -140,11 +140,25 @@ pub struct LineTrust {
     pub inputs: Vec<TrustInput>,
 }
 
+/// The id of the empty tree, SHA-1: what a working copy no one has seen is shown as changed from.
+pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 /// A user pack the person trusted when it was added: the tree id they saw. Its source is the key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackTrust {
     pub tree: String,
+}
+
+/// A working copy: a linked `dev:` folder that the person edits, by its real path. `seen` is the tree id of the folder
+/// when the person last saw it (when they linked it, or acknowledged a change). `integrated` is the tree id an
+/// integrate left in it, which the person has not acknowledged yet (0.9, Per pack source).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkingCopyTrust {
+    pub seen: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrated: Option<String>,
 }
 
 /// `~/.config/collide/trust.yaml`.
@@ -160,6 +174,9 @@ pub struct TrustFile {
     /// The paths of the `dev:` folders the person trusted, sorted.
     #[serde(default)]
     pub dev: Vec<String>,
+    /// Linked working copies, by the folder's real path.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub working_copies: BTreeMap<String, WorkingCopyTrust>,
 }
 
 impl TrustFile {
@@ -181,6 +198,51 @@ impl TrustFile {
                 tree: tree.to_string(),
             },
         );
+    }
+
+    /// The person has seen the working copy at `folder` as `tree`: nothing waits for them.
+    pub fn set_working_copy_seen(&mut self, folder: &str, tree: &str) {
+        self.working_copies.insert(
+            folder.to_string(),
+            WorkingCopyTrust {
+                seen: tree.to_string(),
+                integrated: None,
+            },
+        );
+    }
+
+    /// An integrate left `tree` in the working copy at `folder`. A folder never seen has no `seen` to show a change
+    /// from, so it is first seen as the empty tree.
+    pub fn note_integrated(&mut self, folder: &str, tree: &str) {
+        let entry = self
+            .working_copies
+            .entry(folder.to_string())
+            .or_insert_with(|| WorkingCopyTrust {
+                seen: EMPTY_TREE.to_string(),
+                integrated: None,
+            });
+        entry.integrated = Some(tree.to_string());
+    }
+
+    /// The tree ids (seen, then left by the integrate) of a working copy that waits for an acknowledgement.
+    pub fn working_copy_waiting(&self, folder: &str) -> Option<(&str, &str)> {
+        let entry = self.working_copies.get(folder)?;
+        let integrated = entry.integrated.as_deref()?;
+        Some((entry.seen.as_str(), integrated))
+    }
+
+    /// The person acknowledged `tree`. It clears the wait only when `tree` is the one an integrate left, so an
+    /// integrate after the diff was shown still asks. `true` when it cleared one.
+    pub fn acknowledge_working_copy(&mut self, folder: &str, tree: &str) -> bool {
+        let Some(entry) = self.working_copies.get_mut(folder) else {
+            return false;
+        };
+        if entry.integrated.as_deref() != Some(tree) {
+            return false;
+        }
+        entry.seen = tree.to_string();
+        entry.integrated = None;
+        true
     }
 
     pub fn add_dev(&mut self, folder: &str) {

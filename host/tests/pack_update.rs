@@ -148,6 +148,97 @@ fn lock_in_checkout(world: &World) -> String {
     fs::read_to_string(world.fixture.repo.work().join(".collide/packs.lock")).unwrap()
 }
 
+/// A board whose lock names a commit the remote never had, so no load can use it. Nothing is warmed: the remote has
+/// both of its commits published and the cache is empty.
+fn bad_pin_world() -> World {
+    let (remote, first, second) = remote_with_two_versions();
+    remote.publish();
+    let fixture = Fixture::fetching(real_path());
+    let source = format!("git:{}//pack@main", remote.file_url());
+    fixture.write(
+        ".collide/board.yaml",
+        &format!("packs:\n  - source: {source}\n"),
+    );
+    fixture.write(
+        ".collide/packs.lock",
+        &format!(
+            "packs:\n  - source: {source}\n    commit: {}\n    tree: {}\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        ),
+    );
+    fixture.commit();
+    let board = fixture.board();
+    World {
+        fixture,
+        remote,
+        board,
+        source,
+        first,
+        second,
+        fake: None,
+    }
+}
+
+#[test]
+fn a_lock_whose_commit_is_gone_is_moved_by_update_to_a_ref() {
+    let w = bad_pin_world();
+    let load: Result<collide_core::owner::ConfigGetResult, _> = w.fixture.client().call(
+        "config.get",
+        &collide_core::owner::ConfigGetParams {
+            board: Some(w.board.clone()),
+            key: None,
+            profile: None,
+        },
+        Some(Duration::from_secs(60)),
+    );
+    assert!(load.is_err(), "the premise: the line does not load");
+
+    let preview = call(&w, "remote", Some("v1"), false, &[]).unwrap();
+    assert_eq!(preview.old.commit, "a".repeat(40));
+    assert_eq!(preview.new.as_ref().unwrap().commit, w.first.0);
+    let done = call(&w, "remote", Some("v1"), true, &[]).unwrap();
+    assert!(done.written);
+    let text = lock_in_checkout(&w);
+    assert!(
+        text.contains(&w.first.0) && text.contains(&w.first.1),
+        "{text}"
+    );
+    w.fixture.commit();
+    let again = call(&w, "remote", Some("v2"), false, &[]).unwrap();
+    assert_eq!(again.old.commit, w.first.0, "the repaired line loads");
+}
+
+#[test]
+fn one_broken_pack_does_not_block_updating_another() {
+    let w = world();
+    // `ferry` is a repo pack with a manifest that does not parse: the line cannot load.
+    w.fixture.write(
+        ".collide/board.yaml",
+        &format!(
+            "packs:\n  - source: repo:.collide/packs/ferry\n  - source: {}\n",
+            w.source
+        ),
+    );
+    w.fixture
+        .write(".collide/packs/ferry/pack.yaml", "name: [broken\n");
+    w.fixture.commit();
+    let result = call(&w, "remote", None, false, &[]).unwrap();
+    assert_eq!(result.new.unwrap().commit, w.second.0);
+}
+
+#[test]
+fn a_name_that_no_pack_at_its_pin_has_is_still_not_found_when_a_pin_is_bad() {
+    let w = bad_pin_world();
+    let error = call(&w, "nothing-by-this-name", None, false, &[]).unwrap_err();
+    assert_eq!(error.code, code::NOT_FOUND);
+    assert!(
+        error.message.contains("nothing-by-this-name"),
+        "{}",
+        error.message
+    );
+}
+
 #[test]
 fn a_preview_shows_the_old_and_new_pins_and_the_diff_and_writes_nothing() {
     let w = world();

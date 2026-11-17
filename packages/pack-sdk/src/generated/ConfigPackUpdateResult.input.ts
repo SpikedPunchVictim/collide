@@ -7,7 +7,7 @@ export type PackFileChangeKind = ('added' | 'deleted' | 'modified') | 'type_chan
 /**
  * Where a pack comes from (0.7, Repo packs and user packs).
  */
-export type PackOrigin = 'builtin' | 'repo' | 'user'
+export type PackOrigin = 'builtin' | 'repo' | 'user' | 'offered'
 
 /**
  * `config.pack_update` result. `old` is the pin now; `new` is the pin the ref resolves to. With `needs_host` set the
@@ -53,12 +53,46 @@ export interface PackPin {
   tree: string
 }
 /**
- * One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7).
+ * One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7). `working_copy`
+ * marks a repo pack whose folder in the user's checkout differs from the line's ref, so `pack link` can use it.
+ * `review` is what `pack add` asks the person to trust.
  */
 export interface PackEntry {
   dev: boolean
   enabled: boolean
   name: string
   origin: PackOrigin
+  review?: PackReviewData | null
   source: string
+  working_copy?: boolean
+}
+/**
+ * What a person is shown before trusting a pack (0.9, Per pack source): where it is from, the hooks, providers and
+ * observers it runs, and what it requires.
+ */
+export interface PackReviewData {
+  /**
+   * The commit a `git:` source resolved to. Absent for a `dev:` folder.
+   */
+  commit?: string | null
+  hooks: PackReviewLine[]
+  name: string
+  /**
+   * A key holds the events the observer gets.
+   */
+  observers: PackReviewLine[]
+  providers: PackReviewLine[]
+  requires: string[]
+  /**
+   * The tree id the pack is trusted at.
+   */
+  tree: string
+  version?: string | null
+}
+/**
+ * One script or provider a pack runs, with the manifest key that names it.
+ */
+export interface PackReviewLine {
+  key: string
+  script: string
 }

@@ -27,13 +27,16 @@ use crate::git_fetch::{FetchEnv, GitFetch};
 use crate::hosts::KnownHosts;
 use crate::pack_cache::ensure_sdk;
 use crate::pack_location::{Inputs, bundle_sdk, locate_bundle};
-use crate::pack_update::{PackUpdateError, UpdateSite, pack_update};
+use crate::pack_manage::{ManageSite, pack_add, pack_enable, pack_link, pack_list};
+use crate::pack_update::{PackError, UpdateSite, pack_update};
 use crate::secret_store::{Secret, SecretStore, pack_item};
 use crate::settings_files::{UserFiles, read_user_files, user_config_dir};
+use crate::user_packs::UserScope;
 use collide_core::agent_layers::{AgentInputs, AgentLayers, agent_layers};
 use collide_core::owner::{
-    ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigPackUpdateParams, ConfigPackUpdateResult,
-    ConfigSetParams, ConfigSetResult, ConfigWriteLayer, SettingLayer,
+    ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigPackAddParams, ConfigPackEnableParams,
+    ConfigPackLinkParams, ConfigPackResult, ConfigPackUpdateParams, ConfigPackUpdateResult,
+    ConfigSetParams, ConfigSetResult, ConfigWriteLayer, PackEntry, SettingLayer,
 };
 use collide_core::profile::{FoundProfile, Profile, ProfileLookupError, find_profile};
 use collide_core::resolve::is_safe_token;
@@ -123,7 +126,12 @@ pub struct ConfigService {
     load_context: LoadContextFactory,
     git_env: Vec<(String, String)>,
     secret_store: Arc<dyn SecretStore>,
+    workspaces: WorkspaceRoots,
 }
+
+/// The folders no `dev:` pack may be under: the worktree root and every workspace path the store holds. Asked at each
+/// request, because a run makes a new one.
+pub type WorkspaceRoots = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 
 /// What a request starts from: the user's files, the repo's line, and the problems of reading them.
 struct Gathered {
@@ -199,7 +207,14 @@ impl ConfigService {
             load_context,
             git_env,
             secret_store,
+            workspaces: Arc::new(Vec::new),
         }
+    }
+
+    /// Where the Collide workspaces are, for the `dev:` refusal. Without it no folder is a workspace.
+    pub fn with_workspaces(mut self, workspaces: WorkspaceRoots) -> ConfigService {
+        self.workspaces = workspaces;
+        self
     }
 
     fn home(&self) -> Result<&Path, String> {
@@ -304,19 +319,80 @@ impl ConfigService {
         params: &ConfigPackUpdateParams,
         board: BoardRef,
         path: &OsStr,
-    ) -> Result<ConfigPackUpdateResult, PackUpdateError> {
-        let home = self.home().map_err(PackUpdateError::Failed)?;
-        let git_dir =
-            boards::git_dir_of(board.root, &self.git_env).map_err(PackUpdateError::Failed)?;
-        let context = (self.load_context)(path).map_err(|message| {
-            PackUpdateError::Failed(format!("the loader cannot start: {message}"))
-        })?;
+    ) -> Result<ConfigPackUpdateResult, PackError> {
+        let home = self.home().map_err(PackError::Failed)?;
+        let git_dir = boards::git_dir_of(board.root, &self.git_env).map_err(PackError::Failed)?;
+        let context = (self.load_context)(path)
+            .map_err(|message| PackError::Failed(format!("the loader cannot start: {message}")))?;
         let site = UpdateSite {
             git_dir: &git_dir,
             checkout: board.root,
             home,
         };
         pack_update(params, &site, &context)
+    }
+
+    /// Where a `config.pack_*` request runs, with the context the loader needs. `f` gets both.
+    fn with_pack_site<T>(
+        &self,
+        board: BoardRef,
+        path: &OsStr,
+        f: impl FnOnce(&ManageSite, LoadContext) -> Result<T, PackError>,
+    ) -> Result<T, PackError> {
+        let home = self.home().map_err(PackError::Failed)?;
+        let git_dir = boards::git_dir_of(board.root, &self.git_env).map_err(PackError::Failed)?;
+        let context = (self.load_context)(path)
+            .map_err(|message| PackError::Failed(format!("the loader cannot start: {message}")))?;
+        let workspaces = (self.workspaces)();
+        let site = ManageSite {
+            git_dir: &git_dir,
+            root: board.root,
+            board_id: board.id,
+            home,
+            workspaces: &workspaces,
+        };
+        f(&site, context)
+    }
+
+    /// `config.pack_list`: the board's packs, the user's, and the working copies on offer. See [`crate::pack_manage`].
+    pub fn pack_list(&self, board: BoardRef, path: &OsStr) -> Result<Vec<PackEntry>, PackError> {
+        self.with_pack_site(board, path, pack_list)
+    }
+
+    /// `config.pack_add`: a user pack, shown and then, with `confirm`, written.
+    pub fn pack_add(
+        &self,
+        params: &ConfigPackAddParams,
+        path: &OsStr,
+    ) -> Result<ConfigPackResult, PackError> {
+        let home = self.home().map_err(PackError::Failed)?;
+        let context = (self.load_context)(path)
+            .map_err(|message| PackError::Failed(format!("the loader cannot start: {message}")))?;
+        pack_add(params, home, &(self.workspaces)(), &context)
+    }
+
+    /// `config.pack_link`: a working copy over a pack, for this user on this board.
+    pub fn pack_link(
+        &self,
+        params: &ConfigPackLinkParams,
+        board: BoardRef,
+        path: &OsStr,
+    ) -> Result<ConfigPackResult, PackError> {
+        self.with_pack_site(board, path, |site, context| {
+            pack_link(params, site, &context)
+        })
+    }
+
+    /// `config.pack_enable`: a user pack on or off for this board.
+    pub fn pack_enable(
+        &self,
+        params: &ConfigPackEnableParams,
+        board: BoardRef,
+        path: &OsStr,
+    ) -> Result<ConfigPackResult, PackError> {
+        self.with_pack_site(board, path, |site, context| {
+            pack_enable(params, site, &context)
+        })
     }
 
     /// `config.set`: one value, to the keychain (`params.secret`) or to the user's file. See the module docs.
@@ -560,6 +636,15 @@ impl ConfigService {
                 ));
                 return None;
             }
+        };
+        // The user's packs are part of the line: a working copy linked here changes what a pack's keys are.
+        let context = match &self.home {
+            Some(home) => context.with_user(UserScope::new(
+                home.clone(),
+                board.id.to_string(),
+                (self.workspaces)(),
+            )),
+            None => context,
         };
         match load_line(&git_dir, "HEAD", &context) {
             Ok(line) => Some(line),

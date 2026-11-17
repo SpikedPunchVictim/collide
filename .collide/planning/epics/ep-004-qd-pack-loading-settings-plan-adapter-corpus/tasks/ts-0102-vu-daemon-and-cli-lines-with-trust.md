@@ -123,10 +123,14 @@ Write these first, over fixture repositories, a temp `HOME` and a daemon in a te
 - Stage 4a item (revision 23 scope, split 2026-11-16). Items of Stage 4a run one at a time, in id order, because
   they share `core`, `host` and the generated files.
 - Carried from `ts-0100-pu` (review, 2026-11-16): a repo `git:` pack on a cold cache whose host was never fetched
-  from fails the load with `LoadProblem::needs_host`. `pack update` then refuses before it reads `approve_hosts`, so
-  `--allow-host` cannot record that host. The trust prompt here records the hosts on a yes; after that, `pack update`
-  works. Make the refusal name the way out until the prompt has run. A timeout kills only git's direct child
-  (`run_bounded`); an `ssh` or remote helper under it can outlive it. A process-group kill belongs with the daemon's
-  other process work (Stage 8) if it shows up.
+  from fails the load with `LoadProblem::needs_host`. The trust prompt here asks for that host and records it on a
+  yes. (`pack update` no longer loads the line first since `ts-0101-bd`, so `--allow-host` already works there.) A
+  timeout kills only git's direct child (`run_bounded`); an `ssh` or remote helper under it can outlive it. A
+  process-group kill belongs with the daemon's other process work (Stage 8) if it shows up.
+- Carried from `ts-0101-bd` (review, 2026-11-16): a `dev:` folder is trusted per folder (0.9), and `pack add` and
+  `pack link` record it (`TrustStore::trust_dev`), but a load does not yet require it: a user pack or a link whose
+  folder was never trusted loads. When this item adds the trust prompt, a load refuses an untrusted `dev:` folder
+  (user pack, link or offered working copy) and the prompt can trust it. A test: a `dev:` source written into the
+  user's `packs.yaml` by hand is refused until trusted.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.

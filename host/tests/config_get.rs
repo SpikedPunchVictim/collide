@@ -147,29 +147,6 @@ fn a_board_the_daemon_does_not_know_is_not_found() {
     assert!(message.contains("board-99"), "{message}");
 }
 
-#[test]
-fn the_pack_config_methods_are_still_not_served() {
-    // `config.set` is served since ts-0099-bw (`config_set.rs`); the pack methods are ts-0100's and ts-0101's.
-    let fixture = Fixture::new();
-    let methods = [
-        ("config.pack_list", json!({ "board": "board-1" })),
-        ("config.pack_add", json!({ "source": "git:example/x" })),
-    ];
-    for (method, params) in methods {
-        let answer: Result<Value, _> =
-            fixture
-                .client()
-                .call(method, &params, Some(Duration::from_secs(5)));
-        match answer {
-            Err(collide_host::owner_client::ClientError::Rpc(error)) => {
-                assert_eq!(error.code, code::METHOD_NOT_FOUND, "{method}");
-                assert!(error.message.contains("not served"), "{method}: {error:?}");
-            }
-            other => panic!("{method}: {other:?}"),
-        }
-    }
-}
-
 // ---- a board: the repo's layer and the packs ----
 
 #[test]

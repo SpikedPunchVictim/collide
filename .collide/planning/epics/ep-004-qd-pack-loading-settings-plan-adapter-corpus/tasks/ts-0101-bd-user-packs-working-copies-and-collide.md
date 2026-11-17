@@ -124,3 +124,96 @@ Write these first, in temp roots, with a fixture remote and a fixture checkout:
   then `pack update <name> --to <ref>` moves it.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.
+
+### Built
+
+Wire (`core/src/owner/config.rs`, then `pnpm gen`):
+
+- `PackOrigin::Offered`; `PackEntry.working_copy` and `PackEntry.review`; new `PackReviewData` and `PackReviewLine`.
+- `ConfigPackAddParams` gains `confirm` and `approve_hosts`; `ConfigPackResult` gains `written`, `note` and `needs_host`
+  (the new-host rule of `ts-0100-pu` applies to `add` too).
+
+Core (`core/src/trust.rs`): `TrustFile.working_copies` (`WorkingCopyTrust { seen, integrated }`) with
+`set_working_copy_seen`, `note_integrated`, `working_copy_waiting` and `acknowledge_working_copy`. An acknowledgement
+clears only the tree an integrate left, and then that tree is the one seen.
+
+Host:
+
+- `host/src/user_packs.rs` (new): `UserScope` (home, board id, workspace paths), `BoardPacks { on, links }`,
+  `read_global_files`, `git_pack_name`, `manifest_name`, `write_sources` and `write_board` (`yaml_out`, then
+  `write_atomically`; files 0o600, folders 0o700).
+- `host/src/working_copy.rs` (new): `WorkingCopies` (`see`, `note_integrated`, `waiting`, `acknowledge`) and
+  `Waiting::render`. Objects of both trees are kept in `<cache>/working-copies.git`.
+- `host/src/git_objects.rs`: `tree_of_folder_into` (same id as `tree_of_folder`, objects kept).
+- `host/src/board_load.rs`: `PackOrigin::{User, Linked}`, `LoadedPack.dev` and `.overrides`, `LoadContext::with_user`,
+  `Load::user_packs` and `Load::dev_pack`, `board_files`. A link replaces the repo pack in place; user packs follow the
+  board's. User and linked packs add nothing to `trust_inputs`. A load problem for a waiting working copy carries the
+  diff. `git_pack` and `pack_from_mirror` take the lock path and the origin.
+- `host/src/pack_update.rs`: `pack_update` no longer loads the line. It reads `board_files` and the user's files, finds
+  a pack by name (HEAD blob, cache entry, mirror blob at the locked commit, or the dev folder), and for a `git:` pack
+  whose name cannot be read it fetches and checks the name at the new commit. `PackUpdateError` is now `PackError`.
+  `tree_changes` and `fetch_for` are shared with the new module.
+- `host/src/pack_manage.rs` (new): `pack_add`, `pack_link`, `pack_enable`, `pack_list`.
+- `host/src/config_get.rs`, `host/src/daemon.rs`: `ConfigService::{pack_list, pack_add, pack_link, pack_enable}` and
+  `with_workspaces` (the workspaces folder plus every `workspace_path` the store holds); the four handlers and arms.
+  `config.get` now loads with the user scope, so a linked working copy's settings are read.
+- `host/src/pack_cli.rs`, `host/src/bin/collide.rs`, `host/src/commands.rs`: `collide pack add|link|enable|disable|
+  list|update`; `pack test` exits `NOT_BUILT` ("a later stage"). The `cli: pack` stub is gone.
+- `checks/tests/real_tree.rs`: `FILLED_TAGS` gains `cli: pack`. `host/tests/command_tree.rs`: `report` is the one stub.
+  `host/tests/config_get.rs`: the "pack methods are not served" test is removed, because all four are served.
+
+Tests:
+
+- `core/tests/trust.rs`: `a_working_copy_waits_for_an_acknowledgement_only_after_an_integrate_changed_it`,
+  `an_acknowledgement_clears_the_tree_it_names_and_not_a_later_one`. Red first (missing methods, compile error).
+- `host/tests/user_packs.rs` (40 tests): add (preview, confirm, second add, dev, bad manifest, built-in name, repo
+  source), load order, name clash, dev folder in a workspace at add and at load, dev tree id, link (folder, none,
+  pointer file, not a pack, name differs, workspace, scope per board and per user), offered folders, differing repo
+  pack, integrate and acknowledgement with diff, enable and disable, list, and the CLI (`command::*`, exit codes and
+  messages).
+- `host/tests/pack_update.rs`: `a_lock_whose_commit_is_gone_is_moved_by_update_to_a_ref`,
+  `one_broken_pack_does_not_block_updating_another`,
+  `a_name_that_no_pack_at_its_pin_has_is_still_not_found_when_a_pin_is_bad`.
+- Red: the new host tests were red as a group, because the host library did not compile (`PackEntry` missing fields,
+  no `with_user`, no `working_copy` module). The three `pack_update` tests were written against the old `pack_update`,
+  which loaded the line first. I did not run them against the old code once it compiled, so I cannot say each failed
+  at runtime. All are green now.
+
+### Decisions for the owner
+
+- **Unlinking.** The plan has `pack link` and no way to undo it. Recommend `collide pack unlink <name>` (removes the
+  link from the board's `packs.yaml`), small and the same shape as `link`. Alternative: edit the file by hand.
+- **The acknowledgement has no wire or CLI yet.** `WorkingCopies::note_integrated` and `acknowledge` exist, and the load
+  problem shows the diff, but nothing calls them: the integrate and the Queue are later stages. Recommend the plan
+  text for that stage says the integrate calls `note_integrated` for each linked folder it changed, and the Queue item's
+  action calls `acknowledge` with the tree id it showed.
+- **`dev:` packs are read in place, not materialized.** No cache entry and no SDK link, so a dev pack's hooks that
+  import the SDK resolve it from their own folder. Recommend materializing at the next item that runs a hook from a
+  pack. Alternative: link the SDK into the folder, which writes into the person's folder.
+- **Dev folders are not trust-enforced at load.** `add` and `link` record trust (`trust_dev`), but a load does not
+  require it, as the plan says a dev pack is hashed at every load and trusted by the caller. Recommend ts-0102 decides
+  with the trust prompt.
+- **Linking a `git:` pack of the board is refused** (a link replaces a repo pack; a git pack moves with `pack update`).
+  Alternative: allow it. Recommend refusing until someone asks.
+- **A stale link** (its repo pack is gone) loads as an extra dev pack after the board's. Recommend keeping this.
+- **`pack list` is refused when the line has a load problem.** It names the problems. Alternative: list what loads.
+  Recommend keeping the refusal until the Queue shows problems.
+- **Added user packs start off** on every board. Alternative: on for the board where they were added. Recommend off,
+  so `add` never changes a board by itself.
+
+- Owner decisions (2026-11-16, at the build): the eight above as recommended, on delegation. `pack unlink` is not
+  built: a link is undone by editing the board's `packs.yaml` until an item adds it. Dev-folder trust at load is
+  carried to `ts-0102-vu` as a note there. Changed at the review: a user pack whose name cannot be read without
+  loading it (a gone `dev:` folder, a cold cache) is loaded only on a board that switched on a name no readable pack
+  has, so one broken pack does not fail every board (`Load::user_packs`; test
+  `a_user_pack_that_cannot_be_read_does_not_break_a_board_that_has_it_off`, seen red). The three `pack_update` tests
+  were checked at the review: each fails when the old load-first refusal is put back.
+
+### Not done, by design
+
+- Daemon lines, the trust prompt, asking for a new host at load, `board.trust*`, `board.init`, `collide init` and
+  `collide trust` (ts-0102 to ts-0105).
+- The Queue item for a waiting working copy, and the integrate that marks one (a later stage).
+- `collide pack test` (a later stage).
+- Materializing `dev:` packs (see Decisions).
+- Experiments refusing `dev:` (a later stage, as the item says).

@@ -6,6 +6,8 @@
 //! - [`GitObjects::read_blobs`] and [`GitObjects::blob_at`]: what files hold;
 //! - [`GitObjects::tree_of_folder`]: the id git would give a folder's files, for `dev:` packs and the materializer's
 //!   re-hash;
+//! - [`GitObjects::tree_of_folder_into`]: the same, with the objects kept in a bare repository of the caller's, so a
+//!   later diff can read both trees (a working copy's old version is in no other repository, ts-0101-bd);
 //! - [`GitObjects::hash_object`], [`GitObjects::object_kind`], [`GitObjects::diff_tree`] and
 //!   [`GitObjects::diff_blobs`]: what the trust hash and its diff need (ts-0097-kw).
 //!
@@ -465,11 +467,7 @@ impl GitObjects {
             folder: folder.display().to_string(),
             reason,
         };
-        match std::fs::metadata(folder) {
-            Ok(meta) if meta.is_dir() => {}
-            Ok(_) => return Err(folder_error("it is not a folder".to_string())),
-            Err(error) => return Err(folder_error(error.to_string())),
-        }
+        check_folder(folder)?;
         let parent = self.scratch.clone().unwrap_or_else(std::env::temp_dir);
         let scratch = ScratchFolder::make(&parent).map_err(|error| {
             folder_error(format!(
@@ -478,8 +476,40 @@ impl GitObjects {
             ))
         })?;
         let bare = scratch.path().join("bare");
-        let index = bare.join("index");
+        self.init_bare(&bare)?;
+        self.write_folder_tree(folder, &bare, &bare.join("index"))
+    }
 
+    /// [`GitObjects::tree_of_folder`], keeping the objects: the folder's files are written into the bare repository
+    /// `store` (made when it is not there), so a later diff against the tree can read them. Used for working copies,
+    /// whose old versions are in no other repository.
+    pub fn tree_of_folder_into(&self, folder: &Path, store: &Path) -> Result<String, GitError> {
+        check_folder(folder)?;
+        if !store.join("HEAD").exists() {
+            if let Some(parent) = store.parent() {
+                std::fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(0o700)
+                    .create(parent)
+                    .map_err(|error| GitError::Folder {
+                        folder: store.display().to_string(),
+                        reason: format!("cannot make its folder: {error}"),
+                    })?;
+            }
+            self.init_bare(store)?;
+        }
+        let parent = self.scratch.clone().unwrap_or_else(std::env::temp_dir);
+        let scratch = ScratchFolder::make(&parent).map_err(|error| GitError::Folder {
+            folder: folder.display().to_string(),
+            reason: format!(
+                "cannot make a temporary folder in `{}`: {error}",
+                parent.display()
+            ),
+        })?;
+        self.write_folder_tree(folder, store, &scratch.path().join("index"))
+    }
+
+    fn init_bare(&self, bare: &Path) -> Result<(), GitError> {
         let mut init = self.command_without_repo();
         init.args([
             "-c",
@@ -490,15 +520,23 @@ impl GitObjects {
             "--object-format=sha1",
             "--template=",
         ])
-        .arg(&bare);
-        self.run_ok(init, "git init", None)?;
+        .arg(bare);
+        self.run_ok(init, "git init", None).map(|_| ())
+    }
 
+    /// Adds every file of `folder` to a throwaway index and writes the tree into `bare`.
+    fn write_folder_tree(
+        &self,
+        folder: &Path,
+        bare: &Path,
+        index: &Path,
+    ) -> Result<String, GitError> {
         // The settings that decide what an add stores are given here, so the answer never depends on what `init`
         // found about the file system. `--attr-source` names an empty tree as the place attributes come from, so a
         // `.gitattributes` in the folder (an `eol` rule, `ident`, an encoding) cannot change a byte that is hashed.
-        let mut add = self.command(&bare);
+        let mut add = self.command(bare);
         add.env("GIT_WORK_TREE", folder)
-            .env("GIT_INDEX_FILE", &index)
+            .env("GIT_INDEX_FILE", index)
             .args([
                 "-c",
                 "core.filemode=true",
@@ -518,8 +556,8 @@ impl GitObjects {
             ]);
         self.run_ok(add, "git add", None)?;
 
-        let mut write_tree = self.command(&bare);
-        write_tree.env("GIT_INDEX_FILE", &index).arg("write-tree");
+        let mut write_tree = self.command(bare);
+        write_tree.env("GIT_INDEX_FILE", index).arg("write-tree");
         let out = self.run_ok(write_tree, "git write-tree", None)?;
         let id = String::from_utf8_lossy(&out).trim().to_string();
         check_id("tree id", &id).map_err(|_| GitError::BadReply {
@@ -924,6 +962,19 @@ fn read_batch(out: &[u8], ids: &[String], bodies: &mut Vec<Vec<u8>>) -> Result<(
         }
     }
     Ok(())
+}
+
+/// `folder` as a folder, or why it is not one.
+fn check_folder(folder: &Path) -> Result<(), GitError> {
+    let folder_error = |reason: String| GitError::Folder {
+        folder: folder.display().to_string(),
+        reason,
+    };
+    match std::fs::metadata(folder) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(folder_error("it is not a folder".to_string())),
+        Err(error) => Err(folder_error(error.to_string())),
+    }
 }
 
 static SCRATCH_COUNTER: AtomicU32 = AtomicU32::new(0);

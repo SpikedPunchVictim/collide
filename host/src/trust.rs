@@ -618,7 +618,7 @@ fn digest(git: &GitObjects, repo: &Path, text: &str) -> Result<String, GitError>
 
 /// The folder's real path, when it is a folder outside every Collide workspace: an agent could edit a pack it runs
 /// from inside its own workspace (0.9).
-fn check_dev_folder(folder: &Path, workspaces: &[PathBuf]) -> Result<PathBuf, TrustError> {
+pub fn check_dev_folder(folder: &Path, workspaces: &[PathBuf]) -> Result<PathBuf, TrustError> {
     let refused = |reason: String| TrustError::DevFolder {
         folder: folder.to_path_buf(),
         reason,

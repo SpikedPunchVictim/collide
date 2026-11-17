@@ -96,9 +96,42 @@ pub enum PackOrigin {
     Repo,
     /// Added with `collide pack add`, switched on per board.
     User,
+    /// A new folder under `.collide/packs/` in the user's checkout that `board.yaml` does not list: a working copy
+    /// that can be linked (0.7, Working copies).
+    Offered,
 }
 
-/// One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7).
+/// One script or provider a pack runs, with the manifest key that names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PackReviewLine {
+    pub key: String,
+    pub script: String,
+}
+
+/// What a person is shown before trusting a pack (0.9, Per pack source): where it is from, the hooks, providers and
+/// observers it runs, and what it requires.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PackReviewData {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The commit a `git:` source resolved to. Absent for a `dev:` folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    /// The tree id the pack is trusted at.
+    pub tree: String,
+    pub hooks: Vec<PackReviewLine>,
+    pub providers: Vec<PackReviewLine>,
+    /// A key holds the events the observer gets.
+    pub observers: Vec<PackReviewLine>,
+    pub requires: Vec<String>,
+}
+
+/// One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7). `working_copy`
+/// marks a repo pack whose folder in the user's checkout differs from the line's ref, so `pack link` can use it.
+/// `review` is what `pack add` asks the person to trust.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackEntry {
@@ -107,6 +140,10 @@ pub struct PackEntry {
     pub origin: PackOrigin,
     pub enabled: bool,
     pub dev: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub working_copy: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<PackReviewData>,
 }
 
 /// `config.pack_list` params (`collide pack list`).
@@ -124,17 +161,33 @@ pub struct ConfigPackListResult {
 }
 
 /// `config.pack_add` params (`collide pack add <source>`): a `git:` or `dev:` source, added to the user's packs.
+/// Without `confirm` nothing is written and the result carries the pack's `review`. With it the source is added, locked
+/// and trusted at the tree id the review showed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigPackAddParams {
     pub source: String,
+    #[serde(default)]
+    pub confirm: bool,
+    /// Hosts the person has said yes to fetching from for the first time; one that is not the host this fetch needs
+    /// is ignored, as for `config.pack_update`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approve_hosts: Vec<String>,
 }
 
 /// The result of `config.pack_add`, `config.pack_link` and `config.pack_enable`: the pack after the change.
+/// `written` is false when nothing changed (a preview, or a change that was already made), and `note` says why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigPackResult {
     pub pack: PackEntry,
+    #[serde(default)]
+    pub written: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// A host never fetched from that the add needs a yes for: nothing was fetched or written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_host: Option<String>,
 }
 
 /// `config.pack_link` params (`collide pack link <name> [<folder>]`). With no `folder` the pack's folder in the

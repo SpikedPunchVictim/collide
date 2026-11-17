@@ -95,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 41] = [
+const FILLED_TAGS: [(&str, &str, &str); 42] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -137,6 +137,7 @@ const FILLED_TAGS: [(&str, &str, &str); 41] = [
     ("shell: daemon connection", "3c", "ts-0077-ws"),
     ("shell: daemon events", "3c", "ts-0077-ws"),
     ("cli: config", "4a", "ts-0099-bw"),
+    ("cli: pack", "4a", "ts-0101-bd"),
 ];
 
 #[test]
@@ -157,9 +158,9 @@ fn every_filled_tag_stays_registered_under_its_stage_and_counts_no_stub() {
 }
 
 /// The tags of the rest of the `host` outlines (ts-0041-xf) and the stage that fills each one: the provider
-/// supervisor Stage 4b, the pack command Stage 4a, the hook executor and `collide report` Stage 7, observers
+/// supervisor Stage 4b, the hook executor and `collide report` Stage 7, observers
 /// Stage 12, the resource sources Stage 13. Each must count at least one stub today.
-const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 12] = [
+const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 11] = [
     ("hooks: invocation", "7"),
     ("hooks: result file", "7"),
     ("supervisor: provider start", "4b"),
@@ -171,7 +172,6 @@ const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 12] = [
     ("sampler: gpu", "13"),
     ("sampler: containers", "13"),
     ("cli: report", "7"),
-    ("cli: pack", "4a"),
 ];
 
 #[test]

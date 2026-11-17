@@ -102,6 +102,19 @@ fn pack() -> Value {
     json!({ "name": "collide", "source": "builtin", "origin": "builtin", "enabled": true, "dev": false })
 }
 
+/// A pack with a working copy to use, offered by `pack list`, and one `pack add` asks the person to trust.
+fn pack_to_trust() -> Value {
+    json!({
+        "name": "ferry", "source": "git:file:///srv/ferry.git//pack@main", "origin": "user", "enabled": false,
+        "dev": false, "working_copy": true,
+        "review": {
+            "name": "ferry", "version": "1.0.0", "commit": "a".repeat(40), "tree": "b".repeat(40),
+            "hooks": [{ "key": "gates.lint", "script": "hooks/lint.sh" }],
+            "providers": [], "observers": [], "requires": ["tool git"],
+        },
+    })
+}
+
 fn config_entry() -> Value {
     json!({ "key": "ask.timeout_s", "value": 180, "layer": "default", "secret": false })
 }
@@ -397,22 +410,23 @@ fn samples() -> Vec<(Method, Value, Value)> {
         (
             Method::ConfigPackList,
             json!({ "board": "bd-1" }),
-            json!({ "packs": [pack()] }),
+            json!({ "packs": [pack(), { "name": "scratch", "source": "dev:/work/scratch", "origin": "offered",
+                "enabled": false, "dev": false }] }),
         ),
         (
             Method::ConfigPackAdd,
-            json!({ "source": "git:https://example.com/p.git" }),
-            json!({ "pack": pack() }),
+            json!({ "source": "git:https://example.com/p.git", "confirm": true }),
+            json!({ "pack": pack_to_trust(), "written": false, "note": "nothing was written" }),
         ),
         (
             Method::ConfigPackLink,
             json!({ "board": "bd-1", "name": "collide", "folder": "/work/packs/collide" }),
-            json!({ "pack": pack() }),
+            json!({ "pack": pack(), "written": true }),
         ),
         (
             Method::ConfigPackEnable,
             json!({ "board": "bd-1", "name": "collide", "enabled": true }),
-            json!({ "pack": pack() }),
+            json!({ "pack": pack(), "written": false }),
         ),
         (
             Method::ConfigPackUpdate,

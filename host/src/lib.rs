@@ -39,6 +39,7 @@ pub mod pack_cache;
 pub mod pack_cli;
 pub mod pack_location;
 pub mod pack_lock;
+pub mod pack_manage;
 pub mod pack_update;
 pub mod phases;
 pub mod provider_client;
@@ -67,6 +68,8 @@ pub mod task_cli;
 pub mod task_view;
 pub mod trust;
 pub mod ui_tools;
+pub mod user_packs;
+pub mod working_copy;
 pub mod workspace;
 
 pub const NAME: &str = "collide-host";

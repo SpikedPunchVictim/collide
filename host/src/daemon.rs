@@ -123,7 +123,7 @@ use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::metrics::Metrics;
 use crate::pack_location::Inputs;
-use crate::pack_update::PackUpdateError;
+use crate::pack_update::PackError;
 use crate::phases::{
     BIND_WAIT, ExitJson, FeedRebuilder, PhaseEndHook, PhaseKey, PhaseOptions, PhasePauseHook,
     Phases, PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
@@ -139,15 +139,16 @@ use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
-    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams, ConfigPackUpdateParams,
-    ConfigSetParams, DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
-    DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
-    OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams, QueueListResult, Request,
-    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
-    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
-    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
-    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code, encode_line,
-    parse_request, route,
+    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams, ConfigPackAddParams,
+    ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult,
+    ConfigPackUpdateParams, ConfigSetParams, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
+    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice,
+    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams,
+    QueueListResult, Request, Response, Routed, RpcError, RunDiffParams, RunGetParams,
+    RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult, RunScope,
+    RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult, RunSummary,
+    StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code,
+    encode_line, parse_request, route,
 };
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{ApplyResult, GetParams};
@@ -913,7 +914,27 @@ impl Daemon {
             }),
             git_env.clone(),
             secret_store,
-        );
+        )
+        .with_workspaces({
+            // The worktree root and the paths the store recorded: a `dev:` folder may not be under either.
+            let root = paths.runs_dir.with_file_name("workspaces");
+            let store = store.clone();
+            Arc::new(move || {
+                let mut found = vec![root.clone()];
+                if let Ok(contexts) = store.run_contexts() {
+                    for (_, json) in contexts {
+                        let value: serde_json::Value =
+                            serde_json::from_str(&json).unwrap_or_default();
+                        if let Some(path) =
+                            value.get("workspace_path").and_then(|path| path.as_str())
+                        {
+                            found.push(std::path::PathBuf::from(path));
+                        }
+                    }
+                }
+                found
+            })
+        });
         let uid = auth::daemon_uid();
         let tree =
             process_tree.unwrap_or_else(|| Arc::new(system_process_tree(&paths, app_executable)));
@@ -1801,6 +1822,10 @@ fn call(
         Method::ConfigGet => config_get(shared, params),
         Method::ConfigSet => config_set(shared, params),
         Method::ConfigPackUpdate => config_pack_update(shared, params),
+        Method::ConfigPackList => config_pack_list(shared, params),
+        Method::ConfigPackAdd => config_pack_add(shared, params),
+        Method::ConfigPackLink => config_pack_link(shared, params),
+        Method::ConfigPackEnable => config_pack_enable(shared, params),
         Method::BoardOpen => board_open(shared, params),
         Method::BoardList => board_list(shared),
         Method::TaskGet => task_get(shared, params),
@@ -2193,10 +2218,104 @@ fn config_pack_update(
         .pack_update(&params, board, &tools_path(shared))
     {
         Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
-        Err(PackUpdateError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
-        Err(PackUpdateError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
-        Err(PackUpdateError::Failed(message)) => Err(RpcError::new(code::INTERNAL_ERROR, message)),
+        Err(PackError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
+        Err(PackError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
+        Err(PackError::Failed(message)) => Err(RpcError::new(code::INTERNAL_ERROR, message)),
     }
+}
+
+/// How a pack request that failed is answered: not found, refused (a conflict with what is there) or broken.
+fn pack_error(error: PackError) -> RpcError {
+    match error {
+        PackError::NotFound(message) => RpcError::new(code::NOT_FOUND, message),
+        PackError::Refused(message) => RpcError::new(code::CONFLICT, message),
+        PackError::Failed(message) => RpcError::new(code::INTERNAL_ERROR, message),
+    }
+}
+
+/// The checkout of the board a `config.pack_*` request names, or why the daemon cannot answer.
+fn pack_board(shared: &Shared, id: &str) -> Result<std::path::PathBuf, RpcError> {
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    Ok(std::path::PathBuf::from(board_root(shared, id)?))
+}
+
+/// `config.pack_list` (ts-0101-bd): `collide pack list`.
+fn config_pack_list(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigPackListParams = read_params("config.pack_list", params)?;
+    let root = pack_board(shared, &params.board)?;
+    let board = BoardRef {
+        id: &params.board,
+        root: &root,
+    };
+    let packs = shared
+        .config
+        .pack_list(board, &tools_path(shared))
+        .map_err(pack_error)?;
+    Ok(serde_json::to_value(ConfigPackListResult { packs }).expect("a result is JSON"))
+}
+
+/// `config.pack_add` (ts-0101-bd): `collide pack add`. No board: a user pack is the user's on every board. A fetch
+/// may take as long as its timeout.
+fn config_pack_add(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigPackAddParams = read_params("config.pack_add", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let result = shared
+        .config
+        .pack_add(&params, &tools_path(shared))
+        .map_err(pack_error)?;
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `config.pack_link` (ts-0101-bd): `collide pack link`.
+fn config_pack_link(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigPackLinkParams = read_params("config.pack_link", params)?;
+    let root = pack_board(shared, &params.board)?;
+    let board = BoardRef {
+        id: &params.board,
+        root: &root,
+    };
+    let result = shared
+        .config
+        .pack_link(&params, board, &tools_path(shared))
+        .map_err(pack_error)?;
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `config.pack_enable` (ts-0101-bd): `collide pack enable` and `disable`.
+fn config_pack_enable(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigPackEnableParams = read_params("config.pack_enable", params)?;
+    let root = pack_board(shared, &params.board)?;
+    let board = BoardRef {
+        id: &params.board,
+        root: &root,
+    };
+    let result = shared
+        .config
+        .pack_enable(&params, board, &tools_path(shared))
+        .map_err(pack_error)?;
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
 /// `config.set` (ts-0099-bw): a secret to the keychain, or a plain value to the user's file ([`crate::config_get`]).
