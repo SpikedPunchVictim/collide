@@ -467,3 +467,69 @@ fn an_empty_path_entry_is_skipped_and_never_means_the_current_folder() {
     let path = std::env::join_paths([PathBuf::new(), root.join("none")]).unwrap();
     assert_eq!(Environment { path }.find("collide-no-such-tool-here"), None);
 }
+
+// The pack's data folder (ts-0102-vu; 0.7, Pack data).
+
+fn data_of(command: &Command) -> Option<PathBuf> {
+    command
+        .get_envs()
+        .find(|(name, _)| *name == "COLLIDE_PACK_DATA")
+        .and_then(|(_, value)| value.map(PathBuf::from))
+}
+
+/// Each test names its own folder: the tests run at once, and `fake_path` clears its folder first.
+fn plan_launch(name: &str) -> collide_host::builtin_packs::ProviderLaunch {
+    let (path, _, _) = fake_path(name);
+    packs(&bundle())
+        .provider("collide/plan", "plan", &Environment { path })
+        .unwrap()
+}
+
+#[test]
+fn a_command_with_no_pack_data_sets_no_variable() {
+    assert_eq!(data_of(&plan_launch("data-none").command()), None);
+}
+
+#[test]
+fn a_command_for_a_pack_on_a_board_sets_the_pack_data_variable_to_a_private_folder() {
+    let root = common::TempRoot::new();
+    let launch = plan_launch("data-private")
+        .with_pack_data(&root.join("data"), "board-1", "collide/plan")
+        .unwrap();
+    let dir = data_of(&launch.command()).expect("the variable is set");
+    assert!(dir.is_dir(), "{}", dir.display());
+    assert_eq!(
+        fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+}
+
+#[test]
+fn two_packs_and_two_boards_have_four_different_data_folders() {
+    let root = common::TempRoot::new();
+    let data = root.join("data");
+    let dir = |board: &str, pack: &str| {
+        let launch = plan_launch("data-four")
+            .with_pack_data(&data, board, pack)
+            .unwrap();
+        data_of(&launch.command()).expect("the variable is set")
+    };
+    let all = [
+        dir("board-1", "collide/plan"),
+        dir("board-1", "ferry"),
+        dir("board-2", "collide/plan"),
+        dir("board-2", "ferry"),
+    ];
+    for (i, a) in all.iter().enumerate() {
+        for b in &all[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+}
+
+#[test]
+fn a_pack_name_that_is_not_a_safe_token_gets_no_launch() {
+    let root = common::TempRoot::new();
+    let result = plan_launch("data-unsafe").with_pack_data(&root.join("data"), "board-1", "../x");
+    assert!(result.is_err());
+}

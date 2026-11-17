@@ -26,6 +26,7 @@ export const OWNER_METHODS = {
   'board.open': call<G.BoardOpenParamsInput, G.BoardOpenResultOutput>(),
   'board.init': call<G.BoardInitParamsInput, G.BoardInitResultOutput>(),
   'board.trust': call<G.BoardTrustParamsInput, G.BoardTrustResultOutput>(),
+  'board.trust_review': call<G.BoardTrustReviewParamsInput, G.BoardTrustReviewResultOutput>(),
   'task.list': call<G.TaskListParamsInput, G.TaskListResultOutput>(),
   'task.get': call<G.TaskGetParamsInput, G.TaskGetResultOutput>(),
   'task.apply': call<G.TaskApplyParamsInput, G.TaskApplyResultOutput>(),

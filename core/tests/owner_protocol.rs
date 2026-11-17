@@ -63,7 +63,8 @@ fn board() -> Value {
             "ref_name": "main",
             "root": "/work/repo",
             "snapshot": "abc123",
-            "trust": { "state": "untrusted", "hash": "h1" }
+            "trust": { "state": "untrusted", "hash": "h1" },
+            "problems": [".collide/board.yaml: packs must be a list"]
         }]
     })
 }
@@ -216,8 +217,35 @@ fn samples() -> Vec<(Method, Value, Value)> {
         ),
         (
             Method::BoardTrust,
-            json!({ "board": "bd-1", "line": "main", "hash": "h1" }),
+            json!({
+                "board": "bd-1", "line": "main", "hash": "h1",
+                "hosts": ["example.invalid"], "dev_folders": ["/work/ferry"]
+            }),
             json!({ "trust": { "state": "trusted", "hash": "h1" } }),
+        ),
+        (
+            Method::BoardTrustReview,
+            json!({ "board": "bd-1", "line": "main" }),
+            json!({
+                "trust": { "state": "untrusted", "hash": "h2" },
+                "problems": ["pack git:x: needs a first fetch"],
+                "changes": [
+                    { "name": "board.yaml", "kind": "changed", "lines": ["@@ -1 +1 @@", "-a", "+b"] },
+                    {
+                        "name": "pack repo:.collide/packs/ferry", "kind": "added",
+                        "files": [{ "path": "pack.yaml", "kind": "added", "lines": ["+name: ferry"] }],
+                        "note": "the old objects are gone"
+                    }
+                ],
+                "packs": [{
+                    "source": "repo:.collide/packs/ferry",
+                    "review": {
+                        "name": "ferry", "tree": "t1", "hooks": [], "providers": [], "observers": [], "requires": []
+                    }
+                }],
+                "hosts": ["example.invalid"],
+                "dev_folders": ["/work/ferry"]
+            }),
         ),
         (
             Method::TaskList,

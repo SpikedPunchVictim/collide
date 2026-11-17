@@ -9,13 +9,15 @@ use std::process::{Command, Output};
 mod common;
 use common::{TempRoot, repo_root};
 
-const TREE: [&str; 9] = [
-    "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "sections",
+const TREE: [&str; 11] = [
+    "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "init", "trust",
+    "sections",
 ];
 
 /// The commands whose handler is a tagged stub (`stop` is built: `tests/stop_command.rs`; `run` is built:
 /// `tests/adapters/claude/run_command.rs` and `run_process.rs`; `config` is built: `tests/config_process.rs`, which
-/// runs it with an environment of its own; `pack` is built: `tests/pack_update.rs` and `tests/user_packs.rs`), with the
+/// runs it with an environment of its own; `pack` is built: `tests/pack_update.rs` and `tests/user_packs.rs`; `init`
+/// and `trust` are built: `tests/board_cli.rs` and `tests/board_process.rs`), with the
 /// tag and stage that fills each.
 const STUBBED: [(&str, &str, &str); 1] = [("report", "cli: report", "7")];
 

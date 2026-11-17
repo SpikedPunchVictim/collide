@@ -24,6 +24,19 @@ fn main() -> ExitCode {
             }
         };
     }
+    if matches!(args.first().map(String::as_str), Some("init" | "trust")) {
+        let word = args[0].as_str();
+        let Ok(cwd) = std::env::current_dir() else {
+            eprintln!("collide {word}: cannot read the working directory");
+            return ExitCode::from(exit::FAILED);
+        };
+        let (out, err) = (&mut std::io::stdout().lock(), &mut std::io::stderr().lock());
+        return ExitCode::from(if word == "init" {
+            collide_host::board_cli::run_init(rest, &cwd, out, err)
+        } else {
+            collide_host::board_cli::run_trust(rest, &cwd, &mut std::io::stdin().lock(), out, err)
+        });
+    }
     if let Some(code) = args
         .first()
         .and_then(|name| commands::execute_stub(name, rest))
@@ -41,13 +54,14 @@ fn main() -> ExitCode {
         }
         Some("help" | "--help" | "-h") => {
             println!(
-                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}\n\n{}\n{}\n{}",
+                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}\n\n{}\n{}\n{}\n{}",
                 commands::tree_text(),
                 collide_host::run_cli::USAGE,
                 collide_host::run_cli::HELP,
                 collide_host::config_cli::USAGE,
                 collide_host::config_set_cli::USAGE,
-                collide_host::pack_cli::USAGE
+                collide_host::pack_cli::USAGE,
+                collide_host::board_cli::USAGE
             );
             return ExitCode::SUCCESS;
         }

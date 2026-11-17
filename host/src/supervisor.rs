@@ -166,6 +166,7 @@ mod tests {
             pack_dir: PathBuf::from("/x"),
             program: PathBuf::from("node"),
             args: Vec::new(),
+            data: None,
         };
         SupervisedProvider::new(launch, "/x", BackoffPolicy::default())
     }

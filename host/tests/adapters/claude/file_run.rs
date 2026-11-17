@@ -778,6 +778,53 @@ fn free_space_that_drops_before_the_phase_starts_leaves_a_ready_worktree_and_no_
     );
 }
 
+const FOUR_GIB: u64 = 4 * 1024 * 1024 * 1024;
+
+fn user_floor(fx: &Fixture, text: &str) {
+    fs::write(fx.home.join(".config/collide/config.yaml"), text).unwrap();
+}
+
+#[test]
+fn with_no_floor_setting_4_gib_free_is_under_the_default_floor_and_pauses_the_run() {
+    let mut fx = Fixture::new(
+        &recording("report"),
+        Setup {
+            free: Some(FakeFree::new(&[FOUR_GIB])),
+            ..Setup::default()
+        },
+    );
+    let run = fx.started();
+    assert_paused_for_disk(&mut fx, &run);
+}
+
+#[test]
+fn a_floor_of_1_gib_in_the_users_file_lets_a_run_start_with_4_gib_free() {
+    let mut fx = Fixture::new(
+        &recording("report"),
+        Setup {
+            free: Some(FakeFree::new(&[FOUR_GIB])),
+            ..Setup::default()
+        },
+    );
+    user_floor(&fx, "disk: { floor_gib: 1 }\n");
+    let run = fx.started();
+    assert_eq!(fx.wait_final(&run), PhaseState::Ended {});
+}
+
+#[test]
+fn a_floor_of_0_is_refused_by_the_settings_so_the_default_still_pauses_the_run() {
+    let mut fx = Fixture::new(
+        &recording("report"),
+        Setup {
+            free: Some(FakeFree::new(&[FOUR_GIB])),
+            ..Setup::default()
+        },
+    );
+    user_floor(&fx, "disk: { floor_gib: 0 }\n");
+    let run = fx.started();
+    assert_paused_for_disk(&mut fx, &run);
+}
+
 // ---- what is refused ----------------------------------------------------------------------------------------------
 
 #[test]

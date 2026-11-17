@@ -1248,6 +1248,40 @@ fn a_dev_folder_that_is_not_there_or_is_a_file_is_refused() {
     }
 }
 
+// ---- a board that is removed (ts-0102-vu) ----
+
+#[test]
+fn forgetting_a_board_removes_its_lines_and_keeps_the_rest() {
+    let fx = Fx::basic();
+    let line = fx.load();
+    let hash = fx.hash_of(&line);
+    fx.trust_line(&line, &hash).unwrap();
+    fx.trust.trust_pack(USER_PACK, &fx.tree("main")).unwrap();
+    let mut file = fx.trust.store().load().unwrap();
+    file.set_line(
+        "/other/board",
+        "main",
+        LineTrust {
+            hash: "h".into(),
+            inputs: Vec::new(),
+        },
+    );
+    fx.trust.store().save(&file).unwrap();
+    fx.trust.forget_board(&fx.root()).unwrap();
+    let after = fx.trust.store().load().unwrap();
+    assert!(!after.boards.contains_key(&fx.root()));
+    assert!(after.boards.contains_key("/other/board"));
+    assert!(after.packs.contains_key(USER_PACK));
+    assert_eq!(fx.state(&line), untrusted(&hash));
+}
+
+#[test]
+fn forgetting_a_board_with_no_entries_writes_nothing() {
+    let fx = Fx::basic();
+    fx.trust.forget_board(&fx.root()).unwrap();
+    assert!(!fx.store_dir.join("trust.yaml").exists());
+}
+
 // ---- no real home, no real git config ----
 
 #[test]

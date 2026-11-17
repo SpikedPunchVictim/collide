@@ -70,8 +70,14 @@
     },
     "LineSummary": {
       "additionalProperties": false,
-      "description": "One line of a board (0.12): a ref the user opened. `snapshot` is the commit its packs are read at.",
+      "description": "One line of a board (0.12): a ref the user opened. `snapshot` is the commit its packs are read at. `problems` is\nwhy the line did not load (a bad `board.yaml`), one message each, in the first-run style. Such a line is untrusted\nat an empty hash: there is nothing to trust until the problems are fixed.",
       "properties": {
+        "problems": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "ref_name": {
           "type": "string"
         },

@@ -17,8 +17,8 @@ use crate::launch::ensure_running_from_cli;
 use crate::owner_client::{ClientError, OwnerClient};
 use crate::task_cli::exit;
 use collide_core::owner::{
-    BoardOpenParams, BoardOpenResult, ConfigEntry, ConfigGetParams, ConfigGetResult, SettingLayer,
-    code,
+    BoardOpenParams, BoardOpenResult, BoardSummary, ConfigEntry, ConfigGetParams, ConfigGetResult,
+    SettingLayer, code,
 };
 use std::io::{Read, Write};
 use std::path::Path;
@@ -209,10 +209,18 @@ pub(crate) fn open_board(
     client: &mut OwnerClient,
     cwd: &Path,
 ) -> Result<Option<String>, ClientError> {
+    Ok(open_board_summary(client, cwd)?.map(|board| board.id))
+}
+
+/// The board for the checkout `cwd` is in, with its lines, or `None` when it is in none.
+pub(crate) fn open_board_summary(
+    client: &mut OwnerClient,
+    cwd: &Path,
+) -> Result<Option<BoardSummary>, ClientError> {
     let params = BoardOpenParams {
         root: cwd.display().to_string(),
         init_git: false,
     };
     let opened: BoardOpenResult = client.call("board.open", &params, None)?;
-    Ok(opened.board.map(|board| board.id))
+    Ok(opened.board)
 }

@@ -547,11 +547,14 @@ methods! {
         "0.11, opening a repo with no setup, and its first-run checks",
         BoardOpenParams, BoardOpenResult;
     BoardInit, "board.init", Board,
-        "0.11, writing a board's starter files, or listing them with a dry run",
+        "collide init, 0.11 Share with team: writing a board's starter files, or listing them with a dry run",
         BoardInitParams, BoardInitResult;
     BoardTrust, "board.trust", Board,
-        "0.9, Trust: trusting a line's packs and gate code by their hash",
+        "collide trust, 0.9 Trust: trusting a line's packs and gate code by their hash",
         BoardTrustParams, BoardTrustResult;
+    BoardTrustReview, "board.trust_review", Board,
+        "collide trust, 0.9 Trust: what a person sees before trusting a line",
+        BoardTrustReviewParams, BoardTrustReviewResult;
     TaskList, "task.list", Task,
         "collide tasks",
         TaskListParams, TaskListResult;

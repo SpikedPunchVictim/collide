@@ -10,6 +10,9 @@ use collide_core::owner::{
     ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult,
     ConfigPackResult, ConfigPackUpdateParams, PackEntry, PackOrigin, RpcError, TrustState, code,
 };
+use collide_core::owner::{
+    BoardTrustParams, BoardTrustResult, BoardTrustReviewParams, BoardTrustReviewResult,
+};
 use collide_host::git_objects::GitObjects;
 use collide_host::owner_client::ClientError;
 use collide_host::settings_files::user_config_dir;
@@ -483,6 +486,89 @@ fn a_dev_folder_inside_a_workspace_is_refused_at_load_too() {
     assert!(error.message.contains("mine"), "{}", error.message);
 }
 
+/// A user pack `mine` from a `dev:` source written into `packs.yaml` by hand, switched on for the board.
+fn hand_written_dev_pack(w: &World) -> PathBuf {
+    let folder = pack_folder(w, "devs/mine", "mine");
+    w.fixture.write_user(
+        "packs.yaml",
+        &format!("packs:\n  - source: dev:{}\n", folder.display()),
+    );
+    fs::create_dir_all(board_folder(w)).unwrap();
+    fs::write(board_folder(w).join("packs.yaml"), "on: [mine]\n").unwrap();
+    fs::canonicalize(folder).unwrap()
+}
+
+fn approve_dev(w: &World, folders: &[&Path]) -> Result<BoardTrustResult, RpcError> {
+    let params = BoardTrustParams {
+        board: w.board.clone(),
+        line: "main".to_string(),
+        hash: String::new(),
+        hosts: Vec::new(),
+        dev_folders: folders.iter().map(|f| f.display().to_string()).collect(),
+    };
+    rpc(w, "board.trust", &params)
+}
+
+#[test]
+fn a_dev_source_written_by_hand_is_refused_until_it_is_trusted() {
+    let w = world();
+    let real = hand_written_dev_pack(&w);
+    let error = list(&w).unwrap_err();
+    assert_eq!(error.code, code::CONFLICT);
+    assert!(
+        error.message.contains("not been trusted"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("collide trust"), "{}", error.message);
+    assert!(
+        error.message.contains(real.to_str().unwrap()),
+        "{}",
+        error.message
+    );
+    approve_dev(&w, &[&real]).unwrap();
+    assert!(names(&list(&w).unwrap()).contains(&"mine"));
+}
+
+#[test]
+fn the_review_names_the_dev_folder_and_hashes_nothing_until_it_is_trusted() {
+    let w = world();
+    let real = hand_written_dev_pack(&w);
+    let params = BoardTrustReviewParams {
+        board: w.board.clone(),
+        line: "main".to_string(),
+    };
+    let shown: BoardTrustReviewResult = rpc(&w, "board.trust_review", &params).unwrap();
+    assert_eq!(shown.dev_folders, vec![real.display().to_string()]);
+    assert_eq!(
+        shown.trust,
+        TrustState::Untrusted {
+            hash: String::new()
+        }
+    );
+    assert!(
+        shown
+            .problems
+            .iter()
+            .any(|problem| problem.contains("not been trusted"))
+    );
+    approve_dev(&w, &[&real]).unwrap();
+    let shown: BoardTrustReviewResult = rpc(&w, "board.trust_review", &params).unwrap();
+    assert!(shown.dev_folders.is_empty() && shown.problems.is_empty());
+    assert!(matches!(shown.trust, TrustState::Untrusted { hash } if hash.len() == 40));
+}
+
+#[test]
+fn approving_a_folder_the_line_does_not_need_trusts_nothing() {
+    let w = world();
+    let real = hand_written_dev_pack(&w);
+    let other = pack_folder(&w, "devs/other", "other");
+    approve_dev(&w, &[&fs::canonicalize(other).unwrap()]).unwrap();
+    assert!(list(&w).is_err());
+    let trust = fs::read_to_string(config_dir(&w).join("trust.yaml")).unwrap_or_default();
+    assert!(!trust.contains(real.to_str().unwrap()), "{trust}");
+}
+
 #[test]
 fn a_user_pack_that_cannot_be_read_does_not_break_a_board_that_has_it_off() {
     // A pack whose name cannot be read without loading it (here its folder is gone) is loaded only on a board that
@@ -526,6 +612,8 @@ fn a_dev_pack_is_hashed_at_every_load_and_its_tree_id_is_git_write_tree() {
         w.board.clone(),
         Vec::new(),
     ));
+    // The folder is the person's own and has been trusted (an edit after that needs no new trust).
+    approve_dev(&w, &[&fs::canonicalize(&folder).unwrap()]).unwrap();
     let git_dir = w.fixture.repo.git_dir();
     let first = load_line(&git_dir, "HEAD", &context).unwrap();
     let mine = first.packs.iter().find(|pack| pack.name == "mine").unwrap();

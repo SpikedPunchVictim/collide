@@ -109,13 +109,14 @@ use crate::auth::{
     self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer,
 };
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
+use crate::board_lines::LineError;
 use crate::boards;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::config_get::{
     BoardRef, ConfigService, GetError, LoadContextFactory, SetError, system_load_context,
 };
-use crate::disk::{Floor, FreeSpace, SystemFreeSpace};
+use crate::disk::{FloorSource, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
 use crate::file_run::quick_run::RunDiffError;
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
@@ -139,16 +140,17 @@ use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
-    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams, ConfigPackAddParams,
-    ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult,
-    ConfigPackUpdateParams, ConfigSetParams, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
-    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice,
-    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams,
-    QueueListResult, Request, Response, Routed, RpcError, RunDiffParams, RunGetParams,
-    RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult, RunScope,
-    RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult, RunSummary,
-    StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code,
-    encode_line, parse_request, route,
+    BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardTrustParams,
+    BoardTrustReviewParams, ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams,
+    ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams,
+    ConfigSetParams, DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
+    DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
+    OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams, QueueListResult, Request,
+    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
+    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
+    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
+    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code, encode_line,
+    parse_request, route,
 };
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{ApplyResult, GetParams};
@@ -508,9 +510,9 @@ pub struct DaemonOptions {
     pub home: Option<String>,
     /// The folder the worktrees of file-task runs are made in. `None` is `workspaces` beside the runs.
     pub workspaces_dir: Option<PathBuf>,
-    /// Where free space is read from, and the floor under which nothing starts (0.2, Durability).
+    /// Where free space is read from. The floor under which nothing starts is the `disk.floor_gib` setting of the
+    /// run's board, 5 GiB when none sets it (0.2, Durability).
     pub free_space: Arc<dyn FreeSpace + Send + Sync>,
-    pub floor: Floor,
     /// Added to the environment of every git command a file-task run's workspace runs. A test passes
     /// `GIT_CONFIG_GLOBAL=/dev/null` here.
     pub git_env: Vec<(String, String)>,
@@ -588,7 +590,6 @@ impl DaemonOptions {
             home: std::env::var("HOME").ok(),
             workspaces_dir: None,
             free_space: Arc::new(SystemFreeSpace),
-            floor: Floor::default(),
             git_env: Vec::new(),
             login: Arc::new(SystemLoginSession),
             sleep: Arc::new(std::thread::sleep),
@@ -709,7 +710,6 @@ impl Daemon {
             home,
             workspaces_dir,
             free_space,
-            floor,
             git_env,
             login,
             sleep,
@@ -810,6 +810,56 @@ impl Daemon {
                 Arc::new(move |text: &str| log.line(text))
             },
         });
+        // `config.get` reads the repo's layer through the loader. The cache is beside the runs, like the workspaces.
+        let config = ConfigService::new(
+            home.clone(),
+            load_context.unwrap_or_else(|| {
+                system_load_context(
+                    paths.runs_dir.with_file_name("cache"),
+                    Inputs::from_process(),
+                    home.clone().filter(|home| !home.is_empty()).map(Into::into),
+                )
+            }),
+            git_env.clone(),
+            secret_store,
+        )
+        .with_workspaces({
+            // The worktree root and the paths the store recorded: a `dev:` folder may not be under either.
+            let root = paths.runs_dir.with_file_name("workspaces");
+            let store = store.clone();
+            Arc::new(move || {
+                let mut found = vec![root.clone()];
+                if let Ok(contexts) = store.run_contexts() {
+                    for (_, json) in contexts {
+                        let value: serde_json::Value =
+                            serde_json::from_str(&json).unwrap_or_default();
+                        if let Some(path) =
+                            value.get("workspace_path").and_then(|path| path.as_str())
+                        {
+                            found.push(std::path::PathBuf::from(path));
+                        }
+                    }
+                }
+                found
+            })
+        });
+        // The floor a run starts above is the `disk.floor_gib` of its board, read at each check.
+        let floor: FloorSource = {
+            let (config, store, env, log) =
+                (config.clone(), store.clone(), env.clone(), log.clone());
+            Arc::new(move |board| {
+                let root = board.and_then(|id| store.board_root(id).ok().flatten());
+                let board = board.zip(root.as_deref()).map(|(id, root)| BoardRef {
+                    id,
+                    root: Path::new(root),
+                });
+                let read = config.floor(board, &captured_path(&env));
+                for problem in &read.problems {
+                    log.line(&format!("disk.floor_gib: {problem}"));
+                }
+                read.floor
+            })
+        };
         let file_runs = Arc::new(FileRuns::new(FileRunConfig {
             runs_dir: paths.runs_dir.clone(),
             workspaces_dir: workspaces_dir
@@ -817,7 +867,7 @@ impl Daemon {
             home: home.clone(),
             clocks: clocks.clone(),
             free_space: free_space.clone(),
-            floor,
+            floor: floor.clone(),
             git_env: git_env.clone(),
             base_env: {
                 let env = env.clone();
@@ -902,39 +952,6 @@ impl Daemon {
             bind_socket(&paths).inspect_err(|e| log.line(&format!("cannot start: {e}")))?;
         log.line(&format!("listening on {}", paths.socket.display()));
 
-        // `config.get` reads the repo's layer through the loader. The cache is beside the runs, like the workspaces.
-        let config = ConfigService::new(
-            home.clone(),
-            load_context.unwrap_or_else(|| {
-                system_load_context(
-                    paths.runs_dir.with_file_name("cache"),
-                    Inputs::from_process(),
-                    home.clone().filter(|home| !home.is_empty()).map(Into::into),
-                )
-            }),
-            git_env.clone(),
-            secret_store,
-        )
-        .with_workspaces({
-            // The worktree root and the paths the store recorded: a `dev:` folder may not be under either.
-            let root = paths.runs_dir.with_file_name("workspaces");
-            let store = store.clone();
-            Arc::new(move || {
-                let mut found = vec![root.clone()];
-                if let Ok(contexts) = store.run_contexts() {
-                    for (_, json) in contexts {
-                        let value: serde_json::Value =
-                            serde_json::from_str(&json).unwrap_or_default();
-                        if let Some(path) =
-                            value.get("workspace_path").and_then(|path| path.as_str())
-                        {
-                            found.push(std::path::PathBuf::from(path));
-                        }
-                    }
-                }
-                found
-            })
-        });
         let uid = auth::daemon_uid();
         let tree =
             process_tree.unwrap_or_else(|| Arc::new(system_process_tree(&paths, app_executable)));
@@ -1820,14 +1837,17 @@ fn call(
         Method::QueueList => queue_list(shared, params),
         Method::QueueAnswer => queue_answer(shared, session, params),
         Method::ConfigGet => config_get(shared, params),
-        Method::ConfigSet => config_set(shared, params),
-        Method::ConfigPackUpdate => config_pack_update(shared, params),
+        Method::ConfigSet => config_set(shared, session, params),
+        Method::ConfigPackUpdate => config_pack_update(shared, session, params),
         Method::ConfigPackList => config_pack_list(shared, params),
-        Method::ConfigPackAdd => config_pack_add(shared, params),
-        Method::ConfigPackLink => config_pack_link(shared, params),
-        Method::ConfigPackEnable => config_pack_enable(shared, params),
+        Method::ConfigPackAdd => config_pack_add(shared, session, params),
+        Method::ConfigPackLink => config_pack_link(shared, session, params),
+        Method::ConfigPackEnable => config_pack_enable(shared, session, params),
         Method::BoardOpen => board_open(shared, params),
         Method::BoardList => board_list(shared),
+        Method::BoardInit => board_init(shared, session, params),
+        Method::BoardTrust => board_trust(shared, session, params),
+        Method::BoardTrustReview => board_trust_review(shared, params),
         Method::TaskGet => task_get(shared, params),
         Method::TaskApply => task_apply(shared, session, params),
         other => Err(RpcError::new(
@@ -2199,9 +2219,11 @@ fn config_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
 /// may take as long as its timeout, so this answers when it is done and no other request waits on it.
 fn config_pack_update(
     shared: &Shared,
+    session: &Session,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     let params: ConfigPackUpdateParams = read_params("config.pack_update", params)?;
+    refuse_run_agent(session, "move a pack")?;
     if shared.stopping() {
         return Err(RpcError::new(
             code::UNAVAILABLE,
@@ -2266,9 +2288,11 @@ fn config_pack_list(
 /// may take as long as its timeout.
 fn config_pack_add(
     shared: &Shared,
+    session: &Session,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     let params: ConfigPackAddParams = read_params("config.pack_add", params)?;
+    refuse_run_agent(session, "add a pack")?;
     if shared.stopping() {
         return Err(RpcError::new(
             code::UNAVAILABLE,
@@ -2285,9 +2309,11 @@ fn config_pack_add(
 /// `config.pack_link` (ts-0101-bd): `collide pack link`.
 fn config_pack_link(
     shared: &Shared,
+    session: &Session,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     let params: ConfigPackLinkParams = read_params("config.pack_link", params)?;
+    refuse_run_agent(session, "link a pack")?;
     let root = pack_board(shared, &params.board)?;
     let board = BoardRef {
         id: &params.board,
@@ -2303,9 +2329,11 @@ fn config_pack_link(
 /// `config.pack_enable` (ts-0101-bd): `collide pack enable` and `disable`.
 fn config_pack_enable(
     shared: &Shared,
+    session: &Session,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     let params: ConfigPackEnableParams = read_params("config.pack_enable", params)?;
+    refuse_run_agent(session, "switch a pack on or off")?;
     let root = pack_board(shared, &params.board)?;
     let board = BoardRef {
         id: &params.board,
@@ -2322,7 +2350,11 @@ fn config_pack_enable(
 /// The request's `value` may be a secret, so nothing here reads it into a message: the params that cannot be read are
 /// answered without the serde error (which can quote a value), no line is logged for the call, and the answer holds no
 /// value.
-fn config_set(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+fn config_set(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
     let params: ConfigSetParams = serde_json::from_value(params.clone()).map_err(|_| {
         RpcError::new(
             code::INVALID_PARAMS,
@@ -2330,6 +2362,7 @@ fn config_set(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
              and `secret`",
         )
     })?;
+    refuse_run_agent(session, "change the person's settings")?;
     if shared.stopping() {
         return Err(RpcError::new(
             code::UNAVAILABLE,
@@ -2364,9 +2397,12 @@ fn board_root_of(
 /// The `PATH` the tools a pack needs are looked for on: where the user's login shell finds them, once it has been
 /// captured.
 fn tools_path(shared: &Shared) -> std::ffi::OsString {
-    shared
-        .env
-        .lock()
+    captured_path(&shared.env)
+}
+
+/// The `PATH` of the captured environment, or the process's own before there is one.
+fn captured_path(env: &Mutex<Option<BaseEnvironment>>) -> std::ffi::OsString {
+    env.lock()
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .and_then(|env| env.vars.get("PATH").cloned())
@@ -2411,7 +2447,12 @@ fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
             let root = checkout.root.display().to_string();
             let id = shared.store.open_board(&root).map_err(store_failed)?;
             BoardOpenResult {
-                board: Some(boards::summary(&id, &root, Some(&checkout))),
+                board: Some(shared.config.lines().summary(
+                    &id,
+                    &root,
+                    Some(&checkout),
+                    &tools_path(shared),
+                )),
                 checks: vec![boards::git_repo_ok(&checkout)],
             }
         }
@@ -2419,9 +2460,91 @@ fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
+/// A run's agent may not change what the person trusts, what the repo holds or the person's settings (0.9: trust is
+/// the person's act, and adding a user pack or linking a folder trusts it). So `board.init`, `board.trust`,
+/// `config.set` and the `config.pack_*` writes are refused to it; the reads are not.
+fn refuse_run_agent(session: &Session, what: &str) -> Result<(), RpcError> {
+    match session.caller() {
+        Caller::RunAgent { run } => Err(RpcError::new(
+            code::NOT_PERMITTED,
+            format!("the agent of run {run} may not {what}"),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// `board.init` (ts-0102-vu): `collide init`, the starter `.collide/board.yaml` of a board ([`crate::board_init`]).
+fn board_init(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: BoardInitParams = read_params("board.init", params)?;
+    refuse_run_agent(session, "write a board's files")?;
+    let root = pack_board(shared, &params.board)?;
+    let result = crate::board_init::init(&root, params.dry_run).map_err(|error| match error {
+        crate::board_init::InitError::Exists(message) => RpcError::new(code::CONFLICT, message),
+        crate::board_init::InitError::Failed(message) => {
+            RpcError::new(code::INTERNAL_ERROR, message)
+        }
+    })?;
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+fn line_error(error: LineError) -> RpcError {
+    match error {
+        LineError::NotFound(message) => RpcError::new(code::NOT_FOUND, message),
+        LineError::Refused(message) => RpcError::new(code::CONFLICT, message),
+        LineError::Invalid(message) => RpcError::new(code::INVALID_PARAMS, message),
+        LineError::Failed(message) => RpcError::new(code::INTERNAL_ERROR, message),
+    }
+}
+
+/// `board.trust` (ts-0102-vu): `collide trust`, the line's hash recorded outside the repo ([`crate::board_lines`]).
+fn board_trust(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: BoardTrustParams = read_params("board.trust", params)?;
+    refuse_run_agent(session, "trust a line's packs")?;
+    let root = pack_board(shared, &params.board)?;
+    let board = BoardRef {
+        id: &params.board,
+        root: &root,
+    };
+    let result = shared
+        .config
+        .lines()
+        .trust(board, &params, &tools_path(shared))
+        .map_err(line_error)?;
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `board.trust_review` (ts-0102-vu): what a person sees before they trust a line. It writes nothing.
+fn board_trust_review(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: BoardTrustReviewParams = read_params("board.trust_review", params)?;
+    let root = pack_board(shared, &params.board)?;
+    let board = BoardRef {
+        id: &params.board,
+        root: &root,
+    };
+    let result = shared
+        .config
+        .lines()
+        .review(board, &params.line, &tools_path(shared))
+        .map_err(line_error)?;
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
 /// `board.list`: the boards opened before, from the store. A board's line is the branch its checkout is on now, read
 /// from git; a board whose folder is gone or is no longer a checkout is listed with no line.
 fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
+    let lines = shared.config.lines();
+    let tools = tools_path(shared);
     let boards = shared
         .store
         .boards()
@@ -2429,7 +2552,7 @@ fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
         .into_iter()
         .map(|board| {
             let checkout = boards::checkout_of(Path::new(&board.root), &shared.git_env).ok();
-            boards::summary(&board.id, &board.root, checkout.as_ref())
+            lines.summary(&board.id, &board.root, checkout.as_ref(), &tools)
         })
         .collect();
     Ok(serde_json::to_value(BoardListResult { boards }).expect("a result is JSON"))

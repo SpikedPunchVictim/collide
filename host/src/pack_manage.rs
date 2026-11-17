@@ -109,7 +109,11 @@ fn read_manifest(path: &Path) -> Result<PackManifest, PackError> {
 
 // ---- the review ----
 
-fn review_data(manifest: &PackManifest, commit: Option<&str>, tree: &str) -> PackReviewData {
+pub(crate) fn review_data(
+    manifest: &PackManifest,
+    commit: Option<&str>,
+    tree: &str,
+) -> PackReviewData {
     let review = pack_review(manifest);
     let lines = |entries: Vec<ReviewEntry>| -> Vec<PackReviewLine> {
         entries

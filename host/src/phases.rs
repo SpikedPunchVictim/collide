@@ -100,7 +100,7 @@ use crate::agent_feed::{AgentFeed, Pause};
 use crate::auth::check_socket_path;
 use crate::clock::{Clock, Clocks};
 use crate::daemon::{AdoptedShim, AdoptedState};
-use crate::disk::{DiskGuard, Floor, FreeSpace};
+use crate::disk::{DiskGuard, FloorSource, FreeSpace};
 use crate::metrics::Metrics;
 use crate::metrics_store::WaitKind;
 use crate::queue::Queue;
@@ -429,7 +429,7 @@ pub struct PhasesConfig {
     pub cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
     /// Where free space is read from and the floor, for a phase that ends with no `result`: on a full volume it fails
     /// with cause `disk`, not `lost` or `failed` (0.2, Durability). `None` never calls a volume full.
-    pub disk: Option<(Arc<dyn FreeSpace + Send + Sync>, Floor)>,
+    pub disk: Option<(Arc<dyn FreeSpace + Send + Sync>, FloorSource)>,
     /// The Queue the phases put a permission request in, and take it out of when it is answered.
     pub queue: Arc<Queue>,
     /// Called when a phase pauses ([`PhasePauseHook`]).
@@ -575,7 +575,7 @@ struct PhasesShared {
     log: Arc<dyn Fn(&str) + Send + Sync>,
     processes: Arc<dyn Processes + Send + Sync>,
     cleanup: Option<Arc<dyn Cleanup + Send + Sync>>,
-    disk: Option<(Arc<dyn FreeSpace + Send + Sync>, Floor)>,
+    disk: Option<(Arc<dyn FreeSpace + Send + Sync>, FloorSource)>,
     queue: Arc<Queue>,
     on_phase_pause: Option<PhasePauseHook>,
     metrics: Arc<Metrics>,
@@ -1559,7 +1559,15 @@ impl Phases {
         let Some((free, floor)) = &self.shared.disk else {
             return false;
         };
-        match DiskGuard::new(free.as_ref(), *floor).volume_full(&entry.dir) {
+        // The floor of the run's board: a run with no board, or one the store does not know, has the user's.
+        let board = self
+            .shared
+            .store
+            .run(&entry.key.run)
+            .ok()
+            .flatten()
+            .and_then(|row| row.board);
+        match DiskGuard::new(free.as_ref(), floor(board.as_deref())).volume_full(&entry.dir) {
             Ok(full) => full,
             Err(error) => {
                 self.log(&format!("phase {}: {error}", entry.key));

@@ -1,11 +1,11 @@
 //! What a board is made of in 3c (ts-0075-hj; 0.8, Board; 0.11, First run works with no pack and no tasks): a git
-//! checkout, found from any folder in it, and the one line it has, the branch the checkout is on now. The boards the
-//! user opened are the store's ([`crate::scratch_store`]); this file reads git.
+//! checkout, found from any folder in it, and the branch it is on now. The boards the user opened are the store's
+//! ([`crate::scratch_store`]); this file reads git. The line a board has, with its trust, is [`crate::board_lines`].
 //!
 //! Only the `git_repo` check is made here. The checks for `claude` come with the no-setup open (Stage 6a), and
 //! `git init` for a folder that is not a checkout is that stage's too.
 
-use collide_core::owner::{BoardSummary, CheckId, FirstRunCheck, LineSummary, TrustState};
+use collide_core::owner::{CheckId, FirstRunCheck};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -76,6 +76,19 @@ pub fn git_dir_of(root: &Path, env: &[(String, String)]) -> Result<PathBuf, Stri
     }
 }
 
+/// The commit `HEAD` names in the checkout at `root`, or `None` when it names none (a checkout with no commit) or git
+/// cannot be run.
+pub fn head_commit(root: &Path, env: &[(String, String)]) -> Option<String> {
+    git(
+        root,
+        env,
+        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+    )
+    .ok()
+    .flatten()
+    .filter(|commit| !commit.is_empty())
+}
+
 /// The `git_repo` check, passed.
 pub fn git_repo_ok(checkout: &Checkout) -> FirstRunCheck {
     git_repo_check(
@@ -99,25 +112,5 @@ fn git_repo_check(ok: bool, message: String) -> FirstRunCheck {
         ok,
         required: true,
         message,
-    }
-}
-
-/// The board `id` at `root` with its one line. Nothing in a checkout is read for trust in 3c (no repo pack is loaded),
-/// so the line is untrusted at an empty hash, which a later stage replaces with the hash of 0.9.
-pub fn summary(id: &str, root: &str, checkout: Option<&Checkout>) -> BoardSummary {
-    BoardSummary {
-        id: id.to_string(),
-        root: root.to_string(),
-        lines: checkout
-            .map(|checkout| LineSummary {
-                ref_name: checkout.branch.clone(),
-                root: checkout.root.display().to_string(),
-                snapshot: None,
-                trust: TrustState::Untrusted {
-                    hash: String::new(),
-                },
-            })
-            .into_iter()
-            .collect(),
     }
 }

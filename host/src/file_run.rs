@@ -68,7 +68,7 @@ use crate::base_env::BaseEnvironment;
 use crate::builtin_roles::{BUILDER_DEFINITION, BUILDER_ROLE_NAME, builder_role};
 use crate::claude_versions::{ClaudeVersions, Gate};
 use crate::clock::{Clock, Clocks};
-use crate::disk::{Before, DiskError, DiskGuard, DiskPause, Floor, FreeSpace};
+use crate::disk::{Before, DiskError, DiskGuard, DiskPause, FloorSource, FreeSpace};
 use crate::metrics::Metrics;
 use crate::metrics_store::WaitKind;
 use crate::models::load_user_models;
@@ -123,7 +123,8 @@ pub struct FileRunConfig {
     pub home: Option<String>,
     pub clocks: Arc<dyn Clocks + Send + Sync>,
     pub free_space: Arc<dyn FreeSpace + Send + Sync>,
-    pub floor: Floor,
+    /// The floor for a run's board, read when the run is checked ([`crate::disk::FloorSource`]).
+    pub floor: FloorSource,
     /// Added to the environment of every git command ([`BuiltinWorkspace::with_git_env`]).
     pub git_env: Vec<(String, String)>,
     pub base_env: BaseEnvSource,
@@ -615,7 +616,9 @@ impl FileRuns {
         live: &mut Live,
         base: &BaseEnvironment,
     ) -> Result<(), Halt> {
-        let guard = DiskGuard::new(self.config.free_space.as_ref(), self.config.floor);
+        let board = live.ctx.quick.as_ref().map(|quick| quick.board.as_str());
+        let floor = (self.config.floor)(board);
+        let guard = DiskGuard::new(self.config.free_space.as_ref(), floor);
         let Live { workspace, ctx } = live;
         let workspace_path = self.config.workspaces_dir.join(ctx.workspace_name());
         let name = ctx.workspace_name().to_string();

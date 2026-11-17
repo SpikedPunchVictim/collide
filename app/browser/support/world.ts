@@ -298,7 +298,10 @@ function removeRoot(root: string): void {
   if (!root.startsWith(`/private/tmp/${ROOT_PREFIX}`) && !root.startsWith(`/tmp/${ROOT_PREFIX}`)) {
     throw new Error(`refusing to remove ${root}`)
   }
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true })
+  if (!existsSync(root)) return
+  // The daemon's cache holds a read-only copy of the SDK (a board's first load makes it), which `rm` cannot empty.
+  spawnSync('/bin/chmod', ['-R', 'u+w', root])
+  rmSync(root, { recursive: true, force: true })
 }
 
 /** The `claude` script: the version, and the recording played for a first launch and for one with `--resume`. */

@@ -24,6 +24,7 @@ use collide_core::state::{PauseCause, RunState};
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * KIB;
@@ -36,6 +37,24 @@ pub const DEFAULT_FLOOR_BYTES: u64 = 5 * GIB;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Floor {
     pub min_free_bytes: u64,
+}
+
+impl Floor {
+    /// A floor of `gib` GiB, the unit of the `disk.floor_gib` setting.
+    pub fn from_gib(gib: u64) -> Floor {
+        Floor {
+            min_free_bytes: gib.saturating_mul(GIB),
+        }
+    }
+}
+
+/// Where a run's floor comes from: the floor for a board (`None` for a run with no board). The daemon's is the
+/// `disk.floor_gib` setting of that board; a test gives a fixed one.
+pub type FloorSource = Arc<dyn Fn(Option<&str>) -> Floor + Send + Sync>;
+
+/// A source that gives `floor` for every board.
+pub fn fixed_floor(floor: Floor) -> FloorSource {
+    Arc::new(move |_| floor)
 }
 
 impl Default for Floor {

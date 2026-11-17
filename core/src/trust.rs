@@ -191,6 +191,11 @@ impl TrustFile {
             .insert(ref_name.to_string(), trust);
     }
 
+    /// Removes every line trusted for the board at `root`. Returns whether there was any.
+    pub fn remove_board(&mut self, root: &str) -> bool {
+        self.boards.remove(root).is_some()
+    }
+
     pub fn set_pack(&mut self, source: &str, tree: &str) {
         self.packs.insert(
             source.to_string(),

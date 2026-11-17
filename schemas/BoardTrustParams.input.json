@@ -1,13 +1,25 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`board.trust` params: trust a line's packs at `hash`. The daemon computes the hash again and refuses when it\ndiffers from this one, so a person trusts what they were shown. Trust is stored outside the repo (0.9).",
+  "description": "`board.trust` params: trust a line's packs at `hash`. The daemon computes the hash again and refuses when it\ndiffers from this one, so a person trusts what they were shown. Trust is stored outside the repo (0.9).\n`hosts` and `dev_folders` are what the person approved when the line could not load without them: a host a `git:`\npack is fetched from for the first time, and a `dev:` folder never trusted. Each is recorded only when the line\nneeds it. With an empty `hash` the call records these and trusts nothing, and the line can then be loaded and\nreviewed.",
   "properties": {
     "board": {
       "type": "string"
     },
+    "dev_folders": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "hash": {
       "type": "string"
+    },
+    "hosts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "line": {
       "type": "string"

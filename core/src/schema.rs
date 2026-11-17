@@ -178,6 +178,8 @@ pub fn registry() -> Registry {
     registry.add::<owner::BoardOpenResult>();
     registry.add::<owner::BoardTrustParams>();
     registry.add::<owner::BoardTrustResult>();
+    registry.add::<owner::BoardTrustReviewParams>();
+    registry.add::<owner::BoardTrustReviewResult>();
     registry.add::<owner::ConfigGetParams>();
     registry.add::<owner::ConfigGetResult>();
     registry.add::<owner::ConfigPackAddParams>();

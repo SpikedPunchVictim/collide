@@ -62,6 +62,21 @@ fn make_sdk(dir: &Path) {
     .unwrap();
 }
 
+/// A loader over the fixture's cache and SDK stand-in in `root`, with the source packs as the built-in bundle.
+pub fn plain_factory(root: &Path) -> LoadContextFactory {
+    let (cache, sdk) = (root.join("cache"), root.join("sdk-copy"));
+    Arc::new(move |path| {
+        Ok(LoadContext::new(
+            cache.clone(),
+            sdk.clone(),
+            Environment {
+                path: path.to_os_string(),
+            },
+            BuiltinPacks::new(repo_root().join("packs")),
+        ))
+    })
+}
+
 impl Fixture {
     /// A checkout on `main` with one commit, and a daemon that has not been told of it yet.
     pub fn new() -> Fixture {
@@ -75,7 +90,6 @@ impl Fixture {
         repo.write("README.md", b"fixture\n");
         repo.commit_all("start");
         let root = repo.root().path().to_path_buf();
-        let cache = root.join("cache");
         let sdk = root.join("sdk-copy");
         make_sdk(&sdk);
         let shell = root.join("fake-shell");
@@ -99,16 +113,7 @@ impl Fixture {
             ("GIT_CONFIG_SYSTEM".to_string(), "/dev/null".to_string()),
             ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
         ];
-        let factory: LoadContextFactory = Arc::new(move |path| {
-            Ok(LoadContext::new(
-                cache.clone(),
-                sdk.clone(),
-                Environment {
-                    path: path.to_os_string(),
-                },
-                BuiltinPacks::new(repo_root().join("packs")),
-            ))
-        });
+        let factory = plain_factory(&root);
         options.load_context = Some(factory);
         configure(&mut options);
         let daemon = Daemon::start(options).expect("the daemon starts");

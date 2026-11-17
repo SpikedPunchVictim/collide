@@ -11,7 +11,9 @@
 
 use crate::atomic_write::{Step, write_atomically};
 use crate::board_load::LoadedLine;
+use crate::git_fetch::mirror_path;
 use crate::git_objects::{GitError, GitObjects, ObjectKind, TreeChangeKind, check_id};
+use collide_core::lock::GitLocator;
 use collide_core::owner::TrustState;
 use collide_core::trust::{
     ChangeKind, DiffDetail, FileChangeKind, FileDiff, InputChange, InputDiff, InputError, LineDiff,
@@ -391,6 +393,47 @@ impl Trust {
         Ok(self.diff(site.repo, &before, &current.inputs))
     }
 
+    /// As [`Trust::changes_since_trust`], for a line with `git:` packs: the trees of such a pack are in its mirror
+    /// under `cache` ([`mirror_path`]), not in the line's repository, so the diff of that input is read there.
+    pub fn changes_since_trust_with_mirrors(
+        &self,
+        site: &LineSite,
+        line: &LoadedLine,
+        cache: &Path,
+    ) -> Result<Vec<InputDiff>, TrustError> {
+        let current = self.line_hash(site.repo, line)?;
+        let file = self.store.load()?;
+        let before = file
+            .line(site.root, site.ref_name)
+            .map(|trusted| trusted.inputs.clone())
+            .unwrap_or_default();
+        let repo_of = |input: &TrustInput| -> PathBuf {
+            let url = input
+                .name
+                .strip_prefix("pack git:")
+                .and_then(|locator| GitLocator::parse(locator).ok())
+                .map(|locator| locator.url);
+            match url {
+                Some(url) => mirror_path(cache, &url),
+                None => site.repo.to_path_buf(),
+            }
+        };
+        // One diff for each repository the inputs live in, then every change in name order.
+        let mut by_repo: BTreeMap<PathBuf, (Vec<TrustInput>, Vec<TrustInput>)> = BTreeMap::new();
+        for input in before {
+            by_repo.entry(repo_of(&input)).or_default().0.push(input);
+        }
+        for input in current.inputs {
+            by_repo.entry(repo_of(&input)).or_default().1.push(input);
+        }
+        let mut changes: Vec<InputDiff> = by_repo
+            .into_iter()
+            .flat_map(|(repo, (old, new))| self.diff(&repo, &old, &new))
+            .collect();
+        changes.sort_by(|a, b| a.change.name.cmp(&b.change.name));
+        Ok(changes)
+    }
+
     /// The difference of two input lists, in name order, with what each changed input shows (the files of a folder,
     /// the lines of a file), read from `repo`. An input whose old objects `repo` no longer has is listed as changed,
     /// and says so.
@@ -594,6 +637,16 @@ impl Trust {
         let mut file = self.store.load()?;
         file.add_dev(&dev_key(&real)?);
         Ok(self.store.save(&file)?)
+    }
+
+    /// Removes what was trusted for the board at `root`, for a board that is removed. Nothing is written when there
+    /// is nothing to remove, so a missing `trust.yaml` stays missing.
+    pub fn forget_board(&self, root: &str) -> Result<(), TrustError> {
+        let mut file = self.store.load()?;
+        if file.remove_board(root) {
+            self.store.save(&file)?;
+        }
+        Ok(())
     }
 
     /// Whether the `dev:` folder is trusted. A change inside the folder does not matter: the trust is of the folder.

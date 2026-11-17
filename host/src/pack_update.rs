@@ -35,7 +35,7 @@ use collide_core::owner::{
     ConfigPackUpdateParams, ConfigPackUpdateResult, PackEntry, PackFileChange, PackFileChangeKind,
     PackOrigin, PackPin,
 };
-use collide_core::trust::{DiffDetail, FileChangeKind, TrustInput};
+use collide_core::trust::{DiffDetail, FileChangeKind, FileDiff, TrustInput};
 use std::path::{Path, PathBuf};
 
 /// Why a `config.pack_*` request gave no result.
@@ -361,6 +361,42 @@ fn update(
     }))
 }
 
+/// A folder's changed files as the wire has them: a binary file and lines left out are said in the note.
+pub fn file_changes(files: Vec<FileDiff>) -> Vec<PackFileChange> {
+    files
+        .into_iter()
+        .map(|file| {
+            let mut notes: Vec<String> = file.note.into_iter().collect();
+            let lines = match file.lines {
+                Some(lines) => {
+                    if lines.binary {
+                        notes.push("a binary file".to_string());
+                    }
+                    if lines.omitted > 0 {
+                        notes.push(format!(
+                            "{} more changed lines are not shown",
+                            lines.omitted
+                        ));
+                    }
+                    lines.lines
+                }
+                None => Vec::new(),
+            };
+            PackFileChange {
+                path: file.path,
+                kind: match file.kind {
+                    FileChangeKind::Added => PackFileChangeKind::Added,
+                    FileChangeKind::Deleted => PackFileChangeKind::Deleted,
+                    FileChangeKind::Modified => PackFileChangeKind::Modified,
+                    FileChangeKind::TypeChanged => PackFileChangeKind::TypeChanged,
+                },
+                lines,
+                note: (!notes.is_empty()).then(|| notes.join("; ")),
+            }
+        })
+        .collect()
+}
+
 /// The files that differ between two trees of `repo` (named `label` for the trust diff), and a note when the diff
 /// could not be made in full.
 pub fn tree_changes(
@@ -379,37 +415,7 @@ pub fn tree_changes(
     let mut note = None;
     for input in found {
         match input.detail {
-            DiffDetail::Files(files) => {
-                for file in files {
-                    let mut notes: Vec<String> = file.note.into_iter().collect();
-                    let lines = match file.lines {
-                        Some(lines) => {
-                            if lines.binary {
-                                notes.push("a binary file".to_string());
-                            }
-                            if lines.omitted > 0 {
-                                notes.push(format!(
-                                    "{} more changed lines are not shown",
-                                    lines.omitted
-                                ));
-                            }
-                            lines.lines
-                        }
-                        None => Vec::new(),
-                    };
-                    changes.push(PackFileChange {
-                        path: file.path,
-                        kind: match file.kind {
-                            FileChangeKind::Added => PackFileChangeKind::Added,
-                            FileChangeKind::Deleted => PackFileChangeKind::Deleted,
-                            FileChangeKind::Modified => PackFileChangeKind::Modified,
-                            FileChangeKind::TypeChanged => PackFileChangeKind::TypeChanged,
-                        },
-                        lines,
-                        note: (!notes.is_empty()).then(|| notes.join("; ")),
-                    });
-                }
-            }
+            DiffDetail::Files(files) => changes.extend(file_changes(files)),
             DiffDetail::Unavailable(why) => note = Some(why),
             DiffDetail::Lines(_) | DiffDetail::None => {}
         }

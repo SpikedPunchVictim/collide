@@ -31,9 +31,12 @@ export interface BoardSummary {
   root: string
 }
 /**
- * One line of a board (0.12): a ref the user opened. `snapshot` is the commit its packs are read at.
+ * One line of a board (0.12): a ref the user opened. `snapshot` is the commit its packs are read at. `problems` is
+ * why the line did not load (a bad `board.yaml`), one message each, in the first-run style. Such a line is untrusted
+ * at an empty hash: there is nothing to trust until the problems are fixed.
  */
 export interface LineSummary {
+  problems?: string[]
   ref_name: string
   root: string
   snapshot?: string | null

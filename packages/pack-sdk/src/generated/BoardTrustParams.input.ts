@@ -3,9 +3,15 @@
 /**
  * `board.trust` params: trust a line's packs at `hash`. The daemon computes the hash again and refuses when it
  * differs from this one, so a person trusts what they were shown. Trust is stored outside the repo (0.9).
+ * `hosts` and `dev_folders` are what the person approved when the line could not load without them: a host a `git:`
+ * pack is fetched from for the first time, and a `dev:` folder never trusted. Each is recorded only when the line
+ * needs it. With an empty `hash` the call records these and trusts nothing, and the line can then be loaded and
+ * reviewed.
  */
 export interface BoardTrustParams {
   board: string
+  dev_folders?: string[]
   hash: string
+  hosts?: string[]
   line: string
 }

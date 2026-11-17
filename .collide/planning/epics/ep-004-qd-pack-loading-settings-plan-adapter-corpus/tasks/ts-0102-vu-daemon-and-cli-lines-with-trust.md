@@ -134,3 +134,98 @@ Write these first, over fixture repositories, a temp `HOME` and a daemon in a te
   user's `packs.yaml` by hand is refused until trusted.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.
+
+### Built
+
+- **Lines with trust.** `host/src/board_lines.rs` (`Lines`) gives `board.open` and `board.list` a real `snapshot` (the
+  commit of `HEAD`, `boards::head_commit`) and a real `trust` per line. It loads at that commit on every call. A load
+  that fails lists the line with its problems and an empty hash. A checkout with no commit has no line. `ref_name` is
+  the branch, `HEAD` when detached. An unreadable `trust.yaml` leaves the line untrusted and names the file.
+  `boards::summary` is gone; the daemon calls `ConfigService::lines()`.
+- **`board.trust`** refuses a stale hash with `CONFLICT` and records nothing. `BoardTrustParams` gained `hosts` and
+  `dev_folders`. **`board.trust_review`** is new and writes nothing: hash, `changes` (`TrustChange`, with the files
+  and diff lines of a folder), each repo or `git:` pack's `PackReviewData`, and the `hosts` and `dev_folders` a failed
+  load needs. `LineSummary.problems` is a third wire change (see Decisions). `pnpm gen` was run.
+- **`board.init`** (`host/src/board_init.rs`): writes only `.collide/board.yaml` (a two-line comment and
+  `packs: []`) through `write_atomically`. It refuses when `.collide` exists, commits nothing, edits no `.gitignore`.
+  `dry_run` writes nothing. Both board writers refuse a run's agent (`NOT_PERMITTED`).
+- **CLI** (`host/src/board_cli.rs`, arms in `host/src/bin/collide.rs`, rows in `COMMANDS` and `TREE`):
+  `collide init [--dry-run]`; `collide trust [--line <ref>] [--yes] [--allow-host <host>] [--allow-dev <folder>]`.
+  `trust` prints the hash, each change with its diff, and each pack's review, then asks `Trust this? [y/N]` on a
+  terminal. With no terminal and no `--yes` it exits 5 and names `--yes` and the terminal. `--yes` trusts exactly the
+  hash shown. A host or `dev:` folder the load needs is asked about first (or `--allow-host`, `--allow-dev`), recorded
+  on a yes, and the line is reviewed again.
+- **Pack data.** `ProviderLaunch.data` and `with_pack_data` set `COLLIDE_PACK_DATA` to a 0700 folder, one per pack and
+  board (`board_load::pack_data_dir`). `command()` stays infallible.
+- **Disk floor.** `disk.floor_gib` is read through the settings layers per board: `ConfigService::floor`, which does
+  not go through `get` (no keychain check). `FileRunConfig.floor` and `PhasesConfig.disk` hold a `FloorSource`
+  (`host/src/disk.rs`) instead of a `Floor`; the daemon's source finds the run's board and logs the problems.
+  `DaemonOptions.floor` is gone. A bad value (0, a string) is a problem and 5 GiB holds.
+- **Carried work.** `Trust::forget_board` (and `TrustFile::remove_board`) removes a board's `trust.yaml` entries.
+  `Trust::changes_since_trust_with_mirrors` passes each `git:` pack's mirror to `Trust::diff`. `LoadProblem` gained
+  `needs_dev_trust`, and `Load::dev_pack` refuses a `dev:` folder never trusted (user pack, link, offered working
+  copy) before it reads the manifest.
+- **Harness.** `app/browser/support/world.ts` `removeRoot` makes the tree writable first: a board's first load now
+  copies the SDK read-only into the daemon's cache, which `rm` could not empty. `config_fixture.rs` gained
+  `plain_factory`.
+
+Tests, by file. Seen red at runtime means it failed against the old behaviour or a stub before the code was written.
+
+- `host/tests/board_lines.rs` (24): lines, snapshot, trust, review, hosts, a git pack's diff. 23 seen red against the
+  old daemon.
+- `host/tests/board_init.rs` (9): all seen red (method not served).
+- `host/tests/board_cli.rs` (26): the question, the refusal with no terminal, `--yes`, a host, a `dev:` folder, the
+  end-to-end change (`a_committed_change_to_a_repo_pack_loads_after_the_prompt_that_showed_its_diff`), `init`, usage.
+  All 26 seen red against a stub that exits 6.
+- `host/tests/board_process.rs` (4): the binary with an empty, non-terminal input. Not seen red: written after the
+  code, over the same paths `board_cli.rs` saw red.
+- `host/tests/disk_floor.rs` (9): 8 seen red against a stub that always answers 5 GiB (the ninth, no setting, is
+  the default). In `adapters/claude/file_run.rs`: `a_floor_of_1_gib_in_the_users_file_lets_a_run_start_with_4_gib_free`
+  seen red (timed out); `with_no_floor_setting_4_gib_free_is_under_the_default_floor_and_pauses_the_run` and
+  `a_floor_of_0_is_refused_by_the_settings_so_the_default_still_pauses_the_run` hold the old behaviour too.
+- `host/tests/user_packs.rs`: `a_dev_source_written_by_hand_is_refused_until_it_is_trusted` and two more, seen red;
+  `a_dev_pack_is_hashed_at_every_load_...` now approves its folder first.
+- `host/tests/trust.rs`: `forgetting_a_board_removes_its_lines_and_keeps_the_rest` seen red against a stub.
+  `a_git_packs_change_shows_its_files_from_the_mirror` seen red with the mirror path taken out.
+- `host/tests/builtin_packs.rs`: three of four pack-data tests seen red; the fourth is the unchanged default.
+- `core/tests/owner_protocol.rs`: new samples for the three changed or new methods.
+
+### Decisions for the owner
+
+1. **Approving a host or folder is a two-step `board.trust`.** A host or `dev:` folder blocks the load before there is
+   a hash, so `board.trust` with an empty hash records only what the load needs (`hosts`, `dev_folders`) and trusts
+   nothing. The CLI then reviews again and asks about the hash. Alternative: a separate `board.allow` method. Recommend
+   keeping this: no new method, and the hash is still the only thing a yes trusts.
+2. **`--yes` trusts the hash, not hosts or folders.** A script passes `--allow-host` and `--allow-dev` for those.
+   Alternative: let `--yes` cover them. Recommend not: a first fetch from a host is its own decision (0.9).
+3. **A third wire change, `LineSummary.problems`.** The item named two. A bad `board.yaml` needed somewhere to show.
+   Alternative: only an empty hash. Recommend keeping it.
+4. **`board.init` and `board.trust` refuse a run's agent.** `config.pack_*` and `config.set` do not; that is left as it
+   is. No test: it needs a process inside a run. Recommend the same refusal on `config.pack_*` in a later item.
+5. **`board.list` loads each call**, so a cold `git:` cache on a known host can fetch during a list. Alternative:
+   cache the summary until a commit moves. Recommend that once the board switcher polls.
+6. **`board.trust --line` takes any ref that resolves**, keyed by the ref text given. Recommend keeping this.
+7. **A bad floor setting never stops a run.** The daemon logs the problem and the 5 GiB default holds. Alternative:
+   refuse to start the run. Recommend keeping this: the setting is checked and shown by `config get`.
+8. **Pack data is delivered, not yet used.** `with_pack_data` exists and is tested; nothing launches a provider on a
+   board yet. Recommend wiring it in the item that does (Stage 4b).
+9. **Plan stub tags.** `stub-tags.json` lists `cli: config` and `cli: pack` as 4a though they are built; no tags were
+   added for `init` and `trust`. Recommend deleting the two stale rows with the plan revision.
+
+- Owner decisions (2026-11-16, at the build): 1 to 3 and 5 to 8 as recommended, on delegation. 4 changed at the
+  review: a run's agent is refused `config.set` and every `config.pack_*` write (add, link, enable, update), as
+  `board.trust` is, because adding a user pack or linking a folder trusts it (0.9) and the settings are the person's;
+  the reads stay open (`refuse_run_agent` in `host/src/daemon.rs`; test
+  `a_runs_agent_may_not_trust_add_switch_or_set_anything_for_the_person` in `host/tests/board_process.rs`, seen red
+  at `pack add`). 9 not taken: a filled tag stays in `stub-tags.json` and counts zero, which is how CI shows a stage
+  complete (`checks/tests/real_tree.rs`).
+
+### Not done, by design
+
+- A pseudo-terminal test of the question. The terminal check is `IsTerminal` on standard input; the answers are
+  tested through `trust_with` with `tty` true and typed input. A test that starts the binary on a terminal would be a
+  child of the test run and so look like a run's agent.
+- Calling `Trust::forget_board`: no code removes a board yet. It is built and tested for the item that does.
+- Measuring the launch line (ts-0103-…), role options (ts-0104-…), the owner check (ts-0105-jv-…).
+- `collide run` is unchanged. `collide pack test`, a Queue item for a waiting working copy, and materializing `dev:`
+  packs stay with their later stages.

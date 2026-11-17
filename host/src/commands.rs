@@ -16,6 +16,8 @@
 //! | `cli: report` | `collide report` | report files for shell scripts (`span`, `metric`) |
 //! | `cli: config` | `collide config` | built: `get`, `set`, `set --secret` ([`crate::config_set_cli`]) |
 //! | `cli: pack` | `collide pack` | built: `add`, `link`, `enable`, `disable`, `list`, `update` ([`crate::pack_cli`]) |
+//! | `cli: init` | `collide init` | built: [`crate::board_cli`], the board file of Share with team (0.11) |
+//! | `cli: trust` | `collide trust` | built: [`crate::board_cli`], the review and the trust of a line (0.9) |
 
 use crate::task_cli::exit;
 use std::any::Any;
@@ -53,7 +55,7 @@ pub struct Command {
 }
 
 /// The tree, in the order `collide --help` lists it.
-pub const COMMANDS: [Command; 9] = [
+pub const COMMANDS: [Command; 11] = [
     Command {
         name: "run",
         summary: "start one agent phase on a task, in a new worktree, and record it",
@@ -96,6 +98,16 @@ pub const COMMANDS: [Command; 9] = [
     Command {
         name: "pack",
         summary: "add, link, enable, disable, list and update packs",
+        build: Build::Built,
+    },
+    Command {
+        name: "init",
+        summary: "write a short .collide/board.yaml in this checkout, and nothing else",
+        build: Build::Built,
+    },
+    Command {
+        name: "trust",
+        summary: "review what a line's packs run, and trust it (asks, unless --yes)",
         build: Build::Built,
     },
     Command {
@@ -249,7 +261,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "sections"
+                "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "init",
+                "trust", "sections"
             ]
         );
     }
@@ -257,7 +270,8 @@ mod tests {
     #[test]
     fn the_built_commands_are_not_run_as_stubs() {
         for name in [
-            "run", "stop", "tasks", "task", "schema", "sections", "config", "pack", "nonsense",
+            "run", "stop", "tasks", "task", "schema", "sections", "config", "pack", "init",
+            "trust", "nonsense",
         ] {
             assert_eq!(execute_stub(name, &[]), None, "{name}");
         }

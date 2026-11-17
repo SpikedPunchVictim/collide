@@ -250,7 +250,7 @@ fn read_line(input: &mut dyn Read) -> String {
 }
 
 /// Asks `question`; only `y` or `yes` is a yes, and so an empty input is a no.
-fn ask(input: &mut dyn Read, out: &mut dyn Write, question: &str) -> bool {
+pub(crate) fn ask(input: &mut dyn Read, out: &mut dyn Write, question: &str) -> bool {
     let _ = write!(out, "{question} [y/N] ");
     let _ = out.flush();
     let answer = read_line(input);
@@ -498,7 +498,7 @@ fn approve_host(
 }
 
 /// What the person is asked to trust, in the words of the trust prompt.
-fn render_review(review: &PackReviewData, source: &str) -> String {
+pub(crate) fn render_review(review: &PackReviewData, source: &str) -> String {
     let entries = |lines: &[collide_core::owner::PackReviewLine]| -> Vec<ReviewEntry> {
         lines
             .iter()

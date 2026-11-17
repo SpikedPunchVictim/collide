@@ -20,9 +20,11 @@
 
 use crate::agent_checks::check_agent_environment;
 use crate::atomic_write::write_atomically;
+use crate::board_lines::Lines;
 use crate::board_load::{LoadContext, LoadedLine, load_line};
 use crate::boards;
 use crate::builtin_packs::{BuiltinPacks, Environment};
+use crate::disk::Floor;
 use crate::git_fetch::{FetchEnv, GitFetch};
 use crate::hosts::KnownHosts;
 use crate::pack_cache::ensure_sdk;
@@ -45,7 +47,7 @@ use collide_core::settings::ConfigFile;
 use collide_core::settings_layers::{
     KeyInfo, LayerInputs, PackSettings, ProfileUse, Settings, find_setting, settings_layers,
 };
-use collide_core::settings_registry::collide_roots;
+use collide_core::settings_registry::{MIN_FLOOR_GIB, collide_roots};
 use collide_core::yaml_out::{has_comment, to_yaml};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -121,6 +123,9 @@ pub struct BoardRef<'a> {
     pub root: &'a Path,
 }
 
+const FLOOR_KEY: &str = "disk.floor_gib";
+
+#[derive(Clone)]
 pub struct ConfigService {
     home: Option<PathBuf>,
     load_context: LoadContextFactory,
@@ -195,6 +200,13 @@ fn resolve(user: &UserFiles, line: Option<&LoadedLine>, profile: Option<ProfileU
     Resolved { settings, agents }
 }
 
+/// The floor a board's runs start above, and what is wrong with the settings it was read from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FloorRead {
+    pub floor: Floor,
+    pub problems: Vec<String>,
+}
+
 impl ConfigService {
     pub fn new(
         home: Option<String>,
@@ -209,6 +221,53 @@ impl ConfigService {
             secret_store,
             workspaces: Arc::new(Vec::new),
         }
+    }
+
+    /// The free-space floor for `board` (the user's layers alone with none): `disk.floor_gib` through the layers, so
+    /// the repo's value, or the user's when the key is overridable. A value the layers refuse is a problem and the
+    /// default holds. The keychain and the agent entries are not read: only this one key matters here.
+    pub fn floor(&self, board: Option<BoardRef>, path: &OsStr) -> FloorRead {
+        let gathered = match self.gather(board, path) {
+            Ok(gathered) => gathered,
+            Err(message) => {
+                return FloorRead {
+                    floor: Floor::default(),
+                    problems: vec![message],
+                };
+            }
+        };
+        let resolved = resolve(&gathered.user, gathered.line.as_ref(), None);
+        let mut problems = gathered.problems;
+        problems.extend(
+            resolved
+                .settings
+                .problems
+                .iter()
+                .filter(|problem| problem.key == FLOOR_KEY)
+                .map(ToString::to_string),
+        );
+        let gib = resolved
+            .settings
+            .entries
+            .iter()
+            .find(|entry| entry.key == FLOOR_KEY)
+            .and_then(|entry| entry.value.as_ref())
+            .and_then(Value::as_u64)
+            .filter(|gib| *gib >= MIN_FLOOR_GIB);
+        FloorRead {
+            floor: gib.map_or_else(Floor::default, Floor::from_gib),
+            problems,
+        }
+    }
+
+    /// The lines of boards with their trust, over the same loader, home and workspaces ([`crate::board_lines`]).
+    pub fn lines(&self) -> Lines {
+        Lines::new(
+            self.home.clone(),
+            self.load_context.clone(),
+            self.git_env.clone(),
+            self.workspaces.clone(),
+        )
     }
 
     /// Where the Collide workspaces are, for the `dev:` refusal. Without it no folder is a workspace.

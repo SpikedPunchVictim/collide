@@ -7,6 +7,7 @@
 //! ([`collide_core::pack_check::check_manifest`]) before it uses a provider entry or the `node` line of
 //! `requires.tools`. Checking a tool's version is the board loader's (`board_load`, Stage 4a).
 
+use crate::board_load::{PackDataError, pack_data_dir};
 use collide_core::pack::PackManifest;
 use collide_core::pack_check::{ManifestError, check_manifest};
 use collide_core::yaml::{YamlError, load_yaml_file};
@@ -52,6 +53,8 @@ pub struct ProviderLaunch {
     pub pack_dir: PathBuf,
     pub program: PathBuf,
     pub args: Vec<OsString>,
+    /// The pack's data folder on a board, the value of `COLLIDE_PACK_DATA`. `None` for a launch with no board.
+    pub data: Option<PathBuf>,
 }
 
 impl ProviderLaunch {
@@ -59,7 +62,21 @@ impl ProviderLaunch {
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
         command.args(&self.args);
+        if let Some(data) = &self.data {
+            command.env("COLLIDE_PACK_DATA", data);
+        }
         command
+    }
+
+    /// This launch for `pack` on `board`, with the data folder made under `data_root` (0.7, Pack data).
+    pub fn with_pack_data(
+        mut self,
+        data_root: &Path,
+        board: &str,
+        pack: &str,
+    ) -> Result<ProviderLaunch, PackDataError> {
+        self.data = Some(pack_data_dir(data_root, board, pack)?);
+        Ok(self)
     }
 }
 
@@ -234,6 +251,7 @@ impl BuiltinPacks {
             pack_dir,
             program,
             args: vec![entry.into_os_string()],
+            data: None,
         })
     }
 }

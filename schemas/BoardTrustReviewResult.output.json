@@ -1,0 +1,274 @@
+{
+  "$defs": {
+    "PackFileChange": {
+      "additionalProperties": false,
+      "description": "One file that differs between two pins of a pack: the manifest, a hook, a script.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PackFileChangeKind"
+        },
+        "lines": {
+          "description": "The changed lines of a text file: `@@`, `-` and `+` lines, no context.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "note": {
+          "description": "Why there are no lines, when there are none to show.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PackFileChangeKind": {
+      "description": "How a file of the pack differs between two pins.",
+      "oneOf": [
+        {
+          "enum": [
+            "added",
+            "deleted",
+            "modified"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "type_changed",
+          "description": "A file that became a folder, a link or a submodule, or the other way round.",
+          "type": "string"
+        }
+      ]
+    },
+    "PackReviewData": {
+      "additionalProperties": false,
+      "description": "What a person is shown before trusting a pack (0.9, Per pack source): where it is from, the hooks, providers and\nobservers it runs, and what it requires.",
+      "properties": {
+        "commit": {
+          "description": "The commit a `git:` source resolved to. Absent for a `dev:` folder.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/PackReviewLine"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "observers": {
+          "description": "A key holds the events the observer gets.",
+          "items": {
+            "$ref": "#/$defs/PackReviewLine"
+          },
+          "type": "array"
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/PackReviewLine"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tree": {
+          "description": "The tree id the pack is trusted at.",
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "tree",
+        "hooks",
+        "providers",
+        "observers",
+        "requires"
+      ],
+      "type": "object"
+    },
+    "PackReviewLine": {
+      "additionalProperties": false,
+      "description": "One script or provider a pack runs, with the manifest key that names it.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "script": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "script"
+      ],
+      "type": "object"
+    },
+    "TrustChange": {
+      "additionalProperties": false,
+      "description": "One thing the trust hash covers that is new, gone or different since the person trusted the line: `board.yaml`, a\npack's folder, a view. A folder shows its changed `files`; a file shows its changed `lines`. Where neither can be\nshown, `note` says why.",
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/PackFileChange"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/TrustChangeKind"
+        },
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TrustChangeKind": {
+      "description": "How one thing the trust hash covers differs from what was trusted.",
+      "enum": [
+        "added",
+        "removed",
+        "changed"
+      ],
+      "type": "string"
+    },
+    "TrustPackReview": {
+      "additionalProperties": false,
+      "description": "A pack of the line that its repo supplies, with what it runs.",
+      "properties": {
+        "review": {
+          "$ref": "#/$defs/PackReviewData"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "review"
+      ],
+      "type": "object"
+    },
+    "TrustState": {
+      "description": "Whether a line's packs and gate code are trusted (0.9, Trust). `hash` is what trust covers now: the packs, the\nlock, the pointer file, `board.yaml`, `config.yaml`, the views and the tree hashes of `protectedPaths`. It is the\nhash an `Untrusted` line would be trusted at, so the person is shown what they trust. (The domain record is plain\nRust, so the wire form is this type.)",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Nothing is trusted yet, or the hash changed since.",
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "untrusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "trusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.trust_review` result: what a person sees before they trust a line. `hash` is the one `board.trust` takes. It\nis empty when the line did not load: `problems` says why, `hosts` holds the hosts a fetch would contact for the\nfirst time and `dev_folders` the `dev:` folders never trusted, and approving them (a `board.trust` with an empty\nhash) lets the load go on. `changes` are against what was trusted, or everything as added when nothing was.",
+  "properties": {
+    "changes": {
+      "items": {
+        "$ref": "#/$defs/TrustChange"
+      },
+      "type": "array"
+    },
+    "dev_folders": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "hosts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "packs": {
+      "items": {
+        "$ref": "#/$defs/TrustPackReview"
+      },
+      "type": "array"
+    },
+    "problems": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "trust": {
+      "$ref": "#/$defs/TrustState"
+    }
+  },
+  "required": [
+    "trust"
+  ],
+  "title": "BoardTrustReviewResult",
+  "type": "object"
+}

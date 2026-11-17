@@ -31,7 +31,7 @@ use crate::git_fetch::{FetchError, GitFetch, mirror_path};
 use crate::git_objects::{GitObjects, ObjectKind, TreeEntry};
 use crate::hosts::KnownHosts;
 use crate::pack_cache::{Materializer, cached_entry, sdk_version};
-use crate::trust::check_dev_folder;
+use crate::trust::{Trust, check_dev_folder};
 use crate::user_packs::{PACKS_FILE, UserScope};
 use collide_core::board::{Board, CollidePointer, check_board, check_pointer};
 use collide_core::lock::{GitLocator, LockEntry, PackLock, PackSource, check_lock};
@@ -59,7 +59,9 @@ pub const TOOL_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 /// One thing wrong with a load. `message` is the whole sentence; `file` is the file it is about (a path at the ref,
 /// `pack.yaml` for a pack's manifest, or the ref itself), `key` the key in it where one is known, and `pack` the source
 /// of the pack when the problem is in one. `needs_host` is set when a pack could not be fetched because its host has
-/// never been fetched from: the first fetch from it needs a yes (`ts-0100-pu`).
+/// never been fetched from: the first fetch from it needs a yes (`ts-0100-pu`). `needs_dev_trust` is set, to the
+/// folder's real path, when a `dev:` folder was never trusted: it runs the person's own code and needs a yes
+/// (`collide trust`) before it loads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadProblem {
     pub pack: Option<String>,
@@ -67,6 +69,7 @@ pub struct LoadProblem {
     pub key: Option<String>,
     pub message: String,
     pub needs_host: Option<String>,
+    pub needs_dev_trust: Option<String>,
 }
 
 impl fmt::Display for LoadProblem {
@@ -355,6 +358,7 @@ fn problem(
         key: key.map(str::to_string),
         message,
         needs_host: None,
+        needs_dev_trust: None,
     }
 }
 
@@ -451,6 +455,7 @@ impl Load<'_> {
             key: None,
             message,
             needs_host: None,
+            needs_dev_trust: None,
         });
     }
 
@@ -926,6 +931,29 @@ impl Load<'_> {
                 return None;
             }
         };
+        // Nothing of a folder is read, and none of its code is hashed or run, before the person has trusted it.
+        let trust = Trust::new(scope.trust_store()).with_git(self.context.git.clone());
+        match trust.dev_trusted(&real, scope.workspaces()) {
+            Ok(true) => {}
+            Ok(false) => {
+                let mut found = problem(
+                    Some(source),
+                    folder,
+                    None,
+                    format!(
+                        "the `dev:` folder {} has not been trusted: run `collide trust` to review and trust it",
+                        real.display()
+                    ),
+                );
+                found.needs_dev_trust = Some(real.display().to_string());
+                self.problems.push(found);
+                return None;
+            }
+            Err(error) => {
+                self.push(Some(source), folder, None, error);
+                return None;
+            }
+        }
         let manifest = self.read_manifest(source, &real.join("pack.yaml"))?;
         if let Some(expected) = expect
             && manifest.name != expected
