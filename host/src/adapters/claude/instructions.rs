@@ -4,13 +4,13 @@
 //! [`ADD_DIR_VAR`], which makes `claude` read the `CLAUDE.md` of an added folder. The skills of that folder come
 //! through a plugin in the phase's snapshot ([`write_skills_plugin`]): a manifest and a `skills` link to
 //! `<folder>/.claude/skills`, so the skills are read when `claude` loads them and are not copied. Settings, hooks and
-//! MCP config still come from the snapshot.
+//! MCP config still come from the snapshot. A skill's own frontmatter `hooks` and `allowed-tools` take effect through
+//! the plugin (measured `ts-0107-rj`), as they would in plain `claude` in that folder; the owner accepted that
+//! (2026-11-17). Each `Skill` call still asks the host first.
 //!
 //! [`is_instruction_path`] is the one list of paths the run's warning reads: a file `claude` loads as instructions.
 //!
-//! The plugin is a seam. `ts-0106-nr` measured that it loads skills; whether a skill's own frontmatter (`hooks`,
-//! `allowed-tools`) takes effect through it is what ts-0104-gx's gated session measured (its Measured section).
-//! [`PLUGIN_ON_THE_LINE`] says whether the line names the plugin.
+//! The plugin is a seam: [`PLUGIN_ON_THE_LINE`] says whether the line names it.
 
 use std::fs;
 use std::io;
@@ -24,10 +24,10 @@ pub const ADD_DIR_VAR: &str = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD";
 pub const PLUGINS_DIR: &str = "plugins";
 pub const PLUGIN_NAME: &str = "repo-skills";
 
-/// Whether the `worktree` line names the skills plugin. Off until a gated session shows whether a skill's own
-/// frontmatter (`hooks`, `allowed-tools`) takes effect through it (owner, 2026-11-17; `ts-0104-gx` Measured). The code
-/// that writes the plugin, and its tests, stay whatever this says.
-pub const PLUGIN_ON_THE_LINE: bool = false;
+/// Whether the `worktree` line names the skills plugin. On since `ts-0107-rj` (owner, 2026-11-17: a skill's own
+/// `hooks` and `allowed-tools` are accepted as plain `claude` takes them). The code that writes the plugin, and its
+/// tests, stay whatever this says.
+pub const PLUGIN_ON_THE_LINE: bool = true;
 
 const MANIFEST_DIR: &str = ".claude-plugin";
 const MANIFEST_FILE: &str = "plugin.json";

@@ -86,6 +86,10 @@ None by a build agent: this check is the owner's. The checklist names the automa
   they share `core`, `host` and the generated files.
 - Owner decisions (2026-11-16, at the split): the recommendation above is taken under the owner's delegation; it
   stays overridable until the item is built.
+- Owner decisions (2026-11-17, after `ts-0107-rj`): the default line now carries the skills plugin, and a skill's own
+  `hooks` and `allowed-tools` take effect (accepted by the owner). The Instructions step adds a skill in the
+  worktree's `.claude/skills/` and checks that it is listed as `repo-skills:<name>`, that its use asks for permission
+  first, and that the warning names it after an edit.
 
 ### Owner checklist
 

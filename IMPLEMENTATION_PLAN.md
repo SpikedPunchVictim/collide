@@ -855,7 +855,7 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       same checkout, at the worktree's root. Freezing `CLAUDE.md` at the line's commit would protect little, since
       the guides it names are read from the worktree anyway, and an agent outside Collide can edit it too. What runs
       code or grants access without the model asking still comes from the snapshot: settings and their hooks,
-      permissions, MCP servers and agent definitions.
+      permissions, MCP servers and agent definitions. The exception is a skill's own frontmatter (below).
       - A phase that starts after its run changed an instruction file shows a warning that names the files, on the
         run in Tracks and in the run record. The acknowledgement before `integrate` (below) is unchanged. The files
         are `CLAUDE.md` at any depth and `.claude/skills/**`, against the commit the workspace was made from, ignored
@@ -867,9 +867,11 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
         and auto memory stays off. A nested `CLAUDE.md` does not load. The variable is not in `claude --help`, so the
         contract test pins it. Skills load through a plugin in the snapshot whose `skills` is a link to the
         folder's `.claude/skills` (measured `ts-0106-nr`), so they are read live and named `repo-skills:<skill>`; the
-        plugin is written only when that folder exists. The plugin is off the line until a gated session shows
-        whether a skill's own frontmatter `hooks` and `allowed-tools` take effect through it (`ts-0107-rj`;
-        `ts-0104-gx`'s session could not tell, since its harness answered no permission request; owner, 2026-11-17).
+        plugin is written only when that folder exists. A skill's own frontmatter takes effect through it (measured
+        `ts-0107-rj`): its `hooks` run and its `allowed-tools` skip the permission request. The owner accepted that
+        as plain `claude` does (2026-11-17), so this is the one thing that runs code or skips a request and is not
+        from the snapshot. Each `Skill` call still asks the host first, and `repo_instructions: none` leaves the
+        plugin off; the Roles page says so.
     - **Auto memory is off for every phase** (`autoMemoryEnabled: false` in the snapshot settings; owner,
       2026-11-13). It is shared by every worktree of a repo, keyed to the main checkout, so it would carry one run's
       notes into another. A role may turn it on.
@@ -4252,8 +4254,8 @@ This sub-stage checks agent entries at load only. Launching an agent, and the se
 (owner, 2026-11-16). `ts-0103-sa`'s one real `claude` run is approved ($0.50 in all); the real keychain and the
 trust prompt over a real repository are the owner's (`ts-0105-jv`). `ts-0106-nr` (skills through a snapshot plugin,
 one real session at $0.10; owner, 2026-11-16) is built before `ts-0104-gx`. `ts-0104-gx` builds the line with the
-plugin off; `ts-0107-rj` (one gated session at $0.05, inside `ts-0104-gx`'s $0.10; owner, 2026-11-17) measures a
-skill's frontmatter through it before it goes on, and is built before `ts-0105-jv`.
+plugin off; `ts-0107-rj` (one gated session, $0.0034) measured that a skill's frontmatter takes effect through it,
+and the owner accepted that (2026-11-17), so the plugin is on. Both are built before `ts-0105-jv`.
 
 ### Stage 4b: Providers, plan adapter, corpus and views
 

@@ -4,6 +4,9 @@
 //! the reason printed, unless `COLLIDE_REAL_CLAUDE=1` and a ledger (`COLLIDE_REAL_LEDGER`) are set, so `cargo test
 //! --workspace` runs nothing real.
 //!
+//! ts-0107-rj adds [`run_answering_session`]: a host that answers permission requests (`skill_only` allows `Skill` and
+//! refuses the rest), on [`ANSWERED_CAP_USD`] a session and [`ANSWERED_LEDGER_LIMIT_USD`] in all.
+//!
 //! **Terms (owner, 2026-11-16).** Haiku only; every session has `--max-budget-usd` of [`SESSION_CAP_USD`] or less on
 //! its line; the ledger refuses a run that could take the item over [`ITEM_LEDGER_LIMIT_USD`]. The child has
 //! `real::child_env()` (the owner's `HOME` and `USER`, for the login only) and `--setting-sources ""` (config none)
@@ -24,7 +27,8 @@ use super::repo_instructions::{
     Line, MCP_MARKER, MCP_NAME, NESTED_WORD, PLUGIN_NAME, PROJECT_HOOK_MARKER, PROJECT_HOOK_TEXT,
     ROOT_WORD, SKILL_NAME, SKILL_WORD, candidate_line, holds_only_the_skills_link,
 };
-use collide_core::adapter::{AgentAdapter, LaunchRequest};
+use collide_core::adapter::{AgentAdapter, AgentSession, LaunchRequest};
+use collide_core::agent::{AgentEvent, PermissionReply, PermissionRequest, ToolKind};
 use collide_host::adapters::claude::ClaudeAdapter;
 use collide_host::adapters::claude::instructions::{
     PLUGIN_ON_THE_LINE, skills_plugin_dir, write_skills_plugin,
@@ -33,9 +37,11 @@ use collide_host::adapters::claude::version::CANARY_MARKER;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::Command;
-use std::time::Duration;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::{Duration, Instant};
 
 /// The cap of one session (`--max-budget-usd`), and the most the item's sessions may add up to.
 pub const SESSION_CAP_USD: f64 = 0.10;
@@ -49,6 +55,11 @@ pub const PLUGIN_LEDGER_LIMIT_USD: f64 = 0.10;
 /// as it is built: does a skill's own frontmatter (`hooks`, `allowed-tools`) take effect through the snapshot plugin?
 pub const FRONTMATTER_CAP_USD: f64 = 0.05;
 pub const FRONTMATTER_LEDGER_LIMIT_USD: f64 = 0.10;
+
+/// ts-0107-rj (owner, 2026-11-17): one haiku session capped at five cents, and five cents in all, so there is no
+/// re-run. It runs the fixture of ts-0104-gx with a host that answers permission requests.
+pub const ANSWERED_CAP_USD: f64 = 0.05;
+pub const ANSWERED_LEDGER_LIMIT_USD: f64 = 0.05;
 
 /// The fixture skill of that session. Its `hooks` entry writes [`FRONTMATTER_HOOK_MARKER`] in the fixture's markers
 /// folder before a `Write`, its `allowed-tools` entry names `Write` (which the line asks permission for), and its text
@@ -206,6 +217,13 @@ pub struct Findings {
     pub skill_calls: Vec<&'static str>,
     /// How many `PreToolUse` hooks started. The snapshot has none, so each one is a skill's own.
     pub pre_tool_use_hooks: usize,
+    /// The tools of [`NAMED_TOOLS`] the host answered allow, and answered refuse (set by the session that answers).
+    pub permission_allowed: Vec<&'static str>,
+    pub permission_refused: Vec<&'static str>,
+    /// The first stream line (counted from 1, among the lines that are JSON) that shows each finding: `init`,
+    /// `pre_tool_use_hook`, and for each tool of [`NAMED_TOOLS`] `<tool>_called`, `<tool>_asked`,
+    /// `<tool>_result_ok` and `<tool>_result_error`, with the tool in lower case.
+    pub evidence: BTreeMap<String, usize>,
 }
 
 /// Whether the list `key` of `init` has an entry that is `name` or an object named `name`.
@@ -229,10 +247,24 @@ fn listed_as(init: &Value, key: &str, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// `name` as one of [`NAMED_TOOLS`], or `None` for any other tool.
+fn named_tool(name: Option<&str>) -> Option<&'static str> {
+    NAMED_TOOLS.into_iter().find(|tool| Some(*tool) == name)
+}
+
+/// The key of [`Findings::evidence`] for `what` that happened to `tool`.
+fn evidence_label(tool: &str, what: &str) -> String {
+    format!("{}_{what}", tool.to_lowercase())
+}
+
+/// Keeps the first stream line that showed `label`.
+fn note_line(evidence: &mut BTreeMap<String, usize>, label: String, number: usize) {
+    evidence.entry(label).or_insert(number);
+}
+
 /// Adds `name` to `list` once, when it is one of [`NAMED_TOOLS`]: the owner's own tools are never named.
 fn note_tool(list: &mut Vec<&'static str>, name: Option<&str>) {
-    let known = NAMED_TOOLS.into_iter().find(|tool| Some(*tool) == name);
-    if let Some(tool) = known.filter(|tool| !list.contains(tool)) {
+    if let Some(tool) = named_tool(name).filter(|tool| !list.contains(tool)) {
         list.push(tool);
     }
 }
@@ -283,7 +315,9 @@ pub fn findings(lines: &[Value], exit: Option<i32>, markers: Vec<&'static str>) 
     let kind = |line: &Value, kind: &str, subtype: &str| {
         line["type"] == kind && line["subtype"] == subtype
     };
-    if let Some(init) = lines.iter().find(|line| kind(line, "system", "init")) {
+    if let Some(at) = lines.iter().position(|line| kind(line, "system", "init")) {
+        let init = &lines[at];
+        found.evidence.insert("init".into(), at + 1);
         found.claude_version = init["claude_code_version"]
             .as_str()
             .unwrap_or("")
@@ -316,24 +350,50 @@ pub fn findings(lines: &[Value], exit: Option<i32>, markers: Vec<&'static str>) 
             .map_or(0, Vec::len);
         found.init_counts.insert("additional_directories", added);
     }
-    for line in lines {
+    // The named tool of each call, by the call's id, so a result can be put against its tool.
+    let mut call_tools: BTreeMap<String, &'static str> = BTreeMap::new();
+    for (at, line) in lines.iter().enumerate() {
+        let number = at + 1;
         if kind(line, "system", "hook_started") && line["hook_event"] == "SessionStart" {
             found.session_start_hooks += 1;
         }
         if kind(line, "system", "hook_started") && line["hook_event"] == "PreToolUse" {
             found.pre_tool_use_hooks += 1;
+            note_line(&mut found.evidence, "pre_tool_use_hook".into(), number);
         }
         let asked = &line["request"];
         if line["type"] == "control_request" && asked["subtype"] == "can_use_tool" {
             note_tool(&mut found.permission_asked, asked["tool_name"].as_str());
+            if let Some(tool) = named_tool(asked["tool_name"].as_str()) {
+                note_line(&mut found.evidence, evidence_label(tool, "asked"), number);
+            }
         }
         let blocks = line["message"]["content"].as_array().into_iter().flatten();
         for block in blocks {
             if line["type"] == "assistant" && block["type"] == "tool_use" {
                 note_tool(&mut found.tools_used, block["name"].as_str());
+                if let Some(tool) = named_tool(block["name"].as_str()) {
+                    note_line(&mut found.evidence, evidence_label(tool, "called"), number);
+                    if let Some(id) = block["id"].as_str() {
+                        call_tools.insert(id.to_string(), tool);
+                    }
+                }
                 if block["name"] == "Skill" {
                     let named = block["input"]["skill"].as_str();
                     found.skill_calls.push(skill_call_kind(named));
+                }
+            }
+            if line["type"] == "user" && block["type"] == "tool_result" {
+                let called = block["tool_use_id"]
+                    .as_str()
+                    .and_then(|id| call_tools.get(id));
+                if let Some(tool) = called {
+                    let outcome = if block["is_error"] == true {
+                        "result_error"
+                    } else {
+                        "result_ok"
+                    };
+                    note_line(&mut found.evidence, evidence_label(tool, outcome), number);
                 }
             }
             if line["type"] == "user" && block["type"] == "tool_result" && block["is_error"] == true
@@ -450,11 +510,7 @@ pub fn run_session_within(
     cap: f64,
     limit: f64,
 ) -> Findings {
-    // A second guard, here and not only in each test's `live!`: nothing reaches `claude` without the opt-in.
-    if let Some(reason) = real::unavailable() {
-        panic!("`{name}` is not run: {reason}");
-    }
-    real::check_ledger_within(name, cap, limit);
+    guard_session(name, cap, limit);
     fixture.clear_markers();
     let mut command = Command::new(real::binary());
     command
@@ -476,9 +532,31 @@ pub fn run_session_within(
         .lines()
         .filter_map(|text| serde_json::from_str(text).ok())
         .collect();
-    let found = findings(&lines, ran.code, fixture.markers_present());
+    settle(fixture, name, cap, &lines, ran.code, ran.stderr.len())
+}
+
+/// The two guards of every session that reaches the real `claude`, in this order: the opt-in, then the ledger. They
+/// are here, and not only in each test's `live!`, so nothing reaches `claude` without them.
+fn guard_session(name: &str, cap: f64, limit: f64) {
+    if let Some(reason) = real::unavailable() {
+        panic!("`{name}` is not run: {reason}");
+    }
+    real::check_ledger_within(name, cap, limit);
+}
+
+/// What a session that ended leaves: its findings, its spend in the ledger, and the asserts that it ran. `lines` are
+/// the stream lines that were JSON.
+fn settle(
+    fixture: &Fixture,
+    name: &str,
+    cap: f64,
+    lines: &[Value],
+    code: Option<i32>,
+    stderr_bytes: usize,
+) -> Findings {
+    let found = findings(lines, code, fixture.markers_present());
     real::add_to_ledger(name, cap, found.cost);
-    println!("stderr: {} bytes", ran.stderr.len());
+    println!("stderr: {stderr_bytes} bytes");
     println!("finding `{name}`: {}", found.describe());
     assert!(!lines.is_empty(), "`{name}`: claude wrote no stream line");
     assert_eq!(found.exit, Some(0), "`{name}`: claude ended with a failure");
@@ -525,12 +603,12 @@ pub fn add_frontmatter_skill(fixture: &Fixture, worktree: &Path) -> std::path::P
     marker
 }
 
-/// The line Collide builds for the session of ts-0104-gx: the default role with config none and haiku, capped at
-/// [`FRONTMATTER_CAP_USD`], started in `worktree`, with the snapshot plugin written for it. The plugin is what the
-/// session measures, so while [`PLUGIN_ON_THE_LINE`] is off it is named by hand where the seam would name it, after
+/// The line Collide builds for the sessions of ts-0104-gx and ts-0107-rj: the default role with config none and haiku,
+/// capped at `cap`, started in `worktree`, with the snapshot plugin written for it. The plugin is what the sessions
+/// measure, so while [`PLUGIN_ON_THE_LINE`] is off it is named by hand where the seam would name it, after
 /// `--add-dir <worktree>`; nothing else is added.
-pub fn frontmatter_line(fixture: &Fixture, worktree: &Path) -> (LaunchRequest, Line) {
-    let request = collide_request_capped(fixture, worktree, FRONTMATTER_CAP_USD);
+pub fn frontmatter_line(fixture: &Fixture, worktree: &Path, cap: f64) -> (LaunchRequest, Line) {
+    let request = collide_request_capped(fixture, worktree, cap);
     let wrote = write_skills_plugin(&fixture.snapshot, worktree).expect("the plugin is written");
     assert!(wrote, "the worktree has skills, so the plugin is written");
     let mut line = Line::of(ClaudeAdapter.launch(&request).expect("the launch line"));
@@ -556,22 +634,191 @@ pub fn describe_frontmatter(found: &Findings, marker: bool, output: bool) -> Str
     let present = |yes: bool| if yes { "present" } else { "absent" };
     format!(
         "skill listed as {:?} | hook marker {} | output file {} | permission asked for {:?} | tools called {:?} | \
-         tool errors {} (words {:?}, names the skill {}) | Skill calls {:?} | PreToolUse hooks started {} | exit {:?} \
-         result {} | cost ${:.6}",
+         allowed {:?}, refused {:?} | tool errors {} (words {:?}, names the skill {}) | Skill calls {:?} | \
+         PreToolUse hooks started {} | stream lines {:?} | exit {:?} result {} | cost ${:.6}",
         found.frontmatter_skill_listed_as,
         present(marker),
         present(output),
         found.permission_asked,
         found.tools_used,
+        found.permission_allowed,
+        found.permission_refused,
         found.tool_errors,
         found.error_words,
         found.error_names_the_skill,
         found.skill_calls,
         found.pre_tool_use_hooks,
+        found.evidence,
         found.exit,
         found.result,
         found.cost,
     )
+}
+
+// ---- ts-0107-rj: a session whose host answers permission requests -------------------------------------------------
+
+/// The host's answer: allow the `Skill` tool, refuse every other tool with a message.
+pub fn skill_only(request: &PermissionRequest) -> PermissionReply {
+    if request.tool.as_deref() == Some("Skill") {
+        PermissionReply::Allow {}
+    } else {
+        PermissionReply::Deny {
+            message: Some("This measurement allows the Skill tool only.".into()),
+        }
+    }
+}
+
+/// What one line of the child's stdout made the host do.
+#[derive(Debug, Default)]
+pub struct Reaction {
+    /// What to write to the child's stdin, in order.
+    pub writes: Vec<Vec<u8>>,
+    /// The line ended the turn: the session has no more turns, so stdin closes.
+    pub turn_ended: bool,
+    /// The tool of each request answered, and whether the answer was allow.
+    pub answered: Vec<(Option<String>, bool)>,
+}
+
+/// Feeds one line to `session`, answers each permission request it raises with `answer`, and says what to write.
+pub fn react(
+    session: &mut dyn AgentSession,
+    text: &str,
+    at_ns: u64,
+    answer: &mut dyn FnMut(&PermissionRequest) -> PermissionReply,
+) -> Reaction {
+    let step = session.feed(text.as_bytes(), at_ns);
+    let mut reaction = Reaction {
+        writes: step.writes,
+        ..Reaction::default()
+    };
+    for stamped in step.events {
+        match stamped.event {
+            AgentEvent::PermissionRequest { request } => {
+                let reply = answer(&request);
+                let allowed = reply == PermissionReply::Allow {};
+                reaction.answered.push((request.tool.clone(), allowed));
+                reaction
+                    .writes
+                    .extend(session.answer(&request.id, reply).writes);
+            }
+            AgentEvent::TurnEnd { .. } => reaction.turn_ended = true,
+            _ => {}
+        }
+    }
+    reaction
+}
+
+/// Runs `line` once on the real binary with a host that answers permission requests by `answer` and ends the session
+/// after its one turn (stdin closes when the turn ends). The same two guards as [`run_session_within`], first. A
+/// session that does not end in [`SESSION_TIMEOUT`] is killed (it is this function's own child) and the ledger takes
+/// its whole cap.
+#[allow(clippy::too_many_arguments)]
+pub fn run_answering_session(
+    fixture: &Fixture,
+    name: &str,
+    request: &LaunchRequest,
+    line: &Line,
+    prompt: &str,
+    cap: f64,
+    limit: f64,
+    answer: &mut dyn FnMut(&PermissionRequest) -> PermissionReply,
+) -> Findings {
+    guard_session(name, cap, limit);
+    fixture.clear_markers();
+    let mut child = Command::new(real::binary())
+        .args(&line.argv)
+        .current_dir(&line.cwd)
+        .env_clear()
+        .envs(real::child_env())
+        .envs(&line.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|_| panic!("`{name}`: claude did not start"));
+    let mut stdin = child.stdin.take();
+    let stdout = child.stdout.take().expect("piped");
+    let mut stderr = child.stderr.take().expect("piped");
+    let (send, received) = mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        let mut stdout = BufReader::new(stdout);
+        loop {
+            let mut text = Vec::new();
+            match stdout.read_until(b'\n', &mut text) {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {
+                    if send.send(text).is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    });
+    let stderr_bytes = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes.len()
+    });
+
+    let began = Instant::now();
+    let mut session = ClaudeAdapter.session(request);
+    session.start();
+    let turn = session.send_turn(prompt);
+    write_all(&mut stdin, &turn.writes);
+    let mut lines: Vec<Value> = Vec::new();
+    let mut allowed = Vec::new();
+    let mut refused = Vec::new();
+    loop {
+        let wait = (began + SESSION_TIMEOUT).saturating_duration_since(Instant::now());
+        let bytes = match received.recv_timeout(wait) {
+            Ok(bytes) => bytes,
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                // The spend of a session that did not end is not known, so the ledger takes its whole cap.
+                real::add_to_ledger(name, cap, cap);
+                panic!("`{name}`: claude did not end within {SESSION_TIMEOUT:?}");
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let Ok(value) = serde_json::from_str::<Value>(text.trim_end()) else {
+            continue;
+        };
+        lines.push(value);
+        let reaction = react(
+            &mut *session,
+            text.trim_end(),
+            began.elapsed().as_nanos() as u64,
+            answer,
+        );
+        for (tool, yes) in &reaction.answered {
+            note_tool(
+                if *yes { &mut allowed } else { &mut refused },
+                tool.as_deref(),
+            );
+        }
+        write_all(&mut stdin, &reaction.writes);
+        if reaction.turn_ended {
+            stdin = None;
+        }
+    }
+    drop(stdin);
+    let code = child.wait().expect("claude is reaped").code();
+    let stderr_bytes = stderr_bytes.join().expect("stderr");
+    let mut found = settle(fixture, name, cap, &lines, code, stderr_bytes);
+    found.permission_allowed = allowed;
+    found.permission_refused = refused;
+    found
+}
+
+/// Writes to the child's stdin. A child that already ended leaves a broken pipe, and its exit says what happened.
+fn write_all(stdin: &mut Option<ChildStdin>, writes: &[Vec<u8>]) {
+    for bytes in writes {
+        if let Some(pipe) = stdin.as_mut() {
+            let _ = pipe.write_all(bytes).and_then(|()| pipe.flush());
+        }
+    }
 }
 
 // ---- the live tests ----------------------------------------------------------------------------------------------
@@ -662,7 +909,7 @@ fn live_a_skills_own_frontmatter_through_the_snapshot_plugin() {
     let fixture = Fixture::new();
     let worktree = fixture.worktree("wt");
     let marker = add_frontmatter_skill(&fixture, &worktree);
-    let (request, line) = frontmatter_line(&fixture, &worktree);
+    let (request, line) = frontmatter_line(&fixture, &worktree, FRONTMATTER_CAP_USD);
     println!("root: {}", fixture.root().path().display());
     let name = "frontmatter-through-the-plugin";
     let turn = first_turn_of(&request, FRONTMATTER_PROMPT);
@@ -673,6 +920,38 @@ fn live_a_skills_own_frontmatter_through_the_snapshot_plugin() {
         &turn,
         FRONTMATTER_CAP_USD,
         FRONTMATTER_LEDGER_LIMIT_USD,
+    );
+    let output = worktree.join(FRONTMATTER_OUTPUT_FILE).exists();
+    println!(
+        "frontmatter finding: {}",
+        describe_frontmatter(&found, marker.exists(), output)
+    );
+}
+
+/// ts-0107-rj: does a skill's own frontmatter (`hooks`, `allowed-tools`) take effect through the snapshot plugin, when
+/// the host answers the permission requests? The host allows `Skill` and refuses every other tool. Collide's own line
+/// on haiku with config none, a cap of [`ANSWERED_CAP_USD`] and a ledger limit of [`ANSWERED_LEDGER_LIMIT_USD`]: one
+/// session, no re-run. The finding is the measurement, so only a session that ran is asserted.
+#[test]
+fn live_a_skills_own_frontmatter_when_the_host_answers_permission_requests() {
+    if let Some(reason) = unavailable_within(ANSWERED_LEDGER_LIMIT_USD) {
+        println!("skipped: {reason}");
+        return;
+    }
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let marker = add_frontmatter_skill(&fixture, &worktree);
+    let (request, line) = frontmatter_line(&fixture, &worktree, ANSWERED_CAP_USD);
+    println!("root: {}", fixture.root().path().display());
+    let found = run_answering_session(
+        &fixture,
+        "frontmatter-answered",
+        &request,
+        &line,
+        FRONTMATTER_PROMPT,
+        ANSWERED_CAP_USD,
+        ANSWERED_LEDGER_LIMIT_USD,
+        &mut skill_only,
     );
     let output = worktree.join(FRONTMATTER_OUTPUT_FILE).exists();
     println!(
@@ -988,7 +1267,7 @@ fn the_frontmatter_session_is_the_built_worktree_line_haiku_five_cents_config_no
         marker.starts_with(fixture.root().path()),
         "the marker is in the temp root"
     );
-    let (request, line) = frontmatter_line(&fixture, &worktree);
+    let (request, line) = frontmatter_line(&fixture, &worktree, FRONTMATTER_CAP_USD);
     assert_eq!(line.value_of("--model"), Some("haiku"));
     assert_eq!(line.value_of("--max-budget-usd"), Some("0.05"));
     assert_eq!(line.value_of("--setting-sources"), Some(""));
@@ -1121,4 +1400,244 @@ fn the_frontmatter_description_names_only_the_fixture_and_counts() {
         "{text}"
     );
     assert!(text.contains("permission asked for [\"Write\"]"), "{text}");
+}
+
+// ---- offline: the session of ts-0107-rj ----------------------------------------------------------------------------
+
+fn permission_request(tool: Option<&str>) -> PermissionRequest {
+    PermissionRequest {
+        id: "r1".into(),
+        tool_call_id: "t1".into(),
+        tool: tool.map(String::from),
+        kind: ToolKind::Other,
+        input: None,
+        reason: None,
+        options: Vec::new(),
+    }
+}
+
+/// A `can_use_tool` request as `claude` writes it on stdout.
+fn can_use_tool_line(id: &str, tool: &str) -> String {
+    json!({"type": "control_request", "request_id": id,
+        "request": {"subtype": "can_use_tool", "tool_name": tool, "tool_use_id": "u1", "input": {"a": "b"}}})
+    .to_string()
+}
+
+/// A session of the real adapter that has its first turn out, as the answering session has.
+fn session_with_a_turn(fixture: &Fixture) -> Box<dyn AgentSession + Send> {
+    let request = fixture.request(
+        json!({ "agent": "claude", "config": "none" }),
+        fixture.repo.work(),
+    );
+    let mut session = ClaudeAdapter.session(&request);
+    session.start();
+    session.send_turn("a turn");
+    session
+}
+
+#[test]
+fn the_host_allows_the_skill_tool_and_refuses_every_other_tool_with_a_message() {
+    assert_eq!(
+        skill_only(&permission_request(Some("Skill"))),
+        PermissionReply::Allow {}
+    );
+    for tool in [
+        Some("Write"),
+        Some("Bash"),
+        Some("Read"),
+        Some("Edit"),
+        Some("skill"),
+        Some("SkillX"),
+        Some("mcp__a__Skill"),
+        None,
+    ] {
+        match skill_only(&permission_request(tool)) {
+            PermissionReply::Deny {
+                message: Some(text),
+            } => assert!(!text.trim().is_empty(), "{tool:?}"),
+            other => panic!("{tool:?}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_skill_request_is_answered_allow_and_a_write_request_deny_with_a_message_on_the_wire() {
+    let fixture = Fixture::new();
+    let mut session = session_with_a_turn(&fixture);
+    let mut answer = skill_only;
+    let skill = react(
+        &mut *session,
+        &can_use_tool_line("q1", "Skill"),
+        1,
+        &mut answer,
+    );
+    assert_eq!(skill.writes.len(), 1);
+    let wire: Value = serde_json::from_slice(&skill.writes[0]).unwrap();
+    assert_eq!(wire["type"], "control_response");
+    assert_eq!(wire["response"]["request_id"], "q1");
+    assert_eq!(wire["response"]["response"]["behavior"], "allow");
+    assert_eq!(skill.answered, [(Some("Skill".to_string()), true)]);
+    let write = react(
+        &mut *session,
+        &can_use_tool_line("q2", "Write"),
+        2,
+        &mut answer,
+    );
+    let wire: Value = serde_json::from_slice(&write.writes[0]).unwrap();
+    assert_eq!(wire["response"]["request_id"], "q2");
+    assert_eq!(wire["response"]["response"]["behavior"], "deny");
+    assert!(
+        !wire["response"]["response"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .is_empty(),
+        "{wire}"
+    );
+    assert_eq!(write.answered, [(Some("Write".to_string()), false)]);
+    assert!(!skill.turn_ended && !write.turn_ended);
+}
+
+#[test]
+fn a_line_that_asks_for_nothing_writes_nothing_and_the_result_line_ends_the_turn() {
+    let fixture = Fixture::new();
+    let mut session = session_with_a_turn(&fixture);
+    let mut answer = skill_only;
+    let init = json!({"type": "system", "subtype": "init", "tools": ["Skill"]}).to_string();
+    let quiet = react(&mut *session, &init, 1, &mut answer);
+    assert!(quiet.writes.is_empty() && quiet.answered.is_empty() && !quiet.turn_ended);
+    let result =
+        json!({"type": "result", "subtype": "success", "result": "DONE", "total_cost_usd": 0.01,
+        "is_error": false, "usage": {"input_tokens": 1, "output_tokens": 1}})
+        .to_string();
+    let ended = react(&mut *session, &result, 2, &mut answer);
+    assert!(ended.turn_ended);
+    assert!(ended.writes.is_empty());
+}
+
+#[test]
+fn findings_give_the_stream_line_of_the_first_call_request_and_result_of_each_named_tool() {
+    let lines = vec![
+        json!({"type": "system", "subtype": "init", "skills": ["x"]}),
+        json!({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Skill", "id": "s1", "input": {}},
+            {"type": "tool_use", "name": "mcp__owner__thing", "id": "o1", "input": {}}]}}),
+        json!({"type": "control_request", "request_id": "r1",
+            "request": {"subtype": "can_use_tool", "tool_name": "Skill", "input": {}}}),
+        json!({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "s1", "content": "ok"},
+            {"type": "tool_result", "tool_use_id": "o1", "content": "ok"}]}}),
+        json!({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "id": "w1", "input": {}}]}}),
+        json!({"type": "system", "subtype": "hook_started", "hook_event": "PreToolUse"}),
+        json!({"type": "control_request", "request_id": "r2",
+            "request": {"subtype": "can_use_tool", "tool_name": "Write", "input": {}}}),
+        json!({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "w1", "is_error": true, "content": "refused"}]}}),
+        json!({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "id": "w2", "input": {}}]}}),
+        json!({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "w2", "content": "written"}]}}),
+        json!({"type": "result", "subtype": "success", "total_cost_usd": 0.01, "result": "DONE"}),
+    ];
+    let found = findings(&lines, Some(0), Vec::new());
+    let expected: BTreeMap<String, usize> = [
+        ("init", 1),
+        ("skill_called", 2),
+        ("skill_asked", 3),
+        ("skill_result_ok", 4),
+        ("write_called", 5),
+        ("pre_tool_use_hook", 6),
+        ("write_asked", 7),
+        ("write_result_error", 8),
+        ("write_result_ok", 10),
+    ]
+    .into_iter()
+    .map(|(label, at)| (label.to_string(), at))
+    .collect();
+    assert_eq!(found.evidence, expected);
+}
+
+#[test]
+fn the_description_says_what_the_host_allowed_and_refused_and_where_the_stream_showed_it() {
+    let found = Findings {
+        permission_allowed: vec!["Skill"],
+        permission_refused: vec!["Write"],
+        evidence: BTreeMap::from([("skill_asked".to_string(), 3)]),
+        exit: Some(0),
+        result: "success".into(),
+        ..Findings::default()
+    };
+    let text = describe_frontmatter(&found, false, false);
+    assert!(
+        text.contains("allowed [\"Skill\"]") && text.contains("refused [\"Write\"]"),
+        "{text}"
+    );
+    assert!(text.contains("\"skill_asked\": 3"), "{text}");
+}
+
+#[test]
+fn the_answering_session_is_not_run_without_the_opt_in_and_says_why() {
+    // The same guard as `run_session_within`, first, before a file or a process: a caller that skips `live!` is
+    // stopped.
+    if std::env::var("COLLIDE_REAL_CLAUDE").as_deref() == Ok("1") {
+        return;
+    }
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let (request, line) = frontmatter_line(&fixture, &worktree, ANSWERED_CAP_USD);
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_answering_session(
+            &fixture,
+            "no-opt-in",
+            &request,
+            &line,
+            "a prompt",
+            ANSWERED_CAP_USD,
+            ANSWERED_LEDGER_LIMIT_USD,
+            &mut skill_only,
+        )
+    }))
+    .expect_err("no opt-in, no run");
+    let message = *refused.downcast::<String>().unwrap();
+    assert!(message.contains("COLLIDE_REAL_CLAUDE=1"), "{message}");
+}
+
+#[test]
+fn the_answering_session_is_the_built_line_haiku_five_cents_config_none_the_plugin_and_the_variable()
+ {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    add_frontmatter_skill(&fixture, &worktree);
+    let (_request, line) = frontmatter_line(&fixture, &worktree, ANSWERED_CAP_USD);
+    assert_eq!(line.value_of("--model"), Some("haiku"));
+    assert_eq!(line.value_of("--max-budget-usd"), Some("0.05"));
+    assert_eq!(line.value_of("--setting-sources"), Some(""));
+    assert_eq!(line.value_of("--add-dir"), worktree.to_str());
+    assert_eq!(line.value_of("--permission-prompt-tool"), Some("stdio"));
+    let plugin = fixture.snapshot.join("plugins").join(PLUGIN_NAME);
+    assert_eq!(line.value_of("--plugin-dir"), plugin.to_str());
+    assert_eq!(
+        line.env
+            .get("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(line.cwd, worktree);
+}
+
+#[test]
+fn the_answering_ledger_has_room_for_one_session_and_none_for_a_second() {
+    let root = super::common::TempRoot::new();
+    let ledger = root.join("ledger");
+    let refusal = |spent: &str| {
+        std::fs::write(&ledger, spent).unwrap();
+        real::ledger_refusal(&ledger, "next", ANSWERED_CAP_USD, ANSWERED_LEDGER_LIMIT_USD)
+    };
+    assert_eq!(ANSWERED_LEDGER_LIMIT_USD, 0.05, "the owner's limit");
+    assert_eq!(ANSWERED_LEDGER_LIMIT_USD, ANSWERED_CAP_USD, "no re-run");
+    assert_eq!(refusal(""), None);
+    assert!(
+        refusal("a\t0.05\t0.0001\n").is_some(),
+        "a cent spent leaves no room for another cap"
+    );
 }
