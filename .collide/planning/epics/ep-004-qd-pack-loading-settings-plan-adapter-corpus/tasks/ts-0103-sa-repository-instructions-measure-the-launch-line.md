@@ -1,7 +1,7 @@
 ---
 id: ts-0103-sa
 kind: task
-status: ready
+status: active
 title: "Repository instructions: measure the launch line"
 owners: []
 links:
