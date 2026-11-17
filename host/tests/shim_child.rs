@@ -802,9 +802,15 @@ fn a_stderr_log_that_fills_up_is_reported_and_stdout_goes_on() {
 fn a_shim_that_cannot_write_exit_json_keeps_the_record_and_leaves_no_file() {
     let dir = RunDir::new();
     // The child takes the write permission off the run directory, so the files the shim holds open still take
-    // writes and only a new file (the temp file of `exit.json`) is refused, as on a full disk.
-    let script = "import os, sys\nos.chmod(sys.argv[1], 0o500)\nsys.exit(5)";
-    let mut spec = dir.spec(script);
+    // writes and only a new file (the temp file of `exit.json`) is refused, as on a full disk. It waits for its
+    // identity file first: `Shim::start` renames that file in after the child starts, and a chmod that came first
+    // refused the rename under load.
+    let script = format!(
+        "import os, sys, time\nwhile not os.path.exists(os.path.join(sys.argv[1], {:?})):\n    time.sleep(0.01)\n\
+         os.chmod(sys.argv[1], 0o500)\nsys.exit(5)",
+        files::CHILD
+    );
+    let mut spec = dir.spec(&script);
     spec.args.push(dir.path().display().to_string());
     let running = Running::start(&spec);
     let mut outcome = running.finish();
