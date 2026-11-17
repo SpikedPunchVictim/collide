@@ -9,6 +9,7 @@ pub mod config_fixture;
 pub mod detached;
 pub mod git_repo;
 pub mod procs;
+pub mod remote;
 pub mod subscriber;
 
 use collide_host::auth::{ProcessTree, SystemProcessTree};

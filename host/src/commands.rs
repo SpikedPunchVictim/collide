@@ -15,7 +15,7 @@
 //! | `cli: stop` | `collide stop` | built: [`crate::stop_cli`], the stop of 0.5 ([`crate::stop`]) through the daemon |
 //! | `cli: report` | `collide report` | report files for shell scripts (`span`, `metric`) |
 //! | `cli: config` | `collide config` | built: `get`, `set`, `set --secret` ([`crate::config_set_cli`]) |
-//! | `cli: pack` | `collide pack` | `add`, `link`, `enable`, `disable` and `list`; `update` and `test` come with Stage 12 |
+//! | `cli: pack` | `collide pack` | `update` built ([`crate::pack_cli`]); the rest is `ts-0101-bd` |
 
 use crate::task_cli::exit;
 use std::any::Any;
@@ -95,10 +95,10 @@ pub const COMMANDS: [Command; 9] = [
     },
     Command {
         name: "pack",
-        summary: "add, link, enable, disable or list packs",
+        summary: "update a git pack (`update`); add, link, enable, disable and list are not built yet",
         build: Build::NotBuilt(Stub {
             tag: "cli: pack",
-            stage: "4b",
+            stage: "4a",
             handler: pack,
         }),
     },
@@ -197,7 +197,8 @@ pub fn report(args: &[String]) -> u8 {
     todo!("cli: report")
 }
 
-/// `collide pack add|link|enable|disable|list` (Stage 4b).
+/// `collide pack add|link|enable|disable|list` (Stage 4a, `ts-0101-bd`). `collide pack update` is built and never
+/// reaches this handler (`bin/collide.rs` runs it first).
 pub fn pack(args: &[String]) -> u8 {
     let _ = args;
     todo!("cli: pack")

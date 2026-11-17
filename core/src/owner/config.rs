@@ -157,3 +157,75 @@ pub struct ConfigPackEnableParams {
     pub name: String,
     pub enabled: bool,
 }
+
+/// What a `git:` source resolved to: the commit, and the tree at the pack's path in it (0.7, Pack sources).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PackPin {
+    pub commit: String,
+    pub tree: String,
+}
+
+/// How a file of the pack differs between two pins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PackFileChangeKind {
+    Added,
+    Deleted,
+    Modified,
+    /// A file that became a folder, a link or a submodule, or the other way round.
+    TypeChanged,
+}
+
+/// One file that differs between two pins of a pack: the manifest, a hook, a script.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PackFileChange {
+    pub path: String,
+    pub kind: PackFileChangeKind,
+    /// The changed lines of a text file: `@@`, `-` and `+` lines, no context.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+    /// Why there are no lines, when there are none to show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// `config.pack_update` params (`collide pack update <name> [--to <ref>]`): fetch the pack's repository, resolve its
+/// ref (or `to`: a branch, a tag or a commit), and show what changed. Only with `confirm` is the lock written.
+/// `approve_hosts` are hosts the person has said yes to for a first fetch: each is recorded when this fetch needs it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigPackUpdateParams {
+    pub board: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub confirm: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approve_hosts: Vec<String>,
+}
+
+/// `config.pack_update` result. `old` is the pin now; `new` is the pin the ref resolves to. With `needs_host` set the
+/// fetch has not run (the first fetch from that host needs the person's yes), `new` is absent and nothing was written.
+/// `written` is true when `confirm` was set and the lock changed, in the file `lock_file` names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigPackUpdateResult {
+    pub pack: PackEntry,
+    pub old: PackPin,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new: Option<PackPin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_host: Option<String>,
+    /// The files that differ, in path order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<PackFileChange>,
+    /// What cannot be shown of the difference (the old version is no longer in the mirror).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub written: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_file: Option<String>,
+}

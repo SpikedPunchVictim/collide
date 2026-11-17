@@ -157,8 +157,8 @@ fn every_filled_tag_stays_registered_under_its_stage_and_counts_no_stub() {
 }
 
 /// The tags of the rest of the `host` outlines (ts-0041-xf) and the stage that fills each one: the provider
-/// supervisor and the pack command Stage 4b, the hook executor and `collide report` Stage 7, observers Stage 12, the
-/// resource sources Stage 13. Each must count at least one stub today.
+/// supervisor Stage 4b, the pack command Stage 4a, the hook executor and `collide report` Stage 7, observers
+/// Stage 12, the resource sources Stage 13. Each must count at least one stub today.
 const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 12] = [
     ("hooks: invocation", "7"),
     ("hooks: result file", "7"),
@@ -171,7 +171,7 @@ const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 12] = [
     ("sampler: gpu", "13"),
     ("sampler: containers", "13"),
     ("cli: report", "7"),
-    ("cli: pack", "4b"),
+    ("cli: pack", "4a"),
 ];
 
 #[test]

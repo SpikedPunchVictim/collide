@@ -140,3 +140,75 @@ Write these first, with a fixture remote that is a bare repository in a temp roo
   they share `core`, `host` and the generated files.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.
+
+### Built
+
+Tests were written before the code. Red seen (by a compile error or a failing run before the code existed):
+`owner_protocol` (no `Method::ConfigPackUpdate`), `hosts`, `git_fetch` and `pack_lock` (modules missing), and the
+`board_load` fetch tests (`with_fetch` and `needs_host` missing). **Not seen red:** `git_locator` and `pack_update`
+(the `command` module included) were written first but first run after their code existed, so they have no red record.
+
+- **Locator** (`core/src/lock.rs`): `GitLocator` (`parse`, `reference`, `target`), `LocatorError`, `UrlTarget`
+  and `url_target`, `SourceError::BadLocator`. `PackSource::parse` uses it for `git:`.
+  Tests: `core/tests/git_locator.rs`.
+- **Wire** (`core/src/owner/config.rs`, `owner.rs`, `schema.rs`): `config.pack_update` with `ConfigPackUpdateParams`,
+  `ConfigPackUpdateResult`, `PackPin`, `PackFileChange`, `PackFileChangeKind`. `pnpm gen` was run (`schemas/`,
+  `packages/pack-sdk/src/generated/`); `app/src/owner/methods.ts` has the method. Round trip: `owner_protocol`.
+- **Hosts** (`host/src/hosts.rs`): `KnownHosts` (`is_known`, `record`), `~/.config/collide/hosts.yaml`, mode 0600.
+- **Fetch** (`host/src/git_fetch.rs`): `mirror_name`, `mirror_path`, `FetchEnv`, `FetchError`, `GitFetch::fetch`,
+  `FETCH_TIMEOUT`. Tests: `host/tests/git_fetch.rs` (new host runs nothing, known host, path on disk, branch moved, tag
+  added, commit pruned, hang, prompt, `ext::` with a permissive `.gitconfig` in the temp HOME, argv and environment).
+- **Pins and lock** (`host/src/pack_lock.rs`): `resolve_pin`, `read_lock`, `set_pin`. Tests: `host/tests/pack_lock.rs`.
+- **Loader** (`host/src/board_load.rs`): `FetchSetup`, `LoadContext::with_fetch`, `LoadProblem::needs_host`,
+  `pack_from_mirror`. A load reads the lock, never the remote; the mirror is read only on a cache miss. Tests are
+  the fetch tests added to `host/tests/board_load.rs`.
+- **Update** (`host/src/pack_update.rs`, `config_get.rs`, `daemon.rs`): `pack_update`, `ConfigService::pack_update`,
+  the `Method::ConfigPackUpdate` handler, and `system_load_context` now takes the home so the daemon can fetch.
+  Tests: `host/tests/pack_update.rs` (preview, confirm leaves the lock uncommitted, next load uses the new tree,
+  other pins keep their place, `--to` branch/tag/commit, older tag, missing ref, same pin, refusals, user pack,
+  new host, approved host, other host).
+- **Command** (`host/src/pack_cli.rs`, `bin/collide.rs`): `collide pack update <name> [--to <ref>] [--yes]
+  [--allow-host <host>]`; the `command` module in `pack_update.rs` and two tests in `command_tree.rs` cover it.
+- **Retag** `cli: pack` from 4b to 4a: `commands.rs`, `stub-tags.json`, `checks/tests/real_tree.rs`,
+  `host/tests/command_tree.rs`. The other `collide pack` words stay the stub (exit 6).
+- Test support: `host/tests/common/remote.rs` (a bare remote on disk), `Fixture::fetching` in `config_fixture.rs`.
+
+### Decisions for the owner
+
+1. **New host over the wire.** The daemon returns `needs_host` in the result (no RPC error), and a caller that has
+   the person's yes sends `approve_hosts`; only the host the fetch needs is recorded. Alternative: an RPC error
+   code. Recommend the result field: it is a normal outcome, not a failure.
+2. **Extra refspec `+HEAD:refs/collide/head`** beside branches and tags, so a locator with no ref (`HEAD`) works on
+   a remote whose default branch is not known. Alternative: ask the remote with `ls-remote`. Recommend keeping it.
+3. **Scheme-less URLs** (`github.com/org/p`) parse but are refused at fetch with a hint to write `https://...`.
+   Alternative: guess `https://`. Recommend refusing; a guess is a host the person did not name.
+4. **Mirror name hash** is FNV-1a 32-bit (no hash crate, no new crate). Alternative: SHA-1 through git. Recommend
+   FNV: it only keeps two URLs apart.
+5. **`hosts.yaml`** is a `hosts:` list, lower case, mode 0600, never pruned by Collide.
+6. **A pack that fails to load cannot be updated by name**, because the line is loaded first. Alternative: update
+   by source. Recommend leaving it until a person hits it; a broken pack is rarely fixed by moving its pin.
+7. **A user pack is found** by `packs.yaml`, its lock entry and the name in the manifest at the locked commit in
+   the mirror (the loader does not load user packs before `ts-0101-bd`). `ts-0101-bd` may replace this lookup.
+8. **CLI flags** `--yes` and `--allow-host` are mine; the confirming call names the commit that was shown, so a
+   remote that moves in between changes nothing.
+9. **Timeout** kills only git's direct child, and is told from other failures by the message prefix `run_bounded`
+   gives. Alternative: a process-group kill and a typed error from `run_bounded`. Recommend a later item.
+10. **Credentials in a URL** are not redacted in messages. Recommend a later item; `https://user:token@host` is
+    rare and the plan names the user's git credentials, not URL secrets.
+11. **Plan text to propose** (0.7, Switching packs): "`collide pack update <name> [--to <ref>] [--yes]` previews the
+    old and new commit and the changed files, and writes the lock only on a yes; a host never fetched from is asked
+    about first." Stage 4a: `cli: pack` is filled in two items, `update` in `ts-0100-pu`, the rest in `ts-0101-bd`.
+
+- Owner decisions (2026-11-16, at the build): 1 to 5, 7 and 8 as built, on delegation. 6 and the cold-cache host case
+  carried to `ts-0101-bd` and `ts-0102-vu` as notes there. 9 as built, carried in `ts-0102-vu`'s note. 10 changed at
+  the review: a `git:` URL with a password is refused (`LocatorError::Password`, its message masks the password as
+  `***`), because a fetch uses the person's git credentials and the locator is committed in the lock; tests in
+  `core/tests/git_locator.rs`. 11 in the plan's 0.7 Switching packs text.
+
+### Not done, by design
+
+- User packs, `pack add/remove/switch/list/link/enable/disable`, name clash, `dev:` rules, working copies: `ts-0101-bd`.
+- The daemon's lines, the trust prompt and asking for a new host in the app: `ts-0102-vu`.
+- A user pack's "next load uses the new tree" is asserted on the user's lock file only, since the loader does not
+  load user packs until `ts-0101-bd`.
+- Trust for the new tree is asked by the existing trust flow on the next open; this item does not call it.

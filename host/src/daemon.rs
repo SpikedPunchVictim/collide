@@ -124,6 +124,7 @@ use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::metrics::Metrics;
 use crate::pack_location::Inputs;
+use crate::pack_update::PackUpdateError;
 use crate::phases::{
     BIND_WAIT, ExitJson, FeedRebuilder, PhaseEndHook, PhaseKey, PhaseOptions, PhasePauseHook,
     Phases, PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
@@ -138,8 +139,8 @@ use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use collide_core::events::Event;
 use collide_core::owner::{
-    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams, ConfigSetParams,
-    DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
+    BoardListResult, BoardOpenParams, BoardOpenResult, ConfigGetParams, ConfigPackUpdateParams,
+    ConfigSetParams, DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
     DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
     OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams, QueueListResult, Request,
     Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
@@ -902,11 +903,12 @@ impl Daemon {
 
         // `config.get` reads the repo's layer through the loader. The cache is beside the runs, like the workspaces.
         let config = ConfigService::new(
-            home,
+            home.clone(),
             load_context.unwrap_or_else(|| {
                 system_load_context(
                     paths.runs_dir.with_file_name("cache"),
                     Inputs::from_process(),
+                    home.clone().filter(|home| !home.is_empty()).map(Into::into),
                 )
             }),
             git_env.clone(),
@@ -1798,6 +1800,7 @@ fn call(
         Method::QueueAnswer => queue_answer(shared, session, params),
         Method::ConfigGet => config_get(shared, params),
         Method::ConfigSet => config_set(shared, params),
+        Method::ConfigPackUpdate => config_pack_update(shared, params),
         Method::BoardOpen => board_open(shared, params),
         Method::BoardList => board_list(shared),
         Method::TaskGet => task_get(shared, params),
@@ -2164,6 +2167,35 @@ fn config_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
         Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
         Err(GetError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
         Err(GetError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
+    }
+}
+
+/// `config.pack_update` (ts-0100-pu): `collide pack update`. The board is required: a pack is updated for one. A fetch
+/// may take as long as its timeout, so this answers when it is done and no other request waits on it.
+fn config_pack_update(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigPackUpdateParams = read_params("config.pack_update", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let root = std::path::PathBuf::from(board_root(shared, &params.board)?);
+    let board = BoardRef {
+        id: &params.board,
+        root: &root,
+    };
+    match shared
+        .config
+        .pack_update(&params, board, &tools_path(shared))
+    {
+        Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
+        Err(PackUpdateError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
+        Err(PackUpdateError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
+        Err(PackUpdateError::Failed(message)) => Err(RpcError::new(code::INTERNAL_ERROR, message)),
     }
 }
 

@@ -1781,9 +1781,11 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
 - **Switching packs** (owner, 2026-11-13):
   - User packs switch on and off per board (`collide pack enable|disable`). Repo packs switch through `board.yaml`,
     a line (0.12) or a repo profile.
-  - `collide pack update <name> [--to <ref>]` moves a `git:` pack, shows the diff of its manifest, workflow graph
-    and hooks, and asks for trust again. For a `git:` repo pack it changes the lock, which the user commits. A `repo:`
-    pack changes by a commit alone.
+  - `collide pack update <name> [--to <ref>] [--yes]` moves a `git:` pack. It previews the old and new commit and the
+    diff of the pack's manifest, workflow graph and hooks, writes the lock only on a yes, and asks for trust again. A
+    host never fetched from is asked about first. For a `git:` repo pack it changes the lock, which the user commits.
+    A `repo:` pack changes by a commit alone. A `git:` URL with a password in it is refused: a fetch uses the
+    person's git credentials (ts-0100-pu).
   - A run pins every pack's tree id at launch, so nothing switched later reaches a live run.
   - An experiment arm can put one pack at another ref (0.14).
 - **Profiles** (owner, 2026-11-13): a named setup for a kind of job.

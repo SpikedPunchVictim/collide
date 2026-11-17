@@ -11,6 +11,8 @@ use collide_host::board_load::LoadContext;
 use collide_host::builtin_packs::{BuiltinPacks, Environment};
 use collide_host::config_get::LoadContextFactory;
 use collide_host::daemon::{Daemon, DaemonOptions, DaemonPaths};
+use collide_host::git_fetch::{FetchEnv, GitFetch};
+use collide_host::hosts::KnownHosts;
 use collide_host::owner_client::OwnerClient;
 use collide_host::settings_files::user_config_dir;
 use std::collections::BTreeMap;
@@ -111,6 +113,34 @@ impl Fixture {
         configure(&mut options);
         let daemon = Daemon::start(options).expect("the daemon starts");
         Fixture { repo, daemon }
+    }
+
+    /// As [`Fixture::new`], with a loader that fetches `git:` packs (ts-0100-pu). `git` is found on `path`, with the
+    /// temp root as its home and no system config: a test that must not run real git gives a `path` with a fake one.
+    pub fn fetching(path: std::ffi::OsString) -> Fixture {
+        Fixture::with_options(|options| {
+            let root =
+                std::path::PathBuf::from(options.home.clone().expect("the fixture sets a home"));
+            let factory: LoadContextFactory = Arc::new(move |tools| {
+                let fetch = GitFetch::new(FetchEnv {
+                    path: path.clone(),
+                    home: root.clone(),
+                    ssh_auth_sock: None,
+                    xdg_config_home: None,
+                })
+                .without_system_config();
+                Ok(LoadContext::new(
+                    root.join("cache"),
+                    root.join("sdk-copy"),
+                    Environment {
+                        path: tools.to_os_string(),
+                    },
+                    BuiltinPacks::new(repo_root().join("packs")),
+                )
+                .with_fetch(fetch, KnownHosts::for_home(&root)))
+            });
+            options.load_context = Some(factory);
+        })
     }
 
     pub fn home(&self) -> &Path {

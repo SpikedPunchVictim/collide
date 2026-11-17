@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.pack_update` params (`collide pack update <name> [--to <ref>]`): fetch the pack's repository, resolve its\nref (or `to`: a branch, a tag or a commit), and show what changed. Only with `confirm` is the lock written.\n`approve_hosts` are hosts the person has said yes to for a first fetch: each is recorded when this fetch needs it.",
+  "properties": {
+    "approve_hosts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "board": {
+      "type": "string"
+    },
+    "confirm": {
+      "default": false,
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "board",
+    "name"
+  ],
+  "title": "ConfigPackUpdateParams",
+  "type": "object"
+}

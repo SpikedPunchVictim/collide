@@ -66,7 +66,7 @@
   "cli: stop": "3a",
   "cli: report": "7",
   "cli: config": "4a",
-  "cli: pack": "4b",
+  "cli: pack": "4a",
   "ui_tools: endpoint token store": "6b",
   "shell: daemon connection": "3c",
   "shell: daemon events": "3c",

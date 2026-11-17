@@ -116,5 +116,11 @@ Write these first, in temp roots, with a fixture remote and a fixture checkout:
   does. Settings files are fixtures, never the owner's own `settings.json`.
 - Stage 4a item (revision 23 scope, split 2026-11-16). Items of Stage 4a run one at a time, in id order, because
   they share `core`, `host` and the generated files.
+- Carried from `ts-0100-pu` (review, 2026-11-16): `pack update` loads the line first (`host/src/pack_update.rs`
+  `pack_update`), so any load problem refuses every update. A pack whose locked commit the remote no longer has, or
+  one broken at its pin, cannot be moved to a fixed commit with `pack update`; one broken pack also blocks updating
+  the others. When this item replaces the lookup (`from_board`, `from_user`), find a `git:` pack by its lock entry
+  and source without a clean load, so `pack update` is the way out of a bad pin. A test: a lock whose commit is gone,
+  then `pack update <name> --to <ref>` moves it.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.

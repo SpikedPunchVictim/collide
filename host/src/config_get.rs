@@ -23,14 +23,17 @@ use crate::atomic_write::write_atomically;
 use crate::board_load::{LoadContext, LoadedLine, load_line};
 use crate::boards;
 use crate::builtin_packs::{BuiltinPacks, Environment};
+use crate::git_fetch::{FetchEnv, GitFetch};
+use crate::hosts::KnownHosts;
 use crate::keychain::{Keychain, Secret, pack_item};
 use crate::pack_cache::ensure_sdk;
 use crate::pack_location::{Inputs, bundle_sdk, locate_bundle};
+use crate::pack_update::{PackUpdateError, UpdateSite, pack_update};
 use crate::settings_files::{UserFiles, read_user_files, user_config_dir};
 use collide_core::agent_layers::{AgentInputs, AgentLayers, agent_layers};
 use collide_core::owner::{
-    ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigSetParams, ConfigSetResult,
-    ConfigWriteLayer, SettingLayer,
+    ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigPackUpdateParams, ConfigPackUpdateResult,
+    ConfigSetParams, ConfigSetResult, ConfigWriteLayer, SettingLayer,
 };
 use collide_core::profile::{FoundProfile, Profile, ProfileLookupError, find_profile};
 use collide_core::resolve::is_safe_token;
@@ -52,20 +55,36 @@ pub type LoadContextFactory = Arc<dyn Fn(&OsStr) -> Result<LoadContext, String> 
 
 /// The factory a daemon uses when its options give none: the built-in packs and the SDK are found from the process
 /// ([`locate_bundle`]), and the SDK is copied once into `cache` ([`ensure_sdk`]). It is read at each call, so a daemon
-/// that starts before the bundle is in place still answers once it is.
-pub fn system_load_context(cache: PathBuf, bundle: Inputs) -> LoadContextFactory {
+/// that starts before the bundle is in place still answers once it is. With a `home`, a `git:` pack that is not in the
+/// cache can be fetched (`ts-0100-pu`): git runs with the fetch's own environment from the process, and the hosts the
+/// user has allowed are read from `<home>/.config/collide/hosts.yaml`.
+pub fn system_load_context(
+    cache: PathBuf,
+    bundle: Inputs,
+    home: Option<PathBuf>,
+) -> LoadContextFactory {
     Arc::new(move |path| {
         let bundle = locate_bundle(&bundle).map_err(|error| error.to_string())?;
         let sdk = bundle_sdk(&bundle).map_err(|error| error.to_string())?;
         let sdk = ensure_sdk(&cache, &sdk).map_err(|error| error.to_string())?;
-        Ok(LoadContext::new(
+        let context = LoadContext::new(
             cache.clone(),
             sdk,
             Environment {
                 path: path.to_os_string(),
             },
             BuiltinPacks::new(bundle),
-        ))
+        );
+        Ok(match &home {
+            Some(home) => {
+                let env = FetchEnv {
+                    home: home.clone(),
+                    ..FetchEnv::from_process()
+                };
+                context.with_fetch(GitFetch::new(env), KnownHosts::for_home(home))
+            }
+            None => context,
+        })
     })
 }
 
@@ -273,6 +292,27 @@ impl ConfigService {
             ))
         })?;
         Ok(ConfigGetResult { entries, notices })
+    }
+
+    /// `config.pack_update`: moves a `git:` pack to a new pin. See [`crate::pack_update`].
+    pub fn pack_update(
+        &self,
+        params: &ConfigPackUpdateParams,
+        board: BoardRef,
+        path: &OsStr,
+    ) -> Result<ConfigPackUpdateResult, PackUpdateError> {
+        let home = self.home().map_err(PackUpdateError::Failed)?;
+        let git_dir =
+            boards::git_dir_of(board.root, &self.git_env).map_err(PackUpdateError::Failed)?;
+        let context = (self.load_context)(path).map_err(|message| {
+            PackUpdateError::Failed(format!("the loader cannot start: {message}"))
+        })?;
+        let site = UpdateSite {
+            git_dir: &git_dir,
+            checkout: board.root,
+            home,
+        };
+        pack_update(params, &site, &context)
     }
 
     /// `config.set`: one value, to the keychain (`params.secret`) or to the user's file. See the module docs.

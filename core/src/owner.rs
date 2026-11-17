@@ -47,7 +47,7 @@
 //! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.record`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
 //! | queue | [`queue`] | `queue.list`, `queue.context`, `queue.answer` |
 //! | workspace | [`workspace`] | `workspace.list`, `workspace.remove`, `workspace.resume` |
-//! | config | [`config`] | `config.get`, `config.set`, `config.pack_list`, `config.pack_add`, `config.pack_link`, `config.pack_enable` |
+//! | config | [`config`] | `config.get`, `config.set`, `config.pack_list`, `config.pack_add`, `config.pack_link`, `config.pack_enable`, `config.pack_update` |
 
 pub mod board;
 pub mod config;
@@ -654,6 +654,9 @@ methods! {
     ConfigPackEnable, "config.pack_enable", Config,
         "collide pack, enabling or disabling a pack",
         ConfigPackEnableParams, ConfigPackResult;
+    ConfigPackUpdate, "config.pack_update", Config,
+        "collide pack, moving a git pack to a new commit",
+        ConfigPackUpdateParams, ConfigPackUpdateResult;
 }
 
 /// What [`route`] found.

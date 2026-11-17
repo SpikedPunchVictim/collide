@@ -1,0 +1,53 @@
+{
+  "$defs": {
+    "PackFileChangeKind": {
+      "description": "How a file of the pack differs between two pins.",
+      "oneOf": [
+        {
+          "enum": [
+            "added",
+            "deleted",
+            "modified"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "type_changed",
+          "description": "A file that became a folder, a link or a submodule, or the other way round.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One file that differs between two pins of a pack: the manifest, a hook, a script.",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/PackFileChangeKind"
+    },
+    "lines": {
+      "description": "The changed lines of a text file: `@@`, `-` and `+` lines, no context.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "note": {
+      "description": "Why there are no lines, when there are none to show.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "kind"
+  ],
+  "title": "PackFileChange",
+  "type": "object"
+}

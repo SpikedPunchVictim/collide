@@ -61,6 +61,7 @@ export const OWNER_METHODS = {
   'config.pack_add': call<G.ConfigPackAddParamsInput, G.ConfigPackResultOutput>(),
   'config.pack_link': call<G.ConfigPackLinkParamsInput, G.ConfigPackResultOutput>(),
   'config.pack_enable': call<G.ConfigPackEnableParamsInput, G.ConfigPackResultOutput>(),
+  'config.pack_update': call<G.ConfigPackUpdateParamsInput, G.ConfigPackUpdateResultOutput>(),
 }
 
 // The ask methods, in the window's shape. They are not in `OWNER_METHODS`: the owner protocol answers `method not

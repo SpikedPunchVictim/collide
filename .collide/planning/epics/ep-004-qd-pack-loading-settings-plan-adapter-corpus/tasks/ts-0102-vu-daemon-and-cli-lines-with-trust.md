@@ -122,5 +122,11 @@ Write these first, over fixture repositories, a temp `HOME` and a daemon in a te
   repository".
 - Stage 4a item (revision 23 scope, split 2026-11-16). Items of Stage 4a run one at a time, in id order, because
   they share `core`, `host` and the generated files.
+- Carried from `ts-0100-pu` (review, 2026-11-16): a repo `git:` pack on a cold cache whose host was never fetched
+  from fails the load with `LoadProblem::needs_host`. `pack update` then refuses before it reads `approve_hosts`, so
+  `--allow-host` cannot record that host. The trust prompt here records the hosts on a yes; after that, `pack update`
+  works. Make the refusal name the way out until the prompt has run. A timeout kills only git's direct child
+  (`run_bounded`); an `ssh` or remote helper under it can outlive it. A process-group kill belongs with the daemon's
+  other process work (Stage 8) if it shows up.
 - Owner decisions (2026-11-16, at the split): the recommendations above are taken under the owner's delegation; they
   stay overridable until the item is built.

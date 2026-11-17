@@ -9,6 +9,24 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some("shim") {
         return ExitCode::from(u8::try_from(collide_host::shim::run(rest)).unwrap_or(1));
     }
+    // `collide pack update` is built; every other `collide pack` word is still the stub.
+    if args.first().map(String::as_str) == Some("pack")
+        && rest.first().map(String::as_str) == Some("update")
+    {
+        return match std::env::current_dir() {
+            Ok(cwd) => ExitCode::from(collide_host::pack_cli::run(
+                rest,
+                &cwd,
+                &mut std::io::stdin().lock(),
+                &mut std::io::stdout().lock(),
+                &mut std::io::stderr().lock(),
+            )),
+            Err(error) => {
+                eprintln!("collide pack update: cannot read the working directory: {error}");
+                ExitCode::from(exit::FAILED)
+            }
+        };
+    }
     if let Some(code) = args
         .first()
         .and_then(|name| commands::execute_stub(name, rest))
@@ -26,12 +44,13 @@ fn main() -> ExitCode {
         }
         Some("help" | "--help" | "-h") => {
             println!(
-                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}\n\n{}\n{}",
+                "{}\n\n{USAGE}\n{}\n\n{HELP}\n\n{}\n\n{}\n{}\n{}",
                 commands::tree_text(),
                 collide_host::run_cli::USAGE,
                 collide_host::run_cli::HELP,
                 collide_host::config_cli::USAGE,
-                collide_host::config_set_cli::USAGE
+                collide_host::config_set_cli::USAGE,
+                collide_host::pack_cli::USAGE
             );
             return ExitCode::SUCCESS;
         }

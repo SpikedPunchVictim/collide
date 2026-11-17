@@ -186,6 +186,11 @@ pub fn registry() -> Registry {
     registry.add::<owner::ConfigPackListParams>();
     registry.add::<owner::ConfigPackListResult>();
     registry.add::<owner::ConfigPackResult>();
+    registry.add::<owner::ConfigPackUpdateParams>();
+    registry.add::<owner::ConfigPackUpdateResult>();
+    registry.add::<owner::PackPin>();
+    registry.add::<owner::PackFileChange>();
+    registry.add::<owner::PackFileChangeKind>();
     registry.add::<owner::ConfigSetParams>();
     registry.add::<owner::ConfigSetResult>();
     registry.add::<owner::DaemonAgentVersionsParams>();

@@ -414,6 +414,17 @@ fn samples() -> Vec<(Method, Value, Value)> {
             json!({ "board": "bd-1", "name": "collide", "enabled": true }),
             json!({ "pack": pack() }),
         ),
+        (
+            Method::ConfigPackUpdate,
+            json!({ "board": "bd-1", "name": "ferry", "to": "v1.3", "confirm": true, "approve_hosts": ["github.com"] }),
+            json!({
+                "pack": pack(),
+                "old": { "commit": "a".repeat(40), "tree": "b".repeat(40) },
+                "new": { "commit": "c".repeat(40), "tree": "d".repeat(40) },
+                "changes": [{ "path": "pack.yaml", "kind": "modified", "lines": ["@@ -1 +1 @@", "-a", "+b"] }],
+                "written": true,
+            }),
+        ),
     ]
 }
 

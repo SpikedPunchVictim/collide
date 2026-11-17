@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "PackEntry": {
+      "additionalProperties": false,
+      "description": "One pack of a board. `dev` is a pack run from a folder (`dev:`), which is badged everywhere (0.7).",
+      "properties": {
+        "dev": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/PackOrigin"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "origin",
+        "enabled",
+        "dev"
+      ],
+      "type": "object"
+    },
+    "PackFileChange": {
+      "additionalProperties": false,
+      "description": "One file that differs between two pins of a pack: the manifest, a hook, a script.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PackFileChangeKind"
+        },
+        "lines": {
+          "description": "The changed lines of a text file: `@@`, `-` and `+` lines, no context.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "note": {
+          "description": "Why there are no lines, when there are none to show.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PackFileChangeKind": {
+      "description": "How a file of the pack differs between two pins.",
+      "oneOf": [
+        {
+          "enum": [
+            "added",
+            "deleted",
+            "modified"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "type_changed",
+          "description": "A file that became a folder, a link or a submodule, or the other way round.",
+          "type": "string"
+        }
+      ]
+    },
+    "PackOrigin": {
+      "description": "Where a pack comes from (0.7, Repo packs and user packs).",
+      "oneOf": [
+        {
+          "const": "builtin",
+          "description": "Compiled into the bundle, so it needs no trust prompt (0.4).",
+          "type": "string"
+        },
+        {
+          "const": "repo",
+          "description": "Listed in the board's `board.yaml`, shared with the team.",
+          "type": "string"
+        },
+        {
+          "const": "user",
+          "description": "Added with `collide pack add`, switched on per board.",
+          "type": "string"
+        }
+      ]
+    },
+    "PackPin": {
+      "additionalProperties": false,
+      "description": "What a `git:` source resolved to: the commit, and the tree at the pack's path in it (0.7, Pack sources).",
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "tree": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "commit",
+        "tree"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.pack_update` result. `old` is the pin now; `new` is the pin the ref resolves to. With `needs_host` set the\nfetch has not run (the first fetch from that host needs the person's yes), `new` is absent and nothing was written.\n`written` is true when `confirm` was set and the lock changed, in the file `lock_file` names.",
+  "properties": {
+    "changes": {
+      "description": "The files that differ, in path order.",
+      "items": {
+        "$ref": "#/$defs/PackFileChange"
+      },
+      "type": "array"
+    },
+    "lock_file": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "needs_host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "new": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackPin"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "note": {
+      "description": "What cannot be shown of the difference (the old version is no longer in the mirror).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "old": {
+      "$ref": "#/$defs/PackPin"
+    },
+    "pack": {
+      "$ref": "#/$defs/PackEntry"
+    },
+    "written": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "pack",
+    "old",
+    "written"
+  ],
+  "title": "ConfigPackUpdateResult",
+  "type": "object"
+}

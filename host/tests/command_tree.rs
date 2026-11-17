@@ -17,7 +17,7 @@ const TREE: [&str; 9] = [
 /// `tests/adapters/claude/run_command.rs` and `run_process.rs`; `config` is built: `tests/config_process.rs`, which
 /// runs it with an environment of its own), with the tag and stage that fills each.
 const STUBBED: [(&str, &str, &str); 2] =
-    [("report", "cli: report", "7"), ("pack", "cli: pack", "4b")];
+    [("report", "cli: report", "7"), ("pack", "cli: pack", "4a")];
 
 /// Runs `collide` in a temp root that is also its `HOME` and its daemon root, so a stub that has since been built
 /// never reaches the real home or daemon.
@@ -132,9 +132,36 @@ fn a_stubbed_command_with_arguments_still_names_its_tag_and_prints_no_backtrace(
     let output = collide(&["pack", "add", "somewhere", "--json"]);
     assert_eq!(output.status.code(), Some(6));
     let stderr = text(output.stderr);
-    assert!(stderr.contains("(cli: pack, Stage 4b)"), "{stderr}");
+    assert!(stderr.contains("(cli: pack, Stage 4a)"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("RUST_BACKTRACE"), "{stderr}");
+}
+
+#[test]
+fn pack_update_is_built_and_a_bad_command_line_for_it_is_a_usage_error_not_a_stub() {
+    for args in [
+        &["pack", "update"][..],
+        &["pack", "update", "a", "b"][..],
+        &["pack", "update", "a", "--nope"][..],
+    ] {
+        let output = collide(args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = text(output.stderr);
+        assert!(
+            stderr.contains("usage: collide pack update <name>"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("not built yet"), "{stderr}");
+    }
+}
+
+#[test]
+fn help_names_the_pack_update_command() {
+    let stdout = text(collide(&["--help"]).stdout);
+    assert!(
+        stdout.contains("usage: collide pack update <name> [--to <ref>]"),
+        "{stdout}"
+    );
 }
 
 #[test]

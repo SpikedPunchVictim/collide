@@ -10,15 +10,19 @@
 //! as [`PackSource::Other`], and the code that fetches decides whether it supports it. A lock entry keeps its
 //! commit and tree id for every source, because "every source resolves to a git tree id" (0.7).
 //!
+//! **A `git:` locator is `<url>//<path>@<ref>`** ([`GitLocator`]): the path and the ref are optional, and without a ref
+//! it is `HEAD`. [`PackSource::parse`] refuses a locator that cannot be split or holds something git must never be
+//! given, so every file that lists a source is checked by the same rule.
+//!
 //! The checks are pure: they read the parsed files, not the disk or the network. Fetching, and comparing a pin with
-//! the tree a fetch returns, is Stage 4a's.
+//! the tree a fetch returns, is the host's (`ts-0100-pu`).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// A pack source, split at its scheme. The text after the scheme is not parsed further here (the `git:` form,
-/// `<url>//<path>@<ref>`, is Stage 4a's).
+/// A pack source, split at its scheme. A `git:` locator is checked here and split by [`GitLocator::parse`]; the text
+/// after any other scheme is not parsed further.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackSource {
     /// `repo:<path>`: in the line's snapshot. Never locked.
@@ -70,7 +74,17 @@ impl PackSource {
                     text: text.to_string(),
                 });
             }
-            "git" => PackSource::Git { locator: rest },
+            "git" => {
+                if let Err(error) = GitLocator::parse(&rest) {
+                    // The source is echoed in the message, so a password in it is masked as the locator's is.
+                    let text = match without_password(&rest) {
+                        Some(shown) => format!("git:{shown}"),
+                        None => text.to_string(),
+                    };
+                    return Err(SourceError::BadLocator { text, error });
+                }
+                PackSource::Git { locator: rest }
+            }
             "dev" => PackSource::Dev { path: rest },
             other => PackSource::Other {
                 scheme: other.to_string(),
@@ -93,6 +107,11 @@ pub enum SourceError {
     FlagLikeLocator {
         text: String,
     },
+    /// A `git:` source whose locator cannot be used: see [`LocatorError`].
+    BadLocator {
+        text: String,
+        error: LocatorError,
+    },
 }
 
 impl fmt::Display for SourceError {
@@ -109,11 +128,302 @@ impl fmt::Display for SourceError {
                 f,
                 "source `{text}` starts with `-` after its scheme, which git would read as a flag"
             ),
+            SourceError::BadLocator { text, error } => write!(f, "source `{text}`: {error}"),
         }
     }
 }
 
 impl std::error::Error for SourceError {}
+
+/// A `git:` locator, split: `<url>//<path>@<ref>` (0.7, Pack sources). `path` and `ref` are optional.
+///
+/// - The `//` that follows a scheme (`https://`, `file://`, `ssh://`) is part of the URL. The path begins after the
+///   first `//` that comes after it.
+/// - An scp-like URL (`git@host:org/repo`) and a path on disk (`/srv/repo.git`, `~/dev/pack`) are URLs too.
+/// - With a path, the ref is the text after the last `@` that follows `//`. Without one, it is the text after the last
+///   `@` that follows the URL's own host part and has no `/` after it, so the `@` of `git@host` is never a ref. A ref
+///   with a `/` in it goes after an empty path: `https://h/o/r//@feature/x`.
+/// - Without a ref it is `HEAD`.
+///
+/// The URL is as written: a `~` is the host's to expand, and nothing here looks at the disk or the network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitLocator {
+    pub url: String,
+    /// A folder of the repository, with no `.` or `..` part. Empty for the repository's own root.
+    pub path: String,
+    pub reference: Option<String>,
+}
+
+/// Why a locator was refused. Each variant holds the locator's text, so a message names the form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocatorError {
+    /// A NUL or a newline, which a command line and a git protocol line cannot hold.
+    Control {
+        text: String,
+    },
+    /// A locator that starts with `-`: git would read it as a flag.
+    FlagLike {
+        text: String,
+    },
+    EmptyUrl {
+        text: String,
+    },
+    BadPath {
+        text: String,
+        reason: &'static str,
+    },
+    EmptyRef {
+        text: String,
+    },
+    BadRef {
+        text: String,
+        reason: &'static str,
+    },
+    /// A URL with a password in its user part. `text` has the password masked: a fetch uses the person's git
+    /// credentials, and a locator is committed in the lock and named in messages.
+    Password {
+        text: String,
+    },
+}
+
+impl fmt::Display for LocatorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LocatorError::Control { text } => {
+                write!(f, "locator {text:?} has a NUL or a newline")
+            }
+            LocatorError::FlagLike { text } => write!(
+                f,
+                "locator `{text}` starts with `-`, which git would read as a flag"
+            ),
+            LocatorError::EmptyUrl { text } => write!(
+                f,
+                "locator `{text}` has an empty URL; the form is `<url>//<path>@<ref>`"
+            ),
+            LocatorError::BadPath { text, reason } => {
+                write!(f, "locator `{text}`: the path {reason}")
+            }
+            LocatorError::EmptyRef { text } => {
+                write!(f, "locator `{text}`: the ref after `@` is empty")
+            }
+            LocatorError::BadRef { text, reason } => {
+                write!(f, "locator `{text}`: the ref {reason}")
+            }
+            LocatorError::Password { text } => write!(
+                f,
+                "locator `{text}` has a password in its URL; remove it: a fetch uses your git credentials (a \
+                 credential helper or an SSH key)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LocatorError {}
+
+/// What a URL would contact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UrlTarget {
+    /// A host on the network, lower case, with no user or port. A fetch from one that has not been fetched from before
+    /// asks first (0.7, Fetch rules).
+    Host(String),
+    /// A repository on disk: an absolute path, a `~/` path or a `file://` URL. It has no host and never asks. A `~` is
+    /// kept as written.
+    Path(String),
+    /// A remote-helper URL (`ext::...`, `fd::...`). It names no host; git's own protocol allowlist refuses it.
+    Helper,
+    /// Text that is no URL git would take: a relative path, or a host and path with no scheme.
+    Unknown,
+}
+
+impl GitLocator {
+    /// Splits `text`, the part of a `git:` source after its scheme.
+    pub fn parse(text: &str) -> Result<GitLocator, LocatorError> {
+        // First, so no other refusal echoes the password.
+        if let Some(shown) = without_password(text) {
+            return Err(LocatorError::Password { text: shown });
+        }
+        let own = || text.to_string();
+        if text.contains(['\0', '\n']) {
+            return Err(LocatorError::Control { text: own() });
+        }
+        if text.starts_with('-') {
+            return Err(LocatorError::FlagLike { text: own() });
+        }
+        let start = scheme_end(text);
+        let (url, path, reference) = match text[start..].find("//") {
+            Some(at) => {
+                let rest = &text[start + at + 2..];
+                match rest.rfind('@') {
+                    Some(sign) => (&text[..start + at], &rest[..sign], Some(&rest[sign + 1..])),
+                    None => (&text[..start + at], rest, None),
+                }
+            }
+            None => {
+                let from = tail_start(text, start);
+                match text[from..].rfind('@') {
+                    Some(sign) if !text[from + sign..].contains('/') => {
+                        (&text[..from + sign], "", Some(&text[from + sign + 1..]))
+                    }
+                    _ => (text, "", None),
+                }
+            }
+        };
+        if url.is_empty() {
+            return Err(LocatorError::EmptyUrl { text: own() });
+        }
+        if let Some(reason) = path_problem(path) {
+            return Err(LocatorError::BadPath {
+                text: own(),
+                reason,
+            });
+        }
+        if let Some(reference) = reference {
+            if reference.is_empty() {
+                return Err(LocatorError::EmptyRef { text: own() });
+            }
+            if reference.starts_with('-') {
+                return Err(LocatorError::BadRef {
+                    text: own(),
+                    reason: "starts with `-`, which git would read as a flag",
+                });
+            }
+            if reference
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace())
+            {
+                return Err(LocatorError::BadRef {
+                    text: own(),
+                    reason: "has a space or a control character",
+                });
+            }
+        }
+        Ok(GitLocator {
+            url: url.to_string(),
+            path: path.to_string(),
+            reference: reference.map(str::to_string),
+        })
+    }
+
+    /// The ref to resolve: the one written, or `HEAD`.
+    pub fn reference(&self) -> &str {
+        self.reference.as_deref().unwrap_or("HEAD")
+    }
+
+    /// What the URL would contact.
+    pub fn target(&self) -> UrlTarget {
+        url_target(&self.url)
+    }
+}
+
+/// The index just past `<scheme>://` at the start of `text`, or 0 when there is none.
+/// `text` with the password of its URL's user part written as `***`, or `None` when it has none. Only a URL with a
+/// scheme has one: an scp-like URL (`git@host:path`) has a user and no password.
+fn without_password(text: &str) -> Option<String> {
+    let start = scheme_end(text);
+    if start == 0 {
+        return None;
+    }
+    let end = text[start..].find('/').map_or(text.len(), |at| start + at);
+    let authority = &text[start..end];
+    let at = authority.rfind('@')?;
+    let colon = authority[..at].find(':')?;
+    Some(format!(
+        "{}{}:***{}",
+        &text[..start],
+        &authority[..colon],
+        &text[start + at..]
+    ))
+}
+
+fn scheme_end(text: &str) -> usize {
+    let Some(at) = text.find("://") else {
+        return 0;
+    };
+    let mut chars = text[..at].chars();
+    let scheme_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c));
+    if scheme_ok { at + 3 } else { 0 }
+}
+
+/// Where a ref can start, in a locator with no path: past a scheme's authority (`user@host`), or past the `:` of an
+/// scp-like URL, so the `@` of a user part is never read as a ref.
+fn tail_start(text: &str, start: usize) -> usize {
+    if start > 0 {
+        return text[start..]
+            .find('/')
+            .map_or(text.len(), |slash| start + slash);
+    }
+    match (text.find(':'), text.find('/')) {
+        (Some(colon), Some(slash)) if colon < slash => colon + 1,
+        (Some(colon), None) => colon + 1,
+        _ => 0,
+    }
+}
+
+fn path_problem(path: &str) -> Option<&'static str> {
+    if path.is_empty() {
+        return None;
+    }
+    for part in path.split('/') {
+        match part {
+            "" => return Some("has an empty part (a leading, trailing or doubled `/`)"),
+            "." | ".." => return Some("has a `..` or `.` part"),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// What `url` (a URL as written, not a whole locator) would contact.
+pub fn url_target(url: &str) -> UrlTarget {
+    if let Some(at) = url.find("::")
+        && !url[..at].contains('/')
+    {
+        return UrlTarget::Helper;
+    }
+    let start = scheme_end(url);
+    if start > 0 {
+        let scheme = url[..start - 3].to_ascii_lowercase();
+        let rest = &url[start..];
+        if scheme == "file" {
+            // `file:///path`, or `file://localhost/path`.
+            return match rest.find('/') {
+                Some(slash) if !rest[slash..].trim_start_matches('/').is_empty() => {
+                    UrlTarget::Path(rest[slash..].to_string())
+                }
+                _ => UrlTarget::Unknown,
+            };
+        }
+        let authority = rest.split('/').next().unwrap_or_default();
+        let host = authority.rsplit('@').next().unwrap_or_default();
+        return host_of(host).map_or(UrlTarget::Unknown, UrlTarget::Host);
+    }
+    if url.starts_with('/') || url.starts_with("~/") {
+        return UrlTarget::Path(url.to_string());
+    }
+    match (url.find(':'), url.find('/')) {
+        (Some(colon), slash) if slash.is_none_or(|slash| colon < slash) => {
+            let host = url[..colon].rsplit('@').next().unwrap_or_default();
+            host_of(host).map_or(UrlTarget::Unknown, UrlTarget::Host)
+        }
+        _ => UrlTarget::Unknown,
+    }
+}
+
+/// The host in `host[:port]` or `[v6][:port]`, lower case, or `None` when there is none.
+fn host_of(text: &str) -> Option<String> {
+    let host = match text.strip_prefix('[') {
+        Some(inner) => inner.split(']').next().unwrap_or_default(),
+        None => match text.rsplit_once(':') {
+            Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => {
+                host
+            }
+            _ => text,
+        },
+    };
+    let usable = !host.is_empty() && !host.chars().any(|c| c.is_whitespace() || c.is_control());
+    usable.then(|| host.to_ascii_lowercase())
+}
 
 /// One pinned pack. `source` is the same text `board.yaml` (or `packs.yaml`) lists the pack by.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

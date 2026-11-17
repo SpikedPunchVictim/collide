@@ -7,6 +7,8 @@ use collide_host::board_load::{
     LoadContext, LoadProblem, LoadedLine, LoadedPack, PackOrigin, load_line, pack_data_dir,
 };
 use collide_host::builtin_packs::{BuiltinPacks, Environment};
+use collide_host::git_fetch::{FetchEnv, GitFetch};
+use collide_host::hosts::KnownHosts;
 use collide_host::pack_cache::{entry_name, materialize};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -15,6 +17,7 @@ use std::time::{Duration, Instant};
 
 mod common;
 use common::git_repo::GitRepo;
+use common::remote::Remote;
 use common::{TempRoot, repo_root};
 
 /// A line's repository with the cache, an SDK stand-in and a `bin` folder for fake tools beside it.
@@ -1111,6 +1114,289 @@ fn a_git_pack_with_a_bad_lock_tree_id_is_a_problem_and_nothing_is_read_from_the_
     let line = git_line(GIT_SOURCE, &"c".repeat(40), "../../etc");
     let problems = line.problems();
     assert_problem(&problems, &[".collide/packs.lock", "tree"]);
+}
+
+// ---- git packs: the mirror and the fetch (ts-0100-pu) ----
+
+/// A remote with the pack `name` at `pack/` on `main`: the remote, its commit and the pack's tree.
+fn remote_pack(name: &str) -> (Remote, String, String) {
+    let remote = Remote::new();
+    remote.work.write(
+        "pack/pack.yaml",
+        manifest(name, "version: 3.0.0\n").as_bytes(),
+    );
+    remote
+        .work
+        .write("pack/hooks/run.sh", b"#!/bin/sh\necho remote\n");
+    let commit = remote.work.commit_all("remote");
+    let tree = remote.work.git(&["rev-parse", "HEAD:pack"]);
+    remote.publish();
+    (remote, commit, tree)
+}
+
+/// A fetch with real git from the test's own home (`root`), reading no system config.
+fn real_fetch(root: &TempRoot) -> GitFetch {
+    GitFetch::new(FetchEnv {
+        path: std::env::var_os("PATH").unwrap_or_default(),
+        home: root.path().to_path_buf(),
+        ssh_auth_sock: None,
+        xdg_config_home: None,
+    })
+    .without_system_config()
+}
+
+/// A `git` on its own `PATH` that records each run in a file and fails. Returns the `PATH` and the file.
+fn recording_git(root: &TempRoot) -> (std::ffi::OsString, PathBuf) {
+    let dir = root.join("fake-git");
+    fs::create_dir(&dir).unwrap();
+    let ran = root.join("fake-git-ran");
+    root.script(
+        "fake-git/git",
+        &format!("#!/bin/sh\necho ran >> '{}'\nexit 1\n", ran.display()),
+    );
+    (dir.into_os_string(), ran)
+}
+
+/// A line that lists and pins a pack at `source`, in a cache of its own. The context fetches with `fetch`.
+fn pinned_line(source: &str, commit: &str, tree: &str) -> Line {
+    let line = Line::new();
+    line.write(
+        ".collide/board.yaml",
+        &format!("packs:\n  - source: {source}\n"),
+    );
+    line.write(
+        ".collide/packs.lock",
+        &format!("packs:\n  - source: {source}\n    commit: {commit}\n    tree: {tree}\n"),
+    );
+    line.commit();
+    line
+}
+
+fn load_with(
+    line: &Line,
+    fetch: GitFetch,
+    home: &TempRoot,
+) -> Result<LoadedLine, Vec<LoadProblem>> {
+    let context = line
+        .context()
+        .with_fetch(fetch, KnownHosts::for_home(home.path()));
+    load_line(&line.repo.git_dir(), "main", &context)
+}
+
+fn mirrors(line: &Line) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(line.cache.join("git")) else {
+        return Vec::new();
+    };
+    entries
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
+#[test]
+fn a_cold_cache_fetches_into_the_mirror_and_loads_the_pack_at_its_locked_tree() {
+    let (remote, commit, tree) = remote_pack("remote");
+    let source = format!("git:{}//pack@main", remote.file_url());
+    let line = pinned_line(&source, &commit, &tree);
+    let home = TempRoot::new();
+    let loaded = load_with(&line, real_fetch(&home), &home).unwrap_or_else(|p| panic!("{p:?}"));
+    let found = pack(&loaded, "remote");
+    assert_eq!(found.origin, PackOrigin::Git);
+    assert_eq!(found.source.as_deref(), Some(source.as_str()));
+    assert_eq!(found.pin.as_deref(), Some(tree.as_str()));
+    assert_eq!(found.manifest.version.as_deref(), Some("3.0.0"));
+    assert!(found.dir.join("hooks/run.sh").is_file());
+    assert_eq!(
+        mirrors(&line).len(),
+        1,
+        "one mirror, in the cache's git folder"
+    );
+}
+
+#[test]
+fn the_loaded_line_shows_the_packs_name_source_commit_and_tree() {
+    let (remote, commit, tree) = remote_pack("remote");
+    let source = format!("git:{}//pack@main", remote.file_url());
+    let line = pinned_line(&source, &commit, &tree);
+    let home = TempRoot::new();
+    let loaded = load_with(&line, real_fetch(&home), &home).unwrap();
+    let locked = &loaded.lock.packs[0];
+    assert_eq!(
+        (
+            locked.source.as_str(),
+            locked.commit.as_str(),
+            locked.tree.as_str()
+        ),
+        (source.as_str(), commit.as_str(), tree.as_str())
+    );
+    let found = pack(&loaded, "remote");
+    assert_eq!(
+        (found.name.as_str(), found.pin.as_deref()),
+        ("remote", Some(tree.as_str()))
+    );
+}
+
+#[test]
+fn a_warm_cache_runs_no_git_and_makes_no_mirror() {
+    let (line, _, tree) = primed_git_line();
+    let home = TempRoot::new();
+    let (path, ran) = recording_git(&home);
+    let fetch = GitFetch::new(FetchEnv {
+        path,
+        home: home.path().to_path_buf(),
+        ssh_auth_sock: None,
+        xdg_config_home: None,
+    });
+    let loaded = load_with(&line, fetch, &home).unwrap();
+    assert_eq!(pack(&loaded, "remote").pin.as_deref(), Some(tree.as_str()));
+    assert!(!ran.exists(), "git ran");
+    assert!(mirrors(&line).is_empty());
+}
+
+#[test]
+fn a_cold_cache_and_a_host_never_fetched_from_is_a_problem_that_names_the_host_and_runs_nothing() {
+    let source = "git:https://example.invalid/o/r//pack@v1";
+    let line = pinned_line(source, &"c".repeat(40), &"d".repeat(40));
+    let home = TempRoot::new();
+    let (path, ran) = recording_git(&home);
+    let fetch = GitFetch::new(FetchEnv {
+        path,
+        home: home.path().to_path_buf(),
+        ssh_auth_sock: None,
+        xdg_config_home: None,
+    });
+    let problems = load_with(&line, fetch, &home).unwrap_err();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert_eq!(problems[0].needs_host.as_deref(), Some("example.invalid"));
+    assert_eq!(problems[0].pack.as_deref(), Some(source));
+    assert!(
+        problems[0].message.contains("example.invalid"),
+        "{}",
+        problems[0]
+    );
+    assert!(!ran.exists(), "git ran");
+    assert!(mirrors(&line).is_empty());
+}
+
+#[test]
+fn a_host_that_has_been_approved_is_fetched_from_on_a_cold_cache() {
+    let source = "git:https://example.invalid/o/r//pack@v1";
+    let line = pinned_line(source, &"c".repeat(40), &"d".repeat(40));
+    let home = TempRoot::new();
+    KnownHosts::for_home(home.path())
+        .record("example.invalid")
+        .unwrap();
+    let (path, ran) = recording_git(&home);
+    let fetch = GitFetch::new(FetchEnv {
+        path,
+        home: home.path().to_path_buf(),
+        ssh_auth_sock: None,
+        xdg_config_home: None,
+    });
+    let problems = load_with(&line, fetch, &home).unwrap_err();
+    assert!(ran.exists(), "git ran");
+    assert_eq!(problems[0].needs_host, None);
+    assert_problem(&texts(&problems), &[source, "getting it failed"]);
+}
+
+#[test]
+fn a_fetch_that_hangs_fails_the_load_naming_the_pack_and_the_time() {
+    let source = "git:https://example.invalid/o/r//pack@v1";
+    let line = pinned_line(source, &"c".repeat(40), &"d".repeat(40));
+    let home = TempRoot::new();
+    KnownHosts::for_home(home.path())
+        .record("example.invalid")
+        .unwrap();
+    fs::create_dir(home.join("hang")).unwrap();
+    home.script("hang/git", "#!/bin/sh\nexec /bin/sleep 30\n");
+    let fetch = GitFetch::new(FetchEnv {
+        path: home.join("hang").into_os_string(),
+        home: home.path().to_path_buf(),
+        ssh_auth_sock: None,
+        xdg_config_home: None,
+    })
+    .with_timeout(Duration::from_millis(300));
+    let started = Instant::now();
+    let problems = texts(&load_with(&line, fetch, &home).unwrap_err());
+    assert!(started.elapsed() < Duration::from_secs(20));
+    assert_problem(&problems, &[source, "did not end within 0.3"]);
+}
+
+#[test]
+fn a_locked_commit_the_remote_no_longer_has_fails_naming_the_pack_and_the_commit() {
+    let (remote, _, tree) = remote_pack("remote");
+    let source = format!("git:{}//pack@main", remote.file_url());
+    let gone = "e".repeat(40);
+    let line = pinned_line(&source, &gone, &tree);
+    let home = TempRoot::new();
+    let problems = texts(&load_with(&line, real_fetch(&home), &home).unwrap_err());
+    assert_problem(&problems, &[&source, &gone, "no longer"]);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+}
+
+#[test]
+fn a_lock_whose_tree_is_not_the_one_at_its_commit_fails_naming_both_ids() {
+    let (remote, commit, tree) = remote_pack("remote");
+    let source = format!("git:{}//pack@main", remote.file_url());
+    let wrong = "f".repeat(40);
+    let line = pinned_line(&source, &commit, &wrong);
+    let home = TempRoot::new();
+    let problems = texts(&load_with(&line, real_fetch(&home), &home).unwrap_err());
+    assert_problem(&problems, &[&source, &wrong, &tree]);
+}
+
+#[test]
+fn a_locked_path_that_is_not_in_the_commit_fails_naming_the_pack() {
+    let (remote, commit, tree) = remote_pack("remote");
+    let source = format!("git:{}//nowhere@main", remote.file_url());
+    let line = pinned_line(&source, &commit, &tree);
+    let home = TempRoot::new();
+    let problems = texts(&load_with(&line, real_fetch(&home), &home).unwrap_err());
+    assert_problem(&problems, &[&source, "nowhere"]);
+}
+
+#[test]
+fn two_lines_that_pin_one_tree_share_one_mirror_and_one_cache_entry() {
+    let (remote, commit, tree) = remote_pack("remote");
+    let source = format!("git:{}//pack@main", remote.file_url());
+    let first = pinned_line(&source, &commit, &tree);
+    let second = pinned_line(&source, &commit, &tree);
+    let home = TempRoot::new();
+    let fetch = real_fetch(&home);
+    let hosts = KnownHosts::for_home(home.path());
+    // Both lines load through the first one's cache.
+    let context = first.context().with_fetch(fetch, hosts);
+    let one = load_line(&first.repo.git_dir(), "main", &context).unwrap();
+    let two = load_line(&second.repo.git_dir(), "main", &context).unwrap();
+    assert_eq!(pack(&one, "remote").entry, pack(&two, "remote").entry);
+    assert_eq!(mirrors(&first).len(), 1);
+    let entries = fs::read_dir(first.cache.join("packs")).unwrap().count();
+    assert_eq!(entries, 1, "one cache entry");
+}
+
+#[test]
+fn a_remote_branch_that_moves_changes_nothing_until_the_pin_is_moved() {
+    let (remote, commit, tree) = remote_pack("remote");
+    let source = format!("git:{}//pack@main", remote.file_url());
+    let line = pinned_line(&source, &commit, &tree);
+    let home = TempRoot::new();
+    let context = line
+        .context()
+        .with_fetch(real_fetch(&home), KnownHosts::for_home(home.path()));
+    let before = load_line(&line.repo.git_dir(), "main", &context).unwrap();
+
+    remote.work.write(
+        "pack/pack.yaml",
+        manifest("remote", "version: 4.0.0\n").as_bytes(),
+    );
+    remote.work.commit_all("moved");
+    remote.publish();
+    let after = load_line(&line.repo.git_dir(), "main", &context).unwrap();
+
+    assert_eq!(pack(&after, "remote").pin, pack(&before, "remote").pin);
+    assert_eq!(
+        pack(&after, "remote").manifest.version.as_deref(),
+        Some("3.0.0")
+    );
 }
 
 // ---- names ----

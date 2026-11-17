@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "How a file of the pack differs between two pins.",
+  "oneOf": [
+    {
+      "enum": [
+        "added",
+        "deleted",
+        "modified"
+      ],
+      "type": "string"
+    },
+    {
+      "const": "type_changed",
+      "description": "A file that became a folder, a link or a submodule, or the other way round.",
+      "type": "string"
+    }
+  ],
+  "title": "PackFileChangeKind"
+}

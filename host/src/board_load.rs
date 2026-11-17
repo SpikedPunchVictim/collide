@@ -11,16 +11,23 @@
 //! that is not there is skipped (its value is the default); a file that is there and wrong is a problem, and the load
 //! goes on to find the rest.
 //!
+//! A `git:` pack is loaded by the lock's tree, never by the ref its source names. Its cache entry is used when it is
+//! there. When it is not, a context that can fetch ([`LoadContext::with_fetch`], `ts-0100-pu`) takes the pack from the
+//! mirror ([`crate::git_fetch`]), fetching into it only when the mirror lacks the locked commit; a context that cannot
+//! fetch reports the missing entry. A host never fetched from is a problem with [`LoadProblem::needs_host`] set, and
+//! nothing is fetched.
+//!
 //! Left to later items: trust (`ts-0097-kw` hashes [`LoadedLine::trust_inputs`]), the settings layers
-//! (`ts-0098-nx`), fetching a `git:` pack (`ts-0100-pu`: until then its entry must already be in the cache), user packs
-//! (`ts-0101-bd`) and the daemon's use of all this (`ts-0102-vu`).
+//! (`ts-0098-nx`), user packs (`ts-0101-bd`) and the daemon's use of all this (`ts-0102-vu`).
 
 use crate::bounded_run::{run_bounded, tail};
 use crate::builtin_packs::{BuiltinPacks, Environment, is_plain_file_name};
-use crate::git_objects::{GitObjects, TreeEntry};
+use crate::git_fetch::{FetchError, GitFetch, mirror_path};
+use crate::git_objects::{GitObjects, ObjectKind, TreeEntry};
+use crate::hosts::KnownHosts;
 use crate::pack_cache::{Materializer, cached_entry, sdk_version};
 use collide_core::board::{Board, CollidePointer, check_board, check_pointer};
-use collide_core::lock::{LockEntry, PackLock, PackSource, check_lock};
+use collide_core::lock::{GitLocator, LockEntry, PackLock, PackSource, check_lock};
 use collide_core::pack::{PackManifest, Requires};
 use collide_core::pack_check::{ManifestError, check_manifest};
 use collide_core::profile::{Profile, check_profile};
@@ -44,13 +51,15 @@ pub const TOOL_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One thing wrong with a load. `message` is the whole sentence; `file` is the file it is about (a path at the ref,
 /// `pack.yaml` for a pack's manifest, or the ref itself), `key` the key in it where one is known, and `pack` the source
-/// of the pack when the problem is in one.
+/// of the pack when the problem is in one. `needs_host` is set when a pack could not be fetched because its host has
+/// never been fetched from: the first fetch from it needs a yes (`ts-0100-pu`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadProblem {
     pub pack: Option<String>,
     pub file: String,
     pub key: Option<String>,
     pub message: String,
+    pub needs_host: Option<String>,
 }
 
 impl fmt::Display for LoadProblem {
@@ -139,6 +148,15 @@ pub struct LoadContext {
     pub git: GitObjects,
     pub materializer: Materializer,
     pub tool_timeout: Duration,
+    /// How a `git:` pack that is not in the cache is fetched. `None`: it is not, and the load says so.
+    pub fetch: Option<FetchSetup>,
+}
+
+/// What fetching a pack needs: the rules ([`GitFetch`]) and the hosts the person has allowed ([`KnownHosts`]).
+#[derive(Debug, Clone)]
+pub struct FetchSetup {
+    pub fetch: GitFetch,
+    pub hosts: KnownHosts,
 }
 
 impl LoadContext {
@@ -157,7 +175,14 @@ impl LoadContext {
             git: GitObjects::new(),
             materializer: Materializer::new(),
             tool_timeout: TOOL_VERSION_TIMEOUT,
+            fetch: None,
         }
+    }
+
+    /// Lets a `git:` pack that is not in the cache be fetched, under the rules of `fetch`.
+    pub fn with_fetch(mut self, fetch: GitFetch, hosts: KnownHosts) -> LoadContext {
+        self.fetch = Some(FetchSetup { fetch, hosts });
+        self
     }
 
     /// Reads and materializes with `git`.
@@ -249,6 +274,7 @@ fn problem(
         file: file.to_string(),
         key: key.map(str::to_string),
         message,
+        needs_host: None,
     }
 }
 
@@ -712,8 +738,8 @@ impl Load<'_> {
         }
     }
 
-    /// A `git:` pack: the lock's tree is the pin. Until the mirror (`ts-0100-pu`) there is nowhere to fetch from, so
-    /// its entry must already be in the cache.
+    /// A `git:` pack: the lock's tree is the pin. Its cache entry is used when it is there; if not, it comes from the
+    /// mirror ([`Load::pack_from_mirror`]).
     fn git_pack(
         &mut self,
         dir: &CollideDir,
@@ -751,24 +777,147 @@ impl Load<'_> {
             Ok(Some(entry)) => {
                 self.read_pack(source, PackOrigin::Git, locked.tree.clone(), entry, names)
             }
-            Ok(None) => {
-                self.push(
-                    Some(source),
-                    &lock_path,
-                    None,
-                    format!(
-                        "is pinned at commit {} (tree {}), which is not in the cache; fetching a `git:` pack comes \
-                         with the pack mirror, so this load cannot get it",
-                        locked.commit, locked.tree
-                    ),
-                );
-                None
-            }
+            Ok(None) => self.pack_from_mirror(&lock_path, source, locked, names),
             Err(error) => {
                 self.push(Some(source), &lock_path, None, error);
                 None
             }
         }
+    }
+
+    /// A `git:` pack whose entry is not in the cache: the locked commit is taken from the mirror, fetching first when
+    /// the mirror does not have it. The tree at the pack's path in that commit must be the locked tree, so a lock
+    /// cannot be satisfied by other files than the ones it pinned.
+    fn pack_from_mirror(
+        &mut self,
+        lock_path: &str,
+        source: &str,
+        locked: &LockEntry,
+        names: &mut Names,
+    ) -> Option<LoadedPack> {
+        let context = self.context;
+        let unreachable = |commit: &str, tree: &str| {
+            format!("is pinned at commit {commit} (tree {tree}), which is not in the cache")
+        };
+        let Some(setup) = &context.fetch else {
+            self.push(
+                Some(source),
+                lock_path,
+                None,
+                format!(
+                    "{}; this load cannot fetch it",
+                    unreachable(&locked.commit, &locked.tree)
+                ),
+            );
+            return None;
+        };
+        let locator = match PackSource::parse(source) {
+            Ok(PackSource::Git { locator }) => GitLocator::parse(&locator),
+            _ => return None,
+        };
+        let locator = match locator {
+            Ok(locator) => locator,
+            Err(error) => {
+                self.push(Some(source), lock_path, None, error);
+                return None;
+            }
+        };
+        let mirror = mirror_path(&context.cache, &locator.url);
+        if !self.mirror_has(&mirror, &locked.commit) {
+            if let Err(error) = setup.fetch.fetch(&mirror, &locator.url, &setup.hosts) {
+                self.fetch_problem(lock_path, source, locked, error);
+                return None;
+            }
+            if !self.mirror_has(&mirror, &locked.commit) {
+                self.push(
+                    Some(source),
+                    lock_path,
+                    None,
+                    format!(
+                        "is pinned at commit {}, which the remote no longer has: it was fetched from {} and the \
+                         commit is not in it, so move the pin with `collide pack update` or restore the commit",
+                        locked.commit, locator.url
+                    ),
+                );
+                return None;
+            }
+        }
+        let found = context.git.tree_at(&mirror, &locked.commit, &locator.path);
+        match found {
+            Ok(found) if found.kind == ObjectKind::Tree && found.id == locked.tree => {}
+            Ok(found) => {
+                self.push(
+                    Some(source),
+                    lock_path,
+                    None,
+                    format!(
+                        "is pinned at tree {}, but commit {} has {} at `{}`: the lock does not match the repository",
+                        locked.tree,
+                        locked.commit,
+                        found.id,
+                        locator.path
+                    ),
+                );
+                return None;
+            }
+            Err(error) => {
+                self.push(
+                    Some(source),
+                    lock_path,
+                    None,
+                    format!(
+                        "`{}` is not in commit {}: {error}",
+                        locator.path, locked.commit
+                    ),
+                );
+                return None;
+            }
+        }
+        self.sdk()?;
+        match context
+            .materializer
+            .materialize(&context.cache, &context.sdk, &mirror, &locked.tree)
+        {
+            Ok(entry) => self.read_pack(source, PackOrigin::Git, locked.tree.clone(), entry, names),
+            Err(error) => {
+                self.push(Some(source), lock_path, None, error);
+                None
+            }
+        }
+    }
+
+    /// Whether `mirror` is there and has the commit `id`.
+    fn mirror_has(&self, mirror: &Path, id: &str) -> bool {
+        mirror.exists()
+            && matches!(
+                self.context.git.object_kind(mirror, id),
+                Ok(Some(ObjectKind::Commit))
+            )
+    }
+
+    fn fetch_problem(
+        &mut self,
+        lock_path: &str,
+        source: &str,
+        locked: &LockEntry,
+        error: FetchError,
+    ) {
+        let message = match &error {
+            FetchError::NeedsApproval { host } => format!(
+                "is pinned at commit {} (tree {}), which is not in the cache, and the first fetch from {host} needs \
+                 a yes before anything is fetched",
+                locked.commit, locked.tree
+            ),
+            other => format!(
+                "is pinned at commit {} (tree {}), which is not in the cache, and getting it failed: {other}",
+                locked.commit, locked.tree
+            ),
+        };
+        let mut found = problem(Some(source), lock_path, None, message);
+        if let FetchError::NeedsApproval { host } = error {
+            found.needs_host = Some(host);
+        }
+        self.problems.push(found);
     }
 
     /// Reads and checks the manifest of the materialized pack at `entry`. The pack is returned only when it has no

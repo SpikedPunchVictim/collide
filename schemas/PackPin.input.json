@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What a `git:` source resolved to: the commit, and the tree at the pack's path in it (0.7, Pack sources).",
+  "properties": {
+    "commit": {
+      "type": "string"
+    },
+    "tree": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "commit",
+    "tree"
+  ],
+  "title": "PackPin",
+  "type": "object"
+}
