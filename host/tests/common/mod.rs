@@ -7,6 +7,7 @@
 
 pub mod config_fixture;
 pub mod detached;
+pub mod fake_provider;
 pub mod git_repo;
 pub mod procs;
 pub mod remote;

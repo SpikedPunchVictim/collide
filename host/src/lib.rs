@@ -47,6 +47,7 @@ pub mod pack_manage;
 pub mod pack_update;
 pub mod phases;
 pub mod provider_client;
+pub mod provider_launch;
 pub mod queue;
 pub mod run_cli;
 pub mod run_diff;

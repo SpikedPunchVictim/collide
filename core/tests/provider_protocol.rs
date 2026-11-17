@@ -5,8 +5,8 @@ use collide_core::item::{Category, LinkTarget};
 use collide_core::observer::{ObserverAck, ObserverEvent};
 use collide_core::provider::{
     self, ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult,
-    ListParams, ListResult, PreviewResult, ProviderError, SourceStale, Task, TaskChanged,
-    TaskCollision, TaskInvalid, TaskRemoved, WatchParams, WatchResult,
+    ListParams, ListResult, PreviewResult, ProviderError, ProviderEvent, SourceStale, Task,
+    TaskChanged, TaskCollision, TaskInvalid, TaskRemoved, WatchParams, WatchResult,
 };
 use collide_core::schema;
 use serde::Serialize;
@@ -462,6 +462,51 @@ fn a_notification_with_an_unknown_key_is_refused() {
             "task.invalid" => refused::<TaskInvalid>(doc),
             other => panic!("no type for {other}"),
         }
+    }
+}
+
+#[test]
+fn every_watch_notification_reads_into_the_event_of_its_method() {
+    for (name, doc) in notifications() {
+        let method = name.split(' ').next().unwrap();
+        let event = ProviderEvent::from_notification(method, doc.clone());
+        let read = match (method, &event) {
+            ("task.collision", ProviderEvent::Collision(body)) => serde_json::to_value(body),
+            ("source.stale", ProviderEvent::Stale(body)) => serde_json::to_value(body),
+            ("task.changed", ProviderEvent::Changed(body)) => serde_json::to_value(body),
+            ("task.renamed", ProviderEvent::Renamed(body)) => serde_json::to_value(body),
+            ("task.removed", ProviderEvent::Removed(body)) => serde_json::to_value(body),
+            ("task.invalid", ProviderEvent::Invalid(body)) => serde_json::to_value(body),
+            _ => panic!("{name} read as {event:?}"),
+        };
+        assert_eq!(read.unwrap(), doc, "{name}");
+    }
+}
+
+#[test]
+fn a_notification_of_another_method_is_kept_as_unreadable_with_its_method() {
+    let event = ProviderEvent::from_notification("task.exploded", json!({}));
+    let ProviderEvent::Unreadable { method, detail } = event else {
+        panic!("{event:?}");
+    };
+    assert_eq!(method, "task.exploded");
+    assert!(detail.contains("not a notification"), "{detail}");
+}
+
+#[test]
+fn a_notification_whose_params_do_not_read_is_kept_as_unreadable_with_the_reason() {
+    for (name, doc) in notifications() {
+        let method = name.split(' ').next().unwrap();
+        let event = ProviderEvent::from_notification(method, with_extra(doc));
+        let ProviderEvent::Unreadable {
+            method: kept,
+            detail,
+        } = event
+        else {
+            panic!("{name} read with an unknown key: {event:?}");
+        };
+        assert_eq!(kept, method);
+        assert!(detail.contains("extra"), "{detail}");
     }
 }
 

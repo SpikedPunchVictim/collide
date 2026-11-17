@@ -28,7 +28,7 @@
 //! | `task.removed` | [`TaskRemoved`] |
 //! | `task.invalid` | [`TaskInvalid`] |
 
-use crate::change::{Effect, FieldDiff, ItemState};
+use crate::change::{Effect, FieldDiff, ItemState, Rename};
 use crate::item::{
     Category, Checklist, Feature, FeatureProblem, KindDecl, Link, LinkTypeDecl, OpDecl, StatusDecl,
 };
@@ -377,6 +377,52 @@ pub struct TaskInvalid {
     pub path: String,
     pub checkout: Option<String>,
     pub reason: String,
+}
+
+/// A notification that `watch` starts, read into its type. The provider sends each as a JSON-RPC message with no `id`;
+/// this is what the host does with the `method` and the `params`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderEvent {
+    Changed(TaskChanged),
+    Renamed(Rename),
+    Removed(TaskRemoved),
+    Invalid(TaskInvalid),
+    Collision(TaskCollision),
+    Stale(SourceStale),
+    /// A notification of a method that is not one of the six, or whose params do not read as that method's type. It
+    /// is kept, with what was wrong, and never dropped.
+    Unreadable {
+        method: String,
+        detail: String,
+    },
+}
+
+impl ProviderEvent {
+    /// Reads one notification. It does not fail: what does not read is an [`ProviderEvent::Unreadable`].
+    pub fn from_notification(method: &str, params: Value) -> ProviderEvent {
+        let read = match method {
+            "task.changed" => read(params, ProviderEvent::Changed),
+            "task.renamed" => read(params, ProviderEvent::Renamed),
+            "task.removed" => read(params, ProviderEvent::Removed),
+            "task.invalid" => read(params, ProviderEvent::Invalid),
+            "task.collision" => read(params, ProviderEvent::Collision),
+            "source.stale" => read(params, ProviderEvent::Stale),
+            _ => Err(format!("`{method}` is not a notification of protocol v0")),
+        };
+        read.unwrap_or_else(|detail| ProviderEvent::Unreadable {
+            method: method.to_string(),
+            detail,
+        })
+    }
+}
+
+fn read<T: serde::de::DeserializeOwned>(
+    params: Value,
+    event: fn(T) -> ProviderEvent,
+) -> Result<ProviderEvent, String> {
+    serde_json::from_value(params)
+        .map(event)
+        .map_err(|error| error.to_string())
 }
 
 /// Why an `initialize` result is refused.

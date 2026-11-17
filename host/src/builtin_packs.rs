@@ -11,6 +11,7 @@ use crate::board_load::{PackDataError, pack_data_dir};
 use collide_core::pack::PackManifest;
 use collide_core::pack_check::{ManifestError, check_manifest};
 use collide_core::yaml::{YamlError, load_yaml_file};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
@@ -47,7 +48,7 @@ impl Environment {
     }
 }
 
-/// A provider's directory and the command that starts it: `program` is `node`, and `args` is the compiled entry.
+/// A provider's directory and the command that starts it: `program` is `node`, and `args` is the entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderLaunch {
     pub pack_dir: PathBuf,
@@ -55,17 +56,31 @@ pub struct ProviderLaunch {
     pub args: Vec<OsString>,
     /// The pack's data folder on a board, the value of `COLLIDE_PACK_DATA`. `None` for a launch with no board.
     pub data: Option<PathBuf>,
+    /// The whole environment of the child (0.2, the base environment), and nothing else but `COLLIDE_PACK_DATA`.
+    /// `None` for the CLI's own launch, which gives the child the CLI's environment.
+    pub env: Option<BTreeMap<String, String>>,
 }
 
 impl ProviderLaunch {
-    /// The command, with the caller's choice of working directory, environment and pipes still to set.
+    /// The command, with the caller's choice of working directory and pipes still to set. With an [`env`](Self::env)
+    /// the environment is cleared first, so the child gets that and `COLLIDE_PACK_DATA` and nothing of the caller's.
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
         command.args(&self.args);
+        if let Some(env) = &self.env {
+            command.env_clear().envs(env);
+        }
         if let Some(data) = &self.data {
             command.env("COLLIDE_PACK_DATA", data);
         }
         command
+    }
+
+    /// This launch with `env` as the whole environment of the child: the captured base environment, as
+    /// [`BaseEnvironment::for_child`](crate::base_env::BaseEnvironment::for_child) gives it.
+    pub fn with_env(mut self, env: BTreeMap<String, String>) -> ProviderLaunch {
+        self.env = Some(env);
+        self
     }
 
     /// This launch for `pack` on `board`, with the data folder made under `data_root` (0.7, Pack data).
@@ -140,26 +155,12 @@ impl fmt::Display for BuiltinPackError {
                 provider,
                 version,
                 searched,
-            } => {
-                let version = version
-                    .as_ref()
-                    .map(|v| format!(" {v}"))
-                    .unwrap_or_default();
-                let looked = if searched.is_empty() {
-                    "nothing, PATH is empty".to_string()
-                } else {
-                    searched
-                        .iter()
-                        .map(|dir| dir.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                write!(
-                    f,
-                    "built-in pack {pack} needs `node`{version} to start its provider `{provider}`, \
-                     and `node` was not found on PATH (searched: {looked})"
-                )
-            }
+            } => f.write_str(&node_missing_text(
+                &format!("built-in pack {pack}"),
+                provider,
+                version.as_deref(),
+                searched,
+            )),
         }
     }
 }
@@ -236,10 +237,7 @@ impl BuiltinPacks {
                 entry,
             });
         }
-        let version = manifest
-            .requires
-            .and_then(|requires| requires.tools.into_iter().find(|tool| tool.name == "node"))
-            .and_then(|tool| tool.version);
+        let version = node_version_wanted(&manifest);
         let (program, searched) = find_node(&env.path);
         let program = program.ok_or_else(|| BuiltinPackError::NodeNotFound {
             pack: pack.to_string(),
@@ -252,16 +250,22 @@ impl BuiltinPacks {
             program,
             args: vec![entry.into_os_string()],
             data: None,
+            env: None,
         })
     }
 }
 
+/// Whether `script` is a plain path inside a pack: not empty, and every part a name, so no `..`, no `.` and no root.
+pub fn is_plain_pack_path(script: &str) -> bool {
+    !script.is_empty()
+        && Path::new(script)
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)))
+}
+
 fn compiled_script(pack: &str, script: &str) -> Result<PathBuf, BuiltinPackError> {
     let path = Path::new(script);
-    let inside = path
-        .components()
-        .all(|part| matches!(part, Component::Normal(_)));
-    if !inside || script.is_empty() {
+    if !is_plain_pack_path(script) {
         return Err(BuiltinPackError::BadScript {
             pack: pack.to_string(),
             script: script.to_string(),
@@ -282,8 +286,40 @@ pub fn is_plain_file_name(name: &str) -> bool {
     one_part && !name.contains('\0')
 }
 
+/// The version of `node` that a manifest's `requires.tools` asks for, when it names one.
+pub(crate) fn node_version_wanted(manifest: &PackManifest) -> Option<String> {
+    manifest
+        .requires
+        .as_ref()
+        .and_then(|requires| requires.tools.iter().find(|tool| tool.name == "node"))
+        .and_then(|tool| tool.version.clone())
+}
+
+/// What is said when a provider cannot start because `node` is not on the `PATH`. `who` names the pack.
+pub(crate) fn node_missing_text(
+    who: &str,
+    provider: &str,
+    version: Option<&str>,
+    searched: &[PathBuf],
+) -> String {
+    let version = version.map(|v| format!(" {v}")).unwrap_or_default();
+    let looked = if searched.is_empty() {
+        "nothing, PATH is empty".to_string()
+    } else {
+        searched
+            .iter()
+            .map(|dir| dir.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "{who} needs `node`{version} to start its provider `{provider}`, \
+         and `node` was not found on PATH (searched: {looked})"
+    )
+}
+
 /// The first executable file named `node` in the `PATH` directories, and the directories searched.
-fn find_node(path: &OsString) -> (Option<PathBuf>, Vec<PathBuf>) {
+pub(crate) fn find_node(path: &OsString) -> (Option<PathBuf>, Vec<PathBuf>) {
     let found = Environment { path: path.clone() }.find("node");
     (found, path_dirs(path))
 }

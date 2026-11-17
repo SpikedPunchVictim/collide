@@ -4264,7 +4264,10 @@ and the owner accepted that (2026-11-17), so the plugin is on. Both are built be
 combined into a corpus, and filtered by views.
 
 - **Provider protocol v0** per 0.10, with the pack's settings passed to `initialize`. A provider supervisor restarts
-  providers with backoff, isolated from the process owner.
+  providers with backoff, isolated from the process owner. A call that is not answered within its method's timeout
+  (`initialize` 30 s, `list` 60 s, `get` 10 s, `apply` and `preview` 120 s, `watch` 10 s) fails and its child is killed.
+  Restarts wait 1 s, doubling to 60 s, and stop after 5 crashes in a row; an `apply` in flight when its child ended is
+  not asked again (`ts-0108-dq`).
 - `@collide/pack-sdk` v0, compiled: `defineProvider`, `defineHook`, `ctx.config`, `ctx.dataDir`.
 - **`plan` adapter (TypeScript):**
   - parses frontmatter per checkout with `yaml` in core mode, behind a size cap (0.10), and keys tasks by (shortId,

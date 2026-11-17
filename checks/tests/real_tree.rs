@@ -95,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 42] = [
+const FILLED_TAGS: [(&str, &str, &str); 45] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -138,6 +138,9 @@ const FILLED_TAGS: [(&str, &str, &str); 42] = [
     ("shell: daemon events", "3c", "ts-0077-ws"),
     ("cli: config", "4a", "ts-0099-bw"),
     ("cli: pack", "4a", "ts-0101-bd"),
+    ("supervisor: provider start", "4b", "ts-0108-dq"),
+    ("supervisor: restart with backoff", "4b", "ts-0108-dq"),
+    ("supervisor: provider calls", "4b", "ts-0108-dq"),
 ];
 
 #[test]
@@ -157,15 +160,12 @@ fn every_filled_tag_stays_registered_under_its_stage_and_counts_no_stub() {
     }
 }
 
-/// The tags of the rest of the `host` outlines (ts-0041-xf) and the stage that fills each one: the provider
-/// supervisor Stage 4b, the hook executor and `collide report` Stage 7, observers
-/// Stage 12, the resource sources Stage 13. Each must count at least one stub today.
-const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 11] = [
+/// The tags of the rest of the `host` outlines (ts-0041-xf) and the stage that fills each one: the hook executor and
+/// `collide report` Stage 7, observers Stage 12, the resource sources Stage 13. (The provider supervisor's tags were
+/// Stage 4b; they are in [`FILLED_TAGS`].) Each must count at least one stub today.
+const HOST_ADAPTER_EXECUTOR_TAGS: [(&str, &str); 8] = [
     ("hooks: invocation", "7"),
     ("hooks: result file", "7"),
-    ("supervisor: provider start", "4b"),
-    ("supervisor: restart with backoff", "4b"),
-    ("supervisor: provider calls", "4b"),
     ("supervisor: observers", "12"),
     ("sampler: process tree", "13"),
     ("sampler: network", "13"),
