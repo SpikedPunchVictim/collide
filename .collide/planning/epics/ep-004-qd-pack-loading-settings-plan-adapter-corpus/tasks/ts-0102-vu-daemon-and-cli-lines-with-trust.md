@@ -1,7 +1,7 @@
 ---
 id: ts-0102-vu
 kind: task
-status: active
+status: done
 title: "Daemon and CLI: lines with trust, collide init, pack data and the disk floor"
 owners: []
 links:
