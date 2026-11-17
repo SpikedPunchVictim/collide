@@ -41,7 +41,39 @@ export interface HookContext extends HookResultWriter {
 
 /** Builds `state`, `config` and `dataDir` from the hook input and the environment. */
 export function createHookContext(input: HookInputOutput): HookContext {
-  return unimplemented('sdk: ctx')
+  // `ctx.report` and the result writer are Stage 7's: each is built on first use, so reaching one throws its stub's
+  // tag and nothing else in the context is touched.
+  const report = once(createReport)
+  const result = once(createResultWriter)
+  return {
+    state: input.state,
+    config: input.config,
+    get dataDir() {
+      return packDataDir()
+    },
+    report: {
+      span: (name, run, attrs) => report().span(name, run, attrs),
+      metric: (name, value, unit) => report().metric(name, value, unit),
+      progress: (done, total) => report().progress(done, total),
+    },
+    ok: (outputs) => result().ok(outputs),
+    fail: (message) => result().fail(message),
+    refuse: (message) => result().refuse(message),
+  }
+}
+
+/** `COLLIDE_PACK_DATA`, read when `ctx.dataDir` is read, so a hook that never needs it runs without it. */
+function packDataDir(): string {
+  const dir = process.env.COLLIDE_PACK_DATA
+  if (dir === undefined || dir === '') {
+    throw new Error('ctx.dataDir needs the COLLIDE_PACK_DATA environment variable, and it is not set')
+  }
+  return dir
+}
+
+function once<T>(make: () => T): () => T {
+  let made: T | undefined
+  return () => (made ??= make())
 }
 
 /** Builds `ctx.report`, over the file named by `COLLIDE_REPORT`. Span ids are `<pid>-<counter>` (0.5). */

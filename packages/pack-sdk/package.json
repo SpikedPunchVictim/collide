@@ -1,6 +1,6 @@
 {
   "name": "@collide/pack-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./yaml": {
+      "types": "./dist/yaml.d.ts",
+      "default": "./dist/yaml.js"
     }
   },
   "files": [
@@ -19,6 +23,9 @@
     "gen": "node scripts/gen.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

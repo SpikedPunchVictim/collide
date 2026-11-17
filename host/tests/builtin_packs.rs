@@ -202,6 +202,24 @@ fn the_bundle_holds_both_packs_the_compiled_provider_and_its_own_sdk_copy() {
 }
 
 #[test]
+fn the_sdk_copy_in_the_bundle_carries_yaml_in_its_own_node_modules_as_real_files() {
+    let bundle = bundle();
+    let yaml = bundle.join("plan/node_modules/@collide/pack-sdk/node_modules/yaml");
+    let package: serde_json::Value =
+        serde_json::from_slice(&fs::read(yaml.join("package.json")).unwrap()).unwrap();
+    assert_eq!(package["version"], "2.9.1");
+    for path in everything_under(&yaml) {
+        let kind = fs::symlink_metadata(&path).unwrap().file_type();
+        assert!(!kind.is_symlink(), "{} is a symlink", path.display());
+    }
+    assert!(
+        bundle
+            .join("plan/node_modules/@collide/pack-sdk/dist/yaml.js")
+            .is_file()
+    );
+}
+
+#[test]
 fn no_typescript_file_is_in_the_bundle_and_the_sdk_copy_has_none_either() {
     let bundle = bundle();
     let ts: Vec<_> = everything_under(&bundle)

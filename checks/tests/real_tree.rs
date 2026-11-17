@@ -95,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 45] = [
+const FILLED_TAGS: [(&str, &str, &str); 47] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -141,6 +141,8 @@ const FILLED_TAGS: [(&str, &str, &str); 45] = [
     ("supervisor: provider start", "4b", "ts-0108-dq"),
     ("supervisor: restart with backoff", "4b", "ts-0108-dq"),
     ("supervisor: provider calls", "4b", "ts-0108-dq"),
+    ("sdk: ctx", "4b", "ts-0109-qj"),
+    ("sdk: defineHook", "4b", "ts-0109-qj"),
 ];
 
 #[test]

@@ -1541,7 +1541,8 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
   imports the SDK starts in 123 ms (median of 10, on a loaded machine) against 65 ms for `node -e 0`, and in 81 ms
   with a warm `NODE_COMPILE_CACHE`.
 - **Node refuses to strip types under `node_modules`** (measured by R1: `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
-  So `@collide/pack-sdk` ships as compiled JS + `.d.ts`, with zero runtime dependencies, and Collide supplies it:
+  So `@collide/pack-sdk` ships as compiled JS + `.d.ts`, with one runtime dependency, `yaml` 2.9.1, in the SDK copy's
+  own `node_modules` (owner, 2026-11-17; `ts-0109-qj`), and Collide supplies it:
   - Collide materializes the pack into `~/Library/Application Support/Collide/cache/packs/<tree id>-<SDK version>/`,
     keyed by the pack's git tree id, whatever the pack's source (0.7), and by the SDK it links, so a new SDK makes new
     entries and a pack runs with the SDK its `requires.sdk` was checked against (ts-0095-kp). An entry never changes,

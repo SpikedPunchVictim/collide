@@ -94,3 +94,82 @@ Write these first.
   materialized repo pack resolves it through the SDK link. The SDK's version is raised so a pack can require the export.
   Tests: a materialized fixture pack imports `@collide/pack-sdk/yaml` and parses a document; a pack that holds its own
   `node_modules` is still refused. The rest: the recommendations above (a hook that returns nothing is `error`).
+
+### Built
+
+- `packages/pack-sdk/src/hook.ts`: `defineHook` is real. It reads stdin to the end (no cap, said in a comment),
+  parses one JSON object (`parseInput`), checks `COLLIDE_RESULT`, builds the context, awaits the handler, checks the
+  result (`checkResult`: an object whose `status` is one of the six) and writes it (`writeResult`: a temp file in the
+  result's folder with `wx`, then a rename; the temp file is removed when either step fails). Any failure writes its
+  message to stderr, sets `process.exitCode = 1` and leaves no result file. A handler that returns nothing and wrote no
+  file fails the same way; one that returned nothing after writing the file itself (Stage 7's `ctx.ok`) exits 0.
+- `packages/pack-sdk/src/context.ts`: `createHookContext` gives `state` and `config` from the input and `dataDir` as a
+  getter that reads `COLLIDE_PACK_DATA` when it is read (unset or empty throws a message naming it). `ctx.report` and
+  `ctx.ok`, `ctx.fail`, `ctx.refuse` are thin delegates that call `createReport` and `createResultWriter` on first use,
+  so a call still throws `unimplemented: sdk: ctx.report` or `sdk: ctx.result`. Those two stubs are unchanged.
+- `packages/pack-sdk/src/yaml.ts` (new): `export { parse, YAMLParseError } from 'yaml'`, nothing more.
+  `package.json`: version 0.1.0 to 0.2.0, `dependencies: { yaml: "2.9.1" }`, and the `./yaml` entry in `exports`.
+  `pnpm-lock.yaml` gains only that importer dependency (installed with `pnpm install --offline`).
+- `scripts/build-packs.ts`: the staged SDK copy now carries its own dependencies in its own `node_modules`
+  (`copyOwnDependencies`, one rule for packs and the SDK; a dependency with dependencies of its own is still refused).
+  `ensure_sdk` needed no change: it copies the folder as it is, so `<cache>/sdk/0.2.0/node_modules/yaml` is there.
+- `checks/tests/real_tree.rs`: `sdk: ctx` and `sdk: defineHook` moved to `FILLED_TAGS` (47 entries).
+- Tests. `test/define-hook.test.ts` (25) with `test/hook-script.ts`: a real `node` child with a cleared environment
+  and piped stdin: ok, pending with `retryAfter`, unverified, thrown, returns nothing, bad status, non-object result,
+  six kinds of bad input, unset `COLLIDE_RESULT`, context values, `dataDir` unset, whole write (folder listing; a
+  symlink at the path is replaced and not written through; a result that cannot be put in place leaves no temp file),
+  and `createHookContext` in process. `test/stubs.test.ts` now lists `ctx.ok` and `ctx.report`. `test/package.test.ts`:
+  one dependency (yaml 2.9.1), `yaml.js` is the only file that imports it, the `./yaml` export, the version is at least
+  0.2.0, and three tests of a hook run by plain node through a link to a staged copy of the compiled `dist` (no
+  workspace link): it leaves its result, `@collide/pack-sdk/yaml` parses a document, and it exports exactly
+  `YAMLParseError` and `parse`. `host/tests/pack_cache.rs` (3): a materialized pack script imports
+  `@collide/pack-sdk/yaml` from the real built bundle and parses a document; the SDK copy carries its `node_modules`
+  read-only and the entry link reaches it; a pack holding `node_modules/yaml` is refused. `host/tests/builtin_packs.rs`
+  (1): the bundle's SDK copy holds yaml 2.9.1 as real files. The type test that a handler may return `void` or a
+  `HookResultInput` and not a status outside the six already exists (`sdk-types.test.ts`, `hook-types.test.ts`) and
+  was not changed.
+- Runtime red. Before the code, all 24 hook tests and the 2 stub tests failed at runtime against the stubs
+  (`unimplemented: sdk: defineHook`, `sdk: ctx`). `package.test.ts` first failed in its setup (no `yaml` installed); I
+  then saw four of its tests fail with `src/yaml.ts` removed and the version at 0.1.0, and five with `dependencies`
+  and the `./yaml` export removed. Mutations, each seen red then restored: a direct `writeFile` instead of temp and
+  rename (the symlink test); no temp cleanup (the cannot-be-put-in-place test); no SDK own-dependency copy in
+  `build-packs.ts` (`the_sdk_copy_in_the_bundle_carries_yaml...` and
+  `a_pack_script_that_imports_the_sdk_yaml_export_parses_a_document`, `Cannot find package 'yaml'`); a stub under
+  `sdk: ctx` (`every_filled_tag_stays_registered...`). Not red before the change, because the code already did it:
+  `the_sdk_copy_carries_its_own_node_modules...` and `a_pack_that_holds_its_own_yaml_in_node_modules_is_still_refused`
+  (they pin the rule).
+- Checks: `cargo build --workspace`, `cargo test --workspace` (no failure), clippy `-D warnings`, `cargo fmt --check`,
+  `pnpm test` (pack-sdk 96, plan 283, app 231), `pnpm typecheck`, app build, `pnpm build:packs` and `pnpm check` pass.
+
+### Decisions for the owner
+
+1. A handler that returns nothing: `error`, as recommended. The hook also exits non-zero with a message, unless the
+   result file already exists (so Stage 7's `ctx.ok` followed by a bare return needs no change here). A stale file at
+   `COLLIDE_RESULT` would hide a forgotten return, so the executor (Stage 7) should hand each hook a fresh path.
+2. Failure is an exit code, not a rejected promise: `defineHook` prints the message and sets `process.exitCode`, so
+   `await defineHook(...)` always resolves and the hook ends by itself. Alternative: reject and let Node print a
+   stack. Recommend keeping this: the message is the whole output.
+3. Result checks are the status and the object only. `message`, `outputs` and `retryAfter` pass through unchecked;
+   core's `effective_result` checks them and the outputs cap. Alternative: check them in the SDK too. Not recommended
+   until a second reader needs it.
+4. The SDK's version is 0.2.0, so a pack requires `>=0.2 <0.3`. `fixtures/packs/orchard` and `loop` still say
+   `>=0.1 <0.2`: no test loads them against the real SDK, and `ts-0110-ra` should move the Orchard fixture to
+   `>=0.2 <0.3`.
+5. `packs/plan` keeps its own `yaml`, so the bundle holds two copies (one beside the pack, one in the SDK copy).
+   Alternative: have it import `@collide/pack-sdk/yaml`. Not now, as the item says.
+6. Plan text to propose (not applied): 0.6 still says `@collide/pack-sdk` ships "with zero runtime dependencies".
+   Suggest: "with one runtime dependency, `yaml` 2.9.1, which the compiled SDK copy carries in its own
+   `node_modules`".
+
+- Owner decisions (2026-11-17, at the build): decisions 1 to 5 as recommended, on delegation; `ts-0110-ra` moves the
+  Orchard fixture's `requires.sdk` to `>=0.2 <0.3` because it imports `@collide/pack-sdk/yaml`, and
+  `fixtures/packs/loop` keeps `>=0.1 <0.2` (its tests use a stand-in SDK). Decision 6 is applied: plan 0.6 now says the
+  SDK has one runtime dependency, `yaml` 2.9.1.
+
+### Not done, by design
+
+- `ctx.report`, `ctx.ok`, `ctx.fail`, `ctx.refuse` (Stage 7, tags `sdk: ctx.report` and `sdk: ctx.result`);
+  `defineObserver` (Stage 12).
+- The `.d.ts` files are not in the staged SDK copy (`build-packs.ts` drops every `.ts`), so `tsc` in a pack sees no
+  types for `@collide/pack-sdk/yaml`. The plan leaves `collide pack test` and its types to the second-pack stage.
+- Moving the Orchard fixture to `>=0.2 <0.3` and importing `@collide/pack-sdk/yaml` there: `ts-0110-ra`.

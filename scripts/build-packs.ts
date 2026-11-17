@@ -57,20 +57,31 @@ const skipped = (path: string) => path.endsWith('.ts') || path.endsWith('.map') 
 const copyTree = (from: string, to: string) =>
   cpSync(from, to, { recursive: true, dereference: true, filter: (path) => !skipped(path) })
 
-function copyDependency(packDir: string, name: string, to: string) {
-  const installed = realpathSync(join(packDir, 'node_modules', name))
+/** Copies the installed package `name` of `from`'s `node_modules` into `<to>/node_modules/<name>`. */
+function copyDependency(from: string, name: string, to: string) {
+  const installed = realpathSync(join(from, 'node_modules', name))
   const target = join(to, 'node_modules', name)
   if (name === SDK) {
     mkdirSync(target, { recursive: true })
     cpSync(join(installed, 'package.json'), join(target, 'package.json'))
     copyTree(join(installed, 'dist'), join(target, 'dist'))
+    // The SDK's own dependencies (`yaml`) go in its own `node_modules`, where `@collide/pack-sdk/yaml` finds them from
+    // the SDK's real path, which is how a materialized pack reaches it through the SDK link (0.6).
+    copyOwnDependencies(installed, target)
     return
   }
   const own = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')).dependencies ?? {}
   if (Object.keys(own).length > 0) {
-    throw new Error(`${name} has dependencies of its own (${Object.keys(own).join(', ')}); the bundle copies none of them`)
+    const names = Object.keys(own).join(', ')
+    throw new Error(`${name} has dependencies of its own (${names}); the bundle copies none of them`)
   }
   copyTree(installed, target)
+}
+
+/** Copies each dependency named in `from`'s `package.json` into `<to>/node_modules`. */
+function copyOwnDependencies(from: string, to: string) {
+  const dependencies = JSON.parse(readFileSync(join(from, 'package.json'), 'utf8')).dependencies ?? {}
+  for (const name of Object.keys(dependencies)) copyDependency(from, name, to)
 }
 
 function stagePack(name: string, to: string) {
@@ -82,8 +93,7 @@ function stagePack(name: string, to: string) {
   if (!existsSync(join(packDir, 'package.json'))) return
   run(packDir, 'pnpm', ['exec', 'tsc', '-p', 'tsconfig.build.json', '--outDir', join(to, 'src')])
   writeFileSync(join(to, 'package.json'), '{"private": true, "type": "module"}\n')
-  const dependencies = JSON.parse(readFileSync(join(packDir, 'package.json'), 'utf8')).dependencies ?? {}
-  for (const dependency of Object.keys(dependencies)) copyDependency(packDir, dependency, to)
+  copyOwnDependencies(packDir, to)
 }
 
 run(root, 'pnpm', ['--filter', SDK, 'build'])

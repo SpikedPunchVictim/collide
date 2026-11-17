@@ -943,6 +943,78 @@ fn a_hook_that_imports_the_sdk_runs_from_the_entry() {
     assert!(find_on_path("node", &path).is_some());
 }
 
+// ---- the SDK's own yaml (ts-0109-qj) ----
+
+#[test]
+fn a_pack_script_that_imports_the_sdk_yaml_export_parses_a_document() {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if let Some(message) = node_missing_message(&path) {
+        panic!("{message}");
+    }
+    let bundle = common::bundle("pack-cache");
+    let bundle_sdk = bundle_sdk(&bundle).unwrap();
+    let fixture = Fixture::new();
+    let sdk = ensure_sdk(&fixture.cache, &bundle_sdk).unwrap();
+    fixture.repo.write(
+        "hooks/y.ts",
+        b"import { parse } from '@collide/pack-sdk/yaml'\n\
+          console.log(JSON.stringify(parse(['a: [1, 2]', 'b: x'].join('\\n'))))\n",
+    );
+    fixture.repo.commit_all("one");
+    let entry = materialize(&fixture.cache, &sdk, &fixture.git_dir(), &fixture.tree()).unwrap();
+    assert!(!entry.join("node_modules/yaml").exists());
+    let output = Command::new("node")
+        .env_clear()
+        .env("PATH", &path)
+        .env("HOME", fixture.repo.root().path())
+        .env("COLLIDE_DAEMON_ROOT", fixture.repo.root().path())
+        .arg(entry.join("pack/hooks/y.ts"))
+        .current_dir(fixture.repo.root().path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "{\"a\":[1,2],\"b\":\"x\"}"
+    );
+}
+
+#[test]
+fn the_sdk_copy_carries_its_own_node_modules_read_only_and_the_entry_link_reaches_them() {
+    let fixture = Fixture::ordinary();
+    let bundled = fixture.repo.root().join("bundled-sdk");
+    make_sdk(&bundled, "1.2.3");
+    fs::create_dir_all(bundled.join("node_modules/yaml")).unwrap();
+    fs::write(bundled.join("node_modules/yaml/package.json"), "{}\n").unwrap();
+    let sdk = ensure_sdk(&fixture.cache, &bundled).unwrap();
+    assert!(sdk.join("node_modules/yaml/package.json").is_file());
+    assert_eq!(mode_of(&sdk.join("node_modules/yaml")), 0o555);
+    assert_eq!(mode_of(&sdk.join("node_modules/yaml/package.json")), 0o444);
+    let entry = materialize(&fixture.cache, &sdk, &fixture.git_dir(), &fixture.tree()).unwrap();
+    assert!(
+        entry
+            .join("node_modules/@collide/pack-sdk/node_modules/yaml/package.json")
+            .is_file()
+    );
+}
+
+#[test]
+fn a_pack_that_holds_its_own_yaml_in_node_modules_is_still_refused() {
+    let fixture = Fixture::new();
+    fixture.repo.write("pack.yaml", b"name: x\n");
+    fixture.repo.write(
+        "node_modules/yaml/index.js",
+        b"export const parse = () => 1\n",
+    );
+    fixture.repo.commit_all("one");
+    let error = refused_naming(&fixture, &fixture.tree(), "node_modules/yaml/index.js");
+    assert!(error.contains("node_modules"), "{error}");
+}
+
 // ---- ensure_sdk ----
 
 #[test]
