@@ -16,6 +16,7 @@
 //! | 3 | 1 plus the text of the worktree's `CLAUDE.md` files as an appended system prompt (a file of the snapshot) |
 //! | 3b | the same text on the line itself (`--append-system-prompt`), which puts it in argv and in `ps` |
 //! | 4 | `--setting-sources user,project`: loads project settings and hooks; here only to record it fails the rule |
+//! | 5 | 2 plus `--plugin-dir <snapshot>/plugins/repo-skills`, holding only a link to the skills (ts-0106-nr) |
 //!
 //! **The fixture.** A git repository in a temp root, with stand-in files only (`fixtures/repo-instructions/`): a root
 //! `CLAUDE.md` with an `@docs/guide.md` import, a nested `CLAUDE.md`, a skill, an agent, project settings with a hook,
@@ -59,6 +60,11 @@ pub const MARKERS: [&str; 3] = [PROJECT_HOOK_MARKER, LOCAL_HOOK_MARKER, MCP_MARK
 /// The variable that makes `claude` read `CLAUDE.md` from the directories `--add-dir` adds. It is in the binary's
 /// strings, not in `claude --help` (measured on 2.1.326); Part 2 finds out whether it does what its name says.
 pub const ADD_DIR_VAR: &str = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD";
+
+/// The plugin of candidate 5: its name (skills of a plugin may be listed as `<name>:<skill>`), and the folder of the
+/// snapshot that holds it (0.3, the launch line: `--plugin-dir <snapshot>/plugins/<name>`).
+pub const PLUGIN_NAME: &str = "repo-skills";
+pub const PLUGINS_DIR: &str = "plugins";
 
 /// The file of the snapshot that holds candidate 3's text.
 pub const INSTRUCTIONS_FILE: &str = "instructions.md";
@@ -278,6 +284,8 @@ pub enum Candidate {
     AppendedPromptFile,
     AppendedPromptInline,
     ProjectSource,
+    /// 2 plus the snapshot plugin whose `skills` is a link to the worktree's `.claude/skills` (ts-0106-nr).
+    AddDirSkillsPlugin,
 }
 
 /// The line of `candidate` for `request`, started in the request's folder. Candidate 3 writes its file in the fixture's
@@ -305,13 +313,103 @@ pub fn candidate_line(fixture: &Fixture, candidate: Candidate, request: &LaunchR
                 .extend(["--append-system-prompt".into(), instruction_text(cwd)]);
         }
         Candidate::ProjectSource => line.set_setting_sources("user,project"),
+        Candidate::AddDirSkillsPlugin => {
+            let plugin = write_skills_plugin(&fixture.snapshot, cwd);
+            line.argv
+                .extend(["--add-dir".into(), cwd.display().to_string()]);
+            line.argv
+                .extend(["--plugin-dir".into(), plugin.display().to_string()]);
+            line.env.insert(ADD_DIR_VAR.into(), "1".into());
+        }
     }
     line
 }
 
+/// Writes the plugin of candidate 5 in `snapshot` and returns its folder: a manifest with a name and a description,
+/// and `skills`, a link to `<start_dir>/.claude/skills`, so the skills are read from the folder the phase starts in
+/// when `claude` loads them and are not frozen at the line's commit. It holds nothing else: no hooks, MCP servers,
+/// agents or commands.
+pub fn write_skills_plugin(snapshot: &Path, start_dir: &Path) -> PathBuf {
+    let folder = snapshot.join(PLUGINS_DIR).join(PLUGIN_NAME);
+    fs::create_dir_all(folder.join(".claude-plugin")).unwrap();
+    let manifest = json!({
+        "name": PLUGIN_NAME,
+        "description": "The repository's own skills, read from the folder a phase starts in.",
+    });
+    fs::write(
+        folder.join(".claude-plugin/plugin.json"),
+        manifest.to_string(),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(start_dir.join(".claude/skills"), folder.join("skills")).unwrap();
+    folder
+}
+
+/// The names a folder holds, sorted.
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// Whether the plugin folder `folder` holds the manifest and the link to `<start_dir>/.claude/skills` and nothing
+/// else: no other file, a manifest with only a name, a description and a version (a key such as `hooks`, `mcpServers`,
+/// `agents` or `commands` would add code), and a `skills` that is a link that resolves to the start folder's skills.
+/// The error says which part it breaks.
+pub fn holds_only_the_skills_link(folder: &Path, start_dir: &Path) -> Result<(), String> {
+    let top = names_in(folder);
+    if top != [".claude-plugin", "skills"] {
+        return Err(format!(
+            "the plugin folder holds {top:?}, not the manifest folder and `skills`"
+        ));
+    }
+    let manifest_folder = names_in(&folder.join(".claude-plugin"));
+    if manifest_folder != ["plugin.json"] {
+        return Err(format!(
+            "the manifest folder holds {manifest_folder:?}, not `plugin.json`"
+        ));
+    }
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(folder.join(".claude-plugin/plugin.json")).unwrap(),
+    )
+    .map_err(|error| format!("the manifest is not JSON: {error}"))?;
+    let keys = manifest
+        .as_object()
+        .ok_or("the manifest is not an object")?;
+    if let Some(key) = keys
+        .keys()
+        .find(|key| !["name", "description", "version"].contains(&key.as_str()))
+    {
+        return Err(format!(
+            "the manifest has the key `{key}`, which is more than a name"
+        ));
+    }
+    let skills = folder.join("skills");
+    if !fs::symlink_metadata(&skills)
+        .unwrap()
+        .file_type()
+        .is_symlink()
+    {
+        return Err("`skills` is not a link".into());
+    }
+    let wanted = start_dir.join(".claude/skills");
+    match (fs::canonicalize(&skills), fs::canonicalize(&wanted)) {
+        (Ok(linked), Ok(wanted)) if linked == wanted => Ok(()),
+        (Ok(linked), _) => Err(format!(
+            "`skills` resolves to {}, not the start folder's skills",
+            linked.display()
+        )),
+        (Err(error), _) => Err(format!("`skills` does not resolve: {error}")),
+    }
+}
+
 /// Whether `line` leaves settings, hooks and MCP config to the snapshot (the rule in the module's documentation). The
 /// error says which part it breaks. `--setting-sources` may be `user` or empty (config none), never `project` or
-/// `local`.
+/// `local`. A `--plugin-dir` is a folder of the snapshot, never one of the repository.
 pub fn keeps_the_snapshot_line(
     line: &Line,
     snapshot: &Path,
@@ -334,6 +432,19 @@ pub fn keeps_the_snapshot_line(
     }
     if !line.argv.iter().any(|word| word == "--strict-mcp-config") {
         return Err("--strict-mcp-config is missing".into());
+    }
+    for at in line
+        .argv
+        .iter()
+        .enumerate()
+        .filter_map(|(at, word)| (word == "--plugin-dir").then_some(at))
+    {
+        let plugin = line.argv.get(at + 1).map(Path::new);
+        if !plugin.is_some_and(|plugin| plugin.starts_with(snapshot)) {
+            return Err(format!(
+                "--plugin-dir {plugin:?} is not a folder of the snapshot"
+            ));
+        }
     }
     let project = worktree.join(".claude");
     if let Some(word) = line
@@ -672,6 +783,199 @@ fn candidate_4_loads_project_settings_so_the_rule_refuses_it_and_the_message_nam
 
     let seen = the_fake_saw(&fixture, &line);
     assert!(seen.argv.iter().any(|word| word == "user,project"));
+}
+
+#[test]
+fn candidate_5_adds_the_skills_plugin_to_candidate_2_and_keeps_the_snapshot_flags() {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let request = fixture.request(plain_role(), &worktree);
+    let line = candidate_line(&fixture, Candidate::AddDirSkillsPlugin, &request);
+    let candidate_2 = candidate_line(&fixture, Candidate::AddDir, &request);
+
+    let plugin = fixture.snapshot.join("plugins").join(PLUGIN_NAME);
+    assert_eq!(
+        line.value_of("--plugin-dir"),
+        Some(plugin.to_str().unwrap())
+    );
+    assert_eq!(line.argv[..candidate_2.argv.len()], candidate_2.argv[..]);
+    assert_eq!(line.argv.len(), candidate_2.argv.len() + 2);
+    assert_eq!(line.value_of("--add-dir"), Some(worktree.to_str().unwrap()));
+    assert_eq!(line.env, candidate_2.env);
+    assert_eq!(line.cwd, worktree);
+    assert_eq!(
+        keeps_the_snapshot_line(&line, &fixture.snapshot, &worktree),
+        Ok(())
+    );
+    assert!(
+        line.argv.iter().any(|word| word == "--strict-mcp-config"),
+        "the four snapshot flags are still present"
+    );
+    assert!(
+        line.argv
+            .iter()
+            .all(|word| !Path::new(word).starts_with(worktree.join(".claude"))),
+        "no word of the line is a path under the worktree's .claude"
+    );
+
+    let seen = the_fake_saw(&fixture, &line);
+    assert_eq!(seen.env.get(ADD_DIR_VAR).map(String::as_str), Some("1"));
+}
+
+#[test]
+fn the_skills_plugin_folder_holds_only_the_manifest_and_the_link_to_the_worktrees_skills() {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let plugin = write_skills_plugin(&fixture.snapshot, &worktree);
+
+    assert_eq!(names_in(&plugin), [".claude-plugin", "skills"]);
+    assert_eq!(names_in(&plugin.join(".claude-plugin")), ["plugin.json"]);
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(plugin.join(".claude-plugin/plugin.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["name"], PLUGIN_NAME);
+    assert_eq!(holds_only_the_skills_link(&plugin, &worktree), Ok(()));
+
+    let link = plugin.join("skills");
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        fs::canonicalize(&link).unwrap(),
+        fs::canonicalize(worktree.join(".claude/skills")).unwrap()
+    );
+    let skill = fs::read_to_string(link.join("repo-canary-skill/SKILL.md")).unwrap();
+    assert!(
+        skill.contains(SKILL_WORD),
+        "the skill is read through the link"
+    );
+    assert!(
+        !plugin.starts_with(&worktree),
+        "the plugin is in the snapshot, not in the worktree"
+    );
+}
+
+#[test]
+fn the_skills_plugin_shows_the_worktrees_skills_as_they_are_now_not_as_committed() {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let plugin = write_skills_plugin(&fixture.snapshot, &worktree);
+    let skill = worktree.join(".claude/skills/repo-canary-skill/SKILL.md");
+
+    fs::write(
+        &skill,
+        "---\nname: repo-canary-skill\ndescription: Edited after the plugin was made.\n---\n",
+    )
+    .unwrap();
+    fs::create_dir(worktree.join(".claude/skills/later-skill")).unwrap();
+    fs::write(
+        worktree.join(".claude/skills/later-skill/SKILL.md"),
+        "later",
+    )
+    .unwrap();
+
+    let through = |path: &str| fs::read_to_string(plugin.join("skills").join(path)).unwrap();
+    assert!(through("repo-canary-skill/SKILL.md").contains("Edited after the plugin was made"));
+    assert_eq!(through("later-skill/SKILL.md"), "later");
+    assert_eq!(
+        names_in(&plugin.join("skills")),
+        ["later-skill", "repo-canary-skill"]
+    );
+}
+
+#[test]
+fn the_plugin_check_refuses_more_than_the_manifest_and_the_link() {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let fresh = |name: &str| {
+        let snapshot = fixture.root().join(name);
+        fs::create_dir(&snapshot).unwrap();
+        (write_skills_plugin(&snapshot, &worktree), snapshot)
+    };
+
+    let (plugin, _) = fresh("a");
+    fs::create_dir(plugin.join("hooks")).unwrap();
+    fs::write(plugin.join("hooks/hooks.json"), "{}").unwrap();
+    let refusal = holds_only_the_skills_link(&plugin, &worktree).unwrap_err();
+    assert!(refusal.contains("hooks"), "{refusal}");
+
+    let (plugin, _) = fresh("b");
+    fs::write(plugin.join(".claude-plugin/extra.json"), "{}").unwrap();
+    let refusal = holds_only_the_skills_link(&plugin, &worktree).unwrap_err();
+    assert!(refusal.contains("extra.json"), "{refusal}");
+
+    for key in ["hooks", "mcpServers", "agents", "commands"] {
+        let (plugin, _) = fresh(&format!("key-{key}"));
+        let manifest = json!({"name": PLUGIN_NAME, key: "./x"});
+        fs::write(
+            plugin.join(".claude-plugin/plugin.json"),
+            manifest.to_string(),
+        )
+        .unwrap();
+        let refusal = holds_only_the_skills_link(&plugin, &worktree).unwrap_err();
+        assert!(refusal.contains(key), "{key}: {refusal}");
+    }
+
+    let (plugin, _) = fresh("c");
+    fs::remove_file(plugin.join("skills")).unwrap();
+    fs::create_dir(plugin.join("skills")).unwrap();
+    let refusal = holds_only_the_skills_link(&plugin, &worktree).unwrap_err();
+    assert!(refusal.contains("not a link"), "{refusal}");
+
+    let (plugin, _) = fresh("d");
+    fs::remove_file(plugin.join("skills")).unwrap();
+    std::os::unix::fs::symlink(worktree.join("sub"), plugin.join("skills")).unwrap();
+    let refusal = holds_only_the_skills_link(&plugin, &worktree).unwrap_err();
+    assert!(
+        refusal.contains("not the start folder's skills"),
+        "{refusal}"
+    );
+
+    let (plugin, _) = fresh("e");
+    let other = fixture.worktree("other");
+    let refusal = holds_only_the_skills_link(&plugin, &other).unwrap_err();
+    assert!(
+        refusal.contains("not the start folder's skills"),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn the_rule_refuses_a_plugin_folder_that_is_not_in_the_snapshot() {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let request = fixture.request(plain_role(), &worktree);
+    let baseline = candidate_line(&fixture, Candidate::Baseline, &request);
+
+    let mut line = baseline.clone();
+    line.argv.extend([
+        "--plugin-dir".into(),
+        worktree.join("plugins/p").display().to_string(),
+    ]);
+    let refusal = keeps_the_snapshot_line(&line, &fixture.snapshot, &worktree).unwrap_err();
+    assert!(
+        refusal.contains("--plugin-dir") && refusal.contains("plugins/p"),
+        "{refusal}"
+    );
+
+    let mut line = baseline.clone();
+    line.argv.push("--plugin-dir".into());
+    let refusal = keeps_the_snapshot_line(&line, &fixture.snapshot, &worktree).unwrap_err();
+    assert!(refusal.contains("--plugin-dir"), "{refusal}");
+
+    let mut line = baseline;
+    line.argv.extend([
+        "--plugin-dir".into(),
+        fixture.snapshot.join("plugins/p").display().to_string(),
+    ]);
+    assert_eq!(
+        keeps_the_snapshot_line(&line, &fixture.snapshot, &worktree),
+        Ok(())
+    );
 }
 
 // ---- the rule ----------------------------------------------------------------------------------------------------

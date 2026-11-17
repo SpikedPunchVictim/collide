@@ -1,6 +1,8 @@
 //! Part 2 of ts-0103-sa: the candidate lines of `repo_instructions.rs` run once against the real `claude`, to see what
-//! loads. Every test here is skipped, with the reason printed, unless `COLLIDE_REAL_CLAUDE=1` and a ledger
-//! (`COLLIDE_REAL_LEDGER`) are set, so `cargo test --workspace` runs nothing real.
+//! loads. Part 2 of ts-0106-nr (candidate 5, the snapshot plugin with the worktree's skills) is the last test here, on
+//! its own terms: [`PLUGIN_CAP_USD`] a session and [`PLUGIN_LEDGER_LIMIT_USD`] in all. Every test here is skipped, with
+//! the reason printed, unless `COLLIDE_REAL_CLAUDE=1` and a ledger (`COLLIDE_REAL_LEDGER`) are set, so `cargo test
+//! --workspace` runs nothing real.
 //!
 //! **Terms (owner, 2026-11-16).** Haiku only; every session has `--max-budget-usd` of [`SESSION_CAP_USD`] or less on
 //! its line; the ledger refuses a run that could take the item over [`ITEM_LEDGER_LIMIT_USD`]. The child has
@@ -19,8 +21,8 @@
 use super::real;
 use super::repo_instructions::{
     AGENT_NAME, AGENT_WORD, Candidate, Fixture, IMPORT_WORD, LOCAL_HOOK_MARKER, LOCAL_HOOK_TEXT,
-    Line, MCP_MARKER, MCP_NAME, NESTED_WORD, PROJECT_HOOK_MARKER, PROJECT_HOOK_TEXT, ROOT_WORD,
-    SKILL_NAME, SKILL_WORD, candidate_line,
+    Line, MCP_MARKER, MCP_NAME, NESTED_WORD, PLUGIN_NAME, PROJECT_HOOK_MARKER, PROJECT_HOOK_TEXT,
+    ROOT_WORD, SKILL_NAME, SKILL_WORD, candidate_line, holds_only_the_skills_link,
 };
 use collide_core::adapter::{AgentAdapter, LaunchRequest};
 use collide_host::adapters::claude::ClaudeAdapter;
@@ -34,6 +36,10 @@ use std::time::Duration;
 /// The cap of one session (`--max-budget-usd`), and the most the item's sessions may add up to.
 pub const SESSION_CAP_USD: f64 = 0.10;
 pub const ITEM_LEDGER_LIMIT_USD: f64 = 0.50;
+
+/// The same for ts-0106-nr (owner, 2026-11-16): one haiku session capped at five cents, and ten cents in all.
+pub const PLUGIN_CAP_USD: f64 = 0.05;
+pub const PLUGIN_LEDGER_LIMIT_USD: f64 = 0.10;
 
 /// How long a session may take before it is ended.
 const SESSION_TIMEOUT: Duration = Duration::from_secs(180);
@@ -57,10 +63,15 @@ macro_rules! live {
 
 /// Why a live test cannot run, or `None` when it can: the opt-in of `real.rs`, and a ledger to add the spend up in.
 pub fn unavailable() -> Option<String> {
+    unavailable_within(ITEM_LEDGER_LIMIT_USD)
+}
+
+/// [`unavailable`] for an item whose ledger has the limit `limit`.
+fn unavailable_within(limit: f64) -> Option<String> {
     real::unavailable().or_else(|| {
         std::env::var_os(real::LEDGER_ENV).is_none().then(|| {
             format!(
-                "{} names no ledger (the item's spend is added up in one, with a limit of ${ITEM_LEDGER_LIMIT_USD})",
+                "{} names no ledger (the item's spend is added up in one, with a limit of ${limit})",
                 real::LEDGER_ENV
             )
         })
@@ -71,12 +82,17 @@ pub fn unavailable() -> Option<String> {
 
 /// The request of a session Collide starts: config none, haiku and a cap on the line.
 pub fn collide_request(fixture: &Fixture, cwd: &Path) -> LaunchRequest {
+    collide_request_capped(fixture, cwd, SESSION_CAP_USD)
+}
+
+/// [`collide_request`] with a cap of `cap` dollars on the line.
+pub fn collide_request_capped(fixture: &Fixture, cwd: &Path, cap: f64) -> LaunchRequest {
     let mut request = fixture.request(json!({ "agent": "claude", "config": "none" }), cwd);
     request.model = Some(collide_core::agent::ModelRef {
         name: "haiku".into(),
         id: None,
     });
-    request.budget_left_usd = Some(SESSION_CAP_USD);
+    request.budget_left_usd = Some(cap);
     request
 }
 
@@ -119,8 +135,12 @@ pub struct Findings {
     pub exit: Option<i32>,
     pub result: String,
     pub claude_version: String,
-    /// The fixture's own names in the `init` line's lists, by list.
+    /// The fixture's own names in the `init` line's lists, by list. `skills` is true for the skill's own name or the
+    /// name with a plugin's prefix; `plugins` is true for the fixture's plugin.
     pub init_has: BTreeMap<&'static str, bool>,
+    /// The entry of the `init` line's `skills` list that is the fixture's skill, as listed (the plugin's prefix, if
+    /// any, is the fixture's own plugin name).
+    pub skill_listed_as: Option<String>,
     /// How many entries each list of the `init` line has (the owner's own are in these, never named).
     pub init_counts: BTreeMap<&'static str, usize>,
     /// The fixture's words in the model's reply.
@@ -142,6 +162,18 @@ fn lists(init: &Value, key: &str, name: &str) -> bool {
             .iter()
             .any(|entry| entry.as_str() == Some(name) || entry["name"].as_str() == Some(name))
     })
+}
+
+/// The entry of the list `key` of `init` that is `name` or `<prefix>:name`, as listed. Only the fixture's name can
+/// match, so only it is returned.
+fn listed_as(init: &Value, key: &str, name: &str) -> Option<String> {
+    let suffix = format!(":{name}");
+    init[key]
+        .as_array()?
+        .iter()
+        .filter_map(|entry| entry.as_str().or_else(|| entry["name"].as_str()))
+        .find(|entry| *entry == name || entry.ends_with(&suffix))
+        .map(str::to_string)
 }
 
 /// `MEMORY=yes` or `MEMORY=no` in `reply`.
@@ -175,12 +207,16 @@ pub fn findings(lines: &[Value], exit: Option<i32>, markers: Vec<&'static str>) 
             .unwrap_or("")
             .to_string();
         for (key, name) in [
-            ("skills", SKILL_NAME),
             ("agents", AGENT_NAME),
             ("mcp_servers", MCP_NAME),
+            ("plugins", PLUGIN_NAME),
         ] {
             found.init_has.insert(key, lists(init, key, name));
         }
+        found.skill_listed_as = listed_as(init, "skills", SKILL_NAME);
+        found
+            .init_has
+            .insert("skills", found.skill_listed_as.is_some());
         for key in [
             "skills",
             "agents",
@@ -249,7 +285,8 @@ impl Findings {
         };
         format!(
             "claude {} exit {:?} result {} | words: root {}, nested {}, import {}, skill {}, agent {} | init lists: \
-             skill {}, agent {}, mcp server {} | hooks: {} SessionStart, texts {:?}; markers: project {}, local {}, \
+             skill {} (as {:?}), agent {}, mcp server {}, plugin {} | hooks: {} SessionStart, texts {:?}; markers: \
+             project {}, local {}, \
              mcp {} | counts {:?} | memory {:?} | cost ${:.6}",
             self.claude_version,
             self.exit,
@@ -260,8 +297,10 @@ impl Findings {
             has(&self.reply_has, "skill"),
             has(&self.reply_has, "agent"),
             has(&self.init_has, "skills"),
+            self.skill_listed_as,
             has(&self.init_has, "agents"),
             has(&self.init_has, "mcp_servers"),
+            has(&self.init_has, "plugins"),
             self.session_start_hooks,
             self.hook_texts,
             marker(PROJECT_HOOK_MARKER),
@@ -280,11 +319,31 @@ impl Findings {
 /// first and told after. Returns what it left. A session that cannot be run or does not end is a panic that names the
 /// session only: nothing the binary wrote is in the message.
 pub fn run_session(fixture: &Fixture, name: &str, line: &Line, stdin: &[u8]) -> Findings {
+    run_session_within(
+        fixture,
+        name,
+        line,
+        stdin,
+        SESSION_CAP_USD,
+        ITEM_LEDGER_LIMIT_USD,
+    )
+}
+
+/// [`run_session`] for an item with its own terms: a session of `cap` dollars at most and a ledger limit of `limit`.
+/// Both guards are here, for every item: the opt-in, then the ledger.
+pub fn run_session_within(
+    fixture: &Fixture,
+    name: &str,
+    line: &Line,
+    stdin: &[u8],
+    cap: f64,
+    limit: f64,
+) -> Findings {
     // A second guard, here and not only in each test's `live!`: nothing reaches `claude` without the opt-in.
     if let Some(reason) = real::unavailable() {
         panic!("`{name}` is not run: {reason}");
     }
-    real::check_ledger_within(name, SESSION_CAP_USD, ITEM_LEDGER_LIMIT_USD);
+    real::check_ledger_within(name, cap, limit);
     fixture.clear_markers();
     let mut command = Command::new(real::binary());
     command
@@ -298,7 +357,7 @@ pub fn run_session(fixture: &Fixture, name: &str, line: &Line, stdin: &[u8]) -> 
         Ok(ran) => ran,
         Err(_) => {
             // The spend of a session that did not end is not known, so the ledger takes its whole cap.
-            real::add_to_ledger(name, SESSION_CAP_USD, SESSION_CAP_USD);
+            real::add_to_ledger(name, cap, cap);
             panic!("`{name}`: claude did not end within {SESSION_TIMEOUT:?}");
         }
     };
@@ -307,7 +366,7 @@ pub fn run_session(fixture: &Fixture, name: &str, line: &Line, stdin: &[u8]) -> 
         .filter_map(|text| serde_json::from_str(text).ok())
         .collect();
     let found = findings(&lines, ran.code, fixture.markers_present());
-    real::add_to_ledger(name, SESSION_CAP_USD, found.cost);
+    real::add_to_ledger(name, cap, found.cost);
     println!("stderr: {} bytes", ran.stderr.len());
     println!("finding `{name}`: {}", found.describe());
     assert!(!lines.is_empty(), "`{name}`: claude wrote no stream line");
@@ -376,6 +435,34 @@ fn live_an_agents_own_claude_in_a_worktree_it_made_with_git_worktree_add() {
     let line = agents_own_line(&worktree);
     println!("root: {}", fixture.root().path().display());
     run_session(&fixture, "agent-own-claude", &line, b"");
+}
+
+/// ts-0106-nr: candidate 5, candidate 2 plus the snapshot plugin whose skills are the worktree's, in a worktree.
+/// Collide's own line with a cap of [`PLUGIN_CAP_USD`], against the ledger limit [`PLUGIN_LEDGER_LIMIT_USD`].
+#[test]
+fn live_the_snapshot_plugin_with_the_worktrees_skills_in_the_worktree() {
+    if let Some(reason) = unavailable_within(PLUGIN_LEDGER_LIMIT_USD) {
+        println!("skipped: {reason}");
+        return;
+    }
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let request = collide_request_capped(&fixture, &worktree, PLUGIN_CAP_USD);
+    let line = candidate_line(&fixture, Candidate::AddDirSkillsPlugin, &request);
+    println!("root: {}", fixture.root().path().display());
+    let name = "candidate-5-skills-plugin";
+    let found = run_session_within(
+        &fixture,
+        name,
+        &line,
+        &first_turn(&request),
+        PLUGIN_CAP_USD,
+        PLUGIN_LEDGER_LIMIT_USD,
+    );
+    assert!(
+        found.hook_texts.contains(&CANARY_MARKER),
+        "`{name}`: the snapshot's canary hook did not run"
+    );
 }
 
 // ---- offline: the harness itself ---------------------------------------------------------------------------------
@@ -581,4 +668,71 @@ fn a_session_is_not_run_without_the_opt_in_even_when_its_caller_does_not_check()
         .expect_err("no opt-in, no run");
     let message = *refused.downcast::<String>().unwrap();
     assert!(message.contains("COLLIDE_REAL_CLAUDE=1"), "{message}");
+}
+
+// ---- offline: ts-0106-nr ----------------------------------------------------------------------------------------
+
+#[test]
+fn findings_find_the_skill_under_a_plugin_prefix_and_the_plugin_itself() {
+    let prefixed = format!("{PLUGIN_NAME}:{SKILL_NAME}");
+    let mut lines = made_up_stream(&["x", &prefixed], "SKILL=none");
+    lines[0]["plugins"] = json!([{"name": "owner-private-plugin"}, {"name": PLUGIN_NAME}]);
+    let found = findings(&lines, Some(0), Vec::new());
+    assert!(found.init_has["skills"]);
+    assert_eq!(found.skill_listed_as.as_deref(), Some(prefixed.as_str()));
+    assert!(found.init_has["plugins"]);
+    assert_eq!(found.init_counts["plugins"], 2);
+    let printed = found.describe();
+    assert!(printed.contains(&prefixed), "{printed}");
+    assert!(!printed.contains("owner-private"), "{printed}");
+}
+
+#[test]
+fn findings_say_the_skill_and_the_plugin_are_not_listed_when_the_stream_has_neither() {
+    let lines = made_up_stream(
+        &["x", "other-skill", "p:not-repo-canary-skill-2"],
+        "SKILL=none",
+    );
+    let found = findings(&lines, Some(0), Vec::new());
+    assert!(!found.init_has["skills"]);
+    assert_eq!(found.skill_listed_as, None);
+    assert!(!found.init_has["plugins"]);
+}
+
+#[test]
+fn the_plugin_session_is_haiku_capped_at_five_cents_config_none_and_has_the_plugin() {
+    let fixture = Fixture::new();
+    let worktree = fixture.worktree("wt");
+    let request = collide_request_capped(&fixture, &worktree, PLUGIN_CAP_USD);
+    let line = candidate_line(&fixture, Candidate::AddDirSkillsPlugin, &request);
+    assert_eq!(line.value_of("--model"), Some("haiku"));
+    assert_eq!(line.value_of("--max-budget-usd"), Some("0.05"));
+    assert_eq!(line.value_of("--setting-sources"), Some(""));
+    assert!(line.argv.iter().any(|word| word == "--strict-mcp-config"));
+    let plugin = line.value_of("--plugin-dir").expect("the plugin line");
+    assert_eq!(
+        holds_only_the_skills_link(Path::new(plugin), &worktree),
+        Ok(())
+    );
+}
+
+#[test]
+fn the_plugin_ledger_allows_one_session_and_refuses_a_second_that_could_pass_ten_cents() {
+    let root = super::common::TempRoot::new();
+    let ledger = root.join("ledger");
+    let refusal = |spent: &str| {
+        std::fs::write(&ledger, spent).unwrap();
+        real::ledger_refusal(&ledger, "next", PLUGIN_CAP_USD, PLUGIN_LEDGER_LIMIT_USD)
+    };
+    assert_eq!(refusal(""), None);
+    assert_eq!(
+        refusal("a\t0.05\t0.05\n"),
+        None,
+        "a cap reaches the limit exactly"
+    );
+    let refused = refusal("a\t0.05\t0.06\n").expect("refused");
+    assert!(
+        refused.contains("`next` is not run") && refused.contains("$0.1"),
+        "{refused}"
+    );
 }

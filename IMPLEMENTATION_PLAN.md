@@ -863,8 +863,10 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
         starts in>` with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` loads that folder's `CLAUDE.md` and its `@`
         imports through `claude`'s own loader, while settings, hooks, MCP servers and agents stay from the snapshot
         and auto memory stays off. A nested `CLAUDE.md` does not load. The variable is not in `claude --help`, so the
-        contract test pins it. No tested line loads skills; a snapshot plugin that points at the worktree's skills
-        is measured next (`ts-0106-nr`), before the line is built.
+        contract test pins it. Skills load through a plugin in the snapshot whose `skills` is a link to the
+        folder's `.claude/skills` (measured `ts-0106-nr`), so they are read live and named `repo-skills:<skill>`; the
+        plugin is written only when that folder exists. Whether a skill's own frontmatter `hooks` and `allowed-tools`
+        take effect through it is measured in `ts-0104-gx` before the plugin ships (owner, 2026-11-17).
     - **Auto memory is off for every phase** (`autoMemoryEnabled: false` in the snapshot settings; owner,
       2026-11-13). It is shared by every worktree of a repo, keyed to the main checkout, so it would carry one run's
       notes into another. A role may turn it on.
@@ -4246,7 +4248,8 @@ This sub-stage checks agent entries at load only. Launching an agent, and the se
 `ep-004-qd`, built one at a time in id order (part L). It runs after 3d. The keychain uses `security-framework`
 (owner, 2026-11-16). `ts-0103-sa`'s one real `claude` run is approved ($0.50 in all); the real keychain and the
 trust prompt over a real repository are the owner's (`ts-0105-jv`). `ts-0106-nr` (skills through a snapshot plugin,
-one real session at $0.10; owner, 2026-11-16) is built before `ts-0104-gx`.
+one real session at $0.10; owner, 2026-11-16) is built before `ts-0104-gx`. `ts-0104-gx` runs one gated session
+($0.10) on a skill's frontmatter before it ships the plugin (owner, 2026-11-17).
 
 ### Stage 4b: Providers, plan adapter, corpus and views
 

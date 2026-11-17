@@ -119,3 +119,19 @@ Write these first:
   phase starts in>` with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; it loads the root `CLAUDE.md` and its
   imports, and no nested `CLAUDE.md`. Skills follow `ts-0106-nr`: its plugin is added to the line if it works,
   otherwise skills do not load and the Roles page says so. The contract test pins the variable.
+- Owner decisions (2026-11-17, after `ts-0106-nr`): the `worktree` line also carries the skills plugin of
+  `ts-0106-nr` (`--plugin-dir <snapshot>/plugins/repo-skills`, a manifest and a `skills` link to `<the folder the
+  phase starts in>/.claude/skills`), written only when that folder exists; with no such folder the line has no
+  `--plugin-dir`. `.claude/commands/**` leaves the warning's list, since commands do not load. Before the plugin
+  ships, one gated session measures a skill's own frontmatter (see `### Owner approval`); if its `hooks` or
+  `allowed-tools` take effect through the plugin, build the line without the plugin, record the finding, and the
+  owner decides (strip them from a copy, or accept them as plain `claude` would).
+
+### Owner approval
+
+Given by the owner on 2026-11-17: one gated session with `haiku`, `--max-budget-usd 0.05` on the line and $0.10 in
+all (a ledger with that limit; one re-run if a fixture fault needs it), on the terms of `ts-0103-sa`: config none
+(`--setting-sources ""`), a fresh temp repository, the `claude` child may use the real `HOME` for its login only, and
+nothing from the owner's account or home is written down. The fixture skill's frontmatter has a `hooks` entry that
+writes a marker in the temp root and an `allowed-tools` entry, and the prompt asks the model to use the skill. The
+session goes through `run_session_within` of `ts-0106-nr`; no guard is stubbed.
