@@ -1,7 +1,7 @@
 ---
 id: ts-0083-uf
 kind: task
-status: active
+status: done
 title: "Owner check: one real prompt through the app"
 owners: []
 links:
