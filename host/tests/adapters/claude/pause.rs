@@ -38,7 +38,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -171,11 +171,21 @@ pub(crate) struct Rig {
     pub(crate) clocks: Arc<TestClocks>,
     pub(crate) login: Arc<TestLogin>,
     pub(crate) settings: Settings,
+    /// Held for the rig's life, and dropped last, after its daemon and children are gone ([`ONE_RIG_AT_A_TIME`]).
+    _one_at_a_time: MutexGuard<'static, ()>,
 }
+
+/// Rigs run one at a time. Every rig's wall clock starts at the same fixed time, so two at once could mint the same run
+/// id, and a stop, which finds a run's processes by that id across the machine, would reach the other test's child.
+static ONE_RIG_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 impl Rig {
     /// A daemon whose `claude` plays `first`, or `second` when it is started with `--resume`.
     pub(crate) fn new(first: &Path, second: &Path, settings: Settings) -> Rig {
+        // A test that failed while holding the lock leaves it poisoned; the next rig still runs.
+        let one_at_a_time = ONE_RIG_AT_A_TIME
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let root = TempRoot::new();
         let bin = root.join("bin");
         fs::create_dir(&bin).unwrap();
@@ -233,6 +243,7 @@ impl Rig {
             clocks,
             login,
             settings,
+            _one_at_a_time: one_at_a_time,
         }
     }
 
