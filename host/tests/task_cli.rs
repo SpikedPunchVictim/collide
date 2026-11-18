@@ -225,11 +225,11 @@ fn kind_keeps_only_items_of_that_kind() {
 #[test]
 fn an_unknown_kind_fails_listing_the_declared_kinds() {
     let (bundle, repo) = (bundle(), Repo::new("kind-unknown"));
-    let run = collide(&repo, &bundle, &["tasks", "--kind", "spike"]);
+    let run = collide(&repo, &bundle, &["tasks", "--kind", "widget"]);
     assert_eq!(run.code, 2);
     assert!(
         run.stderr
-            .contains("unknown kind `spike`; the provider declares: task, epic"),
+            .contains("unknown kind `widget`; the provider declares: task, epic, proposal, spike"),
         "{}",
         run.stderr
     );

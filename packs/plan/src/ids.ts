@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { DEFAULT_LAYOUT, epicsDirsOf } from './layout.ts'
+import { DEFAULT_LAYOUT, epicsDirsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 
 const run = promisify(execFile)
@@ -10,11 +10,15 @@ const run = promisify(execFile)
 /** The epics folders of the default layout, relative to the repository root, as git writes a path. */
 const DEFAULT_EPICS = epicsDirsOf(DEFAULT_LAYOUT)
 
+/** The folders of the default layout that hold spike folders, relative to the repository root. */
+const DEFAULT_SPIKES = spikesDirsOf(DEFAULT_LAYOUT)
+
 /** Each kind's id prefix and the digits its numbers are padded to (0.10, ids). */
 export const KIND_IDS = {
   task: { prefix: 'ts', width: 4 },
   epic: { prefix: 'ep', width: 3 },
   proposal: { prefix: 'pr', width: 4 },
+  spike: { prefix: 'sp', width: 4 },
 } as const
 export type CreatableKind = keyof typeof KIND_IDS
 
@@ -26,6 +30,7 @@ const MAX_DRAWS = 5_000
 
 const FILE_ID = /^([a-z]{2}-[0-9]{3,}-[a-z]{2})(?:-.*)?\.md$/
 const FOLDER_ID = /^(ep-[0-9]{3,}-[a-z]{2})(?:-.*)?$/
+const SPIKE_FOLDER_ID = /^(sp-[0-9]{3,}-[a-z]{2})(?:-.*)?$/
 
 /**
  * Test hooks, never set by a real run: `generator` makes the number generator from a seed (a test rigs it to return a
@@ -41,13 +46,24 @@ export class IdSourceError extends Error {}
 
 /**
  * The ids that the item paths name. A path is relative to the repository root, with `/`, and only a path under one of
- * `epicsDirs` (the epics folders of the layout's roots) counts. An epic folder names its epic (whatever is inside it),
- * and a file directly in a `tasks/` or `proposals/` folder names its item. Nothing is opened: the id is the start of
- * the name (0.10, ids: names on disk are `<id>-<slug>`).
+ * `epicsDirs` (the epics folders of the layout's roots) or `spikesDirs` (the folders that hold spike folders)
+ * counts. An epic folder names its epic (whatever is inside it), and a file directly in a `tasks/` or `proposals/`
+ * folder names its item. A spike folder names its spike, whatever is inside it. Nothing is opened: the id is the
+ * start of the name (0.10, ids: names on disk are `<id>-<slug>`).
  */
-export function idsInPaths(paths: string[], epicsDirs: readonly string[] = DEFAULT_EPICS): Set<string> {
+export function idsInPaths(
+  paths: string[],
+  epicsDirs: readonly string[] = DEFAULT_EPICS,
+  spikesDirs: readonly string[] = DEFAULT_SPIKES,
+): Set<string> {
   const ids = new Set<string>()
   for (const path of paths) {
+    const spikes = spikesDirs.find((candidate) => path.startsWith(`${candidate}/`))
+    if (spikes !== undefined) {
+      const spike = SPIKE_FOLDER_ID.exec(path.slice(spikes.length + 1).split('/')[0] ?? '')?.[1]
+      if (spike !== undefined) ids.add(spike)
+      continue
+    }
     const dir = epicsDirs.find((candidate) => path.startsWith(`${candidate}/`))
     if (dir === undefined) continue
     const [folder, subfolder, file, ...rest] = path.slice(dir.length + 1).split('/')
@@ -72,19 +88,28 @@ async function git(root: string, args: string[]): Promise<string> {
   }
 }
 
-/** The ids on every local branch and fetched remote ref, under the layout's roots. Refs on one commit are read once. */
-async function idsInRefs(root: string, epicsDirs: string[]): Promise<Set<string>> {
+/**
+ * The ids on every local branch and fetched remote ref, under the layout's roots. Refs on one commit are read once. A
+ * spikes folder is listed one level down, so the files inside a spike folder are never listed.
+ */
+async function idsInRefs(root: string, epicsDirs: string[], spikesDirs: string[]): Promise<Set<string>> {
   const listing = await git(root, ['for-each-ref', '--format=%(objectname)', 'refs/heads', 'refs/remotes'])
   const ids = new Set<string>()
+  const namesOf = (output: string): string[] => output.split('\0').filter((name) => name !== '')
   for (const commit of new Set(listing.split('\n').filter((line) => line !== ''))) {
-    const names = await git(root, ['ls-tree', '-r', '--name-only', '-z', commit, '--', ...epicsDirs])
-    for (const id of idsInPaths(names.split('\0').filter((name) => name !== ''), epicsDirs)) ids.add(id)
+    const inEpics = await git(root, ['ls-tree', '-r', '--name-only', '-z', commit, '--', ...epicsDirs])
+    const spikePaths = spikesDirs.map((dir) => `${dir}/`)
+    const inSpikes = await git(root, ['ls-tree', '--name-only', '-z', commit, '--', ...spikePaths])
+    for (const id of idsInPaths([...namesOf(inEpics), ...namesOf(inSpikes)], epicsDirs, spikesDirs)) ids.add(id)
   }
   return ids
 }
 
-/** The ids in the working tree: the epic folders and the files in their `tasks/` and `proposals/` folders, as `scan.ts` finds them. */
-async function idsInWorkingTree(root: string, epicsDirs: string[]): Promise<Set<string>> {
+/**
+ * The ids in the working tree: the epic folders and the files in their `tasks/` and `proposals/` folders, and the
+ * spike folders, as `scan.ts` finds them. A spike folder is named and never opened.
+ */
+async function idsInWorkingTree(root: string, epicsDirs: string[], spikesDirs: string[]): Promise<Set<string>> {
   const names = async (dir: string): Promise<string[]> => {
     try {
       return await readdir(dir)
@@ -104,7 +129,10 @@ async function idsInWorkingTree(root: string, epicsDirs: string[]): Promise<Set<
       }
     }
   }
-  return idsInPaths(paths, epicsDirs)
+  for (const spikes of spikesDirs) {
+    for (const folder of await names(join(root, spikes))) paths.push(`${spikes}/${folder}/`)
+  }
+  return idsInPaths(paths, epicsDirs, spikesDirs)
 }
 
 /**
@@ -117,9 +145,10 @@ export async function takenIds(
   privateDir: string | null = null,
 ): Promise<Set<string>> {
   const epicsDirs = epicsDirsOf(layout)
-  const ids = await idsInRefs(root, epicsDirs)
-  for (const id of await idsInWorkingTree(root, epicsDirs)) ids.add(id)
-  if (privateDir !== null) for (const id of await idsInWorkingTree(privateDir, ['epics'])) ids.add(id)
+  const spikesDirs = spikesDirsOf(layout)
+  const ids = await idsInRefs(root, epicsDirs, spikesDirs)
+  for (const id of await idsInWorkingTree(root, epicsDirs, spikesDirs)) ids.add(id)
+  if (privateDir !== null) for (const id of await idsInWorkingTree(privateDir, ['epics'], ['spikes'])) ids.add(id)
   return ids
 }
 

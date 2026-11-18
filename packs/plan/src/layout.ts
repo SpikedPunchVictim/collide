@@ -14,7 +14,7 @@ export interface Layout {
   root: string
   /** Roots that held items before `root` changed. Listed and written in place, never written to anew. */
   previous: string[]
-  /** `paths.spike`: where spike folders go. Nothing reads it before the spike workflow (ts-0126-nf). */
+  /** `paths.spike`: the folder that holds the spike folders, in place of `<root>/spikes`. */
   spike: string | null
   /** `code`: accepted, and used by Stage 9's spike workflow. */
   code: string | null
@@ -30,6 +30,18 @@ export const rootsOf = (layout: Layout): string[] => [layout.root, ...layout.pre
 
 /** The epics folder of each root, as git writes a path. */
 export const epicsDirsOf = (layout: Layout): string[] => rootsOf(layout).map((root) => `${root}/epics`)
+
+/** The folder that new spike folders go in: `paths.spike`, or `spikes/` in the current root. */
+export const spikeDirOf = (layout: Layout): string => layout.spike ?? `${layout.root}/spikes`
+
+/**
+ * Every folder that may hold spike folders, as git writes a path: where new ones go first, then the `spikes/` folder of
+ * each root. A spike that was in `<root>/spikes` before `paths.spike` was set stays listed, as an item in a previous
+ * root does.
+ */
+export const spikesDirsOf = (layout: Layout): string[] => [
+  ...new Set([spikeDirOf(layout), ...rootsOf(layout).map((root) => `${root}/spikes`)]),
+]
 
 const KEYS = ['root', 'previous', 'paths', 'code']
 

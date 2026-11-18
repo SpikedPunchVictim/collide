@@ -42,7 +42,7 @@ describe('the id parts', () => {
     for (const [title, slug] of cases) expect(slugOf(title)).toBe(slug)
   })
 
-  test('the ids in a list of paths: epic folders, and files directly in a tasks/ or proposals/ folder', () => {
+  test('the ids in a list of paths: epic and spike folders, and files directly in tasks/ or proposals/', () => {
     const ids = idsInPaths([
       `${EPICS}/ep-002-va-skeleton/epic.md`,
       `${EPICS}/ep-002-va-skeleton/tasks/ts-0007-ga-layout.md`,
@@ -55,7 +55,7 @@ describe('the id parts', () => {
       '.collide/planning/spikes/sp-0001-aa-demo/record.md',
       'src/ts-0099-zz-elsewhere.md',
     ])
-    expect([...ids].sort()).toEqual(['ep-002-va', 'ep-003-da', 'pr-0003-km', 'ts-0007-ga'])
+    expect([...ids].sort()).toEqual(['ep-002-va', 'ep-003-da', 'pr-0003-km', 'sp-0001-aa', 'ts-0007-ga'])
   })
 
   test('the next number is one past the highest for the kind, and 1 when there is none', () => {
@@ -93,7 +93,11 @@ describe('create', () => {
     const { result } = await call(repoWith(), 'initialize', { config: {} })
     expect(result?.capabilities.create).toBe(true)
     const op = (result?.ops as Array<Record<string, any>>).find((candidate) => candidate.name === 'create')
-    expect(op?.args).toMatchObject({ required: ['title'], properties: { kind: { enum: ['task', 'epic', 'proposal'] }, seed: { type: 'integer' } }, additionalProperties: false })
+    expect(op?.args).toMatchObject({
+      required: ['title'],
+      properties: { kind: { enum: ['task', 'epic', 'proposal', 'spike'] }, seed: { type: 'integer' } },
+      additionalProperties: false,
+    })
   })
 
   test('writes <id>-<slug>.md into the epic\'s tasks/ folder, returns the file it touched, and the item loads', async () => {
@@ -151,7 +155,8 @@ describe('create', () => {
     [{ epic: 'ep-009-zz', title: 'Unknown epic' }, 'there is no epic ep-009-zz'],
     [{ epic: 'nonsense', title: 'Bad epic id' }, 'a task needs epic'],
     [{ kind: 'epic', epic: EPIC, title: 'An epic in an epic' }, 'an epic is part of no epic'],
-    [{ kind: 'spike', epic: EPIC, title: 'Unknown kind' }, 'kind must be "task", "epic" or "proposal"'],
+    [{ kind: 'widget', epic: EPIC, title: 'Unknown kind' }, 'kind must be "task", "epic", "proposal" or "spike"'],
+    [{ kind: 'spike', epic: EPIC, title: 'A spike in an epic' }, 'a spike is part of no epic'],
     [{ epic: EPIC }, 'title must be text'],
     [{ epic: EPIC, title: ' padded ' }, 'title must be text'],
     [{ epic: EPIC, title: 'two\nlines' }, 'title must be text'],

@@ -11,7 +11,7 @@ import { drawFreeId, IdSourceError, takenIds } from './ids.ts'
 import type { IdHooks } from './ids.ts'
 import { DEFAULT_LAYOUT } from './layout.ts'
 import type { Layout } from './layout.ts'
-import { stateOf } from './item.ts'
+import { SPIKE, stateOf } from './item.ts'
 import { onlyKeys, refused } from './op-util.ts'
 import { findFence, parseFrontmatter, versionOf } from './read-file.ts'
 import { pathOf, PRIVATE_PREFIX, readEpicFiles, toTask } from './scan.ts'
@@ -136,7 +136,8 @@ export async function reidLocked(
   let moved: string[] = []
   if (oldName.startsWith(id)) {
     renamedTo = join(dirname(renamedFrom), `${newId}${oldName.slice(id.length)}`)
-    moved = isEpicFile ? await filesUnder(renamedFrom) : [renamedFrom]
+    // A spike folder is renamed whole, but only its record is a file of the item: nothing inside it is listed.
+    moved = target.item.kind === SPIKE ? [targetAbsolute] : isEpicFile ? await filesUnder(renamedFrom) : [renamedFrom]
     await rename(renamedFrom, renamedTo)
     await syncDirectory(dirname(renamedTo))
   }

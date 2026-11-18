@@ -43,13 +43,14 @@ describe('the declaration', () => {
       { name: 'blocked-by', dir: 'out', blocking: true },
       { name: 'part-of', dir: 'out', blocking: false },
       { name: 'implements', dir: 'out', blocking: false, target: 'feature' },
+      { name: 'informs', dir: 'out', blocking: false },
     ])
   })
 
-  test('link takes a type of blocked-by or implements, and a target with or without a feature', async () => {
+  test('link takes a type of blocked-by, implements or informs, and a target with or without a feature', async () => {
     const { result } = await call(repo(), 'initialize', { config: {} })
     const op = (result?.ops as Array<Record<string, any>>).find((candidate) => candidate.name === 'link')
-    expect(op?.args.properties.type).toEqual({ enum: ['blocked-by', 'implements'] })
+    expect(op?.args.properties.type).toEqual({ enum: ['blocked-by', 'implements', 'informs'] })
     const pattern = new RegExp(op?.args.properties.to.pattern)
     expect(['ts-0002-bb', 'pr-0003-km#F2', 'pr-0003-km#F10'].every((to) => pattern.test(to))).toBe(true)
     expect(['pr-0003-km#F0', 'pr-0003-km#f2', 'pr-0003-km#F2x', 'pr-0003-km#F2#F3', 'two'].some((to) => pattern.test(to))).toBe(false)

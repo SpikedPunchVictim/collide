@@ -10,14 +10,27 @@ import { checkCreate, CREATE, createLocked, rootOfCreate } from './create.ts'
 import type { IdHooks } from './ids.ts'
 import { FEATURE_TARGET_EXAMPLE, parseFeatureTarget } from './feature-target.ts'
 import { parseFeatures } from './features.ts'
-import { BLOCKED_BY, CATEGORIES, ID_PATTERN, IMPLEMENTS, PROPOSAL, PROPOSAL_STATUSES, readItem, stateOf, statusesOf } from './item.ts'
+import {
+  BLOCKED_BY,
+  CATEGORIES,
+  hasOwnStatuses,
+  ID_PATTERN,
+  IMPLEMENTS,
+  INFORMS,
+  PROPOSAL,
+  PROPOSAL_STATUSES,
+  readItem,
+  SPIKE_STATUSES,
+  stateOf,
+  statusesOf,
+} from './item.ts'
 import { describeFeatures, featuresOf } from './links.ts'
 import { LOCK_FILE, withLock } from './lock.ts'
 import type { LockOptions } from './lock.ts'
 import { CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
 import { checkReid, REID, reidLocked } from './reid.ts'
 import { findFence, parseFrontmatter, readItemFile, versionOf } from './read-file.ts'
-import { DEFAULT_LAYOUT, rootsOf } from './layout.ts'
+import { DEFAULT_LAYOUT, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { FoundItem, RootName, Scan } from './scan.ts'
@@ -45,8 +58,24 @@ interface OpSpec {
 
 const idRegex = new RegExp(ID_PATTERN)
 
-/** The status values `setStatus` takes for any kind: the five categories, and a proposal's own six words. */
-const SET_STATUS_VALUES: readonly string[] = [...CATEGORIES, ...PROPOSAL_STATUSES.map((status) => status.name)]
+/** The link types `link` writes. */
+const STORED_LINKS: readonly string[] = [BLOCKED_BY, IMPLEMENTS, INFORMS]
+
+/** The status values `setStatus` takes for any kind: the five categories, a proposal's own six words and a spike's. */
+const SET_STATUS_VALUES: readonly string[] = [
+  ...new Set([
+    ...CATEGORIES,
+    ...PROPOSAL_STATUSES.map((status) => status.name),
+    ...SPIKE_STATUSES.map((status) => status.name),
+  ]),
+]
+
+/** What a `status` may be, kind by kind: the refusal for a word that no kind has lists them all. */
+const STATUS_WORDS = [
+  `${CATEGORIES.join(', ')} for a task or an epic`,
+  `${PROPOSAL_STATUSES.map((status) => status.name).join(', ')} for a proposal`,
+  `${SPIKE_STATUSES.map((status) => status.name).join(', ')} for a spike`,
+].join('; ')
 
 /** The refusal for a move to `proposed` while the Features part has problems: every problem, with its line. */
 function proposedRefusal(found: FoundItem): string | null {
@@ -69,9 +98,10 @@ const OPS: Record<string, OpSpec> = {
       const given = status ?? category
       if (given === undefined) return `give status or category, one of ${CATEGORIES.join(', ')}`
       // A task's and an epic's status is named after its category (0.10), so `category` takes those five. A proposal's
-      // status is one of its own six words, and `prepare` checks the value against the kind of the item.
+      // or a spike's status is one of its own words, and `prepare` checks the value against the kind of the item.
       if (typeof given !== 'string' || !(status === undefined ? CATEGORIES : SET_STATUS_VALUES).includes(given)) {
-        return `${status === undefined ? 'category' : 'status'} must be one of ${(status === undefined ? CATEGORIES : SET_STATUS_VALUES).join(', ')}`
+        if (status === undefined) return `category must be one of ${CATEGORIES.join(', ')}`
+        return `status must be one of ${STATUS_WORDS}`
       }
       return onlyKeys(args, ['status', 'category'])
     },
@@ -79,8 +109,15 @@ const OPS: Record<string, OpSpec> = {
       const { kind, id } = found.item
       const status = (args.status ?? args.category) as string
       const allowed = statusesOf(kind).map((candidate) => candidate.name)
-      if (kind === PROPOSAL && args.category !== undefined) return { kind: 'refuse', message: `${id} is a proposal, whose statuses are its own: give status, one of ${allowed.join(', ')}` }
-      if (!allowed.includes(status)) return { kind: 'refuse', message: `${id} is ${kind === PROPOSAL ? 'a proposal' : `an item of kind ${kind}`}; its status is one of ${allowed.join(', ')}, not ${status}` }
+      if (hasOwnStatuses(kind) && args.category !== undefined) {
+        const message = `${id} is a ${kind}, whose statuses are its own: give status, one of ${allowed.join(', ')}`
+        return { kind: 'refuse', message }
+      }
+      if (!allowed.includes(status)) {
+        const what = hasOwnStatuses(kind) ? `a ${kind}` : `an item of kind ${kind}`
+        const message = `${id} is ${what}; its status is one of ${allowed.join(', ')}, not ${status}`
+        return { kind: 'refuse', message }
+      }
       if (found.item.status === status) return { kind: 'nothing' }
       if (kind === PROPOSAL && status === 'proposed') {
         const message = proposedRefusal(found)
@@ -119,7 +156,9 @@ const OPS: Record<string, OpSpec> = {
         const target = parseFeatureTarget(to)
         if (!target.ok) return `to ${to}: ${target.reason}`
       }
-      if (args.type !== undefined && args.type !== BLOCKED_BY && args.type !== IMPLEMENTS) return `type must be "${BLOCKED_BY}" or "${IMPLEMENTS}", the link types that are stored`
+      if (args.type !== undefined && !STORED_LINKS.includes(args.type as string)) {
+        return `type must be "${BLOCKED_BY}", "${IMPLEMENTS}" or "${INFORMS}", the link types that are stored`
+      }
       return onlyKeys(args, ['to', 'type'])
     },
     prepare: (found, scan, args, frontmatter) => {
@@ -134,6 +173,18 @@ const OPS: Record<string, OpSpec> = {
         if (to === id) return { kind: 'refuse', message: `${id} cannot be blocked by itself` }
         if (!scan.items.some((other) => other.item.id === to)) return { kind: 'refuse', message: `there is no item ${to} to be blocked by` }
         return links.some((link) => link.type === BLOCKED_BY && link.to === to) ? { kind: 'nothing' } : add()
+      }
+
+      // informs: the target is an item, and the link blocks nothing.
+      if (type === INFORMS) {
+        if (to.includes('#')) {
+          return { kind: 'refuse', message: `${INFORMS} names an item, not a feature, so ${to} cannot be its target` }
+        }
+        if (to === id) return { kind: 'refuse', message: `${id} cannot inform itself` }
+        if (!scan.items.some((other) => other.item.id === to)) {
+          return { kind: 'refuse', message: `there is no item ${to} to inform` }
+        }
+        return links.some((link) => link.type === INFORMS && link.to === to) ? { kind: 'nothing' } : add()
       }
 
       // implements: the target is a feature of a proposal that has it.
@@ -307,7 +358,7 @@ export async function applyOp(
   // The roots to lock. A write to one item locks the root that item is in; a reid may rewrite files in any root, so it
   // locks each that exists. A lock file lives in its root, which is made when it has items to write: a shared root
   // that is not there yet is made when a previous root has items.
-  const sharedFolders = rootsOf(layout).map((path) => join(root, path))
+  const sharedFolders = [...rootsOf(layout), ...spikesDirsOf(layout)].map((path) => join(root, path))
   const locked: RootName[] = []
   if (op === REID || privateDir === null) {
     if (await anyFolder(sharedFolders)) locked.push('shared')

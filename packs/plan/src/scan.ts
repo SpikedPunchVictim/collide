@@ -1,15 +1,19 @@
-import { readdir } from 'node:fs/promises'
+import { lstat, readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import type { TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
 import { parseFeatures } from './features.ts'
 import { KNOWN_KINDS, PROPOSAL, readItem, stateOf } from './item.ts'
 import type { Item } from './item.ts'
-import { DEFAULT_LAYOUT, rootsOf } from './layout.ts'
+import { DEFAULT_LAYOUT, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { isBrokenLink } from './links.ts'
 import { readItemFile } from './read-file.ts'
 
 const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
+const SPIKE_FOLDER = /^sp-[0-9]{3,}-[a-z]{2}(-.*)?$/
+
+/** The one file of a spike folder that is read (0.10, Planning sources). */
+const SPIKE_RECORD = 'record.md'
 
 /** One item that was read and checked, with where it was found. */
 export interface FoundItem {
@@ -30,7 +34,7 @@ export interface FoundItem {
 export interface Scan {
   items: FoundItem[]
   invalid: TaskInvalidOutput[]
-  /** Items whose kind is not `task`, `epic` or `proposal`. They are listed, not dropped. */
+  /** Items whose kind is not one of `KNOWN_KINDS`. They are listed, not dropped. */
   unknownKind: number
   /** Items with a link whose target is no item that was read, or no feature that its proposal has. They are listed, not dropped. */
   brokenLink: number
@@ -64,9 +68,12 @@ async function entries(dir: string) {
 /**
  * Reads the items under `<cwd>/<root>/epics/` for the layout's root and then for each of its `previous` roots (the
  * default root, `.collide/planning`, when no layout is given), and then under `<privateDir>/epics/` when there is a
- * private root: each epic folder's `epic.md` and the `.md` files directly in its `tasks/` and `proposals/` folders, and
- * nothing else. Symbolic links are not followed. `spikes/` and `questions/` are never opened. The epic is the
- * folder, so it is reported from the path and never from frontmatter.
+ * private root: each epic folder's `epic.md` and the `.md` files directly in its `tasks/` and `proposals/` folders.
+ * Then the spikes: each folder of the layout's spikes folders (`spikesDirsOf`), and of `<privateDir>/spikes/`, that is
+ * named for a spike id has its `record.md` read. Nothing else is read. A spike folder is never listed, so what is
+ * inside it (`out/`, `work/`, `node_modules/`, another `record.md`) costs nothing and is never an item. Symbolic links
+ * are not followed. `questions/` is never opened. The epic is the folder, so it is reported from the path and never
+ * from frontmatter, and a spike has none.
  * Every file that reads is returned, in scan order, including a second file with an id another file has (`scanEpics`
  * sets that one aside); `invalid` holds the files that did not read.
  */
@@ -116,10 +123,36 @@ export async function readEpicFiles(
     }
   }
 
+  const spikeRoots: Array<{ dir: string; name: RootName }> = spikesDirsOf(layout).map((dir) => ({
+    dir: join(cwd, dir),
+    name: 'shared',
+  }))
+  if (privateDir !== null) spikeRoots.push({ dir: join(privateDir, 'spikes'), name: 'private' })
+  for (const { dir, name } of spikeRoots) {
+    for (const folder of (await entries(dir)).filter((entry) => entry.isDirectory())) {
+      const spikeDir = join(dir, folder.name)
+      if (!SPIKE_FOLDER.test(folder.name)) {
+        reject(spikeDir, `spike folder "${folder.name}" must start with a spike id such as sp-0005-rt`)
+        continue
+      }
+      const record = join(spikeDir, SPIKE_RECORD)
+      try {
+        // A folder with no record, or a record that is a link, is no item, as an epic folder with no epic.md is none.
+        if (!(await lstat(record)).isFile()) continue
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'ENOENT' || code === 'ENOTDIR') continue
+        reject(record, `the record cannot be read: ${code ?? String(error)}`)
+        continue
+      }
+      await readOne(record, null, name)
+    }
+  }
+
   return { items, invalid }
 }
 
-/** The items under `epics/` of every root of the layout, and of the private root if there is one (`readEpicFiles`). */
+/** The items under `epics/` and `spikes/` of every root of the layout, and of the private root (`readEpicFiles`). */
 export async function scanEpics(
   cwd: string,
   checkout: string | null = null,

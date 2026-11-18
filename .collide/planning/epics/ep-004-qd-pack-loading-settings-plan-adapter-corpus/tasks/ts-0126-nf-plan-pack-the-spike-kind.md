@@ -79,3 +79,85 @@ Write these first.
   share `core`, `host`, `packs/plan` and the generated files.
 - Nothing here runs a real `claude`. No dependency is added.
 - Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+
+### Built
+
+The provider reads, lists, creates, changes and renames a spike. All in `packs/plan/src/`:
+
+- `item.ts`: `SPIKE`, `SPIKE_STATUSES` (the five of 0.10), `INFORMS` and its entry in `LINK_TYPES` (out, not blocking),
+  `SPIKE` in `KNOWN_KINDS`, `hasOwnStatuses`, and `statusesOf` for a spike. The status refusal of `readItem` lists the
+  five "for a spike".
+- `layout.ts`: `spikeDirOf` (`paths.spike`, or `<root>/spikes`) and `spikesDirsOf` (where new spikes go, then each
+  root's `spikes/`). The `Layout.spike` comment is true now.
+- `scan.ts`: `readEpicFiles` also reads spikes. It lists each spikes folder one level down. A folder named for a spike
+  id has its `record.md` read, after one `lstat`, and nothing else: it never lists inside the folder. Another name is a
+  `task.invalid` with the rule. The private root's `spikes/` is read as the shared ones are. A spike has no epic, so it
+  has no `part-of`.
+- `ids.ts`: `KIND_IDS.spike` (`sp`, four digits). `idsInPaths` takes the spikes folders as a third argument, and
+  `takenIds` reads them in every ref (`ls-tree` one level down), in the working tree and in the private root.
+- `create.ts`: `create` of kind `spike` writes `<spikes folder>/<id>-<slug>/record.md`, status `planned`, one heading
+  (the title). It takes no epic. The reply's `files` is the record.
+- `write.ts`: `setStatus` knows the spike's words and refuses a category for a spike, as for a proposal. `link` takes
+  `informs`. A spike under `paths.spike` is locked and written even when the planning root is not there.
+- `reid.ts`: a spike's folder is renamed whole, and only its record is reported in `files`. Nothing inside is listed.
+- `provider.ts`: `initialize` declares the kind, with its own `setStatus` (one helper now builds both), the link type,
+  and `spike` in `create`'s kinds and `informs` in `link`'s types.
+
+Tests: `packs/plan/test/spikes.test.ts` (58 tests) and the fixture `fixtures/collide-spikes/` (the frontmatter of the
+ten records and one `results`). Existing tests that list kinds, link types, ids or the `basic` fixture's items were
+updated: `provider.test.ts`, `provider-stdio.test.ts`, `create.test.ts`, `feature-links.test.ts`, `write.test.ts`,
+`host/tests/builtin_packs.rs` and `host/tests/task_cli.rs` (its unknown kind is `widget` now, as `spike` is declared).
+The `basic` fixture's spike record was a decoy with a bad frontmatter. It is a valid record now, and `work/` beside it
+is the decoy. The real-tree test in `provider.test.ts` lists `epics/` only, and one level of `spikes/`, then checks
+that every spike folder lists as one item with no `task.invalid`.
+
+Red at runtime: before any change to `src/`, 56 of the 58 tests failed on an assertion or on the reply they read (no
+spike kind, no `sp-` ids, a refused `create`). Two passed: the no-`record.md` and symbolic-link case (nothing lists, as
+before) and the task-status guard. Then, with the code in, each of these was broken in turn and the named tests went
+red, and each was put back: `reid` listing inside the folder (1), `takenIds` ignoring spikes in refs (1), `write.ts`
+not locking the spikes folders (1), `spikesDirsOf` without the old place and the previous roots (3).
+
+Checks, each in a run after my last edit: `cargo build`, `cargo test --workspace` (4427 passed, 0 failed), `cargo
+clippy -D warnings`, `cargo fmt --check`, `pnpm test`, `pnpm typecheck`, `pnpm --filter @collide/app build`,
+`pnpm build:packs` and `pnpm check` all pass.
+
+### Decisions for the owner
+
+1. `create` for a spike, a wrongly named folder as `task.invalid`, and `watch` unchanged: taken as the item
+   recommends.
+2. A spike folder with no `record.md`, or with a `record.md` that is a symbolic link, is no item and no
+   `task.invalid`, as an epic folder with no `epic.md` is none. Alternative: invalid. Recommend as built: a branch
+   switch leaves folders of ignored files behind, and they would show as errors for good. A record that cannot be
+   opened (a folder with mode `000`) is a `task.invalid`, and the scan goes on.
+3. `paths.spike` is the folder that holds the spike folders, in place of `<root>/spikes`. The `spikes/` folder of the
+   current root and of each `previous` root stays read, so a spike is not lost when the setting is added. New spikes go
+   to `paths.spike`. Alternative: read only `paths.spike`. Recommend as built. Plan text to propose for 0.10:
+   "`paths.spike` is the folder that holds spike folders; the `spikes/` folder of every root is still read."
+4. A private spike is `<pack data>/planning/spikes/<id>-<slug>/record.md`. Private epic folders are named by id alone
+   because their tasks look the epic up by id. A spike has no epic, so it keeps its slug.
+5. `informs` has no rule on the kind it starts from. Its target must be an item that exists, not itself and not a
+   feature. Alternative: spikes only. Recommend as built: 0.10 and Stage 9 also link a question to a spike and a spike
+   to a task.
+6. `setStatus` on a spike takes `status` only and refuses `category`, as a proposal does. Each category has one spike
+   status, so accepting it would work. Recommend as built: one rule for the kinds with their own words.
+7. A new spike's body is `# <title>`, the first line of 4.3. Alternative: `## Pre-registration`, which Stage 9 owns.
+8. The folder rule is `sp-<three or more digits>-<two letters>[-<slug>]`, as `ID_PATTERN` is. `create` writes four.
+9. The refusal of a `setStatus` with a word no kind has now lists the words kind by kind, so a spike's five show.
+   The message changed. The CLI checks the argument against the declared schema first, so people see that one.
+10. Not checked, as for epics: that a record's `kind` is `spike`, or that its id equals the folder's.
+11. `readEpicFiles` and `scanEpics` keep their names although they read spikes. Alternative: rename. Recommend a rename
+    in a later item that touches both.
+
+- Owner decisions (2026-11-18, at the build): the item's decisions as it recommends, on the owner's delegation; the rest
+  as built. Decision 3's plan text applied to 0.10, Planning sources.
+
+### Not done, by design
+
+- `watch` ignoring the rest of a spike folder: Stage 6a, when `watch` is built (the provider still declares
+  `watch: false`).
+- `collide tasks --ready` over the real tree: it starts the real daemon, which a build must not do. The provider's list
+  over the real tree (`provider.test.ts`, "Collide's own items") shows the ten records load with no `task.invalid`.
+- The spike workflow (pre-registration, `running` and `results` set by a workflow), `supersedes`, and a spike's
+  `instances`: Stage 9.
+- The Move offer for spikes after a layout change: with the Move item of Stage 12.
+- A `reid` of a spike carries its ignored files with the folder, because the folder is renamed. Nothing is copied.

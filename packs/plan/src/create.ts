@@ -5,7 +5,7 @@ import type { ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile, syncDirectory } from './atomic.ts'
 import { drawFreeId, IdSourceError, KIND_IDS, nextNumber, seededGenerator, takenIds } from './ids.ts'
 import type { CreatableKind, IdHooks } from './ids.ts'
-import { DEFAULT_LAYOUT } from './layout.ts'
+import { DEFAULT_LAYOUT, spikeDirOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { readItem, stateOf } from './item.ts'
 import { CONTROL, onlyKeys, refused } from './op-util.ts'
@@ -62,22 +62,33 @@ export function checkCreate(args: Record<string, unknown>): string | null {
   if (args.root !== undefined && !ROOT_NAMES.includes(args.root as RootName)) {
     return 'root must be "shared" or "private"'
   }
-  if (kind !== undefined && kind !== 'task' && kind !== 'epic' && kind !== 'proposal') return 'kind must be "task", "epic" or "proposal"'
+  if (kind !== undefined && !Object.hasOwn(KIND_IDS, kind as string)) {
+    return 'kind must be "task", "epic", "proposal" or "spike"'
+  }
   if (typeof title !== 'string' || title.trim() !== title || title === '' || title.length > TITLE_MAX || CONTROL.test(title)) {
     return `title must be text of 1 to ${TITLE_MAX} characters, with no line break or other control character and no space at either end`
   }
-  if (kind === 'epic') {
-    if (epic !== undefined) return 'an epic is part of no epic: leave epic out'
+  if (kind === 'epic' || kind === 'spike') {
+    if (epic !== undefined) return `${kind === 'epic' ? 'an epic' : 'a spike'} is part of no epic: leave epic out`
   } else if (typeof epic !== 'string' || !EPIC_ID.test(epic)) {
     return `a ${kind === 'proposal' ? 'proposal' : 'task'} needs epic, the id of its epic, such as ep-002-va`
   }
   return checkSeed(args) ?? onlyKeys(args, ['kind', 'epic', 'title', 'seed', 'root'])
 }
 
-/** A new item: a task or an epic starts `ready`, with the parts a task has; a proposal starts as a `draft`, with the two parts 0.10 names. */
+const DRAFT_BODY = '## Features\n\n## Decision\n'
+const TASK_BODY = '## Goal\n\n## Success criteria\n\n## Tests\n\n## Notes\n'
+
+/**
+ * A new item: a task or an epic starts `ready`, with the parts a task has; a proposal starts as a `draft`, with the two
+ * parts 0.10 names; a spike starts `planned`, with its title as the one heading.
+ */
 const fileOf = (id: string, kind: CreatableKind, title: string): string => {
-  const head = `---\nid: ${id}\nkind: ${kind}\nstatus: ${kind === 'proposal' ? 'draft' : 'ready'}\ntitle: ${JSON.stringify(title)}\nowners: []\nlinks: []\n---\n\n`
-  return head + (kind === 'proposal' ? '## Features\n\n## Decision\n' : '## Goal\n\n## Success criteria\n\n## Tests\n\n## Notes\n')
+  const status = { task: 'ready', epic: 'ready', proposal: 'draft', spike: 'planned' }[kind]
+  const fields = `id: ${id}\nkind: ${kind}\nstatus: ${status}\ntitle: ${JSON.stringify(title)}\nowners: []\nlinks: []`
+  const head = `---\n${fields}\n---\n\n`
+  if (kind === 'spike') return `${head}# ${title}\n`
+  return head + (kind === 'proposal' ? DRAFT_BODY : TASK_BODY)
 }
 
 const exists = async (path: string): Promise<boolean> => {
@@ -129,7 +140,8 @@ async function makeDirectory(dir: string): Promise<void> {
 /**
  * Writes a new item: the number is the next free one for the kind across every ref and the working tree, the suffix is
  * drawn until the id is free, and the file goes in the epic's `tasks/` folder, or its `proposals/` folder for a proposal
- * (an epic gets its own folder with an `epic.md`). The item goes under the layout's root, never under a `previous`
+ * (an epic gets its own folder with an `epic.md`, and a spike its own folder, `<id>-<slug>/record.md`, in the layout's
+ * spikes folder, with no epic). The item goes under the layout's root, never under a `previous`
  * one, and the number is free across the roots of all of them. With `root: private` it goes under `privateDir`
  * instead, in a folder named by its epic's id alone (the epic may be a shared one, whose folder has a longer name), and
  * the reply names no file, because nothing in the private root is committed. The number is free across the private
@@ -152,7 +164,7 @@ export async function createLocked(
   const epicsDir = into === 'private' ? join(privateDir as string, 'epics') : sharedEpics
 
   let folder: string | null = null
-  if (kind !== 'epic') {
+  if (kind !== 'epic' && kind !== 'spike') {
     const epic = args.epic as string
     folder = await epicFolder(epicsDir, epic)
     if (folder === null && into === 'private' && (await epicFolder(sharedEpics, epic)) !== null) folder = epic
@@ -173,8 +185,13 @@ export async function createLocked(
   const name = `${id}-${slugOf(title)}`
   const subfolder = kind === 'proposal' ? 'proposals' : 'tasks'
   const epicName = into === 'private' ? id : name
+  const spikesDir = into === 'private' ? join(privateDir as string, 'spikes') : join(root, spikeDirOf(layout))
   const absolute =
-    kind === 'epic' ? join(epicsDir, epicName, 'epic.md') : join(epicsDir, folder as string, subfolder, `${name}.md`)
+    kind === 'spike'
+      ? join(spikesDir, name, 'record.md')
+      : kind === 'epic'
+        ? join(epicsDir, epicName, 'epic.md')
+        : join(epicsDir, folder as string, subfolder, `${name}.md`)
   if (await exists(absolute)) return refused(`${absolute} already exists; nothing was written`)
   await makeDirectory(dirname(absolute))
   await replaceFile(absolute, Buffer.from(fileOf(id, kind, title), 'utf8'), 0o644)

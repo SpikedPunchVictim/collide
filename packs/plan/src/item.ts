@@ -21,30 +21,48 @@ export const PROPOSAL_STATUSES: ReadonlyArray<{ name: string; category: Category
   { name: 'superseded', category: 'dropped' },
 ]
 
+/** A spike's five statuses, each with its category (0.10, kinds). A spike has its own words, as a proposal does. */
+export const SPIKE_STATUSES: ReadonlyArray<{ name: string; category: Category }> = [
+  { name: 'planned', category: 'ready' },
+  { name: 'running', category: 'active' },
+  { name: 'results', category: 'review' },
+  { name: 'concluded', category: 'done' },
+  { name: 'dropped', category: 'dropped' },
+]
+
 export const PROPOSAL = 'proposal'
+export const SPIKE = 'spike'
 
 export const BLOCKED_BY = 'blocked-by'
 export const IMPLEMENTS = 'implements'
+export const INFORMS = 'informs'
 
 /**
  * The link types the provider holds. `blocked-by` is the one that blocks. `implements` is a task's link to the feature it
  * builds, so its target is `feature` (revision 14); the others name an item, which is what a declaration with no `target`
- * means.
+ * means. `informs` is a link to what a spike informs, and blocks nothing.
  */
 export const LINK_TYPES: ReadonlyArray<LinkTypeDeclInput> = [
   { name: BLOCKED_BY, dir: 'out', blocking: true },
   { name: 'part-of', dir: 'out', blocking: false },
   { name: IMPLEMENTS, dir: 'out', blocking: false, target: 'feature' },
+  { name: INFORMS, dir: 'out', blocking: false },
 ]
 
 /** What a link of `type` points at: a feature when the type is declared so, otherwise an item. */
 export const targetOf = (type: string): 'item' | 'feature' => LINK_TYPES.find((declared) => declared.name === type)?.target ?? 'item'
 
-export const KNOWN_KINDS = ['task', 'epic', PROPOSAL] as const
+export const KNOWN_KINDS = ['task', 'epic', PROPOSAL, SPIKE] as const
 
-/** The statuses an item of `kind` may have: a proposal's six, and the five categories for any other kind. */
-export const statusesOf = (kind: string): ReadonlyArray<{ name: string; category: Category }> =>
-  kind === PROPOSAL ? PROPOSAL_STATUSES : CATEGORIES.map((name) => ({ name, category: name }))
+/** Whether `kind` has statuses of its own, so that a category does not name one of them. */
+export const hasOwnStatuses = (kind: string): boolean => kind === PROPOSAL || kind === SPIKE
+
+/** The statuses an item of `kind` may have: a proposal's six, a spike's five, and the categories for any other kind. */
+export const statusesOf = (kind: string): ReadonlyArray<{ name: string; category: Category }> => {
+  if (kind === PROPOSAL) return PROPOSAL_STATUSES
+  if (kind === SPIKE) return SPIKE_STATUSES
+  return CATEGORIES.map((name) => ({ name, category: name }))
+}
 
 /** The state an item of `kind` is in when its status is `status`: the status word and its category. */
 export const stateOf = (kind: string, status: string): { status: string; category: Category } => {
@@ -126,7 +144,9 @@ export function readItem(frontmatter: Record<string, unknown>): ItemResult {
   if (!isString(kind) || kind === '') return bad(`kind must be a non-empty string, not ${describe(kind)}`)
   const allowed = statusesOf(kind).map((candidate) => candidate.name)
   if (!isString(status) || !allowed.includes(status)) {
-    return bad(`status must be one of ${allowed.join(', ')}${kind === PROPOSAL ? ' for a proposal' : ''}, not ${isString(status) ? `"${status}"` : describe(status)}`)
+    const own = hasOwnStatuses(kind) ? ` for a ${kind}` : ''
+    const got = isString(status) ? `"${status}"` : describe(status)
+    return bad(`status must be one of ${allowed.join(', ')}${own}, not ${got}`)
   }
   if (!isString(title) || title.trim() === '') return bad(`title must be a non-empty string, not ${describe(title)}; ${QUOTE_HINT}`)
   if (owners !== undefined && !(Array.isArray(owners) && owners.every(isString))) return bad(`owners must be a list of strings, not ${describe(owners)}`)

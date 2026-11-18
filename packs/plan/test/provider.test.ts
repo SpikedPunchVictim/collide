@@ -5,13 +5,14 @@ import { BODY_CAP, FRONTMATTER_CAP } from '../src/read-file.ts'
 import { call, callUninitialized, connect, copyFixture, EPIC_FILE, fixture, frontmatter, makeRepo } from './helpers.ts'
 
 const EPICS = '.collide/planning/epics'
+const SPIKES = '.collide/planning/spikes'
 
 const idsOf = (result: Record<string, any> | undefined): string[] => (result?.tasks as Array<{ id: string }>).map((task) => task.id).sort()
 const taskOf = (result: Record<string, any> | undefined, id: string): Record<string, any> => (result?.tasks as Array<Record<string, any>>).find((task) => task.id === id)!
 const linksOf = (result: Record<string, any> | undefined, id: string) => taskOf(result, id).links
 
 describe('initialize', () => {
-  test('declares the kinds task, epic and proposal, the five categories as statuses, and blocked-by as the one blocking link', async () => {
+  test('declares the kinds task, epic, proposal and spike, the five categories, and one blocking link', async () => {
     const { result } = await call(fixture('basic'), 'initialize', { config: {} })
     const categories = ['ready', 'active', 'review', 'done', 'dropped'].map((name) => ({ name, category: name }))
     expect(result?.kinds).toEqual([
@@ -29,6 +30,25 @@ describe('initialize', () => {
         ],
         ops: [{ name: 'setStatus', args: expect.objectContaining({ properties: { status: { enum: ['draft', 'proposed', 'accepted', 'deferred', 'rejected', 'superseded'] } }, required: ['status'] }) }],
       },
+      {
+        name: 'spike',
+        statuses: [
+          { name: 'planned', category: 'ready' },
+          { name: 'running', category: 'active' },
+          { name: 'results', category: 'review' },
+          { name: 'concluded', category: 'done' },
+          { name: 'dropped', category: 'dropped' },
+        ],
+        ops: [
+          {
+            name: 'setStatus',
+            args: expect.objectContaining({
+              properties: { status: { enum: ['planned', 'running', 'results', 'concluded', 'dropped'] } },
+              required: ['status'],
+            }),
+          },
+        ],
+      },
     ])
     expect(result?.statuses).toEqual(categories)
     expect(result?.links.filter((link: any) => link.blocking)).toEqual([{ name: 'blocked-by', dir: 'out', blocking: true }])
@@ -38,9 +58,11 @@ describe('initialize', () => {
 })
 
 describe('list over a tree of items', () => {
-  test('lists the epic files and the files directly in tasks/ and proposals/, and reads nothing else', async () => {
+  test('lists the epic files, the files in tasks/ and proposals/ and each spike record, and nothing else', async () => {
     const { result, invalid } = await call(fixture('basic'), 'list')
-    expect(idsOf(result)).toEqual(['ep-001-aa', 'ep-002-bb', 'pr-0001-aa', 'ts-0001-aa', 'ts-0002-bb', 'ts-0003-cc', 'ts-0004-dd'])
+    expect(idsOf(result)).toEqual([
+      'ep-001-aa', 'ep-002-bb', 'pr-0001-aa', 'sp-0001-aa', 'ts-0001-aa', 'ts-0002-bb', 'ts-0003-cc', 'ts-0004-dd',
+    ])
     expect(invalid).toEqual([])
   })
 
@@ -82,7 +104,7 @@ describe('list over a tree of items', () => {
     expect(taskOf(result, 'ts-0004-dd')).toMatchObject({ kind: 'widget' })
     expect(linksOf(result, 'ts-0004-dd')).toContainEqual({ type: 'blocked-by', to: 'ts-0999-zz' })
     expect(invalid).toEqual([])
-    expect(logs).toEqual(['plan: 7 items, 0 invalid, 1 with an unknown kind, 1 with a broken link'])
+    expect(logs).toEqual(['plan: 8 items, 0 invalid, 1 with an unknown kind, 1 with a broken link'])
   })
 
   test('is empty when the repository has no planning folder', async () => {
@@ -124,11 +146,13 @@ describe('the epic comes from the folder', () => {
 })
 
 describe('only the named paths are read', () => {
-  test('spikes/, questions/, a nested folder and the READMEs are present and ignored', async () => {
+  test('questions/, a nested folder, the READMEs and the rest of a spike folder are present and ignored', async () => {
     const { result, invalid } = await call(fixture('basic'), 'list')
     expect(idsOf(result)).not.toContain('ts-0091-aa')
     expect(idsOf(result)).not.toContain('ts-0090-aa')
-    expect((result?.tasks as Array<{ path: string }>).filter((task) => /spikes|questions|README|sub\//.test(task.path))).toEqual([])
+    const paths = (result?.tasks as Array<{ path: string }>).map((task) => task.path)
+    expect(paths.filter((path) => /questions|README|sub\/|\/work\//.test(path))).toEqual([])
+    expect(paths.filter((path) => path.includes('/spikes/'))).toEqual([`${SPIKES}/sp-0001-aa-demo/record.md`])
     expect(invalid).toEqual([])
   })
 })
@@ -226,13 +250,13 @@ describe('the root', () => {
   test('the shared root is read from root, not from the working directory', async () => {
     const { result } = await call(fixture('basic'), 'list')
     expect(process.cwd()).not.toBe(fixture('basic'))
-    expect(result?.tasks).toHaveLength(7)
+    expect(result?.tasks).toHaveLength(8)
   })
 
   test('a second initialize moves the provider to the new root', async () => {
     const client = connect()
     await client.request('initialize', { config: {}, root: fixture('basic') })
-    expect((await client.request('list')).result?.tasks).toHaveLength(7)
+    expect((await client.request('list')).result?.tasks).toHaveLength(8)
     await client.request('initialize', { config: {}, root: makeRepo({}) })
     expect((await client.request('list')).result?.tasks).toEqual([])
     await client.close()
@@ -316,21 +340,32 @@ describe("Collide's own items", () => {
 
   /** Every `epic.md` and every `.md` file directly in a `tasks/` folder under this repository's epics/. */
   const expectedFiles = (): string[] =>
-    readdirSync(join(root, '.collide/planning'), { recursive: true, encoding: 'utf8' }).filter((path) => /^epics\/[^/]+\/(epic\.md|tasks\/[^/]+\.md)$/.test(path))
+    readdirSync(join(root, '.collide/planning/epics'), { recursive: true, encoding: 'utf8' }).filter((path) =>
+      /^[^/]+\/(epic\.md|tasks\/[^/]+\.md)$/.test(path),
+    )
 
-  test('list returns every item under epics/ with no task.invalid, and does not read spikes/', async () => {
+  /** The spike folders of this repository's spikes/, listed one level down and never inside. */
+  const spikeFolders = (): string[] =>
+    readdirSync(join(root, '.collide/planning/spikes'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+
+  test('list returns every item under epics/ and every spike record with no task.invalid', async () => {
     const { result, invalid } = await call(root, 'list')
     expect(invalid).toEqual([])
-    expect(result?.tasks.length).toBe(expectedFiles().length)
+    expect(result?.tasks.length).toBe(expectedFiles().length + spikeFolders().length)
     expect(result?.tasks.length).toBeGreaterThan(40)
-    expect((result?.tasks as Array<{ path: string }>).filter((task) => task.path.includes('/spikes/'))).toEqual([])
+    const spikes = (result?.tasks as Array<{ path: string }>).filter((task) => task.path.includes('/spikes/'))
+    const records = spikeFolders().map((name) => `.collide/planning/spikes/${name}/record.md`)
+    expect(spikes.map((task) => task.path).sort()).toEqual(records.sort())
     // The first call over the real tree pays the cold start (about 1.5 s alone), which passed 5 s once under the
     // parallel `pnpm -r test` of the full gates.
   }, 30_000)
 
-  test('every one of them is a task or an epic, and every blocked-by link has a target', async () => {
+  test('every one of them is a task, an epic or a spike, and every blocked-by link has a target', async () => {
     const { result, logs } = await call(root, 'list')
-    expect(new Set((result?.tasks as Array<{ kind: string }>).map((task) => task.kind))).toEqual(new Set(['task', 'epic']))
+    const kinds = (result?.tasks as Array<{ kind: string }>).map((task) => task.kind)
+    expect(new Set(kinds)).toEqual(new Set(['task', 'epic', 'spike']))
     expect(logs).toEqual([])
   })
 })
