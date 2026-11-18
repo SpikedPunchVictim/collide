@@ -1,7 +1,7 @@
 ---
 id: ts-0118-wp
 kind: task
-status: ready
+status: done
 title: "Views core: set algebra, closure and error counts"
 owners: []
 links:
