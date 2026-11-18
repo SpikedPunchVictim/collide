@@ -1,7 +1,7 @@
 ---
 id: ts-0113-ck
 kind: task
-status: ready
+status: done
 title: "Daemon sources: any provider through task.get, task.apply and task.preview"
 owners: []
 links:
