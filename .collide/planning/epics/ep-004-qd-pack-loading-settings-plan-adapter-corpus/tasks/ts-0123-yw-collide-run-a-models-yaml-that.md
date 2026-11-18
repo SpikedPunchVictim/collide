@@ -1,7 +1,7 @@
 ---
 id: ts-0123-yw
 kind: task
-status: ready
+status: done
 title: "collide run: a models.yaml that fails to load is named, not told it lacks the alias"
 owners: []
 links: []
