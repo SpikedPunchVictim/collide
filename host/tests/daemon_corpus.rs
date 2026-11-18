@@ -859,7 +859,7 @@ fn a_task_apply_write_is_one_event_with_the_connections_actor_and_the_watchers_n
         list.tasks[0].state.status == "done"
     });
 
-    let events = rig.source_events_after("files", before);
+    let events = rig.wait_events("files", before, 2);
     assert_eq!(
         described(&events),
         [
