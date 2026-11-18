@@ -1,7 +1,7 @@
 ---
 id: ts-0105-jv
 kind: task
-status: active
+status: done
 title: "Owner check: layers, trust and an agent entry read back"
 owners: []
 links:
@@ -655,24 +655,36 @@ the worktree's skills, listed as `repo-skills:<name>` (`host/src/adapters/claude
      and `host/src/run_cli.rs` `a_runs_warnings_are_printed_one_line_each_and_none_prints_nothing`.
 
 7. A skill's own `hooks` and `allowed-tools` take effect through the plugin, as they do in plain `claude`. You accepted
-   that (`ts-0107-rj`, 2026-11-17). Each `Skill` call still asks first, which is what Run 1 checks. Nothing more to do
-   here.
+   that (`ts-0107-rj`, 2026-11-17). Corrected after this check (2026-11-18): a `Skill` call asks first only when the
+   skill has a key `claude` does not count as safe, such as `hooks` or `allowed-tools`. `owl-word` is text alone, so
+   neither run's Skill call asked; Run 1's and Run 2's request lines above expected one. You accepted the rule as
+   `claude` has it; plan 0.3 says so. Nothing more to do here.
 
 ### 7. Record
 
 Fill one line each. "Result" is pass, partial or fail, and what you saw if it was not a pass.
 
-- Stage 4a judged done by the owner on: `____-__-__`
-- Cap set for step 6: `$____` (recommended $0.30). Spend, from the two `total` lines: `$____`.
-- 2. Agent entry and layers. Result: / time: / spend: `$0` / awkward:
-- 3. Trust prompt and diff. Result: / time: / spend: `$0` / awkward:
-- 4. Secret in the real keychain. Result: / time: / spend: `$0` / awkward (any keychain prompt, which command):
-- 5. `git:` packs and the new-host question. Result: / time: / spend: `$0` / awkward:
-- 6. Instructions, Run 1. Result: / time: / spend: `$____` / awkward:
-- 6. Instructions, Run 2 (`--config none`, a no to Skill). Result: / time: / spend: `$____` / awkward:
-- 6. The `none` line and the warning: checked by hand (how), or "not checkable by hand in 4a". Result:
+- Stage 4a judged done by the owner on: `2026-11-18` (the day the owner finished this check).
+- Cap set for step 6: not reported. Spend: not recorded (the check's folder was removed before the totals were read).
+- 2. Agent entry and layers. Result: pass (finished, nothing failed) / time: not reported / spend: `$0` / awkward: none.
+- 3. Trust prompt and diff. Result: pass, after a re-copy / time: not reported / spend: `$0` / awkward: a partial copy
+  of an indented block broke `pack.yaml` (`mapping values are not allowed`); the note after "Checked against the code"
+  now warns of it.
+- 4. Secret in the real keychain. Result: pass (finished, nothing failed) / time: not reported / spend: `$0` / awkward:
+  none reported.
+- 5. `git:` packs and the new-host question. Result: pass (finished, nothing failed) / time: not reported / spend: `$0`
+  / awkward: none reported.
+- 6. Instructions, Run 1. Result: pass, with the corrected expectation of step 7: the canary and
+  `repo-skills:owl-word`'s word were given, and no Skill request is expected for a skill of text alone (the owner does
+  not recall one) / time: not reported / spend: not recorded / awkward: a pasted block added `agents:` and `ask:` to
+  `~/.config/collide/models.yaml` (`unknown field agents`); the agent's fix removed them.
+- 6. Instructions, Run 2 (`--config none`, a no to Skill). Result: partial: `none` held (no user layer), the skill was
+  listed and its call ran, and no Skill request appeared, so the no could not be given. The cause is `claude`'s own rule
+  (step 7), accepted by the owner 2026-11-18 / time: not reported / spend: not recorded / awkward: the missing request.
+- 6. The `none` line and the warning: not reported. The gated test of step 6.5 ran; its `finding` line was not kept.
 - Whether your own `CLAUDE.md` and skills under `user` loaded in Run 1 (the question `ts-0103-sa` and `ts-0106-nr` left
-  to this check). Result:
+  to this check). Result: your `CLAUDE.md` did: Run 1's report named `~/.claude/CLAUDE.md` and the file it imports, and
+  a user hook's context. Your own skills: not checked.
 
 ### Clean up
 
@@ -702,13 +714,16 @@ Do the steps in this order. Nothing here uses a glob with `rm`.
 3. Remove what `claude` wrote under your own home for step 6. It names a project folder after the worktree's path,
    so each folder name holds the temp folder's random suffix. List them, then remove each by its exact name.
 
+   In a new terminal `REAL_HOME` is unset and `HOME` may still be this check's, so set it from your account first:
+
    ```sh
-   ls "$REAL_HOME/.claude/projects" | grep collide-check
+   export REAL_HOME="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory | cut -d' ' -f2)"
+   ls "$REAL_HOME/.claude/projects" | grep -e collide-check -e -tmp-cdt-
    rm -r "$REAL_HOME/.claude/projects/<exact folder name>"      # once for each folder listed
    ```
 
-   The path form of the names (`-private-tmp-collide-check-...`) is (unconfirmed); the `ls` shows the real ones.
-   If you ran the gated test in step 6.5, it wrote folders of its own there too, named for its own temp folder.
+   The names, seen at this check (2026-11-18): `-private-tmp-collide-check-<suffix>-root-claude-data-workspaces-<run>`
+   and `...-data-runs-<run>` for the runs, and `-private-tmp-cdt-<pid>-<n>-wt` for the gated test in step 6.5.
 
 4. Remove the temp folder. Collide's cache holds read-only copies of the SDK and the packs, so make the tree writable
    first (`ts-0095-kp`, Not done: no cache cleaner). The guard refuses any path that is not this check's.
@@ -779,5 +794,7 @@ By item id, from the Not done and Decisions sections. None is a defect of this c
   - `host/tests/adapters/claude/repo_instructions.rs`, `instructions.rs`, `instruction_warnings.rs`, `launch.rs`,
     `capabilities.rs`, `run_options.rs`; the gated `repo_instructions_live.rs`.
 
-- Owner result:
-- What was awkward:
+- Owner result: done 2026-11-18. Sections 2 to 6 finished; Run 2's Skill request never came, which is `claude`'s rule
+  for a skill of text alone, accepted as it is (plan 0.3).
+- What was awkward: the YAML copy in step 3, the `models.yaml` paste in step 6, and Clean up step 3, which missed the
+  folders (`REAL_HOME` was unset, and its grep did not match the gated test's); fixed above.
