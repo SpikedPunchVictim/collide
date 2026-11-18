@@ -1,7 +1,7 @@
 ---
 id: ts-0125-uh
 kind: task
-status: ready
+status: done
 title: "Plan pack: the private root"
 owners: []
 links:
