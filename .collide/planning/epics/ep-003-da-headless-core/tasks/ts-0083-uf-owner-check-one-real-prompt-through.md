@@ -267,7 +267,17 @@ If something goes wrong:
 
 **Results.**
 
-- Owner result:
+- Owner result (2026-11-18): run by the owner, no failure reported. Read by the agent from the store, git and
+  `daemon.log`: `run-1794991783994-2`, started from the app on a board branch made from `main` a minute before; the
+  agent asked for Edit and Bash, committed `2634ea0` (`ts-0085-zs`, three files under `app/`) and the phase ended with
+  code 0; at review the scratch task was `review`. After Accept the commit sits on the old HEAD of the board branch, the
+  board has nothing uncommitted, the work folder, its worktree entry and its `collide/<run id>` branch are gone, the
+  scratch task is `done` and the run `ended` with outcome `done`. The diff holds no name that should not be public. Two
+  notes. `collide stop` after the accept stopped nothing (`stopping 0 phase(s)`) and left the app window open, as it
+  should: it ends a run, not the app (Cmd-Q quits it). And `daemon.log` has `a connection was refused: could not read
+  the pid of the connecting peer (LOCAL_PEERPID)` just before each CLI connection: the CLI's probe (`launch.rs`
+  `answers()`, connect and close) closes before the daemon reads its pid, and the daemon logs that as a refusal. Log
+  noise, not a refused command.
 - Time it took (from "Start" to "Accepted", and how long the agent worked):
 - What was awkward:
 
