@@ -1,7 +1,7 @@
 ---
 id: ts-0115-ug
 kind: task
-status: ready
+status: done
 title: "Corpus core: categories, identity, collisions, invalid items and links"
 owners: []
 links:
