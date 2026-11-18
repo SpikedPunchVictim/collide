@@ -67,7 +67,7 @@ impl Queue {
         });
     }
 
-    /// Adds an item, or replaces the one with the same id.
+    /// Adds an item, or replaces the one with the same id. A payload the item already has stays.
     pub fn push(&self, item: QueueItem) {
         match serde_json::to_string(&item) {
             Ok(json) => {
@@ -80,6 +80,47 @@ impl Queue {
             }
             Err(error) => (self.log)(&format!("queue item {} is not JSON: {error}", item.id)),
         }
+        self.show(item);
+    }
+
+    /// Adds an item that carries a `payload` (a queued write, ts-0114-hr), stored with it in one row. Unlike
+    /// [`Queue::push`] it fails when the store cannot keep it: a write that was not kept must not be told as queued.
+    pub fn push_with_payload(&self, item: QueueItem, payload: &str) -> Result<(), String> {
+        let json = serde_json::to_string(&item)
+            .map_err(|error| format!("queue item {} is not JSON: {error}", item.id))?;
+        self.store
+            .set_queue_item_with_payload(&item.id, item.run.as_deref(), &json, payload)
+            .map_err(|error| format!("queue item {} was not stored: {error}", item.id))?;
+        self.show(item);
+        Ok(())
+    }
+
+    /// The payload of item `id`, when it has one and the store can be read.
+    pub fn payload(&self, id: &str) -> Option<String> {
+        match self.store.queue_payload(id) {
+            Ok(payload) => payload,
+            Err(error) => {
+                (self.log)(&format!(
+                    "queue item {id}: its payload was not read: {error}"
+                ));
+                None
+            }
+        }
+    }
+
+    /// The payload of every item that has one, as `(id, payload)`, oldest first.
+    pub fn payloads(&self) -> Vec<(String, String)> {
+        match self.store.queue_payloads() {
+            Ok(rows) => rows,
+            Err(error) => {
+                (self.log)(&format!("the queue items' payloads were not read: {error}"));
+                Vec::new()
+            }
+        }
+    }
+
+    /// Puts an item in the list the clients read, or replaces the one with its id.
+    fn show(&self, item: QueueItem) {
         let mut items = locked(&self.items);
         match items.iter_mut().find(|held| held.id == item.id) {
             Some(held) => *held = item,
@@ -328,6 +369,56 @@ mod tests {
             *told.lock().unwrap(),
             [change(2, &[], &["a"]), change(1, &[], &["b"])]
         );
+    }
+
+    #[test]
+    fn an_item_keeps_its_payload_in_one_row_and_loses_it_when_taken() {
+        let dir = TempDir::new();
+        let queue = open(&dir);
+        queue
+            .push_with_payload(item("a", "run-1", QueueKind::Conflict, 1), "{\"op\":1}")
+            .unwrap();
+        queue.push(item("b", "run-1", QueueKind::DiskFull, 2));
+        assert_eq!(queue.payload("a").as_deref(), Some("{\"op\":1}"));
+        assert_eq!(queue.payload("b"), None);
+        assert_eq!(
+            queue.payloads(),
+            [("a".to_string(), "{\"op\":1}".to_string())]
+        );
+        queue.take("a");
+        assert_eq!(queue.payload("a"), None);
+    }
+
+    #[test]
+    fn replacing_an_item_with_push_leaves_its_payload_and_its_place() {
+        let dir = TempDir::new();
+        let queue = open(&dir);
+        queue
+            .push_with_payload(item("a", "run-1", QueueKind::Conflict, 1), "first")
+            .unwrap();
+        queue
+            .push_with_payload(item("b", "run-1", QueueKind::Conflict, 2), "second")
+            .unwrap();
+        let mut newer = item("a", "run-1", QueueKind::Conflict, 1);
+        newer.title = "still waiting".to_string();
+        queue.push(newer);
+        let ids: Vec<String> = queue.payloads().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(ids, ["a", "b"]);
+        assert_eq!(queue.payload("a").as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn a_payload_survives_a_reopened_store() {
+        let dir = TempDir::new();
+        {
+            let queue = open(&dir);
+            queue
+                .push_with_payload(item("a", "run-1", QueueKind::Conflict, 1), "kept")
+                .unwrap();
+        }
+        let queue = open(&dir);
+        assert_eq!(queue.payload("a").as_deref(), Some("kept"));
+        assert!(queue.get("a").is_some());
     }
 
     #[test]

@@ -310,13 +310,15 @@ class LoopController implements Loop {
   /** The scratch task for a prompt: the one a refused start left, or a new one. Null when the daemon refused it. */
   private async taskFor(board: string, prompt: string): Promise<string | null> {
     if (this.unstarted?.board === board && this.unstarted.prompt === prompt) return this.unstarted.key
-    const { result } = await this.owner.rpc('task.apply', {
+    const { result, queued } = await this.owner.rpc('task.apply', {
       board,
       source: 'scratch',
       apply: { op: 'create', args: { prompt } },
     })
-    if (result.outcome !== 'ok') {
-      const message = result.outcome === 'refused' ? result.message : 'Collide could not make the task.'
+    if (result?.outcome !== 'ok') {
+      // A scratch write is never queued, so `queued` is for the type's sake: it says why if one ever is.
+      const fallback = queued?.reason ?? 'Collide could not make the task.'
+      const message = result?.outcome === 'refused' ? result.message : fallback
       this.dispatch({ type: 'refused', message })
       return null
     }

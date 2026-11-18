@@ -178,7 +178,9 @@ fn apply(
         },
         commit: false,
     };
-    call::<_, TaskApplyResult>(client, "task.apply", &params).result
+    call::<_, TaskApplyResult>(client, "task.apply", &params)
+        .result
+        .expect("a scratch write is applied, never queued")
 }
 
 fn create(client: &mut OwnerClient, board: &str, prompt: &str) -> Task {
@@ -520,7 +522,7 @@ fn a_write_names_its_source_one_way_or_another() {
     params.apply.id = Some("scratch:1".to_string());
     params.apply.args = BTreeMap::from([("status".to_string(), json!("active"))]);
     let result: TaskApplyResult = call(&mut client, "task.apply", &params);
-    assert!(matches!(result.result, ApplyResult::Ok { .. }));
+    assert!(matches!(result.result, Some(ApplyResult::Ok { .. })));
 
     // A `source` that disagrees with the id's is refused.
     params.source = Some("plan".to_string());
@@ -552,7 +554,7 @@ fn a_write_with_a_stale_version_is_a_conflict_that_carries_the_current_task() {
     };
     let result: TaskApplyResult = call(&mut client, "task.apply", &params);
     match result.result {
-        ApplyResult::Conflict { current } => {
+        Some(ApplyResult::Conflict { current }) => {
             assert_eq!(current.version, "2");
             assert_eq!(current.state.status, "active");
         }

@@ -234,6 +234,12 @@ impl Source {
         }
     }
 
+    /// Whether this source's write goes into a checkout, so it waits for a busy one and for the line lock (ts-0114-hr).
+    /// A scratch write lives in Collide's store and touches none.
+    pub fn writes_checkout(&self) -> bool {
+        matches!(self.backing, Backing::Pack(_))
+    }
+
     fn provider(&self) -> &dyn TaskProvider {
         match &self.backing {
             Backing::Scratch(scratch) => scratch,

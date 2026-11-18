@@ -68,8 +68,9 @@ pub struct Migration {
 
 /// The migrations, in order. `events` holds the event log: `seq` is the event's number, `wall_ms` is the time it was
 /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
-/// (ts-0104-gx): one JSON row for each warning, in the order they were written.
-pub const MIGRATIONS: [Migration; 8] = [
+/// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
+/// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
+pub const MIGRATIONS: [Migration; 9] = [
     Migration {
         version: 1,
         name: "events",
@@ -133,6 +134,11 @@ pub const MIGRATIONS: [Migration; 8] = [
               json TEXT NOT NULL
           );
           CREATE INDEX run_warnings_by_run ON run_warnings (run)",
+    },
+    Migration {
+        version: 9,
+        name: "queue_item_payload",
+        sql: "ALTER TABLE queue_items ADD COLUMN payload TEXT",
     },
 ];
 
@@ -556,6 +562,49 @@ impl Store {
             )
             .map_err(|e| sql_error("writing a queue item", e))?;
         Ok(())
+    }
+
+    /// Keeps a Queue item with the `payload` it carries (a queued write, ts-0114-hr) in one row. Writing the same `id`
+    /// again replaces both. [`Store::set_queue_item`] leaves a payload that is there alone.
+    pub fn set_queue_item_with_payload(
+        &self,
+        id: &str,
+        run: Option<&str>,
+        json: &str,
+        payload: &str,
+    ) -> Result<(), StoreError> {
+        self.connect()?
+            .execute(
+                "INSERT INTO queue_items (id, run, json, payload) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (id) DO UPDATE
+                 SET run = excluded.run, json = excluded.json, payload = excluded.payload",
+                params![id, run, json, payload],
+            )
+            .map_err(|e| sql_error("writing a queue item with its payload", e))?;
+        Ok(())
+    }
+
+    /// The payload of the Queue item `id`, when it has one.
+    pub fn queue_payload(&self, id: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.connect()?;
+        let found = conn.query_row(
+            "SELECT payload FROM queue_items WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        match found {
+            Ok(payload) => Ok(payload),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(sql_error("reading a queue item's payload", error)),
+        }
+    }
+
+    /// The payload of every Queue item that has one, as `(id, payload)`, in the order the items were first written.
+    pub fn queue_payloads(&self) -> Result<Vec<(String, String)>, StoreError> {
+        self.pairs(
+            "SELECT id, payload FROM queue_items WHERE payload IS NOT NULL ORDER BY rowid",
+            "reading the queue items' payloads",
+        )
     }
 
     /// Takes one Queue item out. An `id` that is not there is not an error.

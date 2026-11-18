@@ -31,11 +31,21 @@ export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dro
 export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
 
 /**
- * `task.apply` result: the provider's answer, and the commit when `commit` was asked for and the write succeeded.
+ * `task.apply` result: the provider's answer, and the commit when `commit` was asked for and the write
+ * succeeded. A queued write has no `result`; `queued` says why.
  */
 export interface TaskApplyResult {
   commit?: string | null
-  result: ApplyResult
+  queued?: WriteQueued | null
+  result?: ApplyResult | null
+}
+/**
+ * A write the daemon stored because its checkout is busy (0.4, Root busy). `item` is the Queue item that says
+ * why.
+ */
+export interface WriteQueued {
+  item: string
+  reason: string
 }
 /**
  * One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.

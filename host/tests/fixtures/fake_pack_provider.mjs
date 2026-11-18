@@ -10,8 +10,10 @@
 // `linger` answers like any task and then ignores the end of its input, so only a signal ends it,
 // `echo` is a task whose `fields` hold what the process saw (what `initialize` gave it, its working folder, its pid,
 // the names of its environment variables and the version below), and any other id is a plain task.
-// `apply` and `preview` answer by their `op`: `ok`, `conflict` or `refused`.
-import { appendFileSync } from 'node:fs'
+// `apply` and `preview` answer by their `op`: `ok`, `conflict` or `refused`. `apply` also answers `gate`, which
+// appends `start <source>` to the file `args.log`, waits (60 s at most) until the file `args.open` exists, appends
+// `end <source>`, and answers `ok`: a test holds a write in the provider to see what waits for it.
+import { appendFileSync, existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 const SOURCE = '__SOURCE__'
@@ -60,7 +62,16 @@ const get = (params) => {
   return [{ task: task(params.id) }, null]
 }
 
+const gate = (args) => {
+  appendFileSync(args.log, `start ${SOURCE}\n`)
+  const sleeper = new Int32Array(new SharedArrayBuffer(4))
+  const until = Date.now() + 60000
+  while (!existsSync(args.open) && Date.now() < until) Atomics.wait(sleeper, 0, 0, 20)
+  appendFileSync(args.log, `end ${SOURCE}\n`)
+}
+
 const apply = (params) => {
+  if (params.op === 'gate') gate(params.args)
   if (params.op === 'conflict') return { outcome: 'conflict', current: task() }
   if (params.op === 'refused') return { outcome: 'refused', message: 'illegal transition' }
   const written = { ...task(), checkout: params.checkout ?? init.root }

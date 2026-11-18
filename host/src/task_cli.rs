@@ -4,7 +4,7 @@
 //! provider supervisor.
 
 use crate::builtin_packs::{BuiltinPacks, Environment};
-use crate::checkout::{CheckoutError, main_checkout, resolve_checkout};
+use crate::checkout::{CheckoutError, main_checkout, resolve_checkout, root_busy};
 use crate::commit::commit_files;
 use crate::pack_location::{self, locate_bundle};
 use crate::provider_client::ProviderClient;
@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// Exit codes. An op's outcome has its own: `ok` is 0, `conflict` 4 and `refused` 5.
 pub mod exit {
@@ -55,6 +56,7 @@ usage:
   collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
   collide task create <title> [epic=<epic>] [kind=task|epic|proposal] [seed=<number>] [--checkout <path>] [--commit] [--json]
   collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]
+  a write (an op, create, reid) also takes [--wait <seconds> | --no-wait]
   collide sections [--json]";
 
 /// What `collide help` prints.
@@ -86,6 +88,9 @@ is left untouched). --checkout <path> names another checkout instead: <path> mus
 for this repository (relative paths are taken from the working directory), or nothing is written and the exit code is
 2. The item is then read from that checkout too, so a version check is against the file that is written. A write
 leaves the file modified (or untracked, for a new one) and commits nothing.
+A write waits while its checkout is in the middle of a rebase, a merge, a cherry-pick, a revert or a bisect: it says
+which, once, and goes on when the operation ends. It waits 10 minutes; --wait <seconds> sets that, and --no-wait does
+not wait. When the wait ends, or with --no-wait, nothing is written and the exit code is 5.
 --commit commits the write, in the checkout it went to: exactly the files the write reported (for reid, the new and
 the removed paths too), with a message naming the item and the op, such as: task ts-0012-ua setStatus: <title>. Another
 modified, staged or untracked file is not touched, and what you have staged stays staged. Hooks run (there is no
@@ -110,7 +115,7 @@ a blocked-by target that is no item, keep their items from being ready and are r
 
 exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line (also: a
 --checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was written),
-5 refused by the provider
+5 refused by the provider (also: the checkout stayed busy for the wait)
 
 The provider is found through COLLIDE_BUILTIN_PACKS, else the staged bundle above the executable (pnpm build:packs),
 else the bundle beside it. `node` is taken from PATH.";
@@ -167,7 +172,38 @@ pub struct WriteOptions {
     pub checkout: Option<String>,
     /// `--commit`: commit the files the write reported.
     pub commit: bool,
+    /// `--wait <seconds>` and `--no-wait`: how long to wait for a checkout in the middle of a rebase or the like.
+    pub wait: Wait,
 }
+
+/// How long a write waits for a busy checkout (0.4, Root busy). The CLI's direct path waits in place: there is no queue
+/// to leave the write in until it goes through the daemon.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Wait {
+    /// [`DEFAULT_WAIT`].
+    #[default]
+    Default,
+    /// `--wait <seconds>`.
+    Seconds(u64),
+    /// `--no-wait`: refuse at once.
+    Never,
+}
+
+impl Wait {
+    fn limit(self) -> Duration {
+        match self {
+            Wait::Default => DEFAULT_WAIT,
+            Wait::Seconds(seconds) => Duration::from_secs(seconds),
+            Wait::Never => Duration::ZERO,
+        }
+    }
+}
+
+/// How long a write waits for a busy checkout when `--wait` does not say.
+pub const DEFAULT_WAIT: Duration = Duration::from_secs(10 * 60);
+
+/// How often a waiting write looks at its checkout again.
+const WAIT_POLL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CreateOptions {
@@ -260,6 +296,15 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
                 write.commit = true;
                 continue;
             }
+            "--no-wait" => {
+                set_wait(&mut write, Wait::Never, "--no-wait")?;
+                continue;
+            }
+            "--wait" => {
+                let seconds = parse_seconds(words.next().map(String::as_str))?;
+                set_wait(&mut write, Wait::Seconds(seconds), "--wait")?;
+                continue;
+            }
             "--checkout" => match words.next() {
                 Some(path) => path.clone(),
                 None => {
@@ -270,6 +315,11 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
             },
             other => match other.strip_prefix("--checkout=") {
                 Some(path) => path.to_string(),
+                None if other.starts_with("--wait=") => {
+                    let seconds = parse_seconds(other.strip_prefix("--wait="))?;
+                    set_wait(&mut write, Wait::Seconds(seconds), "--wait")?;
+                    continue;
+                }
                 None if other.starts_with("--") => {
                     return Err(CliError::usage(format!("unknown option `{other}`")));
                 }
@@ -327,7 +377,8 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
     }
     if op.is_none() && write != WriteOptions::default() {
         return Err(CliError::usage(
-            "--checkout and --commit are for a write: give an op after the id, such as setStatus active",
+            "--checkout, --commit, --wait and --no-wait are for a write: give an op after the id, \
+             such as setStatus active",
         ));
     }
     Ok(Command::Task(TaskOptions {
@@ -337,6 +388,26 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
         write,
         json,
     }))
+}
+
+/// Sets how long to wait, once: `--wait` and `--no-wait` say opposite things, and either given twice is a mistake.
+fn set_wait(write: &mut WriteOptions, wait: Wait, option: &str) -> Result<(), CliError> {
+    if write.wait != Wait::Default {
+        return Err(CliError::usage(format!(
+            "give one of --wait <seconds> and --no-wait, once; `{option}` came after another"
+        )));
+    }
+    write.wait = wait;
+    Ok(())
+}
+
+/// The seconds `--wait` takes: a whole number.
+fn parse_seconds(given: Option<&str>) -> Result<u64, CliError> {
+    let message = "--wait needs a number of seconds, such as --wait 30";
+    given
+        .filter(|text| !text.is_empty())
+        .and_then(|text| text.parse::<u64>().ok())
+        .ok_or_else(|| CliError::usage(message))
 }
 
 /// A started provider, initialized with the main checkout as its root.
@@ -408,6 +479,52 @@ fn open(cwd: &Path, checkout: Option<&str>) -> Result<Session, CliError> {
         root,
         checkout,
     })
+}
+
+/// Holds a write back while its checkout is in the middle of a rebase, a merge, a cherry-pick, a revert or a bisect
+/// (0.4, Root busy). It says which, once, on `err`, and looks again every [`WAIT_POLL`] until the operation ends or
+/// the wait does; then nothing was written and the exit code is `REFUSED`. It comes before the item is read, so the
+/// version the write is made against is the one the finished operation left.
+///
+/// Two processes that write one root, this one and a daemon, are not serialized: the daemon's line lock is in its own
+/// process, and this path has only the provider's lock file. The CLI cannot see a phase that is live in a checkout
+/// either: only the daemon knows. Both come with the CLI's move behind the daemon (`ts-0120-wm`).
+fn wait_until_free(session: &Session, wait: Wait, err: &mut dyn Write) -> Result<(), CliError> {
+    let dir = session.written_in();
+    let started = Instant::now();
+    let mut said = false;
+    loop {
+        let busy = root_busy(&[], dir).map_err(|error| {
+            CliError::failed(format!(
+                "could not tell whether {} is busy: {error}",
+                dir.display()
+            ))
+        })?;
+        let Some(what) = busy else {
+            return Ok(());
+        };
+        let reason = format!("{what} is in progress in {}", dir.display());
+        if wait == Wait::Never {
+            return Err(CliError::new(
+                exit::REFUSED,
+                format!("{reason}; nothing was written (--no-wait)"),
+            ));
+        }
+        if started.elapsed() >= wait.limit() {
+            return Err(CliError::new(
+                exit::REFUSED,
+                format!(
+                    "{reason}; it did not end in {} seconds, so nothing was written",
+                    wait.limit().as_secs()
+                ),
+            ));
+        }
+        if !said {
+            let _ = writeln!(err, "collide: {reason}; waiting for it to end");
+            said = true;
+        }
+        std::thread::sleep(WAIT_POLL);
+    }
 }
 
 fn emit(out: &mut dyn Write, text: &str) -> Result<(), CliError> {
@@ -580,6 +697,9 @@ fn run_task(
     err: &mut dyn Write,
 ) -> Result<u8, CliError> {
     let mut session = open(cwd, options.write.checkout.as_deref())?;
+    if options.op.is_some() {
+        wait_until_free(&session, options.write.wait, err)?;
+    }
     let (tasks, _invalid) = session.list()?;
     let item = lookup(&tasks, &options.id)?;
     let found = readiness(&tasks);
@@ -861,6 +981,7 @@ fn run_create(
     err: &mut dyn Write,
 ) -> Result<u8, CliError> {
     let mut session = open(cwd, options.write.checkout.as_deref())?;
+    wait_until_free(&session, options.write.wait, err)?;
     let op = declared_op(&session, "create")?;
     let mut args = map_args(&op, &options.words).map_err(CliError::usage)?;
     if let Some(Value::String(epic)) = args.get("epic").cloned() {
@@ -910,6 +1031,7 @@ fn run_reid(
     err: &mut dyn Write,
 ) -> Result<u8, CliError> {
     let mut session = open(cwd, options.write.checkout.as_deref())?;
+    wait_until_free(&session, options.write.wait, err)?;
     let op = declared_op(&session, "reid")?;
     let (tasks, _invalid) = session.list()?;
     let item = lookup(&tasks, &options.id)?;

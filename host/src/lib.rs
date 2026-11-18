@@ -77,5 +77,6 @@ pub mod ui_tools;
 pub mod user_packs;
 pub mod working_copy;
 pub mod workspace;
+pub mod write_guard;
 
 pub const NAME: &str = "collide-host";

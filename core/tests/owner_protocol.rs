@@ -694,6 +694,16 @@ fn every_queue_answer_result_round_trips() {
 }
 
 #[test]
+fn a_queued_write_has_no_result_and_names_its_item_and_why() {
+    let queued = json!({
+        "queued": { "item": "write-1", "reason": "a rebase is in progress in /work" }
+    });
+    assert_eq!(Method::TaskApply.normalize_result(&queued).unwrap(), queued);
+    let done = json!({ "result": { "outcome": "refused", "message": "no" } });
+    assert_eq!(Method::TaskApply.normalize_result(&done).unwrap(), done);
+}
+
+#[test]
 fn a_run_diff_may_carry_one_files_patch() {
     let result = json!({
         "base": "abc", "head": "def", "files": [], "collapsed": [], "more": 0,

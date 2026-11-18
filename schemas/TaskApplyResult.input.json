@@ -401,11 +401,28 @@
         "version"
       ],
       "type": "object"
+    },
+    "WriteQueued": {
+      "additionalProperties": false,
+      "description": "A write the daemon stored because its checkout is busy (0.4, Root busy). `item` is the Queue item that says\nwhy.",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "reason"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.apply` result: the provider's answer, and the commit when `commit` was asked for and the write succeeded.",
+  "description": "`task.apply` result: the provider's answer, and the commit when `commit` was asked for and the write\nsucceeded. A queued write has no `result`; `queued` says why.",
   "properties": {
     "commit": {
       "type": [
@@ -413,13 +430,27 @@
         "null"
       ]
     },
+    "queued": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WriteQueued"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "result": {
-      "$ref": "#/$defs/ApplyResult"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApplyResult"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "required": [
-    "result"
-  ],
   "title": "TaskApplyResult",
   "type": "object"
 }

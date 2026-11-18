@@ -79,6 +79,7 @@ use crate::queue::Queue;
 use crate::shim::ChildStdio;
 use crate::store::Store;
 use crate::workspace::{BuiltinWorkspace, Git, WorkspaceError, WorkspaceSpec};
+use crate::write_guard::LivePhases;
 use collide_core::adapter::{AgentAdapter, LaunchRequest, refuse_unmet_capabilities};
 use collide_core::agent::{Capabilities, ModelRef, SessionStart};
 use collide_core::change::{Actor, ActorKind};
@@ -132,6 +133,8 @@ pub type BaseEnvSource = Arc<dyn Fn(Duration) -> Option<BaseEnvironment> + Send 
 
 /// What [`FileRuns`] is made of.
 pub struct FileRunConfig {
+    /// Where a run's phase is live, for the writes that wait for it ([`crate::write_guard`]).
+    pub live: Arc<LivePhases>,
     pub runs_dir: PathBuf,
     /// The folder the runs' worktrees are made in, one folder for each run.
     pub workspaces_dir: PathBuf,
@@ -395,6 +398,12 @@ impl FileRuns {
                     match serde_json::from_str::<RunContext>(&json) {
                         Ok(ctx) => {
                             let workspace = restored_workspace(&config, &ctx);
+                            // A run left in use by a daemon that ended is live again in the same checkout.
+                            if ctx.workspace_state == WorkspaceState::InUse {
+                                config
+                                    .live
+                                    .started(&run, Path::new(&ctx.workspace_path), false);
+                            }
                             live.insert(run, Arc::new(Mutex::new(Live { workspace, ctx })));
                         }
                         Err(error) => {
@@ -705,6 +714,11 @@ impl FileRuns {
             WorkspaceError::Disk(DiskError::Paused(pause)) => Halt::Disk(pause),
             other => Halt::from(problem(format!("starting the phase: {other}"))),
         })?;
+        if let Some(location) = workspace.location() {
+            self.config
+                .live
+                .started(run, Path::new(&location.path), false);
+        }
         // A workspace that is `idle` (a worktree a re-prompt takes over) goes in use from there.
         self.record_workspace(
             phases,
@@ -1028,6 +1042,8 @@ impl FileRuns {
             Some(WorkspaceState::InUse),
             WorkspaceState::Idle,
         );
+        // Last, so a write that waited for the phase finds its worktree idle.
+        self.config.live.ended(run);
     }
 
     /// The daemon's end hook ([`crate::phases::PhaseEndHook`]) for a file-task run's phase: the workspace goes idle and

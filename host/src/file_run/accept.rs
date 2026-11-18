@@ -40,6 +40,7 @@
 
 use super::quick_run::{QUICK, QuickRun, READY_TITLE};
 use super::{FileRuns, Live, locked};
+use crate::checkout::root_busy;
 use crate::phases::Phases;
 use crate::workspace::{Git, MergeCheck, WorkspaceError};
 use collide_core::change::{Actor, ActorKind};
@@ -56,16 +57,6 @@ use std::sync::{Arc, Mutex};
 
 /// The name of the integrate step in the event log.
 const STEP: &str = "collide/merge-local";
-
-/// What a checkout can be in the middle of, as the file git keeps while it is, and how to say it.
-const IN_PROGRESS: [(&str, &str); 6] = [
-    ("rebase-merge", "a rebase"),
-    ("rebase-apply", "a rebase"),
-    ("MERGE_HEAD", "a merge"),
-    ("CHERRY_PICK_HEAD", "a cherry-pick"),
-    ("REVERT_HEAD", "a revert"),
-    ("BISECT_LOG", "a bisect"),
-];
 
 /// The refs a run's merge is about.
 struct Refs {
@@ -186,7 +177,7 @@ impl FileRuns {
         }
         let root = checkout.display();
         if let Some(what) =
-            operation_in_progress(git, checkout).map_err(|error| git_failed(&error))?
+            root_busy(&self.config.git_env, checkout).map_err(|error| git_failed(&error))?
         {
             return Err(format!(
                 "The checkout at {root} is in the middle of {what}. Finish it or abort it, then accept again. \
@@ -543,24 +534,6 @@ fn last_merge_commit(own: &[Event]) -> Option<String> {
         } => Some((*result == StepResult::Succeeded).then(|| detail.clone())),
         _ => None,
     })?
-}
-
-/// What the checkout is in the middle of, if anything.
-fn operation_in_progress(
-    git: &Git,
-    checkout: &Path,
-) -> Result<Option<&'static str>, WorkspaceError> {
-    let mut args = vec!["rev-parse"];
-    for (name, _) in IN_PROGRESS {
-        args.push("--git-path");
-        args.push(name);
-    }
-    let paths = git.text(checkout, &args)?;
-    Ok(paths
-        .lines()
-        .zip(IN_PROGRESS)
-        .find(|(path, _)| checkout.join(path).exists())
-        .map(|(_, (_, what))| what))
 }
 
 fn merge_head_exists(git: &Git, checkout: &Path) -> Result<bool, WorkspaceError> {

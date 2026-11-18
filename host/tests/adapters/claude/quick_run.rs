@@ -114,7 +114,9 @@ pub(super) fn apply(
         },
         commit: false,
     };
-    call::<_, TaskApplyResult>(fx, "task.apply", &params).result
+    call::<_, TaskApplyResult>(fx, "task.apply", &params)
+        .result
+        .expect("a scratch write is applied, never queued")
 }
 
 /// A scratch task with `prompt`, and its key.

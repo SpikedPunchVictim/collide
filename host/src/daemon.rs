@@ -140,6 +140,8 @@ use crate::sources::{Source, SourceError, Sources, SourcesConfig, changed_event}
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use crate::supervisor::SupervisorPolicy;
+use crate::write_guard::{self, Applied, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig};
+use collide_core::change::Actor;
 use collide_core::events::Event;
 use collide_core::owner::{
     BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardTrustParams,
@@ -147,12 +149,12 @@ use collide_core::owner::{
     ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams,
     ConfigSetParams, DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
     DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
-    OwnerInitializeResult, QueueAnswerParams, QueueItem, QueueListParams, QueueListResult, Request,
-    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
-    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
-    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
-    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, TaskPreviewParams, code,
-    encode_line, parse_request, route,
+    OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueItem,
+    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunDiffParams,
+    RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
+    RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult,
+    RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams,
+    TaskGetResult, TaskPreviewParams, WriteQueued, code, encode_line, parse_request, route,
 };
 use collide_core::provider::{ApplyParams, ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
@@ -550,6 +552,9 @@ pub struct DaemonOptions {
     /// How the providers of a board's sources are supervised: the timeout of each method and the backoff between
     /// restarts. A test gives short ones.
     pub supervisor: SupervisorPolicy,
+    /// How often the writer looks at the queued writes of a checkout that is still busy ([`WRITE_POLL`]). A write
+    /// also goes at once when a phase ends. A test passes a short one.
+    pub write_poll: Duration,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -607,9 +612,14 @@ impl DaemonOptions {
             load_context: None,
             secret_store: Arc::new(MemorySecretStore::new()),
             supervisor: SupervisorPolicy::default(),
+            write_poll: WRITE_POLL,
         }
     }
 }
+
+/// How often a queued write looks again at a checkout that was busy, for what no phase's end tells it: a rebase that
+/// ended (ts-0114-hr).
+pub const WRITE_POLL: Duration = Duration::from_secs(1);
 
 /// What every thread of the daemon shares.
 struct Shared {
@@ -649,6 +659,8 @@ struct Shared {
     config: ConfigService,
     /// The providers behind each board's sources ([`crate::sources`]). They stop with the daemon.
     sources: Sources,
+    /// The line locks, the live phases and the queued writes ([`crate::write_guard`]).
+    guard: WriteGuard,
 }
 
 impl Shared {
@@ -692,6 +704,7 @@ pub struct Daemon {
     shared: Arc<Shared>,
     accept: Option<JoinHandle<()>>,
     sampler: Option<JoinHandle<()>>,
+    writer: Option<JoinHandle<()>>,
 }
 
 impl Daemon {
@@ -726,6 +739,7 @@ impl Daemon {
             claude_published,
             claude_refresh_every,
             subscriber_queue,
+            write_poll,
             feed_rebuilder,
             load_context,
             secret_store,
@@ -868,7 +882,22 @@ impl Daemon {
                 read.floor
             })
         };
+        let live = Arc::new(LivePhases::new());
+        let guard = WriteGuard::new(WriteGuardConfig {
+            queue: queue.clone(),
+            live: live.clone(),
+            git_env: git_env.clone(),
+            now_ms: {
+                let clocks = clocks.clone();
+                Arc::new(move || clocks.read(Clock::Wall).nanos / 1_000_000)
+            },
+            log: {
+                let log = log.clone();
+                Arc::new(move |text: &str| log.line(text))
+            },
+        });
         let file_runs = Arc::new(FileRuns::new(FileRunConfig {
+            live,
             runs_dir: paths.runs_dir.clone(),
             workspaces_dir: workspaces_dir
                 .unwrap_or_else(|| paths.runs_dir.with_file_name("workspaces")),
@@ -925,7 +954,7 @@ impl Daemon {
             processes,
             cleanup,
             disk: Some((free_space.clone(), floor)),
-            queue,
+            queue: queue.clone(),
             on_phase_pause,
             rebuild_feed: {
                 let runs = file_runs.clone();
@@ -1007,6 +1036,7 @@ impl Daemon {
             claude_refresher: Mutex::new(None),
             config,
             sources,
+            guard,
         });
 
         let capturing = shared.clone();
@@ -1042,10 +1072,19 @@ impl Daemon {
             context: "could not start the sampler's thread".to_string(),
             source,
         })?;
+        let writing = shared.clone();
+        let writer = spawn_named("collide-write-queue", move || {
+            writer_loop(&writing, write_poll);
+        })
+        .map_err(|source| SocketError::Io {
+            context: "could not start the queued writes' thread".to_string(),
+            source,
+        })?;
         Ok(Daemon {
             shared,
             accept: Some(accept),
             sampler: Some(sampler),
+            writer: Some(writer),
         })
     }
 
@@ -1066,6 +1105,12 @@ impl Daemon {
     /// The daemon's store, for a reader of the events and of the metrics tables.
     pub fn store(&self) -> Arc<Store> {
         self.shared.store.clone()
+    }
+
+    /// The live phases the line guards read. A test registers a phase here, as a run's workspace does, to see a write
+    /// wait for it.
+    pub fn live_phases(&self) -> Arc<LivePhases> {
+        self.shared.guard.live().clone()
     }
 
     /// The Queue items the daemon holds, those of `run` when it is given.
@@ -1112,6 +1157,10 @@ impl Daemon {
         if let Some(sampler) = self.sampler.take() {
             self.shared.stop.store(true, Ordering::SeqCst);
             let _ = sampler.join();
+        }
+        if let Some(writer) = self.writer.take() {
+            self.shared.stop.store(true, Ordering::SeqCst);
+            let _ = writer.join();
         }
     }
 }
@@ -1185,6 +1234,67 @@ fn sampler_loop(shared: &Shared, metrics: &Metrics, tick: Duration) {
         if let Some(sleep) = ticked.sleep {
             metrics.sleep_interval(sleep.length, &ticked.now);
         }
+    }
+}
+
+/// Applies the queued writes of every checkout that can have them applied now, at start and then whenever a phase ended
+/// or `poll` passed. It sleeps in slices so a stop is seen within one.
+fn writer_loop(shared: &Shared, poll: Duration) {
+    let slice = SAMPLER_SLICE.min(poll);
+    drain_all(shared);
+    loop {
+        let mut waited = Duration::ZERO;
+        while waited < poll {
+            if shared.stopping() {
+                return;
+            }
+            if shared.guard.live().take_released() {
+                break;
+            }
+            std::thread::sleep(slice);
+            waited += slice;
+        }
+        if shared.stopping() {
+            return;
+        }
+        drain_all(shared);
+    }
+}
+
+fn drain_all(shared: &Shared) {
+    for checkout in shared.guard.checkouts_waiting() {
+        shared
+            .guard
+            .hold(&checkout, || drain_checkout(shared, &checkout));
+    }
+}
+
+/// Applies the queued writes of `checkout`, oldest first. The caller holds its line lock.
+fn drain_checkout(shared: &Shared, checkout: &Path) {
+    shared
+        .guard
+        .drain(checkout, &mut |write| apply_queued(shared, write));
+}
+
+/// Applies a stored write as the person who asked: the same `apply` and the same events as a write that was not
+/// queued. A write whose version is old is not applied: the source says conflict, and the Queue says which task moved.
+fn apply_queued(shared: &Shared, write: QueuedWrite) -> Applied {
+    let root = match board_root(shared, &write.board) {
+        Ok(root) => root,
+        Err(error) => return Applied::Problem(error.message),
+    };
+    let source = match source_of(shared, &write.board, &root, &write.source) {
+        Ok(source) => source,
+        Err(error) => return Applied::Problem(source_failed(error).message),
+    };
+    match apply_and_record(shared, write.actor.clone(), &source, &write.apply) {
+        Ok(ApplyResult::Ok { .. }) => Applied::Done,
+        Ok(ApplyResult::Conflict { current }) => Applied::Problem(format!(
+            "{} changed since this write was asked for; it is now {}. Read it and ask again",
+            current.key, current.state.status
+        )),
+        Ok(ApplyResult::Refused { message }) => Applied::Problem(message),
+        Err(error) => Applied::Problem(source_failed(error).message),
     }
 }
 
@@ -2177,6 +2287,9 @@ fn queue_answer(
             "the daemon is shutting down",
         ));
     }
+    if shared.guard.is_queued_write(&params.item) {
+        return queued_write_answer(shared, &params);
+    }
     match shared
         .file_runs
         .answer(&shared.phases, &params.item, &params.answer)
@@ -2185,6 +2298,41 @@ fn queue_answer(
         Err(AnswerError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
         Err(AnswerError::Invalid(message)) => Err(RpcError::new(code::INVALID_PARAMS, message)),
     }
+}
+
+/// The answer to the Queue item of a queued write (ts-0114-hr). Retry looks again now: the write is applied when the
+/// checkout is free, and the item stays, with its reason, when it is not. Dismiss drops the write.
+fn queued_write_answer(
+    shared: &Shared,
+    params: &QueueAnswerParams,
+) -> Result<serde_json::Value, RpcError> {
+    let result = match &params.answer {
+        QueueAnswer::Dismiss {} => {
+            shared.guard.dismiss(&params.item);
+            QueueAnswerResult::Done {}
+        }
+        QueueAnswer::Retry {} => {
+            if let Some(checkout) = shared.guard.checkout_of(&params.item) {
+                shared
+                    .guard
+                    .hold(&checkout, || drain_checkout(shared, &checkout));
+            }
+            if shared.guard.is_queued_write(&params.item) {
+                QueueAnswerResult::Queued {
+                    item: params.item.clone(),
+                }
+            } else {
+                QueueAnswerResult::Done {}
+            }
+        }
+        _ => {
+            return Err(RpcError::new(
+                code::INVALID_PARAMS,
+                "a queued write takes Retry or Dismiss",
+            ));
+        }
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
 /// Reads a request's params as `T`, or says which method they were not readable for.
@@ -2714,24 +2862,81 @@ fn task_apply(
         ));
     }
     let source = source_of(shared, &params.board, &root, &name).map_err(source_failed)?;
-    let result = write(shared, session, &source, &apply)?;
+    let (result, queued) = match write(shared, session, &params.board, &root, &source, &apply)? {
+        Written::Applied(result) => (Some(*result), None),
+        Written::Queued(queued) => (None, Some(queued)),
+    };
     Ok(serde_json::to_value(TaskApplyResult {
         result,
+        queued,
         commit: None,
     })
     .expect("a result is JSON"))
 }
 
-/// The one function every source's write goes through: the source's `apply`, then one `task.changed` event for each
-/// item the write changed, with the actor of the connection. The guards of `ts-0114-hr` (the line lock, a busy root,
-/// the queue) are added here.
+/// What [`write`] did with a write.
+enum Written {
+    Applied(Box<ApplyResult>),
+    /// Stored, because the checkout is busy. The Queue item says why.
+    Queued(WriteQueued),
+}
+
+/// The one function every source's write goes through (ts-0113-ck, ts-0114-hr). A scratch write is applied. A write
+/// into a checkout holds the checkout's line lock, first applies the writes queued before it, and is queued itself
+/// when the checkout is busy (a rebase, merge, cherry-pick, revert or bisect in progress, or a live phase): the
+/// answer is `queued`, and the write is applied, in order, once the checkout is free. A checkout that is not a folder
+/// is left to the provider to refuse in its own words.
 fn write(
     shared: &Shared,
     session: &Session,
+    board: &str,
+    root: &str,
     source: &Source,
     apply: &ApplyParams,
-) -> Result<ApplyResult, RpcError> {
-    let result = source.apply(apply).map_err(source_failed)?;
+) -> Result<Written, RpcError> {
+    let actor = session.actor();
+    if !source.writes_checkout() {
+        let result = apply_and_record(shared, actor, source, apply).map_err(source_failed)?;
+        return Ok(Written::Applied(Box::new(result)));
+    }
+    let checkout = write_guard::canonical(Path::new(apply.checkout.as_deref().unwrap_or(root)));
+    if !checkout.is_dir() {
+        let result = apply_and_record(shared, actor, source, apply).map_err(source_failed)?;
+        return Ok(Written::Applied(Box::new(result)));
+    }
+    shared.guard.hold(&checkout, || {
+        drain_checkout(shared, &checkout);
+        match shared.guard.blocked(&checkout) {
+            Err(message) => Err(RpcError::new(code::INTERNAL_ERROR, message)),
+            Ok(Some(reason)) => {
+                let write = QueuedWrite {
+                    board: board.to_string(),
+                    source: source.name().to_string(),
+                    apply: apply.clone(),
+                    checkout: checkout.clone(),
+                    actor,
+                };
+                shared
+                    .guard
+                    .enqueue(&write, &reason)
+                    .map(Written::Queued)
+                    .map_err(|message| RpcError::new(code::INTERNAL_ERROR, message))
+            }
+            Ok(None) => apply_and_record(shared, actor, source, apply)
+                .map(|result| Written::Applied(Box::new(result)))
+                .map_err(source_failed),
+        }
+    })
+}
+
+/// The source's `apply`, then one `task.changed` event for each item the write changed, with `actor`.
+fn apply_and_record(
+    shared: &Shared,
+    actor: Actor,
+    source: &Source,
+    apply: &ApplyParams,
+) -> Result<ApplyResult, SourceError> {
+    let result = source.apply(apply)?;
     if let ApplyResult::Ok { task, items, .. } = &result {
         for effect in items {
             let event = changed_event(
@@ -2740,7 +2945,7 @@ fn write(
                 source.write_cause(),
                 task.checkout.clone(),
             );
-            if let Err(error) = shared.phases.append_event(session.actor(), event) {
+            if let Err(error) = shared.phases.append_event(actor.clone(), event) {
                 shared.log.line(&format!(
                     "the change of {} was written but its event was not: {error}",
                     effect.key

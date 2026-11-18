@@ -3,6 +3,7 @@
 //! of the common git directory, which every worktree of a repository shares. `--checkout <path>` (ts-0031) names
 //! another checkout, and is accepted only when it is an entry of `git worktree list` for the same repository.
 
+use crate::workspace::{Git, WorkspaceError};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -120,4 +121,36 @@ pub fn resolve_checkout(root: &Path, cwd: &Path, given: &str) -> Result<PathBuf,
             listed,
         })
     }
+}
+
+/// What a checkout can be in the middle of, as the file or folder git keeps while it is, and how to say it. `revert`
+/// is here with the four of 0.4: a revert stopped on a conflict blocks a write as a merge does (ts-0114-hr).
+const IN_PROGRESS: [(&str, &str); 6] = [
+    ("rebase-merge", "a rebase"),
+    ("rebase-apply", "a rebase"),
+    ("MERGE_HEAD", "a merge"),
+    ("CHERRY_PICK_HEAD", "a cherry-pick"),
+    ("REVERT_HEAD", "a revert"),
+    ("BISECT_LOG", "a bisect"),
+];
+
+/// What `checkout` is in the middle of, in words (`a rebase`, `a merge`, `a cherry-pick`, `a revert`, `a bisect`), or
+/// `None` when nothing is. A write to a checkout waits while this is `Some` (0.4, Root busy), and accept refuses.
+/// `env` is added to the environment of git. A linked worktree has its own state files, which `git rev-parse
+/// --git-path` finds, so this reads the checkout it is given and no other.
+pub fn root_busy(
+    env: &[(String, String)],
+    checkout: &Path,
+) -> Result<Option<&'static str>, WorkspaceError> {
+    let mut args = vec!["rev-parse"];
+    for (name, _) in IN_PROGRESS {
+        args.push("--git-path");
+        args.push(name);
+    }
+    let paths = Git::with_env(env.to_vec()).text(checkout, &args)?;
+    Ok(paths
+        .lines()
+        .zip(IN_PROGRESS)
+        .find(|(path, _)| checkout.join(path).exists())
+        .map(|(_, (_, what))| what))
 }

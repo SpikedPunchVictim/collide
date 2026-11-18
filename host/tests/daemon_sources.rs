@@ -220,7 +220,8 @@ impl Rig {
             apply: Rig::apply_params(Some(id), op, checkout),
             commit: false,
         };
-        rpc::<TaskApplyResult>(self, "task.apply", &params).map(|answer| answer.result)
+        rpc::<TaskApplyResult>(self, "task.apply", &params)
+            .map(|answer| answer.result.expect("the write was applied, not queued"))
     }
 
     fn preview(&self, board: &str, source: &str, op: &str) -> Result<PreviewResult, RpcError> {
@@ -709,6 +710,119 @@ fn no_provider_outlives_the_daemon() {
     daemon.stop();
     wait_until("the provider is gone", DEADLINE, || !pid_alive(pid));
     drop(repo);
+}
+
+// ---- the line lock (ts-0114-hr) -----------------------------------------------------------------------------------
+
+/// A `gate` write to `source` at `checkout`, on its own connection and thread: the provider holds it until `open`
+/// exists. The thread answers when the write does.
+fn gate_write(
+    rig: &Rig,
+    board: &str,
+    source: &str,
+    checkout: &Path,
+    (log, open): (&Path, &Path),
+) -> std::sync::mpsc::Receiver<TaskApplyResult> {
+    let paths = rig.fixture.daemon.paths().clone();
+    let params = TaskApplyParams {
+        board: board.to_string(),
+        source: Some(source.to_string()),
+        apply: ApplyParams {
+            op: "gate".to_string(),
+            id: Some("1".to_string()),
+            args: BTreeMap::from([
+                ("log".to_string(), json!(log)),
+                ("open".to_string(), json!(open)),
+            ]),
+            version: None,
+            checkout: Some(checkout.to_str().unwrap().to_string()),
+        },
+        commit: false,
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut client = collide_host::owner_client::OwnerClient::connect(&paths, "gate-write")
+            .expect("the client connects");
+        let answer: TaskApplyResult = client
+            .call("task.apply", &params, WAIT)
+            .expect("apply answers");
+        let _ = sender.send(answer);
+    });
+    receiver
+}
+
+fn lines(path: &Path) -> Vec<String> {
+    fs::read_to_string(path)
+        .map(|text| text.lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn writes_to_one_root_run_one_at_a_time_and_writes_to_two_roots_do_not_wait_for_each_other() {
+    let rig = rig();
+    rig.pack("ferry", "fake", "one", "");
+    rig.pack("ferry2", "fake2", "one", "");
+    rig.board_yaml(&["ferry", "ferry2"]);
+    rig.fixture.commit();
+    let board = rig.fixture.board();
+    rig.trust(&board);
+    let work = std::path::PathBuf::from(rig.root());
+    let side = rig.fixture.home().join("side");
+    rig.fixture.repo.git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        side.to_str().unwrap(),
+        "-b",
+        "side",
+    ]);
+    let side = fs::canonicalize(side).unwrap();
+    let (log, held, free) = (
+        rig.fixture.home().join("gate.log"),
+        rig.fixture.home().join("held"),
+        rig.fixture.home().join("free"),
+    );
+    fs::write(&free, "").unwrap();
+
+    // Two sources on one root: the second write does not reach its provider while the first holds the root.
+    let first = gate_write(&rig, &board, "fake", &work, (&log, &held));
+    wait_until("the first write to reach its provider", DEADLINE, || {
+        lines(&log) == ["start fake"]
+    });
+    let second = gate_write(&rig, &board, "fake2", &work, (&log, &free));
+    let until = std::time::Instant::now() + Duration::from_millis(1500);
+    while std::time::Instant::now() < until {
+        assert_eq!(
+            lines(&log),
+            ["start fake"],
+            "the second write went in while the first held the root"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // Another root is its own lock: this write goes through while the first is still held.
+    let other = gate_write(&rig, &board, "fake2", &side, (&log, &free));
+    other
+        .recv_timeout(DEADLINE)
+        .expect("the write to the other root did not wait for the first");
+    assert_eq!(lines(&log)[..3], ["start fake", "start fake2", "end fake2"]);
+
+    fs::write(&held, "").unwrap();
+    first.recv_timeout(DEADLINE).expect("the first write ends");
+    second
+        .recv_timeout(DEADLINE)
+        .expect("the second write ends once the root is free");
+    assert_eq!(
+        lines(&log),
+        [
+            "start fake",
+            "start fake2",
+            "end fake2",
+            "end fake",
+            "start fake2",
+            "end fake2"
+        ]
+    );
 }
 
 // ---- the reference adapter ------------------------------------------------------------------------------------------

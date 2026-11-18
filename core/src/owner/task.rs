@@ -109,11 +109,24 @@ pub struct TaskApplyParams {
     pub commit: bool,
 }
 
-/// `task.apply` result: the provider's answer, and the commit when `commit` was asked for and the write succeeded.
+/// A write the daemon stored because its checkout is busy (0.4, Root busy). `item` is the Queue item that says
+/// why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WriteQueued {
+    pub item: String,
+    pub reason: String,
+}
+
+/// `task.apply` result: the provider's answer, and the commit when `commit` was asked for and the write
+/// succeeded. A queued write has no `result`; `queued` says why.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskApplyResult {
-    pub result: ApplyResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ApplyResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<WriteQueued>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
 }
