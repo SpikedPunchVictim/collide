@@ -1,7 +1,7 @@
 ---
 id: ts-0122-dd
 kind: task
-status: ready
+status: done
 title: "Daemon: a socket probe is not logged as a refused connection"
 owners: []
 links: []
