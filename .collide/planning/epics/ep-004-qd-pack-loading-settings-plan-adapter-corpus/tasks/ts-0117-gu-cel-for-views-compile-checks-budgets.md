@@ -1,7 +1,7 @@
 ---
 id: ts-0117-gu
 kind: task
-status: ready
+status: done
 title: "CEL for views: compile checks, budgets and caps"
 owners: []
 links:
