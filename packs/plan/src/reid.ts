@@ -14,7 +14,7 @@ import type { Layout } from './layout.ts'
 import { stateOf } from './item.ts'
 import { onlyKeys, refused } from './op-util.ts'
 import { findFence, parseFrontmatter, versionOf } from './read-file.ts'
-import { readEpicFiles, toTask } from './scan.ts'
+import { pathOf, PRIVATE_PREFIX, readEpicFiles, toTask } from './scan.ts'
 import type { FoundItem } from './scan.ts'
 
 export const REID = 'reid'
@@ -23,8 +23,6 @@ export const REID = 'reid'
 export function checkReid(args: Record<string, unknown>): string | null {
   return checkSeed(args) ?? onlyKeys(args, ['seed'])
 }
-
-const posix = (root: string, absolute: string): string => relative(root, absolute).split(sep).join('/')
 
 /** The files under `dir`, at any depth, as absolute paths. A temp file of a killed writer is not one. */
 async function filesUnder(dir: string): Promise<string[]> {
@@ -50,8 +48,8 @@ interface Planned {
  * link that names the old id. Returns the reason when a line is in a form the provider does not edit, or when the
  * edit changes more than those fields.
  */
-async function plan(root: string, found: FoundItem, oldId: string, newId: string, renamed: boolean): Promise<Planned | string> {
-  const absolute = join(root, ...found.path.split('/'))
+async function plan(found: FoundItem, oldId: string, newId: string, renamed: boolean): Promise<Planned | string> {
+  const { absolute } = found
   const bytes = await readFile(absolute)
   if (versionOf(bytes) !== found.version) return `${found.path} changed while it was being read; send the op again`
   const fence = findFence(bytes, bytes.length)
@@ -89,7 +87,9 @@ async function plan(root: string, found: FoundItem, oldId: string, newId: string
  * The order: every file's new content is made and checked first (a refusal writes nothing); then each file is replaced
  * in place, the renamed item's own file last; then the file (or an epic's folder) takes the new name. A kill between
  * two steps leaves every file whole, and at worst some links ahead of the item or a file name behind its id.
- * Every root of the layout is read, and a file is renamed where it is. The caller holds the lock.
+ * Every root of the layout is read, and the private root when there is one, and a file is renamed where it is. A file
+ * of the private root is rewritten like the others but is not in `files`: nothing in it is committed. The caller holds
+ * the lock of every root that has items.
  */
 export async function reidLocked(
   root: string,
@@ -97,8 +97,9 @@ export async function reidLocked(
   args: Record<string, unknown>,
   hooks: IdHooks,
   layout: Layout = DEFAULT_LAYOUT,
+  privateDir: string | null = null,
 ): Promise<ApplyResultInput> {
-  const { items: all } = await readEpicFiles(root, null, layout)
+  const { items: all } = await readEpicFiles(root, null, layout, privateDir)
   const sharing = all.filter((found) => found.item.id === id)
   const target = sharing[1] ?? sharing[0]
   if (target === undefined) return refused(`there is no item ${id}`)
@@ -110,7 +111,8 @@ export async function reidLocked(
   try {
     const number = Number(numberText)
     const next = generatorFor(args, hooks)
-    newId = await drawFreeId({ prefix, number, width: numberText.length, next, look: () => look(root, layout) })
+    const width = numberText.length
+    newId = await drawFreeId({ prefix, number, width, next, look: () => look(root, layout, privateDir) })
   } catch (error) {
     if (error instanceof IdSourceError) return refused(`reid: ${error.message}`)
     throw error
@@ -118,7 +120,7 @@ export async function reidLocked(
 
   const planned: Planned[] = []
   for (const found of all.filter((candidate) => candidate === target || candidate.item.links.some((link) => namesItem(link.to, id)))) {
-    const result = await plan(root, found, id, newId, found === target)
+    const result = await plan(found, id, newId, found === target)
     if (typeof result === 'string') return refused(result)
     planned.push(result)
   }
@@ -126,7 +128,7 @@ export async function reidLocked(
   for (const { absolute, content, mode } of planned) await replaceFile(absolute, content, mode)
 
   // The new name: an item file keeps what follows the id in its name; an epic's folder is renamed, and its files go with it.
-  const targetAbsolute = join(root, ...target.path.split('/'))
+  const targetAbsolute = target.absolute
   const isEpicFile = target.epic === null
   const renamedFrom = isEpicFile ? dirname(targetAbsolute) : targetAbsolute
   const oldName = basename(renamedFrom)
@@ -140,10 +142,11 @@ export async function reidLocked(
   }
   const afterRename = (absolute: string): string => (renamedTo === null || (absolute !== renamedFrom && !absolute.startsWith(`${renamedFrom}${sep}`)) ? absolute : join(renamedTo, relative(renamedFrom, absolute)))
 
-  const written = planned.map(({ absolute }) => posix(root, afterRename(absolute)))
-  const files = new Set([...written, ...moved.flatMap((absolute) => [posix(root, absolute), posix(root, afterRename(absolute))])])
+  const shown = (absolute: string): string => pathOf(root, privateDir, absolute)
+  const written = planned.map(({ absolute }) => shown(afterRename(absolute)))
+  const files = new Set([...written, ...moved.flatMap((absolute) => [shown(absolute), shown(afterRename(absolute))])])
 
-  const after = (await readEpicFiles(root, null, layout)).items
+  const after = (await readEpicFiles(root, null, layout, privateDir)).items
   const renamedItem = after.find((found) => found.item.id === newId)
   if (renamedItem === undefined) throw new Error(`${newId} does not read back after the write`)
   const changed = after.filter((found) => written.includes(found.path))
@@ -151,7 +154,7 @@ export async function reidLocked(
     outcome: 'ok',
     task: toTask(renamedItem, true),
     version: renamedItem.version,
-    files: [...files],
+    files: [...files].filter((path) => !path.startsWith(PRIVATE_PREFIX)),
     items: changed.map((found) => ({
       key: `plan:${found.item.id}`,
       version: found.version,

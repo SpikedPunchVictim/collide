@@ -33,7 +33,7 @@ const FOLDER_ID = /^(ep-[0-9]{3,}-[a-z]{2})(?:-.*)?$/
  */
 export interface IdHooks {
   generator?: (seed: number) => () => number
-  look?: (root: string, layout: Layout) => Promise<Set<string>>
+  look?: (root: string, layout: Layout, privateDir: string | null) => Promise<Set<string>>
 }
 
 /** A problem reading the ids that other refs hold. The op that asked refuses with the message. */
@@ -107,11 +107,19 @@ async function idsInWorkingTree(root: string, epicsDirs: string[]): Promise<Set<
   return idsInPaths(paths, epicsDirs)
 }
 
-/** Every id Collide can see under the layout's roots: local branches, fetched remote refs and the working tree. */
-export async function takenIds(root: string, layout: Layout = DEFAULT_LAYOUT): Promise<Set<string>> {
+/**
+ * Every id Collide can see under the layout's roots: local branches, fetched remote refs and the working tree. The
+ * private root, when there is one, is read from disk only: a private id is never looked for in a ref.
+ */
+export async function takenIds(
+  root: string,
+  layout: Layout = DEFAULT_LAYOUT,
+  privateDir: string | null = null,
+): Promise<Set<string>> {
   const epicsDirs = epicsDirsOf(layout)
   const ids = await idsInRefs(root, epicsDirs)
   for (const id of await idsInWorkingTree(root, epicsDirs)) ids.add(id)
+  if (privateDir !== null) for (const id of await idsInWorkingTree(privateDir, ['epics'])) ids.add(id)
   return ids
 }
 

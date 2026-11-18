@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto'
 import { mkdir, readdir, stat } from 'node:fs/promises'
-import { dirname, join, relative, sep } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile, syncDirectory } from './atomic.ts'
 import { drawFreeId, IdSourceError, KIND_IDS, nextNumber, seededGenerator, takenIds } from './ids.ts'
@@ -10,9 +10,17 @@ import type { Layout } from './layout.ts'
 import { readItem, stateOf } from './item.ts'
 import { CONTROL, onlyKeys, refused } from './op-util.ts'
 import { readItemFile } from './read-file.ts'
-import { readEpicFiles, toTask } from './scan.ts'
+import { pathOf, readEpicFiles, toTask } from './scan.ts'
+import type { RootName } from './scan.ts'
 
 export const CREATE = 'create'
+
+/** The values of `create`'s `root` argument: the shared root, or the user's private one (0.10, Planning sources). */
+export const ROOT_NAMES: readonly RootName[] = ['shared', 'private']
+
+/** The root a `create` writes to: the one it names, and the shared one when it names none. */
+export const rootOfCreate = (args: Record<string, unknown>): RootName =>
+  args.root === 'private' ? 'private' : 'shared'
 
 export const TITLE_MAX = 200
 
@@ -51,6 +59,9 @@ export function generatorFor(args: Record<string, unknown>, hooks: IdHooks): () 
 /** The problem with `create`'s arguments, or null. Runs before the lock is taken. */
 export function checkCreate(args: Record<string, unknown>): string | null {
   const { kind, epic, title } = args
+  if (args.root !== undefined && !ROOT_NAMES.includes(args.root as RootName)) {
+    return 'root must be "shared" or "private"'
+  }
   if (kind !== undefined && kind !== 'task' && kind !== 'epic' && kind !== 'proposal') return 'kind must be "task", "epic" or "proposal"'
   if (typeof title !== 'string' || title.trim() !== title || title === '' || title.length > TITLE_MAX || CONTROL.test(title)) {
     return `title must be text of 1 to ${TITLE_MAX} characters, with no line break or other control character and no space at either end`
@@ -60,7 +71,7 @@ export function checkCreate(args: Record<string, unknown>): string | null {
   } else if (typeof epic !== 'string' || !EPIC_ID.test(epic)) {
     return `a ${kind === 'proposal' ? 'proposal' : 'task'} needs epic, the id of its epic, such as ep-002-va`
   }
-  return checkSeed(args) ?? onlyKeys(args, ['kind', 'epic', 'title', 'seed'])
+  return checkSeed(args) ?? onlyKeys(args, ['kind', 'epic', 'title', 'seed', 'root'])
 }
 
 /** A new item: a task or an epic starts `ready`, with the parts a task has; a proposal starts as a `draft`, with the two parts 0.10 names. */
@@ -91,9 +102,13 @@ async function epicFolder(epicsDir: string, epic: string): Promise<string | null
   return names.find((name) => EPIC_FOLDER.exec(name)?.[1] === epic) ?? null
 }
 
-/** The refusal for an epic the root has no folder for. An epic that a previous root holds is named, with where. */
-async function noEpic(root: string, layout: Layout, epic: string): Promise<string> {
-  const refusal = `there is no epic ${epic} in the working tree (${layout.root}/epics/); create it first`
+/**
+ * The refusal for an epic the root has no folder for. An epic that a previous root holds is named, with where. A
+ * private item may be for an epic of either root, which the refusal says.
+ */
+async function noEpic(root: string, layout: Layout, epic: string, into: RootName): Promise<string> {
+  const where = `in the working tree (${layout.root}/epics/)${into === 'private' ? ' or the private root' : ''}`
+  const refusal = `there is no epic ${epic} ${where}; create it first`
   if (layout.previous.length === 0) return refusal
   const { items } = await readEpicFiles(root, null, layout)
   const old = items.find((found) => found.item.kind === 'epic' && found.item.id === epic)
@@ -115,31 +130,41 @@ async function makeDirectory(dir: string): Promise<void> {
  * Writes a new item: the number is the next free one for the kind across every ref and the working tree, the suffix is
  * drawn until the id is free, and the file goes in the epic's `tasks/` folder, or its `proposals/` folder for a proposal
  * (an epic gets its own folder with an `epic.md`). The item goes under the layout's root, never under a `previous`
- * one, and the number is free across the roots of all of them. The caller holds the lock. The reply carries the item as
- * read back from disk and the file it wrote.
+ * one, and the number is free across the roots of all of them. With `root: private` it goes under `privateDir`
+ * instead, in a folder named by its epic's id alone (the epic may be a shared one, whose folder has a longer name), and
+ * the reply names no file, because nothing in the private root is committed. The number is free across the private
+ * root too, and a private id is never looked for in a ref. The caller holds the lock of the root written to. The reply
+ * carries the item as read back from disk and the file it wrote.
  */
 export async function createLocked(
   root: string,
   args: Record<string, unknown>,
   hooks: IdHooks,
   layout: Layout = DEFAULT_LAYOUT,
+  privateDir: string | null = null,
 ): Promise<ApplyResultInput> {
   const kind = (args.kind ?? 'task') as CreatableKind
   const title = args.title as string
   const { prefix, width } = KIND_IDS[kind]
-  const epicsDir = join(root, layout.root, 'epics')
+  const into = rootOfCreate(args)
+  if (into === 'private' && privateDir === null) return refused('create: the private root has no folder to be in')
+  const sharedEpics = join(root, layout.root, 'epics')
+  const epicsDir = into === 'private' ? join(privateDir as string, 'epics') : sharedEpics
 
   let folder: string | null = null
   if (kind !== 'epic') {
-    folder = await epicFolder(epicsDir, args.epic as string)
-    if (folder === null) return refused(await noEpic(root, layout, args.epic as string))
+    const epic = args.epic as string
+    folder = await epicFolder(epicsDir, epic)
+    if (folder === null && into === 'private' && (await epicFolder(sharedEpics, epic)) !== null) folder = epic
+    if (folder === null) return refused(await noEpic(root, layout, epic, into))
   }
 
   const look = hooks.look ?? takenIds
   let id: string
   try {
-    const number = nextNumber(await look(root, layout), prefix)
-    id = await drawFreeId({ prefix, number, width, next: generatorFor(args, hooks), look: () => look(root, layout) })
+    const number = nextNumber(await look(root, layout, privateDir), prefix)
+    const next = generatorFor(args, hooks)
+    id = await drawFreeId({ prefix, number, width, next, look: () => look(root, layout, privateDir) })
   } catch (error) {
     if (error instanceof IdSourceError) return refused(`create: ${error.message}`)
     throw error
@@ -147,7 +172,9 @@ export async function createLocked(
 
   const name = `${id}-${slugOf(title)}`
   const subfolder = kind === 'proposal' ? 'proposals' : 'tasks'
-  const absolute = kind === 'epic' ? join(epicsDir, name, 'epic.md') : join(epicsDir, folder as string, subfolder, `${name}.md`)
+  const epicName = into === 'private' ? id : name
+  const absolute =
+    kind === 'epic' ? join(epicsDir, epicName, 'epic.md') : join(epicsDir, folder as string, subfolder, `${name}.md`)
   if (await exists(absolute)) return refused(`${absolute} already exists; nothing was written`)
   await makeDirectory(dirname(absolute))
   await replaceFile(absolute, Buffer.from(fileOf(id, kind, title), 'utf8'), 0o644)
@@ -157,13 +184,15 @@ export async function createLocked(
   const checked = readItem(read.frontmatter)
   if (!checked.ok) throw new Error(`${absolute} does not read back after the write: ${checked.reason}`)
   if (checked.item.id !== id || checked.item.title !== title) throw new Error(`${absolute} does not read back as the item that was written`)
-  const path = relative(root, absolute).split(sep).join('/')
-  const found = { item: checked.item, epic: folder === null ? null : (EPIC_FOLDER.exec(folder)?.[1] as string), path, body: read.body, bodyLine: read.bodyLine, version: read.version }
+  const path = pathOf(root, privateDir, absolute)
+  const epic = folder === null ? null : (EPIC_FOLDER.exec(folder)?.[1] as string)
+  const { body, bodyLine, version } = read
+  const found = { item: checked.item, epic, root: into, path, absolute, body, bodyLine, version }
   return {
     outcome: 'ok',
     task: toTask(found, true),
     version: found.version,
-    files: [path],
+    files: into === 'private' ? [] : [path],
     items: [{ key: `plan:${id}`, version: found.version, from: null, to: stateOf(kind, found.item.status) }],
   }
 }

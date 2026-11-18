@@ -15,7 +15,12 @@ const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
 export interface FoundItem {
   item: Item
   epic: string | null
+  /** Which root the file is in. A private item is not a file of the checkout (see `PRIVATE_PREFIX`). */
+  root: RootName
+  /** The path the provider reports: from the checkout for a shared item, `private:` and then from the private root. */
   path: string
+  /** Where the file is on disk. */
+  absolute: string
   body: string
   /** The line of the file that `body` starts on. */
   bodyLine: number
@@ -31,7 +36,20 @@ export interface Scan {
   brokenLink: number
 }
 
+export type RootName = 'shared' | 'private'
+
+/** The start of the `path` of a private item, so that it is never taken for a file of the checkout (0.10). */
+export const PRIVATE_PREFIX = 'private:'
+
 const posix = (cwd: string, absolute: string): string => relative(cwd, absolute).split(sep).join('/')
+
+/** The path to report for the file at `absolute`: from `cwd` for a shared file, or `private:` and from `privateDir`. */
+export function pathOf(cwd: string, privateDir: string | null, absolute: string): string {
+  if (privateDir !== null && absolute.startsWith(`${privateDir}${sep}`)) {
+    return `${PRIVATE_PREFIX}${posix(privateDir, absolute)}`
+  }
+  return posix(cwd, absolute)
+}
 
 /** The entries of a directory, sorted by name; a directory that is not there has none. */
 async function entries(dir: string) {
@@ -45,9 +63,10 @@ async function entries(dir: string) {
 
 /**
  * Reads the items under `<cwd>/<root>/epics/` for the layout's root and then for each of its `previous` roots (the
- * default root, `.collide/planning`, when no layout is given): each epic folder's `epic.md` and the `.md` files
- * directly in its `tasks/` and `proposals/` folders, and nothing else. Symbolic links are not followed. `spikes/` and
- * `questions/` are never opened. The epic is the folder, so it is reported from the path and never from frontmatter.
+ * default root, `.collide/planning`, when no layout is given), and then under `<privateDir>/epics/` when there is a
+ * private root: each epic folder's `epic.md` and the `.md` files directly in its `tasks/` and `proposals/` folders, and
+ * nothing else. Symbolic links are not followed. `spikes/` and `questions/` are never opened. The epic is the
+ * folder, so it is reported from the path and never from frontmatter.
  * Every file that reads is returned, in scan order, including a second file with an id another file has (`scanEpics`
  * sets that one aside); `invalid` holds the files that did not read.
  */
@@ -55,21 +74,30 @@ export async function readEpicFiles(
   cwd: string,
   checkout: string | null = null,
   layout: Layout = DEFAULT_LAYOUT,
+  privateDir: string | null = null,
 ): Promise<{ items: FoundItem[]; invalid: TaskInvalidOutput[] }> {
   const items: FoundItem[] = []
   const invalid: TaskInvalidOutput[] = []
-  const reject = (absolute: string, reason: string): void => void invalid.push({ path: posix(cwd, absolute), checkout, reason })
+  const reject = (absolute: string, reason: string): void =>
+    void invalid.push({ path: pathOf(cwd, privateDir, absolute), checkout, reason })
 
-  const readOne = async (absolute: string, epic: string | null): Promise<void> => {
+  const readOne = async (absolute: string, epic: string | null, root: RootName): Promise<void> => {
     const read = await readItemFile(absolute)
     if (!read.ok) return reject(absolute, read.reason)
     const checked = readItem(read.frontmatter)
     if (!checked.ok) return reject(absolute, checked.reason)
-    items.push({ item: checked.item, epic, path: posix(cwd, absolute), body: read.body, bodyLine: read.bodyLine, version: read.version })
+    const path = pathOf(cwd, privateDir, absolute)
+    const { body, bodyLine, version } = read
+    items.push({ item: checked.item, epic, root, path, absolute, body, bodyLine, version })
   }
 
-  for (const root of rootsOf(layout)) {
-    const epicsDir = join(cwd, root, 'epics')
+  const roots: Array<{ dir: string; name: RootName }> = rootsOf(layout).map((root) => ({
+    dir: join(cwd, root),
+    name: 'shared',
+  }))
+  if (privateDir !== null) roots.push({ dir: privateDir, name: 'private' })
+  for (const { dir, name } of roots) {
+    const epicsDir = join(dir, 'epics')
     for (const folder of (await entries(epicsDir)).filter((entry) => entry.isDirectory())) {
       const epicDir = join(epicsDir, folder.name)
       const epic = EPIC_FOLDER.exec(folder.name)?.[1]
@@ -78,12 +106,12 @@ export async function readEpicFiles(
         continue
       }
       for (const file of (await entries(epicDir)).filter((entry) => entry.isFile() && entry.name === 'epic.md')) {
-        await readOne(join(epicDir, file.name), null)
+        await readOne(join(epicDir, file.name), null, name)
       }
       for (const subfolder of ['tasks', 'proposals']) {
         const inside = await entries(join(epicDir, subfolder))
         const files = inside.filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-        for (const file of files) await readOne(join(epicDir, subfolder, file.name), epic)
+        for (const file of files) await readOne(join(epicDir, subfolder, file.name), epic, name)
       }
     }
   }
@@ -91,13 +119,14 @@ export async function readEpicFiles(
   return { items, invalid }
 }
 
-/** The items under `epics/` of every root of the layout (see `readEpicFiles`). */
+/** The items under `epics/` of every root of the layout, and of the private root if there is one (`readEpicFiles`). */
 export async function scanEpics(
   cwd: string,
   checkout: string | null = null,
   layout: Layout = DEFAULT_LAYOUT,
+  privateDir: string | null = null,
 ): Promise<Scan> {
-  const { items, invalid } = await readEpicFiles(cwd, checkout, layout)
+  const { items, invalid } = await readEpicFiles(cwd, checkout, layout, privateDir)
   // Two files with one id: the first in scan order is the item, the others are invalid.
   const seen = new Map<string, FoundItem>()
   const kept: FoundItem[] = []
@@ -124,6 +153,9 @@ export function toTask(found: FoundItem, withBody: boolean): TaskInput {
   const { item } = found
   const { features, problems } = item.kind === PROPOSAL ? parseFeatures(found.body, found.bodyLine) : { features: [], problems: [] }
   const partOf = found.epic === null ? [] : [{ type: 'part-of', to: found.epic }]
+  // A private item says so in `fields.root`, over any `root` field the file has.
+  const own = Object.keys(item.fields).length === 0 ? null : item.fields
+  const fields = found.root === 'private' ? { ...item.fields, root: 'private' } : own
   return {
     key: `plan:${item.id}`,
     id: item.id,
@@ -136,7 +168,7 @@ export function toTask(found: FoundItem, withBody: boolean): TaskInput {
     kind: item.kind,
     links: [...partOf, ...item.links],
     owners: item.owners,
-    ...(Object.keys(item.fields).length === 0 ? {} : { fields: item.fields }),
+    ...(fields === null ? {} : { fields }),
     ...(features.length === 0 ? {} : { features }),
     ...(problems.length === 0 ? {} : { featureProblems: problems }),
   }

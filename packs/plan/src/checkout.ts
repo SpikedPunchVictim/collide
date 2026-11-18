@@ -48,3 +48,12 @@ export async function resolveCheckout(root: string, checkout: string): Promise<s
   }
   return resolved
 }
+
+/**
+ * Whether `checkout` is the main checkout `mainRoot`, compared with symbolic links resolved. The daemon names the main
+ * checkout like any other, so a path is the only way to tell.
+ */
+export async function isMainCheckout(mainRoot: string, checkout: string): Promise<boolean> {
+  const real = async (path: string): Promise<string> => realpath(path).catch(() => path)
+  return (await real(mainRoot)) === (await real(checkout))
+}

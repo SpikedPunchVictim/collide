@@ -52,8 +52,11 @@ export interface Reply {
   logs: string[]
 }
 
-/** A fake client for the provider: one request in, its reply out. `root` is what `initialize` will send. */
-export function connect() {
+/**
+ * A fake client for the provider: one request in, its reply out. `packData` is the pack's data folder, which the daemon
+ * gives as `COLLIDE_PACK_DATA`: none when it is left out, whatever this process's environment says.
+ */
+export function connect({ packData = null }: { packData?: string | null } = {}) {
   const input = new PassThrough()
   const output = new PassThrough()
   output.setEncoding('utf8')
@@ -68,7 +71,7 @@ export function connect() {
     lines.push(...parts)
     waiting.splice(0).forEach((wake) => wake())
   })
-  const done = servePlan({ input, output, log: (message) => logs.push(message) })
+  const done = servePlan({ input, output, log: (message) => logs.push(message), packData })
   let nextId = 1
 
   const request = async (method: string, params: unknown = {}): Promise<Reply> => {

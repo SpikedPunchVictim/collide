@@ -1,4 +1,4 @@
-import { isAbsolute } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { defineProvider } from '@collide/pack-sdk'
 import type {
@@ -8,8 +8,8 @@ import type {
   ListResultInput,
   ProviderHandlers,
 } from '@collide/pack-sdk'
-import { resolveCheckout } from './checkout.ts'
-import { TITLE_MAX } from './create.ts'
+import { isMainCheckout, resolveCheckout } from './checkout.ts'
+import { ROOT_NAMES, TITLE_MAX } from './create.ts'
 import { DEFAULT_LAYOUT, resolveLayout } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { BLOCKED_BY, CATEGORIES, ID_PATTERN, IMPLEMENTS, LINK_TO_PATTERN, LINK_TYPES, PROPOSAL, PROPOSAL_STATUSES } from './item.ts'
@@ -71,6 +71,7 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
         epic: { type: 'string', pattern: '^ep-[0-9]{3,}-[a-z]{2}$' },
         title: { type: 'string', minLength: 1, maxLength: TITLE_MAX },
         seed: { type: 'integer' },
+        root: { enum: [...ROOT_NAMES] },
       },
       required: ['title'],
       ...noExtraArgs,
@@ -94,22 +95,35 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
 
 export interface PlanProviderOptions {
   log: (message: string) => void
+  /**
+   * The pack's data folder, which the daemon gives as `COLLIDE_PACK_DATA`: the private root is `planning/` in it. A
+   * value that is not an absolute path, or none, means there is no private root.
+   */
+  packData: string | null
 }
+
+/** The private root, `<pack data>/planning`, or null when there is no usable pack data folder. */
+const privateRootOf = (packData: string | null): string | null =>
+  packData !== null && isAbsolute(packData) ? join(packData, 'planning') : null
 
 /**
  * Protocol v0's `initialize`, `list`, `get` and `apply` for the markdown provider. The repository root comes from
  * `initialize`'s `root` and from nowhere else, and the shared folders from its `config.layout` (checked there: an
  * `initialize` with a layout that may not be used fails with the reason); until it has run, `list` and `get` fail.
  */
-export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
+export function planHandlers({ log, packData }: PlanProviderOptions): ProviderHandlers {
   let root: string | null = null
   let layout: Layout = DEFAULT_LAYOUT
+  const privateRoot = privateRootOf(packData)
 
   const scan = async (checkout: string | null): Promise<Scan> => {
     if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')
     // A named checkout is read in place of the main checkout, so an item is listed with the version that a write
     // there will check; one that is not a checkout of the repository is an error.
-    const result = await scanEpics(checkout === null ? root : await resolveCheckout(root, checkout), checkout, layout)
+    // The private root is the main checkout's: a call that names another checkout lists only the shared root.
+    const where = checkout === null ? root : await resolveCheckout(root, checkout)
+    const withPrivate = privateRoot !== null && (checkout === null || (await isMainCheckout(root, where)))
+    const result = await scanEpics(where, checkout, layout, withPrivate ? privateRoot : null)
     if (result.invalid.length + result.unknownKind + result.brokenLink > 0) {
       log(`plan: ${result.items.length} items, ${result.invalid.length} invalid, ${result.unknownKind} with an unknown kind, ${result.brokenLink} with a broken link`)
     }
@@ -134,7 +148,7 @@ export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
     },
     apply: (params) => {
       if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')
-      return applyOp(root, params, {}, {}, layout)
+      return applyOp(root, params, {}, {}, layout, privateRoot)
     },
   }
 }
@@ -143,9 +157,16 @@ export interface ServeOptions {
   input?: Readable
   output?: Writable
   log?: (message: string) => void
+  /** The pack's data folder. `COLLIDE_PACK_DATA` when it is left out; null for none, whatever the environment says. */
+  packData?: string | null
 }
 
 /** Serves the provider over `input` and `output` (stdin and stdout by default) until the input ends. */
-export function servePlan({ input, output, log = (message) => void process.stderr.write(`${message}\n`) }: ServeOptions = {}): Promise<void> {
-  return defineProvider(planHandlers({ log }), { input, output, log })
+export function servePlan({
+  input,
+  output,
+  log = (message) => void process.stderr.write(`${message}\n`),
+  packData = process.env.COLLIDE_PACK_DATA ?? null,
+}: ServeOptions = {}): Promise<void> {
+  return defineProvider(planHandlers({ log, packData }), { input, output, log })
 }

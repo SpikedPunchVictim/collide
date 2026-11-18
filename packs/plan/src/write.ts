@@ -3,10 +3,10 @@ import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { ApplyParamsOutput, ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile } from './atomic.ts'
-import { CheckoutError, resolveCheckout } from './checkout.ts'
+import { CheckoutError, isMainCheckout, resolveCheckout } from './checkout.ts'
 import { addLinkLine, clearOwnersLine, setOwnerLine, setStatusLine } from './frontmatter-edit.ts'
 import type { Edit } from './frontmatter-edit.ts'
-import { checkCreate, CREATE, createLocked } from './create.ts'
+import { checkCreate, CREATE, createLocked, rootOfCreate } from './create.ts'
 import type { IdHooks } from './ids.ts'
 import { FEATURE_TARGET_EXAMPLE, parseFeatureTarget } from './feature-target.ts'
 import { parseFeatures } from './features.ts'
@@ -20,7 +20,7 @@ import { findFence, parseFrontmatter, readItemFile, versionOf } from './read-fil
 import { DEFAULT_LAYOUT, rootsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { scanEpics, toTask } from './scan.ts'
-import type { FoundItem, Scan } from './scan.ts'
+import type { FoundItem, RootName, Scan } from './scan.ts'
 
 export { TEMP_SUFFIX } from './atomic.ts'
 
@@ -55,6 +55,11 @@ function proposedRefusal(found: FoundItem): string | null {
   const lines = problems.map((problem) => `  line ${problem.line}: ${problem.reason}`)
   return `${found.item.id} cannot move to proposed: its ## Features part in ${found.path} has ${problems.length} problem${problems.length === 1 ? '' : 's'}; fix ${problems.length === 1 ? 'it' : 'them'} first:\n${lines.join('\n')}`
 }
+
+const NO_PACK_DATA =
+  "create: root private needs the pack's data folder, and there is none: COLLIDE_PACK_DATA is not set to an absolute " +
+  'folder (a command that runs without the daemon has none)'
+const NOT_MAIN = 'create: root private is for the main checkout, and checkout names another: leave checkout out'
 
 const OPS: Record<string, OpSpec> = {
   [SET_STATUS]: {
@@ -165,11 +170,18 @@ async function writeLocked(
   spec: OpSpec,
   args: Record<string, unknown>,
   layout: Layout,
+  privateDir: string | null,
+  lockedRoot: RootName,
 ): Promise<ApplyResultInput> {
-  const scan = await scanEpics(root, null, layout)
+  const scan = await scanEpics(root, null, layout, privateDir)
   const found = scan.items.find((candidate) => candidate.item.id === id)
   if (found === undefined) return refused(`there is no item ${id}`)
-  const absolute = join(root, ...found.path.split('/'))
+  // The lock held is the lock of the root the item was in when the op arrived: a file copied to the other root since
+  // then is not written under it.
+  if (found.root !== lockedRoot) {
+    return refused(`${id} moved to the ${found.root} root while the write waited; send the op again`)
+  }
+  const { absolute } = found
 
   const bytes = await readFile(absolute)
   if (versionOf(bytes) !== found.version) return refused(`${found.path} changed while it was being read; send the op again`)
@@ -201,9 +213,14 @@ async function writeLocked(
     outcome: 'ok',
     task: toTask(after, true),
     version: after.version,
-    files: [after.path],
+    files: after.root === 'private' ? [] : [after.path],
     items: [{ key, version: after.version, from: stateOf(found.item.kind, found.item.status), to: stateOf(after.item.kind, after.item.status) }],
   }
+}
+
+/** Runs `work` holding each lock in turn, the first outermost. Every writer takes them in the same order. */
+function withLocks<T>(paths: string[], work: () => Promise<T>, options: LockOptions): Promise<T> {
+  return paths.reduceRight((inner, path) => () => withLock(path, inner, options), work)()
 }
 
 /** Whether any of the folders is there. */
@@ -223,12 +240,17 @@ async function anyFolder(paths: string[]): Promise<boolean> {
  * Protocol v0's `apply` for the markdown provider. `mainRoot` is the main checkout, and a write goes there unless
  * `checkout` names another checkout of the repository (an entry of `git worktree list`; anything else is refused and
  * writes nothing). The shared root is `<checkout>/<layout.root>` (`.collide/planning` by default), and every write
- * holds that checkout's own lock file in it, whichever root the item is in: a write to an item under a `previous` root
- * changes that file and no other. `create` and `reid` still see every ref when they number or draw an id. `version` is
- * required: a write must say which content it was made against. An op that would change nothing writes nothing and
- * answers `ok` with no `files` and no `items`. Two ops are not about one version of one item: `create` makes an item,
- * so it takes no id and no version, and `reid` rewrites links in several files, each read under the lock, so it takes
- * no version (it refuses one rather than ignore it). `hooks` are for tests.
+ * to a shared item holds that checkout's own lock file in it, whichever shared root the item is in: a write to an item
+ * under a `previous` root changes that file and no other. `create` and `reid` still see every ref when they number or
+ * draw an id. `version` is required: a write must say which content it was made against. An op that would change
+ * nothing writes nothing and answers `ok` with no `files` and no `items`. Two ops are not about one version of one
+ * item: `create` makes an item, so it takes no id and no version, and `reid` rewrites links in several files, each
+ * read under the lock, so it takes no version (it refuses one rather than ignore it). `hooks` are for tests.
+ *
+ * `packPlanning` is the private root, `<pack data>/planning`, or null when the pack has no data folder. It belongs to
+ * the main checkout: a call that names another checkout neither reads nor writes it. A write to a private item holds
+ * the lock file in the private root and touches nothing in the repository; `reid`, which may rewrite files in both
+ * roots, holds the lock of each root that exists, the shared one first.
  */
 export async function applyOp(
   mainRoot: string,
@@ -236,6 +258,7 @@ export async function applyOp(
   lock: LockOptions = {},
   hooks: IdHooks = {},
   layout: Layout = DEFAULT_LAYOUT,
+  packPlanning: string | null = null,
 ): Promise<ApplyResultInput> {
   const { op, id, version, checkout } = params
   const spec = Object.hasOwn(OPS, op) ? OPS[op] : undefined
@@ -254,14 +277,20 @@ export async function applyOp(
     }
   }
   const planning = join(root, layout.root)
+  const privateDir = packPlanning !== null && (await isMainCheckout(mainRoot, root)) ? packPlanning : null
+  const lockOf = { shared: join(planning, LOCK_FILE), private: join(privateDir ?? '', LOCK_FILE) }
+  const folderOf = { shared: planning, private: privateDir ?? '' }
 
   if (op === CREATE) {
     if (id !== undefined && id !== null) return refused('create makes the id: leave id out')
     if (version !== undefined && version !== null) return refused('create takes no version: it makes a new item')
     const problem = checkCreate(args)
     if (problem !== null) return refused(`create: ${problem}`)
-    await mkdir(planning, { recursive: true })
-    return withLock(join(planning, LOCK_FILE), () => createLocked(root, args, hooks, layout), lock)
+    const into = rootOfCreate(args)
+    if (into === 'private' && packPlanning === null) return refused(NO_PACK_DATA)
+    if (into === 'private' && privateDir === null) return refused(NOT_MAIN)
+    await mkdir(folderOf[into], { recursive: true })
+    return withLock(lockOf[into], () => createLocked(root, args, hooks, layout, privateDir), lock)
   }
 
   if (typeof id !== 'string' || id === '') return refused(`${op} needs the id of the item to change`)
@@ -275,12 +304,23 @@ export async function applyOp(
   const problem = spec === undefined ? null : spec.check(args)
   if (problem !== null) return refused(`${op}: ${problem}`)
 
-  // The lock file lives in the root. A root that is not there yet is made when a previous root has items to write.
-  if (!(await anyFolder(rootsOf(layout).map((path) => join(root, path))))) return refused(`there is no item ${id}`)
-  await mkdir(planning, { recursive: true })
+  // The roots to lock. A write to one item locks the root that item is in; a reid may rewrite files in any root, so it
+  // locks each that exists. A lock file lives in its root, which is made when it has items to write: a shared root
+  // that is not there yet is made when a previous root has items.
+  const sharedFolders = rootsOf(layout).map((path) => join(root, path))
+  const locked: RootName[] = []
+  if (op === REID || privateDir === null) {
+    if (await anyFolder(sharedFolders)) locked.push('shared')
+    if (op === REID && privateDir !== null && (await anyFolder([privateDir]))) locked.push('private')
+  } else {
+    const holder = (await scanEpics(root, null, layout, privateDir)).items.find((candidate) => candidate.item.id === id)
+    if (holder !== undefined) locked.push(holder.root)
+  }
+  if (locked.length === 0) return refused(`there is no item ${id}`)
+  for (const name of locked) await mkdir(folderOf[name], { recursive: true })
   const work =
     spec === undefined
-      ? () => reidLocked(root, id, args, hooks, layout)
-      : () => writeLocked(root, id, version as string, spec, args, layout)
-  return withLock(join(planning, LOCK_FILE), work, lock)
+      ? () => reidLocked(root, id, args, hooks, layout, privateDir)
+      : () => writeLocked(root, id, version as string, spec, args, layout, privateDir, locked[0] as RootName)
+  return withLocks(locked.map((name) => lockOf[name]), work, lock)
 }

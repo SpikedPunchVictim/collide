@@ -59,6 +59,9 @@ Write these first.
 
 ## Notes
 
+- Carried from `ts-0125-uh`: a private epic folder is named by the epic's id alone (`<pack data>/planning/epics/<epic
+  id>/`). A `reid` of a shared epic does not rename that folder, so the private items in it keep the old epic id as
+  `part-of`. `reid` over every kind renames it too, under the private root's lock.
 - IMPLEMENTATION_PLAN.md:
   - Stage 4c: Planning ("kinds, op effects and links"); Success Criteria ("two branches that each create ten items in
     the shared root merge with no id collision"; "`collide task reid` on a colliding item rewrites the links that name

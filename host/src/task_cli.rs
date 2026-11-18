@@ -1000,7 +1000,8 @@ fn resolve_epic(tasks: &[Task], query: &str) -> Result<String, CliError> {
 }
 
 /// Commits what an `ok` reported, when `--commit` was given (`commit` is the checkout to commit in), and returns the
-/// exit code: 0, or 1 when the commit failed (the files are then left written). Under `--json` the one document on
+/// exit code: 0, or 1 when the commit failed (the files are then left written) or the item is a private one, which
+/// is in no repository (ts-0125-uh). Under `--json` the one document on
 /// stdout stays the provider's result, so the new commit is not printed.
 pub(crate) fn commit_reported(
     commit: Option<&Path>,
@@ -1011,6 +1012,21 @@ pub(crate) fn commit_reported(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> u8 {
+    // A private item is a file of the pack's data folder, not of the repository: there is nothing to commit.
+    if commit.is_some()
+        && task
+            .path
+            .as_deref()
+            .is_some_and(|path| path.starts_with("private:"))
+    {
+        let _ = writeln!(
+            err,
+            "collide: --commit refused: {} is in the private root, which is in no repository; the write was \
+             made and nothing was committed",
+            task.id
+        );
+        return exit::FAILED;
+    }
     let Some(dir) = commit.filter(|_| !files.is_empty()) else {
         return exit::OK;
     };
