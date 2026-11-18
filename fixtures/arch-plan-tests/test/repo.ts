@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll } from 'vitest'
 import { REPO, start, tree } from './helpers.ts'
 import type { ProviderOptions } from './helpers.ts'
@@ -40,6 +40,8 @@ export interface Repo {
   taskPath(shortId: string): string
   /** A provider that `initialize` has given this repository as its root, running the plan CLI with `env`. */
   provider(options?: ProviderOptions): ReturnType<typeof start>
+  /** A second checkout of the repository, made by `git worktree add` on a new branch, beside this one. */
+  worktree(name: string): Repo
 }
 
 /**
@@ -65,15 +67,21 @@ export function makeRepo(treeName = 'basic', script: string | null = null): Repo
     GIT_CONFIG_GLOBAL: emptyConfig,
     GIT_CONFIG_SYSTEM: emptyConfig,
   }
+  const first = repoAt(root, env)
+  first.git('init', '--quiet', '--initial-branch=main')
+  first.git('add', '-A')
+  first.git('commit', '--quiet', '-m', 'fixture')
+  return first
+}
+
+/** The checkout at `root`: git reads no configuration of the user's or the system's, and the home is a temp folder. */
+function repoAt(root: string, env: NodeJS.ProcessEnv): Repo {
   const git = (...args: string[]): string =>
     execFileSync(
       'git',
       ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args],
       { cwd: root, env, encoding: 'utf8' },
     )
-  git('init', '--quiet', '--initial-branch=main')
-  git('add', '-A')
-  git('commit', '--quiet', '-m', 'fixture')
 
   const snapshot = (): Record<string, string> => {
     const files: Record<string, string> = {}
@@ -106,6 +114,11 @@ export function makeRepo(treeName = 'basic', script: string | null = null): Repo
       throw new Error(`no task file for ${shortId}`)
     },
     provider: (options = {}) => start(root, { env, ...options }),
+    worktree: (name) => {
+      const path = join(dirname(root), name)
+      git('worktree', 'add', '--quiet', '-b', name, path)
+      return repoAt(path, env)
+    },
   }
 }
 

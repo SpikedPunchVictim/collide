@@ -3,10 +3,15 @@
 // It keeps the rules the adapter reads and nothing else:
 //   plan set <task id> status=<status> [--root DIR] [--format text|json] [--dry-run]
 //   plan new task <proposal> <title> --epic <epic> [--depends-on a,b] [--blocked-by a,b] [--root DIR] [--format ...]
+//   plan renumber <old id> <new id> [--file PATH] [--force] [--root DIR] [--format text|json] [--dry-run]
 // As in the real CLI, an oclif CLI, the first argument is the command: a flag before it is not a command.
 // The shapes follow the real CLI as read in the owner's copy of the Orchard repo: the flags, the JSON envelope
 // (schema_version 1, command, corpus, data), the exit codes (0 done, 1 the write gate refused it, 2 the CLI would not
 // do what it was asked) and what --dry-run reports. Every value here is made up, and so are the messages.
+// `renumber` follows the same copy: it moves a task file to a new number in its folder and keeps the slug, rewrites the
+// citations it can safely reach, refreshes the generated tables, and adds a row to `ID-MAP.md` at the root of the
+// folder: `| old id | new id | day | moved: <path>[; survivors: <paths>] |`, both ids with their slug. Not here: the
+// real flag `--incoming`, frozen spans, other kinds of id, and the second gate (that exit 1 is for).
 //
 // The root is an `arch/` folder. A write changes the task file and refreshes the generated table (the region between
 // `<!-- BEGIN GENERATED tasks -->` and `<!-- END GENERATED -->`) of each epic whose rows change.
@@ -36,8 +41,8 @@ const REGION = /(<!-- BEGIN GENERATED tasks -->\n)([\s\S]*?)(<!-- END GENERATED 
 
 // ---------------------------------------------------------------- arguments
 
-const VALUE_FLAGS = ['root', 'format', 'epic', 'depends-on', 'blocked-by']
-const SWITCH_FLAGS = ['dry-run', 'debug']
+const VALUE_FLAGS = ['root', 'format', 'epic', 'depends-on', 'blocked-by', 'file']
+const SWITCH_FLAGS = ['dry-run', 'debug', 'force']
 
 function parseArguments(argv) {
   const flags = {}
@@ -64,7 +69,7 @@ function resolveContext(flags) {
   if (format !== 'text' && format !== 'json') throw new UsageError(`the format ${format} is not text or json`)
   const root = path.resolve(flags.root ?? process.env.PLAN_ROOT ?? process.cwd())
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new UsageError(`the root ${root} is not a folder`)
-  return { root, format, dryRun: flags['dry-run'] === true }
+  return { root, format, dryRun: flags['dry-run'] === true, force: flags.force === true }
 }
 
 // ---------------------------------------------------------------- the corpus
@@ -147,8 +152,11 @@ function withStatus(text, status) {
 
 // ---------------------------------------------------------------- generated tables
 
-/** `texts` is a map of relPath to text for every task, with the pending change laid over the disk. */
-function regenerate(root, corpus, texts) {
+/**
+ * `texts` is a map of relPath to text for every task, with the pending change laid over the disk. `epicTexts` is the
+ * same for epic files that a write has already changed.
+ */
+function regenerate(root, corpus, texts, epicTexts = new Map()) {
   const rows = (epic) =>
     corpus.tasks
       .filter((task) => EPIC_ID.exec(String(frontmatterOf(texts.get(task.relPath)).epic))?.[1] === epic.shortId)
@@ -159,7 +167,7 @@ function regenerate(root, corpus, texts) {
       })
   const refreshed = []
   for (const epic of corpus.epics) {
-    const before = readText(root, epic.relPath)
+    const before = epicTexts.get(epic.relPath) ?? readText(root, epic.relPath)
     const after = before.replace(
       REGION,
       (_all, begin, _old, end) => `${begin}| ID | Status |\n|---|---|\n${rows(epic).join('')}${end}`,
@@ -346,6 +354,186 @@ function commandNewTask(context, flags, positionals) {
   }
 }
 
+// ---------------------------------------------------------------- renumber
+
+const ID_MAP = 'ID-MAP.md'
+const ID_MAP_HEAD = [
+  '# Renumbered ids',
+  '',
+  'One row for each renumber: the old id, the new id, the day, and what moved.',
+  '',
+  '| old id | new id | renamed | detail |',
+  '|---|---|---|---|',
+]
+
+/** Every markdown file under the root, as a path from the root, sorted. */
+function markdownFiles(root, dir = '') {
+  const found = []
+  for (const entry of filesIn(path.join(root, dir))) {
+    const rel = dir === '' ? entry.name : `${dir}/${entry.name}`
+    if (entry.isDirectory()) found.push(...markdownFiles(root, rel))
+    else if (entry.isFile() && rel.endsWith('.md')) found.push(rel)
+  }
+  return found.sort()
+}
+
+/** The text with `replace` applied outside the generated region, and how many times it applied. */
+function rewriteOutsideRegion(text, pattern, replacement) {
+  let count = 0
+  const rewrite = (part) =>
+    part.replace(pattern, () => {
+      count++
+      return replacement
+    })
+  const region = REGION.exec(text)
+  if (region === null) return { text: rewrite(text), count }
+  const end = region.index + region[0].length
+  return { text: rewrite(text.slice(0, region.index)) + region[0] + rewrite(text.slice(end)), count }
+}
+
+const today = () => {
+  const now = new Date()
+  return [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, '0')).join('-')
+}
+
+function commandRenumber(context, flags, positionals) {
+  const [, oldArg, newArg, ...extra] = positionals
+  if (oldArg === undefined || newArg === undefined) throw new UsageError('renumber needs an old id and a new id')
+  if (extra.length > 0) throw new UsageError(`renumber takes two arguments, and got ${extra.length} more`)
+  const oldMatch = TASK_ID.exec(oldArg)
+  if (oldMatch === null) throw new UsageError(`renumber takes task ids only, not ${oldArg}`)
+  const oldShort = oldMatch[1]
+  const newShort = /^T-\d{2}-\d{3}$/.exec(newArg)?.[0]
+  if (newShort === undefined) throw new UsageError(`give the new id without a slug, as T-NN-NNN, not ${newArg}`)
+  const scope = oldShort.slice(2, 4)
+  if (newShort.slice(2, 4) !== scope) {
+    const there = newShort.slice(2, 4)
+    throw new UsageError(`the new id must stay in proposal ${scope}; ${newShort} is in proposal ${there}`)
+  }
+
+  const corpus = readCorpus(context.root)
+  const claimants = corpus.tasks.filter((task) => task.shortId === oldShort)
+  if (claimants.length === 0) throw new UsageError(`there is no task ${oldShort}`)
+  const taken = corpus.tasks.find((task) => task.shortId === newShort)
+  if (taken !== undefined) throw new UsageError(`${newShort} already exists (${taken.relPath})`)
+  const mapPath = path.join(context.root, ID_MAP)
+  const mapText = fs.existsSync(mapPath) ? readText(context.root, ID_MAP) : ''
+  const mapRows = mapText.split('\n').filter((line) => line.startsWith('|'))
+  if (mapRows.some((row) => new RegExp(`\\b${newShort}\\b`).test(row))) {
+    throw new UsageError(`${newShort} is named in the id map, so it is never used again`)
+  }
+
+  const collision = claimants.length > 1
+  const given = flags.file
+  if (given !== undefined && !collision) {
+    throw new UsageError(`--file was given, but ${oldShort} has only one claimant`)
+  }
+  let moved = claimants[0]
+  if (collision) {
+    if (given === undefined) {
+      throw new UsageError(
+        `${oldShort} is in more than one file (${claimants.map((c) => c.relPath).join(', ')}); pass --file`,
+      )
+    }
+    // As in the real CLI, a relative path is tried from the root and from the folder above it.
+    const spellings = [path.join(context.root, given), path.resolve(path.dirname(context.root), given)].map((full) =>
+      path.relative(context.root, full).split(path.sep).join('/'),
+    )
+    moved = claimants.find((claimant) => spellings.includes(claimant.relPath))
+    if (moved === undefined) throw new UsageError(`--file ${given} does not match any file of ${oldShort}`)
+  }
+  const survivors = claimants.filter((claimant) => claimant !== moved).map((claimant) => claimant.relPath)
+  const slug = moved.file.slice(oldShort.length + 1, -'.md'.length)
+  const newFile = `${newShort}-${slug}.md`
+  const newRelPath = `${moved.dir}/tasks/${newFile}`
+  if (fs.existsSync(path.join(context.root, newRelPath))) throw new UsageError(`${newRelPath} already exists`)
+
+  // Which citations are rewritten. A bare one can say which file it means only when there is one claimant.
+  const bare = new RegExp(`\\b${oldShort}\\b`, 'g')
+  const slugged = new RegExp(`\\b${oldShort}-${slug}(?![a-z0-9-])`, 'g')
+  const bareOnly = new RegExp(`\\b${oldShort}\\b(?!-[a-z0-9])`, 'g')
+  const others = markdownFiles(context.root).filter((rel) => rel !== ID_MAP && rel !== moved.relPath)
+  const already = new RegExp(`\\b${newShort}\\b`)
+  const citing = others.filter((rel) => already.test(readText(context.root, rel)))
+  if (citing.length > 0 && !context.force) {
+    throw new UsageError(`${newShort} is already cited in ${citing.join(', ')}; pass --force to merge`)
+  }
+
+  const updated = []
+  const skipped = []
+  const epicTexts = new Map()
+  const edits = []
+  for (const rel of others) {
+    const before = readText(context.root, rel)
+    const fixed = collision
+      ? rewriteOutsideRegion(before, slugged, `${newShort}-${slug}`)
+      : rewriteOutsideRegion(before, bare, newShort)
+    if (collision) {
+      const left = rewriteOutsideRegion(fixed.text, bareOnly, oldShort).count
+      if (left > 0) {
+        skipped.push({ relPath: rel, citations: Array(left).fill(oldShort), reasons: Array(left).fill('ambiguous') })
+      }
+    }
+    if (fixed.count === 0) continue
+    updated.push({ relPath: rel, occurrences: fixed.count })
+    if (EPIC_FILE.test(path.basename(rel))) epicTexts.set(rel, fixed.text)
+    else edits.push({ relPath: rel, content: fixed.text })
+  }
+  const ownBefore = readText(context.root, moved.relPath)
+  const own = rewriteOutsideRegion(ownBefore, bare, newShort)
+
+  const renamedTask = { ...moved, shortId: newShort, num: newShort.slice(5), relPath: newRelPath, file: newFile }
+  const nextCorpus = { ...corpus, tasks: corpus.tasks.map((task) => (task === moved ? renamedTask : task)) }
+  const texts = new Map(corpus.tasks.map((task) => [task.relPath, readText(context.root, task.relPath)]))
+  texts.delete(moved.relPath)
+  texts.set(newRelPath, own.text)
+  for (const edit of edits) texts.set(edit.relPath, edit.content)
+  const refreshed = regenerate(context.root, nextCorpus, texts, epicTexts)
+  const epicWrites = new Map(epicTexts)
+  for (const entry of refreshed) epicWrites.set(entry.relPath, entry.content)
+
+  const row = `| ${oldShort}-${slug} | ${newShort}-${slug} | ${today()} | moved: ${moved.relPath}${
+    survivors.length > 0 ? `; survivors: ${survivors.join(', ')}` : ''
+  } |`
+  if (!context.dryRun) {
+    for (const edit of edits) writeAtomic(context.root, edit.relPath, edit.content)
+    for (const [rel, content] of epicWrites) writeAtomic(context.root, rel, content)
+    writeAtomic(context.root, newRelPath, own.text)
+    fs.unlinkSync(path.join(context.root, moved.relPath))
+    const head = mapText === '' ? `${ID_MAP_HEAD.join('\n')}\n` : `${mapText.replace(/\n+$/, '')}\n`
+    writeAtomic(context.root, ID_MAP, `${head}${row}\n`)
+  }
+
+  const regenerated = refreshed.map((entry) => entry.relPath)
+  const done = { errors: [], regenerated, written: !context.dryRun }
+  const files = [...new Set([newRelPath, ...updated.map((entry) => entry.relPath), ID_MAP])]
+  updated.sort((a, b) => (a.relPath < b.relPath ? -1 : 1))
+  return {
+    command: 'renumber',
+    data: {
+      oldId: `${oldShort}-${slug}`,
+      newId: `${newShort}-${slug}`,
+      kind: 'task',
+      renamed: [{ oldRelPath: moved.relPath, newRelPath, contentChanged: own.count > 0 }],
+      updated,
+      skipped,
+      keepsOldId: { frozenCiting: [], namedFiles: [] },
+      survivors,
+      regenerated,
+      idMapFile: ID_MAP,
+      errors: [],
+      written: !context.dryRun,
+      dryRun: context.dryRun,
+    },
+    lines: [
+      `${moved.relPath} -> ${newRelPath}${own.count > 0 ? ' (citation rewritten)' : ''}`,
+      ...updated.map((entry) => `${entry.relPath}  ${entry.occurrences} citation(s) rewritten`),
+    ],
+    files,
+    done,
+  }
+}
+
 // ---------------------------------------------------------------- output
 
 const diagnosticLine = (error) => `${error.file}  ${error.severity}  ${error.rule}  ${error.message}`
@@ -381,7 +569,8 @@ function main(argv) {
     context = resolveContext(flags)
     if (positionals[0] === 'set') result = commandSet(context, positionals)
     else if (positionals[0] === 'new') result = commandNewTask(context, flags, positionals)
-    else throw new UsageError(`there is no command ${positionals[0] ?? '(none)'}; try set or new task`)
+    else if (positionals[0] === 'renumber') result = commandRenumber(context, flags, positionals)
+    else throw new UsageError(`there is no command ${positionals[0] ?? '(none)'}; try set, new task or renumber`)
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
     process.stderr.write(`${error.message}\n`)

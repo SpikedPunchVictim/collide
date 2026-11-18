@@ -3,9 +3,12 @@ import type { Readable, Writable } from 'node:stream'
 import { defineProvider } from '@collide/pack-sdk'
 import type { GetResultInput, ListResultInput, ProviderHandlers } from '@collide/pack-sdk'
 import { INITIALIZE_RESULT } from './declaration.ts'
+import { isFolder } from './files.ts'
 import { findTask, scan } from './scan.ts'
 import type { Scan } from './scan.ts'
 import { applyOp, previewOp } from './write.ts'
+import { createWatcher } from './watcher.ts'
+import type { Watcher, WatchOptions } from './watcher.ts'
 import type { WriteContext } from './write.ts'
 
 /** A page of `list` is this many tasks. The corpus has about 1,600, so a full list is a few pages. */
@@ -26,35 +29,51 @@ export interface ServeOptions {
   env?: NodeJS.ProcessEnv
   /** How long the plan CLI may run before a write fails. */
   timeoutMs?: number
+  /** The debounce, the recheck, the clock and the file watcher of `watch`. Tests replace them. */
+  watch?: WatchOptions
+}
+
+/** The handlers, and the one call that ends them: `stop` closes every watcher `watch` opened. */
+export interface PlanHandlers extends ProviderHandlers {
+  stop(): void
 }
 
 /**
- * `initialize`, `list`, `get`, `apply` and `preview` for one checkout's `arch/` tree. The root comes from `initialize`
- * and from nowhere else; until it has run, every other call fails. The tree is read again on each call, so a reply is
- * never older than the request. A write runs the checkout's own `./plan`; the SDK answers one request at a time, in
- * the order they came, so two writes to the checkout never overlap in this process.
+ * `initialize`, `list`, `get`, `apply`, `preview` and `watch` for the checkouts of one repository. The root comes from
+ * `initialize`: it is the checkout that a call without `checkout` means, and nothing is read from the working
+ * directory. Until `initialize` has run, every other call fails. A call that names a checkout means that folder, which
+ * must exist. The tree is read again on each call, so a reply is never older than the request. A write runs the
+ * checkout's own `./plan`; the SDK answers one request at a time, in the order they came, so two writes in this
+ * process never overlap.
  */
 export function planHandlers(options: {
   log: (message: string) => void
   pageSize?: number
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
-}): ProviderHandlers {
+  watch?: WatchOptions
+}): PlanHandlers {
   const { log, pageSize = PAGE_SIZE, env = process.env, timeoutMs = WRITE_TIMEOUT_MS } = options
   let root: string | null = null
+  let watcher: Watcher | null = null
 
-  /** The root a call is for: the one `initialize` gave, which is the only checkout this provider reads or writes. */
-  const rootFor = (checkout: string | undefined): string => {
+  /** The folder a call is for: the one it names, else the root `initialize` gave. */
+  const checkoutFor = async (checkout: string | undefined): Promise<string> => {
     if (root === null) {
       throw new Error("the provider has no root yet: send initialize, with the checkout's path as root, first")
     }
-    if (checkout !== undefined && resolve(checkout) !== root) {
-      throw new Error(`checkout ${JSON.stringify(checkout)} is not the checkout this provider was given (${root})`)
-    }
-    return root
+    if (checkout === undefined) return root
+    if (!isAbsolute(checkout)) throw new Error(`checkout ${JSON.stringify(checkout)} is not an absolute path`)
+    if (!(await isFolder(checkout))) throw new Error(`checkout ${JSON.stringify(checkout)} is not a folder`)
+    return resolve(checkout)
   }
-  const read = async (checkout: string | undefined): Promise<Scan> => scan(rootFor(checkout), log)
-  const writing = (checkout: string | undefined): WriteContext => ({ root: rootFor(checkout), env, timeoutMs, log })
+  const read = async (checkout: string | undefined): Promise<Scan> => scan(await checkoutFor(checkout), log)
+  const writing = async (checkout: string | undefined): Promise<WriteContext> => ({
+    root: await checkoutFor(checkout),
+    env,
+    timeoutMs,
+    log,
+  })
 
   return {
     initialize: ({ root: given }) => {
@@ -87,8 +106,18 @@ export function planHandlers(options: {
       const found = findTask((await read(checkout ?? undefined)).tasks, id)
       return found === undefined ? {} : { task: { ...found.task, body: found.body } }
     },
-    apply: (params) => applyOp(writing(params.checkout ?? undefined), params),
-    preview: (params) => previewOp(writing(params.checkout ?? undefined), params),
+    apply: async (params) => applyOp(await writing(params.checkout ?? undefined), params),
+    preview: async (params) => previewOp(await writing(params.checkout ?? undefined), params),
+    watch: async ({ checkouts }, notify) => {
+      await checkoutFor(undefined)
+      if (!Array.isArray(checkouts) || checkouts.some((one) => typeof one !== 'string' || !isAbsolute(one))) {
+        throw new Error(`watch needs checkouts, a list of absolute paths; got ${JSON.stringify(checkouts)}`)
+      }
+      watcher ??= createWatcher({ env, log, notify, options: options.watch })
+      await watcher.set(checkouts)
+      return {}
+    },
+    stop: () => watcher?.stop(),
   }
 }
 
@@ -100,6 +129,9 @@ export function servePlan({
   pageSize,
   env,
   timeoutMs,
+  watch,
 }: ServeOptions = {}): Promise<void> {
-  return defineProvider(planHandlers({ log, pageSize, env, timeoutMs }), { input, output, log })
+  const handlers = planHandlers({ log, pageSize, env, timeoutMs, watch })
+  // The watchers keep the process alive, so they end with the input.
+  return defineProvider(handlers, { input, output, log }).finally(handlers.stop)
 }

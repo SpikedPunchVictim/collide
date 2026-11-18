@@ -58,10 +58,10 @@ describe('initialize', () => {
     expect(result.links).toEqual([{ name: 'blocked-by', dir: 'out', blocking: true }])
   })
 
-  test('declares setStatus and create, and the capabilities: create, preview, collections, not watch', async () => {
+  test('declares setStatus and create, and the capabilities: watch, create, preview, collections', async () => {
     const result = await initialize()
     expect(result.ops.map((op: { name: string }) => op.name)).toEqual(['setStatus', 'create'])
-    expect(result.capabilities).toEqual({ watch: false, create: true, collections: true, preview: true })
+    expect(result.capabilities).toEqual({ watch: true, create: true, collections: true, preview: true })
   })
 
   const argsSchema = async (name: string) => {

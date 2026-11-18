@@ -61,8 +61,7 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
 ]
 
 /**
- * What `initialize` answers. No `watch` yet (`ts-0112-px`). A category is written as the one status that has it, which
- * is what `categoryStatus` says.
+ * What `initialize` answers. A category is written as the one status that has it, which is what `categoryStatus` says.
  */
 export const INITIALIZE_RESULT: InitializeResultInput = {
   scope: 'ref',
@@ -77,5 +76,5 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
   ],
   ops: OPS,
   links: [{ name: BLOCKED_BY, dir: 'out', blocking: true }],
-  capabilities: { watch: false, create: true, collections: true, preview: true },
+  capabilities: { watch: true, create: true, collections: true, preview: true },
 }

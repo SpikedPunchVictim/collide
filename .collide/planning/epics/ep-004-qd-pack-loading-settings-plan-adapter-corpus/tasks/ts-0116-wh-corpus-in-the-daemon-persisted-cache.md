@@ -118,5 +118,9 @@ the Orchard fixture adapter (needs `node`, as the built-in pack tests do).
 - Stage 4b item (revision 23 scope, split 2026-11-17). Items of Stage 4b run one at a time, in id order, because they
   share `core`, `host` and the generated files.
 - Nothing here runs a real `claude`.
+- Carried from `ts-0112-px` (2026-11-17): `source.stale` carries only `reason`, and the `plan` adapter names the
+  checkout in that text. If the daemon acts per checkout (marks one checkout's tasks stale and not the others), add a
+  `checkout` field to `SourceStale` in `core/src/provider.rs` here, run `pnpm gen`, and have the adapter's `watcher.ts`
+  send it.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation: `task.invalid` is an event and a
   view count now, and a Queue item comes with Stage 6's Queue page.

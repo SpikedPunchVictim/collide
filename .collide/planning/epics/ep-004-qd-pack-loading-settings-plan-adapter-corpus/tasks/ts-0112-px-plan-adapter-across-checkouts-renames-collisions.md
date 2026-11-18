@@ -103,3 +103,87 @@ Write these first. Helpers make a temp git repository and a second checkout with
   share `core`, `host` and the generated files.
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation.
+
+### Built
+
+Every Node test below runs against the fake plan CLI and temp git repositories (empty `GIT_CONFIG_GLOBAL` and
+`GIT_CONFIG_SYSTEM`, a temp `HOME`). No Rust and no wire type changed, so `pnpm gen` had nothing to do.
+
+- **The fake follows the owner's copy of the Orchard repo (2026-11-17).** Read only, never run; shapes only, every value
+  invented. Taken from it: `renumber OLD NEW` with `--file`, `--force`, `--root`, `--format`, `--dry-run`; the JSON
+  envelope keys and the report's keys; exit 0 done, exit 2 for a refusal, exit 1 only for the write gate; the id map
+  as `ID-MAP.md` at the root of the folder, rows `| old id | new id | day | moved: <path>[; survivors: <paths>] |`,
+  both ids with their slug; the file keeps its slug and its number moves; citations outside the generated region are
+  rewritten; the epic tables are refreshed. Could not confirm (the copy was read, not run): the exact text of messages
+  (invented), what the CLI does with a second `--force` on a loop of renumbers, the order of `survivors` when there are
+  several, and whether exit 1 is ever used by `renumber` itself. The fake does not model the real `--incoming` flag,
+  frozen spans, ids other than tasks, or the second gate.
+- `fixtures/orchard-arch/plan`: `renumber` (`commandRenumber`, `markdownFiles`, `rewriteOutsideRegion`, `today`,
+  `ID_MAP`); `regenerate` takes already-rewritten epic texts. `fixtures/orchard-arch/basic/arch/ID-MAP.md`: the real row
+  shape, invented values.
+- `fixtures/packs/orchard/providers/plan/`
+  - `provider.ts`: `planHandlers` returns `PlanHandlers` (`stop` added). `checkoutFor` resolves `checkout`, default the
+    root, and refuses a path that is not absolute or not a folder. `list`, `get`, `apply` and `preview` take it.
+    `watch` calls `createWatcher(...).set(checkouts)` and returns `{}` at once. `servePlan` calls `stop` when the input
+    ends.
+  - `watcher.ts` (new): `createWatcher`, `DEBOUNCE_MS` (300), `RECHECK_MS` (10 000), `Timers`, `WatchFs`,
+    `WatchOptions`. `node:fs.watch` on each checkout's `arch/` (recursive) and on the folder of its HEAD file (only
+    `HEAD` counts, since git swaps it in by rename). A trailing debounce; a recheck interval; a baseline read before the
+    reply; serialised flushes; a checkout that cannot be read is `source.stale` once until it reads again; watchers are
+    reopened on a read when one failed or `arch/` came later.
+  - `changes.ts` (new, pure): `compare` (changed, removed, invalid, renamed), `diffOf`, `idsChanged`, `collisionsOf`.
+  - `id-map.ts` (new): `readIdMap`, `renamedTo` (follows a chain to its end, stops on a loop). `git.ts` (new):
+    `gitHead`, `gitDir`, `gitRenames` (`git diff -M` under `arch/` between two HEADs). `files.ts`: `isFolder`.
+  - `declaration.ts`: `capabilities.watch` is true.
+- `fixtures/arch-plan-tests/test/`: `checkouts.test.ts` (13: list, get and write per checkout, the id map, git helpers),
+  `watch.test.ts` (40), `fake-plan.test.ts` (`describe('renumber')`, 26), `fakes.ts` (fake clock, fake file watcher),
+  `helpers.ts` (`notifications`, `pending`, `DEADLINE_MS` 20 s), `repo.ts` (`worktree`). `initialize.test.ts` and
+  `list.test.ts`: two expectations updated (`watch: true`; a checkout that is not a folder is refused).
+- **Seen red at runtime.** The 26 `renumber` tests of the fake: I did not record a red run for them, so treat them as
+  not seen red. For the adapter I wrote the tests after the code, so I stubbed it afterwards: `checkoutFor` that
+  ignores `checkout`, and a `watch` handler that does not start the watcher. Result: 42 of the 53 tests in
+  `checkouts.test.ts` and `watch.test.ts` failed at runtime (all the checkout, change, cause, removed, invalid,
+  rename, collision, recheck, stale, set and real-watcher tests); the 11 that passed are the id map, git helper and
+  "sends nothing" tests. The stub was removed. That is a weaker check than red-before-code; say so at review.
+- Real `fs.watch` is used in three tests, each waiting with a 20 s deadline; the debounce, the recheck and the
+  closing of watchers use the injected clock and file watcher.
+
+### Decisions for the owner
+
+- **Renames are keys.** `task.renamed {from, to}` carries `plan:<short id>` for both, which is what `ts-0115-ug` and
+  `ts-0116-wh` resolve ("the old key resolves to the new one"). Alternative: paths. Recommend keys.
+- **Rename only on evidence.** From the id map, else from git's rename detection between the two HEADs. A file that went
+  with another that came and no evidence is a `task.removed` and a new `task.changed`, never a guess. Alternative:
+  guess from equal titles. Recommend no guess.
+- **`task.removed` cause.** `deleted` when HEAD did not move, `unknown` when it did (the adapter does not read history).
+  Recommend this until a use needs more.
+- **Baseline before the reply.** `watch` reads each checkout before it answers, so a write right after the reply is a
+  change, not part of the baseline. Cost: `watch` is as slow as one scan per new checkout. Recommend keeping it.
+- **Collision locations.** `{checkout, path}` with the path from the checkout root, the checkout's absolute path as the
+  checkout. Sent when the set of locations of a short id changes and has two or more; nothing for what exists at
+  `watch` (core lists), nothing when it resolves.
+- **A worktree's HEAD.** Its HEAD file sits in `.git/worktrees/<name>` of the main repository, so the adapter asks git
+  (`--absolute-git-dir`) and watches that folder, not `<checkout>/.git`. Plan text for 0.10 Sources, `plan` row: "the
+  folder of each checkout's own HEAD file, as git reports it".
+- **Same short id twice in one checkout** is two `task.invalid` files, not a collision (a collision is across paths in
+  different checkouts). Recommend.
+- **`source.stale` has only a reason**, so the checkout is named in the text. If core should act per checkout, the wire
+  type needs a `checkout` field; that is a change to `core/src/provider.rs`, for `ts-0113-ck` to ask for.
+
+- Owner decisions (2026-11-17, at the build): every decision above as recommended, taken on delegation; no plan text
+  (0.10's `plan` row says HEAD, which still holds). At review: the id map's header and slugged cells were checked
+  against the plan CLI's `appendIdMap` in the copy, which writes `| old id | new id | renamed | detail |` for a new file
+  (older rows there are bare). One fix, seen red first: `compare` took a gone task's git rename as matching a new task
+  with no path when git reported no rename for it; it now needs git's rename (test `with no rename from git for the gone
+  file, a new task without a path is not taken for its new name`). The `renumber` tests had no red run, so three
+  mutations of the fake were tried (no citation rewrite, bare ids in the row, no --force check): each was caught (4, 2
+  and 1 tests failed). `source.stale` with a `checkout` field is carried to `ts-0116-wh`, which watches sources.
+
+### Not done, by design
+
+- Divergence reporting and collision chips: `ts-0115-ug`. The daemon's use of the notifications, `task.get`, `apply` and
+  `preview` through the daemon, and sources: `ts-0113-ck`. Reconcile at start: `ts-0116-wh`.
+- The line lock, root busy and the phase queue: `ts-0114-hr`. The adapter does not know of them.
+- `watch` on a platform without recursive `fs.watch`: the recheck is the only net there; not tested beyond the
+  `noFs` case.
+- The real plan CLI's `--incoming` and other id kinds in the fake's `renumber`.

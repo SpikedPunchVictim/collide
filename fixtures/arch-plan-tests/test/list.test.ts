@@ -66,7 +66,7 @@ describe('list over the basic tree', () => {
     expect(result).toMatchObject({ tasks: [], collections: [], invalid: [] })
   })
 
-  test('names one checkout only: the root is fine, another path is an error', async () => {
+  test('takes the root as the checkout, and refuses a path that is not a folder', async () => {
     expect((await call(ROOT, 'list', { checkout: ROOT })).result?.tasks).toHaveLength(8)
     expect((await call(ROOT, 'list', { checkout: '/elsewhere' })).error?.message).toMatch(/checkout/)
   })

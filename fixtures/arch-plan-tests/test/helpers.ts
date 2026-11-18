@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterAll } from 'vitest'
 import { servePlan } from '../../../fixtures/packs/orchard/providers/plan/provider.ts'
+import type { WatchOptions } from '../../../fixtures/packs/orchard/providers/plan/watcher.ts'
 
 type Message = Record<string, any>
 
@@ -12,7 +13,17 @@ export interface ProviderOptions {
   pageSize?: number
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
+  watch?: WatchOptions
 }
+
+/** A notification the provider sent: no `id`, a method and its params. */
+export interface Note {
+  method: string
+  params: Message
+}
+
+/** How long a test waits for something a real file watcher or a real clock must bring. A loaded machine is slow. */
+export const DEADLINE_MS = 20_000
 
 export const REPO = join(import.meta.dirname, '..', '..', '..')
 export const PACK = join(REPO, 'fixtures', 'packs', 'orchard')
@@ -43,6 +54,7 @@ export function connect(options: ProviderOptions = {}) {
   const output = new PassThrough()
   output.setEncoding('utf8')
   const lines: string[] = []
+  const notes: Note[] = []
   const waiting: Array<() => void> = []
   const logs: string[] = []
   let buffer = ''
@@ -50,7 +62,12 @@ export function connect(options: ProviderOptions = {}) {
     buffer += chunk
     const parts = buffer.split('\n')
     buffer = parts.pop() ?? ''
-    lines.push(...parts)
+    for (const line of parts) {
+      const message: Message = JSON.parse(line)
+      if (message.id === undefined && typeof message.method === 'string') {
+        notes.push({ method: message.method, params: message.params })
+      } else lines.push(line)
+    }
     waiting.splice(0).forEach((wake) => wake())
   })
   const done = servePlan({ input, output, log: (message) => logs.push(message), ...options })
@@ -77,11 +94,37 @@ export function connect(options: ProviderOptions = {}) {
     }
     return replies
   }
+  /**
+   * The next `count` notifications of `method` (any method when it is null), taken off the queue in order.
+   * It waits on the condition, not on the clock, and fails at the deadline with what did come.
+   */
+  const notifications = async (method: string | null, count = 1, deadlineMs = DEADLINE_MS): Promise<Note[]> => {
+    const matching = () => notes.filter((note) => method === null || note.method === method)
+    const deadline = Date.now() + deadlineMs
+    while (matching().length < count) {
+      const left = deadline - Date.now()
+      if (left <= 0) {
+        throw new Error(`wanted ${count} ${method ?? 'notification'}(s), got ${JSON.stringify(notes)}`)
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, left)
+        waiting.push(() => {
+          clearTimeout(timer)
+          resolve()
+        })
+      })
+    }
+    const taken = matching().slice(0, count)
+    for (const note of taken) notes.splice(notes.indexOf(note), 1)
+    return taken
+  }
+  /** What has come and not been taken. */
+  const pending = (): Note[] => [...notes]
   const close = async (): Promise<void> => {
     input.end()
     await done
   }
-  return { request, requestMany, close }
+  return { request, requestMany, notifications, pending, close }
 }
 
 /** A provider that `initialize` has given `root`. `close` ends it. */

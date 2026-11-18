@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 
 async function entriesIn(dir: string) {
   try {
@@ -31,4 +31,13 @@ export async function inBatches<T, R>(items: T[], work: (item: T) => Promise<R>)
     results.push(...(await Promise.all(items.slice(at, at + BATCH).map(work))))
   }
   return results
+}
+
+/** Whether `path` is a folder. A link to a folder counts; anything that cannot be read does not. */
+export async function isFolder(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
 }
