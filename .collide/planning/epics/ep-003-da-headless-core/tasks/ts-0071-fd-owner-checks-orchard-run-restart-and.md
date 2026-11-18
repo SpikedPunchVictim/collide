@@ -69,6 +69,9 @@ None by a build agent: these checks are the owner's. The checklist names the aut
 
 ### Owner checklist
 
+Checked against the code at f4dad8a on 2026-11-17: no command, path, table or message drifted; the run now loads the
+worktree's `CLAUDE.md` and skills (a note under Check 1).
+
 Written from the code and `collide --help` of the build at the time of writing. Every command below is the owner's to
 run; nothing here was run by the build agent.
 
@@ -160,6 +163,12 @@ Look for:
 - `run <run id> started on <task file>`, then `run <run id>: running`.
 - A permission request reads `The agent asks to use <tool> (<kind>).`, with `reason:` and `input:` lines, or
   `input not available until approved`. The prompt is `Allow this once? [y/N]` and offers nothing else.
+- Since `ts-0104-gx`, a run reads the worktree's own `CLAUDE.md` (and the files it imports) and its `.claude/skills`,
+  as the commit the worktree is made from has them (`repo_instructions: worktree`, the default of the built-in
+  builder: `host/src/adapters/claude/instructions.rs`). That adds input tokens to turn 1, and a `Skill` call asks like
+  any tool: `The agent asks to use Skill (<kind>).`. If an instruction file is changed in the worktree before a later
+  attempt, the record shows `warning: phase build started after instruction files changed in the worktree: <files>`
+  under the `worktree:` line (`record_text` in `host/src/run_cli.rs`). With one attempt, as here, none is expected.
 - The record ends with `run <run id>: ended`, `worktree: <path> (branch collide/<run id>)`, `report:` with the agent's
   words, then `model calls:` (one `turn N: wall ..., model time ..., input ..., output ..., cache read ...,
   cache write ..., cost $...` line per turn; `not reported` for a figure the agent did not give, never `0`) and a

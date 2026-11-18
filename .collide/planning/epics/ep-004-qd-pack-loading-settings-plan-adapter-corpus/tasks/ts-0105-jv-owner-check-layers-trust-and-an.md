@@ -93,6 +93,9 @@ None by a build agent: this check is the owner's. The checklist names the automa
 
 ### Owner checklist
 
+Checked against the code at f4dad8a on 2026-11-17: the commands, paths, messages and tables still match; `pnpm install`
+is now needed once (the SDK needs `yaml`), and the live-test and `stdout.log` notes are settled.
+
 Written from the code and the Built, Decisions and Not done sections of `ts-0093-am` to `ts-0104-gx`, `ts-0106-nr` and
 `ts-0107-rj`. Every command below is the owner's to run: **not run by the writer**, and none was tried against a real
 daemon, keychain or `claude`. A command or claim marked "(unconfirmed)" could not be confirmed from the code; the note
@@ -125,7 +128,7 @@ no cap, and `--budget` is the file run's `--max-budget-usd`; watch the `total` l
 
    ```sh
    cd <collide checkout>
-   pnpm install                      # only if dependencies changed
+   pnpm install                      # once since ts-0109: the pack SDK needs `yaml`
    pnpm build:packs
    cargo build -p collide-host       # target/debug/collide and target/debug/collide-daemon
    export COLLIDE_BIN=<collide checkout>/target/debug
@@ -582,8 +585,8 @@ the worktree's skills, listed as `repo-skills:<name>` (`host/src/adapters/claude
    ```
 
    Pass: the first prints `repo-skills:owl-word` (the stream's first `system` line lists the skills; that the line is
-   in `stdout.log` follows from `host/src/shim.rs`, the exact text is (unconfirmed)). The second lists `.claude-plugin`
-   and `skills`. The third prints nothing.
+   in `stdout.log` follows from `host/src/shim.rs`, which keeps each stdout line whole; the form `repo-skills:<skill>`
+   was measured in `ts-0106-nr`). The second lists `.claude-plugin` and `skills`. The third prints nothing.
 
 4. **Run 2: the default role with `--config none`, and a no to the skill.** `--config none` is the one option of
    `collide run` that exists for this; it is about *your* settings, not the repository's (see below). Answer `n` at the
@@ -607,16 +610,20 @@ the worktree's skills, listed as `repo-skills:<name>` (`host/src/adapters/claude
    - A real-`claude` measurement of the line without `--add-dir`, which is the `none` line:
      `live_candidate_1_the_current_line_in_the_worktree` in
      `host/tests/adapters/claude/repo_instructions_live.rs`, on its own fixture worktree. It runs `claude` once, cap
-     $0.10, and needs the opt-in and a ledger file. It prints the findings table; the filter, the ledger file's need
-     to exist, and the output are (unconfirmed). If you run it, count its spend inside your cap:
+     $0.10, and needs the opt-in and a ledger: with no `COLLIDE_REAL_LEDGER` the test is skipped, prints `skipped:` and
+     passes (`unavailable` in that file). The ledger file need not exist; the test creates it. The filter
+     `live_candidate_1` matches that one test, in the `claude_adapter` target (`host/Cargo.toml`). With `--nocapture`
+     it prints a `root:` line, a `spend:` line and a `finding` line (`Findings::describe`). If you run it, count its
+     spend inside your cap:
 
      ```sh
-     real_login; touch "$CHECK/ledger.tsv"
+     real_login
      cd <collide checkout> && COLLIDE_REAL_CLAUDE=1 COLLIDE_REAL_LEDGER="$CHECK/ledger.tsv" \
        cargo test -p collide-host --test claude_adapter live_candidate_1 -- --nocapture --test-threads=1
      ```
 
-     Pass: root `CLAUDE.md` loaded: no, skill: no (the table of `ts-0103-sa`, column "1 baseline").
+     Pass: the `finding` line has `words: root not loaded` and `skill not loaded` (the table of `ts-0103-sa`, column
+     "1 baseline").
    - Otherwise record "not checkable by hand in 4a" for this line and leave it to the tests.
 
 6. **The warning after an edit.** The line is `warning: phase build started after instruction files changed in the

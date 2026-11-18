@@ -80,6 +80,9 @@ None by a build agent: this check is the owner's. The checklist names the automa
 
 ### Owner checklist
 
+Checked against the code at f4dad8a on 2026-11-17: no command, path, table or message drifted; two notes added (`pnpm
+install` is needed once, and any older daemon is to be stopped).
+
 Written from the code and the Built and Decisions sections of `ts-0077-ws` to `ts-0082-fp`. Every command below is the
 owner's to run; nothing here was run by the build agent, and no command was tried against the real app. Run it after
 the checks of `ts-0071-fd`, so a real run has been seen from the CLI first. The run spends real money on your
@@ -92,7 +95,7 @@ the checks of `ts-0071-fd`, so a real run has been seen from the CLI first. The 
 
    ```sh
    cd <collide checkout>
-   pnpm install                                         # only if dependencies changed
+   pnpm install                                         # once since ts-0109: the pack SDK needs `yaml`
    pnpm build:packs
    pnpm --filter @collide/app build                     # the page, into app/dist; the app embeds it
    cargo build -p collide-host                          # collide, collide-daemon
@@ -108,6 +111,8 @@ the checks of `ts-0071-fd`, so a real run has been seen from the CLI first. The 
    result.
 
 2. Stop a daemon left from an older build. One from before `ts-0077-ws` does not know the app and has no `run.start`.
+   A daemon from any build older than the one just made may also lack newer fields of a run (`warnings` of
+   `ts-0104-gx`, in `core/src/owner/run.rs`), so stop it as well.
    A daemon that is not there is fine.
 
    ```sh
