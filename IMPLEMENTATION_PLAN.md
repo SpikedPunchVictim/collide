@@ -4403,8 +4403,9 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   `no`, a hash like `1e10`, a duplicate key, an alias bomb, a file over the cap); provider contract tests against
   markdown and plan fixtures; id generation; view counts; layout checks. Quality parts (revision 18): parser
   fixtures for each part and the Pre-registration part, and coverage cases.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-004-qd`, items lettered `4c`
-(part L).
+**Status**: Not Started. Split into `ts-0124-xm` to `ts-0138-pn` (revision 23 scope, 2026-11-18), in epic `ep-004-qd`,
+built one at a time in id order (part L). It runs after 4b. Nothing in it runs a real `claude`. The criteria over the
+Orchard repo, and the checks on a real clone, are the owner's, in `ts-0138-pn`.
 
 ## Stage 5: GitHub adapter
 
