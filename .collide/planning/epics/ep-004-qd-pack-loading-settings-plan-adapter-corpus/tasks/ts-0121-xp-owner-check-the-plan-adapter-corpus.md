@@ -1,7 +1,7 @@
 ---
 id: ts-0121-xp
 kind: task
-status: ready
+status: active
 title: "Owner check: the plan adapter, corpus and views on the Orchard repo"
 owners: []
 links:
