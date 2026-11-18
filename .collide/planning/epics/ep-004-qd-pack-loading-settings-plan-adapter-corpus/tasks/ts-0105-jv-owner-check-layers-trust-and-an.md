@@ -96,6 +96,11 @@ None by a build agent: this check is the owner's. The checklist names the automa
 Checked against the code at f4dad8a on 2026-11-17: the commands, paths, messages and tables still match; `pnpm install`
 is now needed once (the SDK needs `yaml`), and the live-test and `stdout.log` notes are settled.
 
+Noted on 2026-11-18, at the owner's run of step 4: the code blocks sit inside numbered steps, so in this file each of
+their lines starts with three spaces. A copy that starts at the first word keeps those spaces on every line but the
+first, and a YAML file written that way does not parse (`pack.yaml:2:7: mapping values are not allowed in this
+context`). Copy each block whole, or from a rendered view, and check a written file with `cat -e` before committing it.
+
 Written from the code and the Built, Decisions and Not done sections of `ts-0093-am` to `ts-0104-gx`, `ts-0106-nr` and
 `ts-0107-rj`. Every command below is the owner's to run: **not run by the writer**, and none was tried against a real
 daemon, keychain or `claude`. A command or claim marked "(unconfirmed)" could not be confirmed from the code; the note
