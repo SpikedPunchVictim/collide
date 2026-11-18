@@ -1,7 +1,7 @@
 ---
 id: ts-0126-nf
 kind: task
-status: ready
+status: done
 title: "Plan pack: the spike kind"
 owners: []
 links:
