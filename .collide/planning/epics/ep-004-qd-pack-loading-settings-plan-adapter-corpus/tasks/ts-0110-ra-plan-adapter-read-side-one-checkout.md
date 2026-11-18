@@ -1,7 +1,7 @@
 ---
 id: ts-0110-ra
 kind: task
-status: ready
+status: done
 title: "Plan adapter, read side: one checkout"
 owners: []
 links:
