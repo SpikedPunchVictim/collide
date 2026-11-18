@@ -1,7 +1,7 @@
 ---
 id: ts-0112-px
 kind: task
-status: ready
+status: done
 title: "Plan adapter across checkouts: renames, collisions and watch"
 owners: []
 links:
