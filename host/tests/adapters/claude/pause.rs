@@ -26,6 +26,7 @@ use collide_host::file_run::PHASE_NAME;
 use collide_host::login::{End, LoginSessions};
 use collide_host::owner_client::OwnerClient;
 use collide_host::phases::{PhaseKey, PhaseOptions, Phases};
+use collide_host::sysproc;
 use common::procs::Guarded;
 use common::{PYTHON, TempRoot, kill_child_of, signal_if_same, wait_until};
 use serde::Serialize;
@@ -678,13 +679,33 @@ fn a_child_that_ends_its_turn_on_interrupt_ends_stopped_with_no_signal_sent() {
         &recording("cancelled"),
         Settings::default(),
     );
+    let began_us = real_now_us();
     let run = rig.started(None);
     rig.wait_running(&run);
     let stopped = rig.stop(&run);
     assert_eq!(stopped.state, RunState::Stopped {});
     assert_eq!(stopped.signalled, 0);
     assert_eq!(rig.wait_final(&run), PhaseState::Stopped {});
-    assert!(stopped.survivors.is_empty());
+    // The rig's wall clock starts at a fixed time (`wall_base_secs`), which real time has passed, so the stop's scan
+    // takes any orphan of this user's that started since then for a suspect: another program's, too. Only one that
+    // started during this test can be the run's.
+    let survivors: Vec<_> = stopped
+        .survivors
+        .iter()
+        .filter(|s| {
+            !s.command.ends_with("(suspect)")
+                || sysproc::start_time_us(s.pid).is_none_or(|started| started >= began_us)
+        })
+        .collect();
+    assert!(survivors.is_empty(), "{survivors:?}");
+}
+
+/// Real time now, in microseconds since the epoch: the clock the operating system dates a process by.
+fn real_now_us() -> u64 {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("the clock is after the epoch");
+    u64::try_from(since.as_micros()).expect("microseconds fit in u64")
 }
 
 #[test]
