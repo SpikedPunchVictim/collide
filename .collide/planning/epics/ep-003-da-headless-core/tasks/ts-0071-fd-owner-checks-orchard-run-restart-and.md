@@ -187,7 +187,10 @@ Look for:
 
 Automated tests it relies on: `ts-0069-bn` (`collide run`: `host/tests/adapters/claude/run_command.rs`).
 
-- Owner result:
+- Owner result (2026-11-18): run by the owner, no failure reported. From the store, read by the agent:
+  `run-1794988754212-0`, one `phase_ends` row (`build`, `ended`), one `run` and one `phase` span, exit code 0 in
+  `exit.json`, cost $0.0242 on haiku. `claude` 2.1.327 was in use, newer than the tested range 2.1.323 through 2.1.325,
+  and the version line said so. Orchard's own status and worktree list are the owner's observation.
 
 **Check 2: a daemon restart in the middle of a run, then `collide run --resume`.**
 
@@ -266,7 +269,11 @@ Automated tests it relies on:
 - `ts-0070-mk`: `a_phase_outlives_a_daemon_that_is_killed_and_the_next_daemon_adopts_it`
   (`host/tests/adapters/claude/launchd_run.rs`, opt-in with `COLLIDE_REAL_LAUNCHD=1`).
 
-- Owner result:
+- Owner result (2026-11-18): run by the owner, no failure reported. From the store and `daemon.log`, read by the agent:
+  `run-1794990220187-1`; the log has the old daemon's stop and the new daemon's `starting, pid <pid>`, `the last daemon
+  was stopped` and `adopting 2 shim directories`; one `run` and one `phase` span; one `phase_ends` row (`build`,
+  `ended`); `restart-check.txt` holds `restart-check`; the permission request that was pending across the restart is one
+  wait span of 248 s; cost $0.0045. The optional Mac restart was not run (the log has no third daemon start).
 
 **Check 3: the sleep test with `sleep-check.sh`.**
 
@@ -345,7 +352,12 @@ Automated tests it relies on:
   (`host/tests/adapters/claude/metrics.rs`).
 - `host/tests/clock.rs` for the three clocks.
 
-- Owner result:
+- Owner result (2026-11-18): run by the owner, no failure reported, on the second try (the correction note above). From
+  the store and the watcher, read by the agent: `run-1794991040805-1`; the watcher's gap of 53.13 s and the OS record of
+  53.17 s agree; one `wait` `sleep` span of 53.1 s under `build`, its wall times 53 s apart; the phase is 270.1 s on the
+  continuous clock and 186.3 s active after the sleep wait (53.1 s) and the permission wait (30.7 s); no `cold_returns`
+  row; `ended`; cost $0.0044. So the 0.2 table holds as far as a run shows it, and the sleep counts as waiting. The
+  stopwatch comparison is the owner's.
 
 **Gaps.**
 
