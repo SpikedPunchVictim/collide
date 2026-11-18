@@ -1,7 +1,7 @@
 ---
 id: ts-0071-fd
 kind: task
-status: active
+status: done
 title: "Owner checks: Orchard run, restart and sleep test"
 owners: []
 links:
