@@ -97,7 +97,7 @@ its root, one commit.
 - Out of scope: renames, collisions, `watch` (`ts-0112-px`); the line lock, root busy and the phase queue
   (`ts-0114-hr`); recording a write in a commit (Stage 7, `record`).
 - Area: `fixtures/packs/orchard/providers/`, `fixtures/orchard-arch/plan` (the fake CLI) and the fixture-repo helper,
-  `packs/orchard-fixture-tests/`.
+  `fixtures/arch-plan-tests/`.
 - The test rule: no test touches the real home, real launchd or a real daemon. A test that runs the `collide` binary
   clears the environment (`env_clear()`) and sets `HOME` and `COLLIDE_DAEMON_ROOT` to a temp root, as
   `host/tests/common/mod.rs` `TempRoot` does. This item's tests are Node: each makes its own temp git repository, sets

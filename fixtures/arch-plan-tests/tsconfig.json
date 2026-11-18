@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "erasableSyntaxOnly": true,
+    "paths": {
+      "@collide/pack-sdk": ["../../packages/pack-sdk/src/index.ts"],
+      "@collide/pack-sdk/yaml": ["../../packages/pack-sdk/src/yaml.ts"]
+    }
+  },
+  "include": ["test", "vitest.config.ts", "../../fixtures/packs/orchard/providers"]
+}

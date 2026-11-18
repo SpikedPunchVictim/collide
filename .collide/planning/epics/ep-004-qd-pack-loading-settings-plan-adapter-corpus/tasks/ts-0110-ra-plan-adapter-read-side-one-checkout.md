@@ -121,3 +121,86 @@ Write these first.
   its own local clone in a temp folder, with no network and no package install; otherwise it reads the CLI's source.
   Fixtures keep the real shapes with stand-in names and invented content. Nothing is copied verbatim, and the denylist
   check covers every fixture. The rest: the recommendation above (`packs/orchard-fixture-tests`).
+
+### Built
+
+The fixture shapes follow the owner's copy of the Orchard repo (read 2026-11-16, read-only). Every value in the fixtures
+is invented. Confirmed against the copy: the task path (`arch/proposals/NN-<slug>/tasks/T-NN-NNN-<slug>.md`, the id is
+the file stem), the frontmatter keys (`title`, `status`, `epic`, `depends_on`, `blocked_by` and a few extras), the six
+statuses (all 1,659 task files use one of them), `epic:` in the short (`E-07`) and the long (`E-07-<slug>`) form,
+`depends_on` as `[]`, a flow list or a block list, the generated region markers, the slice headings
+(`### Slice N: <name>`) and tables (`Lane | Tasks, in order | Waits on another lane`), the stream table
+(`Stream | Owns | Gate | PoC`, size tags in the cells, under a heading that says "streams"), the id-map columns, and
+that task-named files sit outside `tasks/` folders and non-`.md` files sit inside them (both are ignored).
+
+Could not confirm: the value forms of the extra keys `awaiting`, `clears`, `migrated`, `backlog_id`, `self_review` and
+`reviewed_by` (the adapter ignores them); what `blocked_by` holds (open-question ids in the fixture; the adapter ignores
+it, so only `depends_on` makes links); the question-file shape (never read); the proposal file's exact keys.
+
+What exists:
+- `fixtures/packs/orchard/providers/plan.ts` (entry) and `providers/plan/`: `read-file.ts` (capped reader, `parse` from
+  `@collide/pack-sdk/yaml`), `ids.ts`, `declaration.ts` (the `initialize` result), `task.ts`, `epic.ts` (tables),
+  `collections.ts`, `files.ts`, `scan.ts`, `provider.ts` (paging, `get`, handlers). It imports only the SDK, node
+  built-ins and its own files. `pack.yaml` `requires.sdk` is `>=0.2 <0.3`.
+- Fixture trees: `fixtures/orchard-arch/basic` (2 proposals, 8 tasks, 2 epics with generated, slice and stream tables,
+  an id map, a question and a proposal file) and `hazards` (15 task files that must go to `invalid[]`, one fine task,
+  one non-task file, one epic with broken YAML). The cap cases are made at test time in a temp copy, so no large file is
+  tracked.
+- The test package `fixtures/arch-plan-tests` (54 tests, six files: initialize 7, list/get/collections/versions 16,
+  hazards 21, paging 4, provider-stdio 2, pack-shape 4). Nothing touches the real home or a daemon; the child test runs
+  with a cleared environment and a temp `HOME` and `COLLIDE_DAEMON_ROOT`, links a shim for the SDK in a temp pack copy,
+  and ends the child by closing its stdin (it is killed if that fails).
+
+Red at runtime: with `servePlan` a stub that threw `unimplemented`, 52 of the 54 tests failed when run, and every
+initialize, list, get, collection, hazard, cap, paging and child-process test among them. The two that passed are two
+pack-shape tests (no `package.json` or `node_modules`; the script the manifest names exists), which describe files that
+already held. The SDK range and the imports-only test were red until `pack.yaml` and the modules existed.
+
+Mutation checks (each reverted): dropping `onAnchor`, the merge-key check, the conflict-marker check, `uniqueKeys`, the
+fence skip in the epic reader, a version over part of the file, and reading `### Gaps` as a slice each turned tests
+red. Dropping `maxAliasCount: 0` did not: an anchor is refused first, so an alias has nothing to name; it stays as a
+second guard.
+
+Changes outside the item's area, both needed: `core/tests/pack_manifest.rs` asserts the fixture's `requires.sdk`
+(now `>=0.2 <0.3`); `pnpm-workspace.yaml` has an entry for `fixtures/arch-plan-tests`, and `pnpm-lock.yaml` its importer
+(offline, no new package: the same dev dependencies as `packs/plan`, plus `ajv`, which `claude-contract` already uses).
+
+### Decisions for the owner
+
+- **Where the tests live (recommend: keep).** `fixtures/arch-plan-tests`, not `packs/orchard-fixture-tests`.
+  `host/tests/layout.rs` requires every folder of `packs/` to be a pack and counts five; the names check allows the
+  reference pack's name only under `packs/` and `fixtures/`. `ts-0111-vn` and `ts-0112-px` name the old folder and
+  should say this one. Alternative: change the layout test to allow a non-pack folder in `packs/`.
+- **Id and alias (recommend: keep).** In the copy the long id is the file stem (`T-NN-NNN-<slug>`); there is no second
+  long form (`T-01-042-e-02-<slug>`) and no separate stem alias, so `id` is the stem, `aliases` is empty, and `get`
+  takes the short id, the stem and `plan:<short id>`. Plan text that says otherwise should be corrected.
+- **Collections (recommend: keep).** A task's `collections` holds the epic ids only (`plan:E-07`); the slices and
+  streams are the epic collection's `groups`, because a group has no id in the protocol. An epic holds a task when
+  the task's `epic:` says so or any of the epic's tables (generated list, slices, streams) names it. A table under
+  another heading, prose and code fences do not count. The item says a task carries "its slice and stream": read as
+  the groups.
+- **Body cap 1 MiB (recommend: keep).** The reader's 256 KiB would refuse real tasks (the largest file in the copy is
+  about 330 KB). The frontmatter cap stays 64 KiB.
+- **`checkout` (recommend: keep).** Tasks and `invalid[]` carry the root as `checkout`; `list` and `get` accept a
+  `checkout` equal to the root and refuse another. `ts-0112-px` widens this.
+- **Paging.** 500 tasks a page, as the item said; the collections and `invalid[]` come with the first page only, so
+  walking the pages gives each once. The tree is read again for every page, so a change between pages can show.
+- **Unknown YAML tags (recommend: accept for now).** `parse` hides warnings, so a file with an unknown tag is read as
+  text and not refused. Exporting `parseDocument` from the SDK would let the adapter refuse it; that is an SDK change.
+- **Plan text.** The plan's manifest example still says `sdk: ">=0.1 <0.2"` (0.7 Pack manifest); propose `>=0.2 <0.3`
+  since 0.2 is the first SDK with the yaml export.
+
+- Owner decisions (2026-11-17, at the build): the decisions above as recommended, on delegation. At review: the copy has
+  a few task files whose stem carries the epic (`T-NN-NNN-e-NN-<slug>`, the form the plan cites as measured), so a test
+  renames a fixture task to that form and checks it lists with the stem as `id`, is found by short id, stem and key, and
+  keeps its epic (red with digits refused in the slug). Plan text applied: 0.10 Identity (the long form is `id`) and the
+  0.7 manifest example (`>=0.2 <0.3`). `ts-0111-vn` and `ts-0112-px` now name `fixtures/arch-plan-tests`. Unknown YAML
+  tags stay accepted until an SDK change exports `parseDocument`.
+
+### Not done, by design
+
+- No `apply`, ops, `create` or `preview` (`ts-0111-vn`): `apply` answers an error. No `watch`, checkouts other than the
+  root, renames, id-map reading or collisions (`ts-0112-px`).
+- Not run against the real Orchard tree (the item says no test reads it); `ts-0121-xp` (owner-run) checks that, and the
+  scan time over about 1,660 files.
+- No `labels`, `owners` or `checklist` for a task: the corpus has no such keys.

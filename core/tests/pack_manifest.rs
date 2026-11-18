@@ -129,7 +129,7 @@ fn the_reference_manifest_holds_every_key_of_the_plans_example() {
     assert!(!manifest.name.is_empty());
     assert_eq!(manifest.version.as_deref(), Some("0.1.0"));
     let requires = manifest.requires.as_ref().unwrap();
-    assert_eq!(requires.sdk.as_deref(), Some(">=0.1 <0.2"));
+    assert_eq!(requires.sdk.as_deref(), Some(">=0.2 <0.3"));
     assert_eq!(requires.agents, ["claude"]);
     assert_eq!(requires.model_name.as_deref(), Some("^[a-z]+$"));
     assert_eq!(requires.tools.len(), 3);

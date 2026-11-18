@@ -1899,7 +1899,7 @@ apiVersion: collide/v0
 name: orchard
 version: 0.1.0
 requires:
-  sdk: ">=0.1 <0.2"
+  sdk: ">=0.2 <0.3"
   tools:
     - { name: node, version: ">=22.18" }
     - { name: pnpm }
@@ -2326,8 +2326,9 @@ Why the plan adapter parses files itself:
 
 **Identity.**
 - A task's key is `source:shortId` (`plan:T-01-042`, `github:acme/edge#212`).
-- Long forms are aliases. For orchard that is the file stem: plan's JSON id is
-  `T-01-042-e-02-<slug>`, while `depends_on` uses `T-01-042` (measured R2).
+- The long form is the task's `id`, the one `get` and `apply` take; any other form is an alias. For Orchard the long
+  form is the file stem, `T-01-042-<slug>` (in a few files `T-01-042-e-02-<slug>`), and `depends_on` uses `T-01-042`
+  (measured R2; `ts-0110-ra`).
 - The plan provider also supplies a `labelId` template field (`t01-042`) for orchard's labels (0.5).
 - Ref-scoped sources identify a task in a checkout by (shortId, path).
   - The same shortId at different paths in two checkouts is a **collision**, shown as a collision, never as

@@ -93,7 +93,7 @@ Write these first. Helpers make a temp git repository and a second checkout with
   name and row format are the owner's sample (`ts-0110-ra`); until it exists the fixture's shape is invented.
 - Out of scope: reporting a divergence (core's, `ts-0115-ug`); the line lock and the phase queue (`ts-0114-hr`); the
   daemon's use of the stream (`ts-0113-ck`, `ts-0116-wh`).
-- Area: `fixtures/packs/orchard/providers/`, `fixtures/orchard-arch/plan`, `packs/orchard-fixture-tests/`.
+- Area: `fixtures/packs/orchard/providers/`, `fixtures/orchard-arch/plan`, `fixtures/arch-plan-tests/`.
 - The test rule: no test touches the real home, real launchd or a real daemon. A test that runs the `collide` binary
   clears the environment (`env_clear()`) and sets `HOME` and `COLLIDE_DAEMON_ROOT` to a temp root, as
   `host/tests/common/mod.rs` `TempRoot` does. This item's tests are Node: each makes its own temp git repositories, sets
