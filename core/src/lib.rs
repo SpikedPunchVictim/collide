@@ -5,6 +5,7 @@ pub mod ask;
 pub mod board;
 pub mod change;
 pub mod context;
+pub mod corpus;
 pub mod domain;
 pub mod duration;
 pub mod engine;

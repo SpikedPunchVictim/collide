@@ -41,7 +41,8 @@ fn linked_task() -> Value {
                 "kind": "task",
                 "status": "done",
                 "category": "done",
-                "stale": false
+                "stale": false,
+                "missing": false
             },
             {
                 "type": "blocked-by",
@@ -50,7 +51,8 @@ fn linked_task() -> Value {
                 "kind": "task",
                 "status": "ready",
                 "category": "ready",
-                "stale": true
+                "stale": true,
+                "missing": false
             }
         ]
     })
@@ -189,6 +191,35 @@ fn a_tasks_entry_carries_its_links_one_hop_out_in_both_directions() {
     assert_eq!(links[0].key, "plan:0009");
     assert!(!links[0].stale);
     assert!(links[1].stale);
+}
+
+#[test]
+fn a_link_to_a_key_the_corpus_does_not_hold_says_so() {
+    let mut doc = workspace_input();
+    doc["tasks"][0]["links"][0] = json!({
+        "type": "blocked-by",
+        "dir": "out",
+        "key": "plan:0099",
+        "kind": "",
+        "status": "",
+        "category": "backlog",
+        "stale": false,
+        "missing": true
+    });
+    let input: HookInput = round_trip(doc);
+    assert!(input.tasks[0].links[0].missing);
+    assert!(!input.tasks[0].links[1].missing);
+}
+
+#[test]
+fn a_link_written_without_missing_reads_as_present() {
+    let mut doc = workspace_input();
+    doc["tasks"][0]["links"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("missing");
+    let input: HookInput = serde_json::from_value(doc).unwrap();
+    assert!(!input.tasks[0].links[0].missing);
 }
 
 #[test]

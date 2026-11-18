@@ -319,7 +319,7 @@
     },
     "HookLink": {
       "additionalProperties": false,
-      "description": "A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says\nthat the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.",
+      "description": "A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says\nthat the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.\n`missing` says that the corpus holds no task with the key: `kind` and `status` are then empty and `category` is\n`backlog`, so a gate can refuse a link that goes nowhere.",
       "properties": {
         "category": {
           "$ref": "#/$defs/Category"
@@ -332,6 +332,10 @@
         },
         "kind": {
           "type": "string"
+        },
+        "missing": {
+          "default": false,
+          "type": "boolean"
         },
         "stale": {
           "type": "boolean"

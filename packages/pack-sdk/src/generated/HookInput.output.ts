@@ -219,12 +219,15 @@ export interface HookTask {
 /**
  * A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says
  * that the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.
+ * `missing` says that the corpus holds no task with the key: `kind` and `status` are then empty and `category` is
+ * `backlog`, so a gate can refuse a link that goes nowhere.
  */
 export interface HookLink {
   category: Category
   dir: LinkDir
   key: string
   kind: string
+  missing: boolean
   stale: boolean
   status: string
   type: string

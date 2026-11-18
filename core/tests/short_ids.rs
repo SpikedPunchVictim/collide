@@ -1,7 +1,7 @@
 //! Tests for short-form id lookup (ts-0020) and the epic helpers beside it.
 
 use collide_core::provider::Task;
-use collide_core::short_id::{Lookup, epic_short_form, resolve};
+use collide_core::short_id::{Lookup, epic_short_form, matching_ids, resolve};
 use serde_json::json;
 
 fn task(id: &str, epic: Option<&str>) -> Task {
@@ -121,4 +121,19 @@ fn an_epic_is_shown_short_without_its_suffix() {
     assert_eq!(epic_short_form("ep-002-va"), "ep-002");
     assert_eq!(epic_short_form("ep-002"), "ep-002");
     assert_eq!(epic_short_form("ep-1000-zz"), "ep-1000");
+}
+
+#[test]
+fn matching_ids_reads_a_short_form_over_bare_ids() {
+    let ids = [
+        "ts-0012-ua",
+        "ts-0012-qb",
+        "ts-0030-zz",
+        "plan:ts-0012-ua",
+        "T-01-042",
+    ];
+    assert_eq!(matching_ids(ids, "12"), ["ts-0012-ua", "ts-0012-qb"]);
+    assert_eq!(matching_ids(ids, "12-qb"), ["ts-0012-qb"]);
+    assert!(matching_ids(ids, "99").is_empty());
+    assert!(matching_ids(ids, "T-01-042").is_empty(), "not a short form");
 }

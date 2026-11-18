@@ -21,7 +21,18 @@ test('a hook input outside a task point has no change, and a task entry has no b
     path: 'a.md',
     templateFields: {},
     fields: {},
-    links: [{ type: 'blocked-by', dir: 'out', key: 'plan:0009', kind: 'task', status: 'done', category: 'done', stale: false }],
+    links: [
+      {
+        type: 'blocked-by',
+        dir: 'out',
+        key: 'plan:0009',
+        kind: 'task',
+        status: 'done',
+        category: 'done',
+        stale: false,
+        missing: false,
+      },
+    ],
   }
   // @ts-expect-error a task entry never carries its body.
   const withBody: HookInputOutput['tasks'][number] = { ...task, body: 'text' }

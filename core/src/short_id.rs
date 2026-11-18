@@ -89,6 +89,17 @@ pub fn resolve<'a>(tasks: &'a [Task], query: &str) -> Lookup<'a> {
     }
 }
 
+/// The ids among `ids` that `query` could mean as a short form (`12`, `12-ua`, `ts-12`), as `resolve` reads one. It is
+/// empty when `query` is not a short form or no id fits. It is for a caller that holds ids and not [`Task`]s.
+pub fn matching_ids<'a>(ids: impl IntoIterator<Item = &'a str>, query: &str) -> Vec<&'a str> {
+    let Some(query) = parse(query) else {
+        return Vec::new();
+    };
+    ids.into_iter()
+        .filter(|id| parse(id).is_some_and(|item| matches(&query, &item)))
+        .collect()
+}
+
 /// An epic id without its random suffix: `ep-002-va` is shown as `ep-002` beside a link target.
 pub fn epic_short_form(epic: &str) -> &str {
     match epic.rsplit_once('-') {

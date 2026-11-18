@@ -29,6 +29,8 @@ pub const OUTPUTS_MAX_BYTES: usize = 64 * 1024;
 
 /// A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says
 /// that the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.
+/// `missing` says that the corpus holds no task with the key: `kind` and `status` are then empty and `category` is
+/// `backlog`, so a gate can refuse a link that goes nowhere.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HookLink {
@@ -40,6 +42,8 @@ pub struct HookLink {
     pub status: String,
     pub category: Category,
     pub stale: bool,
+    #[serde(default)]
+    pub missing: bool,
 }
 
 /// One entry of `tasks[]`: the fields and the path of a task, never its body, and its links. It is not the

@@ -113,3 +113,99 @@ Write these first, over `FakeProvider` data in `core/tests/`.
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation: an additive `missing: bool` on a
   hook's link entry.
+
+### Built
+
+A pure `core` module. No I/O, no daemon, no store, no new crate or package. `pnpm gen` ran and a second run left no
+diff.
+
+- `core/src/hook.rs`: `HookLink.missing: bool` (`#[serde(default)]`, always written). `schemas/HookInput.*.json` and
+  `packages/pack-sdk/src/generated/HookInput.*.ts` are regenerated. Existing fixtures that build a link
+  (`core/tests/hook_protocol.rs`, `host/tests/schema_command.rs`, `packages/pack-sdk/test/hook-types.test.ts`) gain the
+  key.
+- `core/src/corpus.rs` (new, in `core/src/lib.rs`).
+  - Input: `Corpus::set_checkouts` (`CheckoutInfo`, `CheckoutKind::{Line { default }, Workspace { forked_from },
+    Other}`), `declare_source` (an `InitializeResult`), `load(source, checkout, ListResult)` (replaces one checkout's
+    list; `None` for a source that is not ref-scoped).
+  - Notifications, one method each, each touching one entry: `apply_changed` (returns `Applied::{Done, NeedsTask}`),
+    `apply_renamed`, `apply_removed`, `apply_invalid`, `mark_stale` and `mark_fresh`. An undeclared source is
+    `CorpusError::UnknownSource`.
+  - Answers: `rows` (`Row`: shown task, `branch_only`, `divergence`, `collided`, `stale`), `divergences` (`Divergence`),
+    `collisions`, `invalid` (`Invalid`, with the source), `statuses`, `lookup` (`Found::{One, Collided, Ambiguous,
+    None}`), `get` (a `TaskGetResult` with no runs), `list_result` (a `TaskListResult`, no body), `links_of`
+    (`Vec<HookLink>`), `stale_sources`.
+  - `reconcile(cached, fresh)` returns `ProviderEvent`s (`Changed` with `cause: startup`, `Removed` with `unknown`,
+    `Invalid`).
+  - Scale: indexes by key, by name, by link target and by (source, checkout, path). An entry records what it indexed,
+    so a notification reindexes that entry only. The module comment says so.
+- `core/src/short_id.rs`: `matching_ids`, for the number forms (`12`, `12-ua`) over bare ids. `resolve` is unchanged.
+- Tests. `core/tests/corpus.rs` (58 tests), `core/tests/hook_protocol.rs` (2 new, 4 updated),
+  `core/tests/short_ids.rs` (1 new).
+- **Seen red at runtime.**
+  - `missing`: with the field stubbed `#[serde(skip)]`, 6 tests of `hook_protocol.rs` failed (the link entry, the two
+    new tests and the round trips).
+  - Corpus: with every method stubbed to answer empty, 51 of the first 56 tests failed at runtime. Five passed against
+    the stub:
+    - `a_workspace_that_agrees_with_its_root_is_not_divergent`
+    - `reconcile_of_an_unchanged_source_gives_no_event`
+    - `reconcile_says_nothing_of_what_it_was_not_given_a_list_for`
+    - `a_link_whose_type_targets_a_feature_is_not_resolved_here`
+    - `a_lookup_of_nothing_is_an_answer_with_no_task`
+
+    Each of the first four was then mutation-checked and failed. The fifth was not seen red.
+  - Then 29 mutations of `corpus.rs`, each put back after. Misses led to tests: a rename whose old key resolves only
+    through the redirect, a shown copy where the default root is not first in path order, and a moved copy that must
+    not answer for its old path; all three now fail under their mutation. Caught by the first set: divergence rule
+    (equality, path), feature links, reconcile (unchanged, listed, stale, invalid), category, collision rule, `missing`,
+    rename (checkout), invalid (removal, clearing), branch only, link stale, stale clear, body, duplicate in a
+    checkout, `NeedsTask`, ambiguous names, inbound index.
+  - Not seen red: `matching_ids_reads_a_short_form_over_bare_ids` (a new function; the corpus tests that use it did go
+    red under the ambiguous-names mutation).
+
+### Decisions for the owner
+
+- **`missing` is always written** (`"missing": false` too), as `stale` is. Alternative: leave it out when false, so
+  old payloads stay byte-identical. Recommend always: a gate reads `link.missing` without a default.
+- **A key has one copy for each checkout.** A task listed twice in one checkout is the first and an invalid item for the
+  later one (the stance of `ts-0112-px`). Alternative: keep both and call it a collision. Recommend as built.
+- **A collided key has one row for each path, no one `task`.** `get` of it gives `task` absent, `ambiguous: [key]`,
+  `collisions` and every copy. Alternative: show the first path. Recommend as built: nothing is picked for the user.
+- **Divergence compares state** (status and category) of the same path. A version or title difference is not one; the
+  drawer's copies carry the version. Every workspace is compared with its own root, including a workspace of another
+  line, and the caller (the board, the selected line) filters. Recommend.
+- **The category is the declared one**, from the task's kind when the source declared the kind, else from the source's
+  statuses. It replaces the category the provider put in `state`. A status the kind lacks but the source declares is
+  accepted. Alternative: refuse it. Recommend lenient until a pack has kinds whose statuses clash.
+- **A change brings only a state.** `apply_changed` updates a held copy from the event; a new copy returns `NeedsTask`
+  and the daemon fetches that one task and applies the event again with it. A change that makes the status undeclared
+  drops the copy, so the fix needs the task again. Alternative: keep the dropped copy. Recommend as built.
+- **A rename in one checkout moves that copy only.** The old key resolves to the new one when it holds nothing. The
+  copy keeps its `id` until its source lists it again, so `ts-0116-wh` should `get` it after a rename.
+- **`reconcile` also gives `task.invalid`** for an item that is new or has a new reason (the item's list names only
+  changed and removed), and gives no removal for a task that became invalid. It says nothing of a checkout it was not
+  given a list for or a source that is stale. Its `diff` names status, title, path, kind, labels, owners, collections
+  and each field. Recommend.
+- **A bare link target that fits several tasks of its source is `missing`**, so a gate refuses it. A link of a type that
+  targets a feature is left out, since `HookLink` cannot say it (planning, 4c).
+- **Links read the shown copy**; for a collided key, the first path's.
+- **Stale is explicit**: `mark_stale` and `mark_fresh`; `load` does not clear it. The daemon clears it after a full
+  read.
+- **Collections** of a source are those its shown checkout listed (default root, else first).
+- **`task.collision` is not consumed.** Collisions come from the lists, as `ts-0116-wh` says.
+- Plan text, 0.5 `tasks[].links`: "Each entry also has `missing`: true when the corpus holds no task with that key
+  (`kind` and `status` are then empty and `category` is `backlog`)."
+
+- Owner decisions (2026-11-17, at the build): every recommendation above, on delegation. The 0.5 plan text is applied to
+  the `tasks[]` links entry in the hook payload, and it also says that a bare id naming more than one task is `missing`.
+  At review, two mutations were caught: a collision counted by copies instead of paths (3 tests failed, among them
+  `the_same_path_in_two_checkouts_with_two_states_is_a_divergence_and_no_collision`) and a link's `stale` forced false
+  (`a_link_to_a_source_that_is_stale_is_marked_stale`).
+
+### Not done, by design
+
+- The store cache, its migration, the events' persistence, the notification pump (which fetches for `NeedsTask`,
+  clears stale, and relists after a restart) and the checkout list from `git worktree list`: `ts-0116-wh`.
+- `task.list`'s additive fields (`divergent`, `collisions`, `stale_sources`, `refreshing`), `runs` and `latest_run`
+  on `task.get`, and a Queue item for `task.invalid`: `ts-0116-wh`.
+- Views, fields and the closure: `ts-0118-wp`. It reads `rows`, `links_of` (`missing` and `category`) and `invalid`.
+- Feature links: 4c. The time to build a corpus of 1,600 tasks: `ts-0116-wh` records it.

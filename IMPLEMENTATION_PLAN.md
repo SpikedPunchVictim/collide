@@ -1382,7 +1382,9 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       (from `preview` when the provider has it) and actual at `after_*`.
     - `from` is null at create and `to` is null at delete.
     - Each `tasks[]` entry carries its links one hop out, in both directions, as `{type, dir, key, kind, status,
-      category, stale}`, resolved across sources. It still carries fields and paths, never bodies.
+      category, stale, missing}`, resolved across sources. `missing` is true when the corpus holds no task the link
+      names, or a bare id names more than one; `kind` and `status` are then empty and `category` is `backlog`, so a gate
+      can refuse it (owner, 2026-11-17; `ts-0115-ug`). It still carries fields and paths, never bodies.
     - Outside a run, `latestRun` as before: the item's latest finished run, read-only.
   - Point bindings take `timeout:`. The default is 30 s for task points and 120 s for move points, which may scan
     files. A timeout is `error`.
