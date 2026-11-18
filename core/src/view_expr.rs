@@ -479,8 +479,9 @@ fn check_json(name: &str, value: &Json) -> Result<(), CapError> {
     }
 }
 
-/// The dependencies of a task: the targets of its [`DEPENDENCY_LINKS`] links, in order.
-fn dependencies(task: &Task) -> Vec<String> {
+/// The dependencies of a task: the targets of its [`DEPENDENCY_LINKS`] links, in order. A view's `deps` and its
+/// `closure` both read these, so the two cannot disagree.
+pub fn dependencies(task: &Task) -> Vec<String> {
     task.links
         .iter()
         .filter(|link| {

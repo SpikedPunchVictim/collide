@@ -677,8 +677,9 @@ impl Corpus {
 
     // --- lookup ---
 
-    /// The key an entry is held under: `key` itself, else what it was renamed to.
-    fn resolve_key(&self, key: &str) -> Option<String> {
+    /// The key an entry is held under: `key` itself, else what it was renamed to. No id, alias or short id is read as
+    /// a key: for those, use [`Corpus::lookup`].
+    pub fn resolve_key(&self, key: &str) -> Option<String> {
         let mut at = key;
         for _ in 0..MAX_REDIRECTS {
             if self.entries.contains_key(at) {
@@ -865,7 +866,8 @@ impl Corpus {
         result
     }
 
-    fn kind_of(&self, source: &str, task: &Task) -> String {
+    /// The kind of a task: its own, else its source's one kind, else empty (a view's `kind` variable).
+    pub fn kind_of(&self, source: &str, task: &Task) -> String {
         self.sources
             .get(source)
             .map_or_else(String::new, |state| state.kind_of(task))
@@ -927,7 +929,7 @@ impl Corpus {
 
     /// The key a link's target names: a `to` with a `:` is a key (an old one too), and any other is a name in
     /// `source`. A name that fits several tasks is not resolved, so the link is reported as missing.
-    fn resolve_target(&self, source: &str, to: &str) -> Option<String> {
+    pub fn resolve_target(&self, source: &str, to: &str) -> Option<String> {
         let target = qualified(source, to);
         if let Some(key) = self.resolve_key(&target) {
             return Some(key);
