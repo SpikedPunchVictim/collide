@@ -295,15 +295,6 @@ fn task_says_why_an_item_is_not_ready() {
 }
 
 #[test]
-fn task_json_carries_the_epic() {
-    let (bundle, repo) = (bundle(), Repo::new("show-json"));
-    let task = json(&collide(&repo, &bundle, &["task", "ts-0003-cc", "--json"]));
-    assert_eq!(task["epic"], "ep-001-aa");
-    assert_eq!(task["ready"], false);
-    assert!(task["body"].as_str().unwrap().contains("Made-up content"));
-}
-
-#[test]
 fn a_number_shared_by_two_items_lists_both_and_asks_for_the_suffix() {
     let (bundle, repo) = (bundle(), Repo::new("ambiguous"));
     let run = collide(&repo, &bundle, &["task", "12"]);
@@ -548,10 +539,9 @@ fn a_wrong_command_line_prints_usage_and_exits_2() {
 fn help_prints_the_usage_the_exit_codes_and_where_the_provider_is_found() {
     let run = collide_with(&std::env::temp_dir(), Path::new("/nowhere"), &[], &["help"]);
     assert_eq!(run.code, 0);
-    assert!(
-        run.stdout
-            .contains("collide tasks [--ready] [--kind <kind>] [--json]")
-    );
+    assert!(run.stdout.contains(
+        "collide tasks [--ready] [--kind <kind>] [--view <name>] [--checkout <path>] [--json]"
+    ));
     for line in [
         "exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line",
         "3 id not found or ambiguous, 4 conflict (nothing was written),",
@@ -1701,38 +1691,7 @@ features
 }
 
 #[test]
-fn task_json_lists_the_features_and_the_problems() {
-    let features = "\
-### Packs
-- **F1 Trust prompt**: first
-- **F2 Pack lock**: second
-### Unsorted
-- **F3 Badge**: third
-bad
-";
-    let (bundle, repo) = (
-        bundle(),
-        repo_with_proposal("proposal-json", "draft", features),
-    );
-    let task = json(&collide(&repo, &bundle, &["task", "pr-0003-km", "--json"]));
-    let features: Vec<(&str, &str)> = task["features"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|f| (f["id"].as_str().unwrap(), f["section"].as_str().unwrap()))
-        .collect();
-    assert_eq!(features, [("F1", "Packs"), ("F2", "Packs"), ("F3", "")]);
-    assert_eq!(task["featureProblems"][0]["line"], 21);
-    assert!(
-        task["featureProblems"][0]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("neither an entry nor a continuation")
-    );
-}
-
-#[test]
-fn a_proposal_with_no_features_part_prints_none_and_has_none_in_json() {
+fn a_proposal_with_no_features_part_prints_no_features_in_text() {
     let repo = Repo::new("proposal-none");
     let folder = repo.dir.join(ALPHA_PROPOSALS);
     fs::create_dir_all(&folder).unwrap();
@@ -1743,8 +1702,6 @@ fn a_proposal_with_no_features_part_prints_none_and_has_none_in_json() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     assert!(!run.stdout.contains("  features"), "{}", run.stdout);
     assert!(!run.stdout.contains("feature problems"), "{}", run.stdout);
-    let task = json(&collide(&repo, &bundle, &["task", "pr-0003", "--json"]));
-    assert!(task.get("features").is_none() && task.get("featureProblems").is_none());
 }
 
 #[test]

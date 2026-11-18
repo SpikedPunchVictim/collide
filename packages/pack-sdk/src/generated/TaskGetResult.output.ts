@@ -5,6 +5,11 @@
  */
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
 /**
+ * Which end of a link the item that stores it holds: `out` for `blocked-by`, which points at the blocker.
+ * Collide derives the other direction (0.10).
+ */
+export type LinkDir = 'out' | 'in'
+/**
  * The state of one checklist item. Only a person marks `done` or `n/a`; the gate is a pack's (ts-0012).
  */
 export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
@@ -12,13 +17,17 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
 /**
  * `task.get` result. `task` is absent when nothing matches, which is an answer and not an error (as the provider's
  * `get`). When a short id matches several items (two tasks numbered 12) `task` is absent and `ambiguous` lists their
- * keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first.
+ * keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first. `links` are the task's
+ * links one hop out in both directions, as a hook reads them (0.5). `ops` are the ops its source declares for its
+ * kind: what `collide task <id> <op>` maps its words to. Both are additive.
  */
 export interface TaskGetResult {
   ambiguous: string[]
   collisions: TaskCollision[]
   copies: TaskCopy[]
   latest_run?: LatestRun | null
+  links: HookLink[]
+  ops?: OpDecl[]
   runs: string[]
   task?: Task | null
 }
@@ -63,6 +72,33 @@ export interface LatestRun {
     [k: string]: unknown
   }
   workflow: string
+}
+/**
+ * A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says
+ * that the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.
+ * `missing` says that the corpus holds no task with the key: `kind` and `status` are then empty and `category` is
+ * `backlog`, so a gate can refuse a link that goes nowhere.
+ */
+export interface HookLink {
+  category: Category
+  dir: LinkDir
+  key: string
+  kind: string
+  missing: boolean
+  stale: boolean
+  status: string
+  type: string
+}
+/**
+ * An op, as a provider declares it. Its effect is the category it moves the item to, if any, so that
+ * `task.before_status` can fire before the op runs (0.4). `args` is the JSON Schema of its arguments, which the UI
+ * renders as a form (0.10), and `checkouts` names the checkouts it may target (empty: any).
+ */
+export interface OpDecl {
+  args?: unknown
+  checkouts?: string[]
+  movesTo?: Category | null
+  name: string
 }
 /**
  * One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`

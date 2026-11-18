@@ -784,6 +784,8 @@ impl Corpus {
             collisions: Vec::new(),
             runs: Vec::new(),
             latest_run: None,
+            links: Vec::new(),
+            ops: Vec::new(),
         };
         match self.lookup(query) {
             Found::None => nothing,
@@ -800,6 +802,7 @@ impl Corpus {
             Found::One(key) => TaskGetResult {
                 task: Some(self.shown(&self.entries[&key]).clone()),
                 copies: self.copies_of(&key),
+                links: self.links_of(&key),
                 ..nothing
             },
         }

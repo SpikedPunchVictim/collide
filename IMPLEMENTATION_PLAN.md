@@ -4316,7 +4316,11 @@ combined into a corpus, and filtered by views.
 - **CLI:** `collide task new <prompt>`, `collide tasks [--view <name>] [--checkout <path>]`, `collide task <id>
   [--json]` (one item: fields, status, links one hop out, version and latest run; part K), `collide task <id> <op> …`.
   The new forms go through the daemon; `tasks`, `task <id>` and `task create` stay direct until 4c (owner, 2026-11-17;
-  `ts-0120-wm`). `collide init`, `collide config get|set` and `collide pack …` were built in 4a.
+  `ts-0120-wm`). A write by key (`task <source>:<id> <op>`) goes through the daemon; a bare id's write stays direct. A
+  daemon that is not running is started on use and says so once; one that cannot start makes the command exit 1, and the
+  direct commands go on. Exit 10: a view with an error of its own. Exit 11: a write still queued behind a busy checkout.
+  A queued write is reported applied only once the task's version has changed (`ts-0120-wm`). `collide init`, `collide
+  config get|set` and `collide pack …` were built in 4a.
 
 **Success Criteria**: On the Orchard repo:
 - A task shows `doing` in one worktree and `ready` at the board root, with the divergence reported.

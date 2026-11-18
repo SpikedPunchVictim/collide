@@ -371,6 +371,12 @@ pub const STRIPPED_ENV: [&str; 3] = ["COLLIDE_RUN", "COLLIDE_RUN_START", "COLLID
 /// [`LAUNCHCTL_ENV`]) is read from this process's environment, and under `COLLIDE_DAEMON_ROOT` no launchd job is loaded
 /// ([`launchctl_from_env`]).
 pub fn ensure_running_from_cli(paths: &DaemonPaths) -> Result<(), String> {
+    ensure_running_from_cli_kind(paths).map(|_| ())
+}
+
+/// As [`ensure_running_from_cli`], and says what the start did, for a command that tells the person it started the
+/// daemon.
+pub fn ensure_running_from_cli_kind(paths: &DaemonPaths) -> Result<StartKind, String> {
     let exe = std::fs::canonicalize(std::env::current_exe().map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
         .and_then(|exe| {
@@ -389,9 +395,7 @@ pub fn ensure_running_from_cli(paths: &DaemonPaths) -> Result<(), String> {
         std::env::var(ROOT_ENV).ok().as_deref(),
         std::env::var(LAUNCHCTL_ENV).ok().as_deref(),
     );
-    ensure_daemon(&request)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    ensure_daemon(&request).map_err(|e| e.to_string())
 }
 
 /// The path to use when the starter's own `PATH` is not set: the system's.

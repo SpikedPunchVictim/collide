@@ -1,0 +1,29 @@
+  collide tasks [--ready] [--kind <kind>] [--view <name>] [--checkout <path>] [--json]
+  collide task <id> [--json]
+  collide task new <prompt> [--json]
+  a write (an op, create, reid) also takes [--wait <seconds> | --no-wait]
+
+Through the daemon, which is started when none runs (and says so, once). If it cannot start, these exit 1; the
+commands above go on working without it:
+collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a
+  pack's), one line each: key, status, kind, title, in the order the daemon lists them. --ready and --kind apply on
+  top. A view with an error of its own lists no task, prints the error and exits 10. Tasks a view could not check are
+  counted on stderr, and the rest are listed. An unknown view exits 3 and names the board's views.
+collide tasks --checkout <path>: only the tasks that have a copy in that checkout, which must be an entry of `git
+  worktree list` (anything else exits 2). It takes --view too.
+collide task new <prompt>: a scratch task for this repository's board (in Collide's store, in no file) and its key,
+  such as scratch:3. Give the prompt as one argument.
+collide task <id> --json: the daemon's answer for one item: its fields, state (status and category), links one hop out
+  in both directions (each with the other end's kind, status and category), version, latest run, runs and copies. A
+  short id that fits several items, or an id at different paths in different checkouts, is ambiguous: the answer lists
+  the keys, and each location, and the exit code is 3.
+collide task <source>:<id> <op> ...: the write goes through the daemon (<source>:<id> is the key, such as scratch:3).
+  If its checkout is busy (a rebase, a merge, a cherry-pick, a revert, a bisect or a live phase) the daemon queues it:
+  the command says why, prints the Queue item's id, and waits for the write to apply (10 minutes; --wait <seconds>
+  sets that). --no-wait, and a wait that ran out, leave it queued and exit 11. --commit does not apply to a write
+  that was queued: commit it when it has landed.
+
+exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line (also: a
+--checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was written),
+5 refused by the provider (also: the checkout stayed busy for the wait), 10 the view has an error of its own,
+11 the write is queued in the daemon and not applied yet

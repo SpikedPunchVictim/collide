@@ -126,6 +126,48 @@
       ],
       "type": "object"
     },
+    "HookLink": {
+      "additionalProperties": false,
+      "description": "A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says\nthat the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.\n`missing` says that the corpus holds no task with the key: `kind` and `status` are then empty and `category` is\n`backlog`, so a gate can refuse a link that goes nowhere.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "dir": {
+          "$ref": "#/$defs/LinkDir"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "missing": {
+          "default": false,
+          "type": "boolean"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "dir",
+        "key",
+        "kind",
+        "status",
+        "category",
+        "stale",
+        "missing"
+      ],
+      "type": "object"
+    },
     "ItemState": {
       "additionalProperties": false,
       "description": "An item's status and its category.",
@@ -193,6 +235,14 @@
       ],
       "type": "object"
     },
+    "LinkDir": {
+      "description": "Which end of a link the item that stores it holds: `out` for `blocked-by`, which points at the blocker.\nCollide derives the other direction (0.10).",
+      "enum": [
+        "out",
+        "in"
+      ],
+      "type": "string"
+    },
     "Location": {
       "additionalProperties": false,
       "description": "Where one copy of a task is.",
@@ -207,6 +257,36 @@
       "required": [
         "checkout",
         "path"
+      ],
+      "type": "object"
+    },
+    "OpDecl": {
+      "additionalProperties": false,
+      "description": "An op, as a provider declares it. Its effect is the category it moves the item to, if any, so that\n`task.before_status` can fire before the op runs (0.4). `args` is the JSON Schema of its arguments, which the UI\nrenders as a form (0.10), and `checkouts` names the checkouts it may target (empty: any).",
+      "properties": {
+        "args": true,
+        "checkouts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "movesTo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Category"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -391,7 +471,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.get` result. `task` is absent when nothing matches, which is an answer and not an error (as the provider's\n`get`). When a short id matches several items (two tasks numbered 12) `task` is absent and `ambiguous` lists their\nkeys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first.",
+  "description": "`task.get` result. `task` is absent when nothing matches, which is an answer and not an error (as the provider's\n`get`). When a short id matches several items (two tasks numbered 12) `task` is absent and `ambiguous` lists their\nkeys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first. `links` are the task's\nlinks one hop out in both directions, as a hook reads them (0.5). `ops` are the ops its source declares for its\nkind: what `collide task <id> <op>` maps its words to. Both are additive.",
   "properties": {
     "ambiguous": {
       "default": [],
@@ -424,6 +504,19 @@
         }
       ]
     },
+    "links": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HookLink"
+      },
+      "type": "array"
+    },
+    "ops": {
+      "items": {
+        "$ref": "#/$defs/OpDecl"
+      },
+      "type": "array"
+    },
     "runs": {
       "default": [],
       "items": {
@@ -446,7 +539,8 @@
     "ambiguous",
     "copies",
     "collisions",
-    "runs"
+    "runs",
+    "links"
   ],
   "title": "TaskGetResult",
   "type": "object"

@@ -397,3 +397,25 @@ pub fn daemon_status(paths: &collide_host::daemon::DaemonPaths) -> Option<serde_
     )?;
     Some(ask(2, "daemon.status", serde_json::json!({}))?["result"].clone())
 }
+
+/// Stops the daemon a `collide` command started under the test's own root, when the test ends: by the pid that daemon
+/// reports on the test's own socket, and no other. It waits, up to ten seconds, for the process to be gone.
+pub struct DaemonStop(pub collide_host::daemon::DaemonPaths);
+
+impl Drop for DaemonStop {
+    fn drop(&mut self) {
+        let pid = daemon_status(&self.0).and_then(|status| status["pid"].as_i64());
+        if let Some(pid) = pid {
+            // SAFETY: `kill` takes two integers; the pid is the one the daemon on this test's own socket reports.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            wait_until(
+                "the daemon ends",
+                std::time::Duration::from_secs(10),
+                || {
+                    // SAFETY: signal 0 sends nothing.
+                    unsafe { libc::kill(pid as libc::pid_t, 0) != 0 }
+                },
+            );
+        }
+    }
+}

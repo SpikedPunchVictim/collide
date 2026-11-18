@@ -12,8 +12,26 @@
 //! does, with `refused`.
 
 use collide_core::item::OpDecl;
+use collide_core::provider::InitializeResult;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+
+/// The ops that apply to an item of `kind`: the provider's own, then the kind's (a kind's op of one name replaces
+/// the provider's).
+pub fn declared_ops(init: &InitializeResult, kind: Option<&str>) -> Vec<OpDecl> {
+    let mut ops = init.ops.clone();
+    if let Some(decl) = init
+        .kinds
+        .iter()
+        .find(|decl| Some(decl.name.as_str()) == kind)
+    {
+        for op in &decl.ops {
+            ops.retain(|existing| existing.name != op.name);
+            ops.push(op.clone());
+        }
+    }
+    ops
+}
 
 fn properties(schema: &Value) -> Option<&Map<String, Value>> {
     schema.get("properties").and_then(Value::as_object)

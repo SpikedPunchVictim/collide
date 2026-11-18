@@ -1,7 +1,8 @@
-//! `collide tasks`, `collide task <id>`, `collide task <id> <op> ...` (ts-0020) and `collide sections` (ts-0049). Until the daemon exists the CLI
-//! starts the built-in `collide/plan` provider itself (through the loader of ts-0029), asks it for the items, and
-//! applies the ready rule and short-id lookup of `core` to what it lists. The corpus stage moves this behind the
-//! provider supervisor.
+//! `collide tasks`, `collide task <id>`, `collide task <id> <op> ...` (ts-0020) and `collide sections` (ts-0049). Until
+//! Stage 4c the CLI starts the built-in `collide/plan` provider itself (through the loader of ts-0029), asks it for the
+//! items, and applies the ready rule and short-id lookup of `core` to what it lists. The forms that need the corpus
+//! (`task new`, `tasks --view`, `tasks --checkout`, `task <id> --json`, a write on a key) are
+//! [`crate::task_daemon`]'s; [`run`] hands them over.
 
 use crate::builtin_packs::{BuiltinPacks, Environment};
 use crate::checkout::{CheckoutError, main_checkout, resolve_checkout, root_busy};
@@ -9,7 +10,7 @@ use crate::commit::commit_files;
 use crate::pack_location::{self, locate_bundle};
 use crate::provider_client::ProviderClient;
 use crate::section_view::sections_text;
-use crate::task_args::{describe, map_args};
+use crate::task_args::{declared_ops, describe, map_args};
 use crate::task_view::View;
 use collide_core::item::{Category, OpDecl};
 use collide_core::provider::{
@@ -47,12 +48,18 @@ pub mod exit {
     /// `collide run`: the run waits for a person and the command left it (a permission request with no answer, a full
     /// disk, a budget that ran out).
     pub const WAITING: u8 = 9;
+    /// `collide tasks --view`: the view has an error of its own, so it lists no task (`crate::task_daemon`).
+    pub const VIEW_FAILED: u8 = 10;
+    /// `collide task <id> <op>` through the daemon: the write is in the daemon's Queue and was not applied yet, because
+    /// its checkout is busy (`--no-wait`, or the wait ran out).
+    pub const QUEUED: u8 = 11;
 }
 
 pub const USAGE: &str = "\
 usage:
-  collide tasks [--ready] [--kind <kind>] [--json]
+  collide tasks [--ready] [--kind <kind>] [--view <name>] [--checkout <path>] [--json]
   collide task <id> [--json]
+  collide task new <prompt> [--json]
   collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
   collide task create <title> [epic=<epic>] [kind=task|epic|proposal] [seed=<number>] [--checkout <path>] [--commit] [--json]
   collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]
@@ -82,6 +89,26 @@ collide task reid <id>: give an item a new suffix and rewrite every link that na
   Where two files share one id, the second (the one `collide tasks` reports as skipped) is the one renamed; links meant
   for the other file are rewritten too. Each file touched is printed. Without --commit nothing is committed: review with
   git diff.
+
+Through the daemon, which is started when none runs (and says so, once). If it cannot start, these exit 1; the
+commands above go on working without it:
+collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a
+  pack's), one line each: key, status, kind, title, in the order the daemon lists them. --ready and --kind apply on
+  top. A view with an error of its own lists no task, prints the error and exits 10. Tasks a view could not check are
+  counted on stderr, and the rest are listed. An unknown view exits 3 and names the board's views.
+collide tasks --checkout <path>: only the tasks that have a copy in that checkout, which must be an entry of `git
+  worktree list` (anything else exits 2). It takes --view too.
+collide task new <prompt>: a scratch task for this repository's board (in Collide's store, in no file) and its key,
+  such as scratch:3. Give the prompt as one argument.
+collide task <id> --json: the daemon's answer for one item: its fields, state (status and category), links one hop out
+  in both directions (each with the other end's kind, status and category), version, latest run, runs and copies. A
+  short id that fits several items, or an id at different paths in different checkouts, is ambiguous: the answer lists
+  the keys, and each location, and the exit code is 3.
+collide task <source>:<id> <op> ...: the write goes through the daemon (<source>:<id> is the key, such as scratch:3).
+  If its checkout is busy (a rebase, a merge, a cherry-pick, a revert, a bisect or a live phase) the daemon queues it:
+  the command says why, prints the Queue item's id, and waits for the write to apply (10 minutes; --wait <seconds>
+  sets that). --no-wait, and a wait that ran out, leave it queued and exit 11. --commit does not apply to a write
+  that was queued: commit it when it has landed.
 
 Where a write goes: the main checkout's .collide/planning/, also when you run collide inside a linked worktree (which
 is left untouched). --checkout <path> names another checkout instead: <path> must be an entry of `git worktree list`
@@ -115,7 +142,8 @@ a blocked-by target that is no item, keep their items from being ready and are r
 
 exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line (also: a
 --checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was written),
-5 refused by the provider (also: the checkout stayed busy for the wait)
+5 refused by the provider (also: the checkout stayed busy for the wait), 10 the view has an error of its own,
+11 the write is queued in the daemon and not applied yet
 
 The provider is found through COLLIDE_BUILTIN_PACKS, else the staged bundle above the executable (pnpm build:packs),
 else the bundle beside it. `node` is taken from PATH.";
@@ -128,18 +156,18 @@ pub struct CliError {
 }
 
 impl CliError {
-    fn new(code: u8, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: u8, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
         }
     }
 
-    fn failed(error: impl std::fmt::Display) -> Self {
+    pub(crate) fn failed(error: impl std::fmt::Display) -> Self {
         Self::new(exit::FAILED, error.to_string())
     }
 
-    fn usage(message: impl Into<String>) -> Self {
+    pub(crate) fn usage(message: impl Into<String>) -> Self {
         Self::new(exit::USAGE, message)
     }
 }
@@ -148,6 +176,17 @@ impl CliError {
 pub struct TasksOptions {
     pub ready: bool,
     pub kind: Option<String>,
+    pub json: bool,
+    /// `--view <name>`: the members of a named view, through the daemon.
+    pub view: Option<String>,
+    /// `--checkout <path>`: only the tasks that have a copy in this checkout, through the daemon.
+    pub checkout: Option<String>,
+}
+
+/// `collide task new <prompt>`: a scratch task.
+#[derive(Debug, PartialEq, Eq)]
+pub struct NewOptions {
+    pub prompt: String,
     pub json: bool,
 }
 
@@ -190,7 +229,7 @@ pub enum Wait {
 }
 
 impl Wait {
-    fn limit(self) -> Duration {
+    pub(crate) fn limit(self) -> Duration {
         match self {
             Wait::Default => DEFAULT_WAIT,
             Wait::Seconds(seconds) => Duration::from_secs(seconds),
@@ -227,6 +266,7 @@ pub enum Command {
     Task(TaskOptions),
     Create(CreateOptions),
     Reid(ReidOptions),
+    New(NewOptions),
 }
 
 /// Reads the words after `collide tasks`.
@@ -235,6 +275,8 @@ pub fn parse_tasks(args: &[String]) -> Result<Command, CliError> {
         ready: false,
         kind: None,
         json: false,
+        view: None,
+        checkout: None,
     };
     let mut words = args.iter();
     while let Some(word) = words.next() {
@@ -245,20 +287,61 @@ pub fn parse_tasks(args: &[String]) -> Result<Command, CliError> {
                 Some(kind) => options.kind = Some(kind.clone()),
                 None => return Err(CliError::usage("--kind needs a kind, such as --kind task")),
             },
-            other => match other.strip_prefix("--kind=") {
-                Some(kind) if !kind.is_empty() => options.kind = Some(kind.to_string()),
-                _ if other.starts_with("--") => {
+            "--view" => set_once(&mut options.view, words.next(), "--view", "a view's name")?,
+            "--checkout" => set_once(
+                &mut options.checkout,
+                words.next(),
+                "--checkout",
+                "a path, such as --checkout ../other-worktree",
+            )?,
+            other => {
+                if let Some(kind) = other
+                    .strip_prefix("--kind=")
+                    .filter(|kind| !kind.is_empty())
+                {
+                    options.kind = Some(kind.to_string());
+                } else if let Some(name) = other.strip_prefix("--view=") {
+                    set_once(
+                        &mut options.view,
+                        Some(&name.to_string()),
+                        "--view",
+                        "a view's name",
+                    )?;
+                } else if let Some(path) = other.strip_prefix("--checkout=") {
+                    set_once(
+                        &mut options.checkout,
+                        Some(&path.to_string()),
+                        "--checkout",
+                        "a path, such as --checkout ../other-worktree",
+                    )?;
+                } else if other.starts_with("--") {
                     return Err(CliError::usage(format!("unknown option `{other}`")));
-                }
-                _ => {
+                } else {
                     return Err(CliError::usage(format!(
                         "`collide tasks` takes no argument; got `{other}`"
                     )));
                 }
-            },
+            }
         }
     }
     Ok(Command::Tasks(options))
+}
+
+/// Sets an option that takes one value, once: a value that is missing or empty, and an option given twice, are usage
+/// errors that name the option.
+fn set_once(
+    slot: &mut Option<String>,
+    given: Option<&String>,
+    option: &str,
+    needs: &str,
+) -> Result<(), CliError> {
+    let Some(value) = given.filter(|value| !value.is_empty()) else {
+        return Err(CliError::usage(format!("{option} needs {needs}")));
+    };
+    if slot.replace(value.clone()).is_some() {
+        return Err(CliError::usage(format!("{option} is given twice")));
+    }
+    Ok(())
 }
 
 /// Reads the words after `collide sections`.
@@ -352,6 +435,9 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
             json,
         }));
     }
+    if id == "new" {
+        return parse_new(plain.collect(), &write, json);
+    }
     if id == "reid" {
         let Some(id) = plain.next() else {
             return Err(CliError::usage(
@@ -388,6 +474,40 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
         write,
         json,
     }))
+}
+
+/// Reads the words after `collide task new`: one prompt. A scratch task is made in Collide's store and not in a
+/// checkout, so the options of a write to a checkout are refused, by name.
+fn parse_new(words: Vec<String>, write: &WriteOptions, json: bool) -> Result<Command, CliError> {
+    let given = [
+        write.checkout.as_ref().map(|_| "--checkout"),
+        write.commit.then_some("--commit"),
+        match write.wait {
+            Wait::Default => None,
+            Wait::Seconds(_) => Some("--wait"),
+            Wait::Never => Some("--no-wait"),
+        },
+    ];
+    if let Some(option) = given.into_iter().flatten().next() {
+        return Err(CliError::usage(format!(
+            "`collide task new` takes no `{option}`: a scratch task is made in Collide's store, not in a checkout"
+        )));
+    }
+    let mut words = words.into_iter();
+    let Some(prompt) = words.next() else {
+        return Err(CliError::usage(
+            "`collide task new` needs a prompt, such as: collide task new \"try the cache\"",
+        ));
+    };
+    if words.next().is_some() {
+        return Err(CliError::usage(
+            "`collide task new` takes the prompt as one argument: put it in quotes",
+        ));
+    }
+    if prompt.trim().is_empty() {
+        return Err(CliError::usage("the prompt of `collide task new` is empty"));
+    }
+    Ok(Command::New(NewOptions { prompt, json }))
 }
 
 /// Sets how long to wait, once: `--wait` and `--no-wait` say opposite things, and either given twice is a mistake.
@@ -453,14 +573,7 @@ impl Session {
 fn open(cwd: &Path, checkout: Option<&str>) -> Result<Session, CliError> {
     let root = main_checkout(cwd).map_err(CliError::failed)?;
     let checkout = checkout
-        .map(|given| {
-            resolve_checkout(&root, cwd, given).map_err(|error| match error {
-                CheckoutError::NotACheckout { .. } | CheckoutError::UnreadableCheckout { .. } => {
-                    CliError::usage(format!("--checkout: {error}"))
-                }
-                other => CliError::failed(other),
-            })
-        })
+        .map(|given| checkout_named(&root, cwd, given))
         .transpose()?;
     let bundle = locate_bundle(&pack_location::Inputs::from_process()).map_err(CliError::failed)?;
     let launch = BuiltinPacks::new(bundle)
@@ -481,6 +594,17 @@ fn open(cwd: &Path, checkout: Option<&str>) -> Result<Session, CliError> {
     })
 }
 
+/// The checkout that `--checkout` names: an entry of `git worktree list` of the repository whose main checkout is
+/// `root`, or a usage error.
+pub(crate) fn checkout_named(root: &Path, cwd: &Path, given: &str) -> Result<PathBuf, CliError> {
+    resolve_checkout(root, cwd, given).map_err(|error| match error {
+        CheckoutError::NotACheckout { .. } | CheckoutError::UnreadableCheckout { .. } => {
+            CliError::usage(format!("--checkout: {error}"))
+        }
+        other => CliError::failed(other),
+    })
+}
+
 /// Holds a write back while its checkout is in the middle of a rebase, a merge, a cherry-pick, a revert or a bisect
 /// (0.4, Root busy). It says which, once, on `err`, and looks again every [`WAIT_POLL`] until the operation ends or
 /// the wait does; then nothing was written and the exit code is `REFUSED`. It comes before the item is read, so the
@@ -488,7 +612,8 @@ fn open(cwd: &Path, checkout: Option<&str>) -> Result<Session, CliError> {
 ///
 /// Two processes that write one root, this one and a daemon, are not serialized: the daemon's line lock is in its own
 /// process, and this path has only the provider's lock file. The CLI cannot see a phase that is live in a checkout
-/// either: only the daemon knows. Both come with the CLI's move behind the daemon (`ts-0120-wm`).
+/// either: only the daemon knows. A write through the daemon (`crate::task_daemon`) has both; this path moves behind
+/// it in Stage 4c.
 fn wait_until_free(session: &Session, wait: Wait, err: &mut dyn Write) -> Result<(), CliError> {
     let dir = session.written_in();
     let started = Instant::now();
@@ -527,19 +652,23 @@ fn wait_until_free(session: &Session, wait: Wait, err: &mut dyn Write) -> Result
     }
 }
 
-fn emit(out: &mut dyn Write, text: &str) -> Result<(), CliError> {
+pub(crate) fn emit(out: &mut dyn Write, text: &str) -> Result<(), CliError> {
     out.write_all(text.as_bytes())
         .map_err(|error| CliError::failed(format!("could not write the output: {error}")))
 }
 
 /// Runs a command; returns the exit code. Errors go to `err`.
 pub fn run(command: &Command, cwd: &Path, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    if crate::task_daemon::wants_daemon(command) {
+        return crate::task_daemon::run(command, cwd, out, err);
+    }
     let result = match command {
         Command::Tasks(options) => run_tasks(options, cwd, out, err),
         Command::Sections(options) => run_sections(options, cwd, out, err),
         Command::Task(options) => run_task(options, cwd, out, err),
         Command::Create(options) => run_create(options, cwd, out, err),
         Command::Reid(options) => run_reid(options, cwd, out, err),
+        Command::New(_) => Err(CliError::failed("`task new` goes through the daemon")),
     };
     match result {
         Ok(code) => code,
@@ -647,7 +776,7 @@ fn run_sections(
 }
 
 /// The text for an id that matched several items: each with its epic, and what to add.
-fn ambiguous_message(query: &str, matches: &[&Task]) -> String {
+pub(crate) fn ambiguous_message(query: &str, matches: &[&Task]) -> String {
     let mut text = format!("`{query}` matches {} items:\n", matches.len());
     for task in matches {
         text.push_str(&format!(
@@ -796,25 +925,8 @@ fn run_task(
     }
 }
 
-/// The ops that apply to an item of `kind`: the provider's own, then the kind's (a kind's op of one name replaces
-/// the provider's).
-fn declared_ops(init: &InitializeResult, kind: Option<&str>) -> Vec<OpDecl> {
-    let mut ops = init.ops.clone();
-    if let Some(decl) = init
-        .kinds
-        .iter()
-        .find(|decl| Some(decl.name.as_str()) == kind)
-    {
-        for op in &decl.ops {
-            ops.retain(|existing| existing.name != op.name);
-            ops.push(op.clone());
-        }
-    }
-    ops
-}
-
 /// What an `ok` changed, by comparing the item as it was read with what the write returned.
-fn ok_text(before: &Task, after: &Task, files: &[String]) -> String {
+pub(crate) fn ok_text(before: &Task, after: &Task, files: &[String]) -> String {
     let mut changes = Vec::new();
     if before.state.status != after.state.status {
         changes.push(format!(
@@ -890,7 +1002,7 @@ fn resolve_epic(tasks: &[Task], query: &str) -> Result<String, CliError> {
 /// Commits what an `ok` reported, when `--commit` was given (`commit` is the checkout to commit in), and returns the
 /// exit code: 0, or 1 when the commit failed (the files are then left written). Under `--json` the one document on
 /// stdout stays the provider's result, so the new commit is not printed.
-fn commit_reported(
+pub(crate) fn commit_reported(
     commit: Option<&Path>,
     task: &Task,
     files: &[String],

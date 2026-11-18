@@ -7,6 +7,8 @@
 //! `query` does (0.11). `task.get` carries it.
 
 use crate::change::{ItemState, LatestRun};
+use crate::hook::HookLink;
+use crate::item::OpDecl;
 use crate::provider::{ApplyParams, ApplyResult, Collection, Task, TaskCollision, TaskInvalid};
 use crate::view::View;
 use schemars::JsonSchema;
@@ -148,7 +150,9 @@ pub struct TaskCopy {
 
 /// `task.get` result. `task` is absent when nothing matches, which is an answer and not an error (as the provider's
 /// `get`). When a short id matches several items (two tasks numbered 12) `task` is absent and `ambiguous` lists their
-/// keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first.
+/// keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first. `links` are the task's
+/// links one hop out in both directions, as a hook reads them (0.5). `ops` are the ops its source declares for its
+/// kind: what `collide task <id> <op>` maps its words to. Both are additive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskGetResult {
@@ -164,6 +168,10 @@ pub struct TaskGetResult {
     pub runs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_run: Option<LatestRun>,
+    #[serde(default)]
+    pub links: Vec<HookLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ops: Vec<OpDecl>,
 }
 
 /// `task.apply` params (`collide task <id> <op>`, `collide task new`, `collide task reid`, and the drawer's forms):

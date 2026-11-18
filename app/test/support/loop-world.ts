@@ -164,8 +164,9 @@ export class World {
     })
     owner.handle('task.get', ({ board: boardId, id }) => {
       const stored = this.tasksOf(boardId).get(id)
-      if (stored === undefined) return { ambiguous: [], copies: [], collisions: [], runs: [] }
-      return { task: taskOf(stored.key, stored.prompt), ambiguous: [], copies: [], collisions: [], runs: stored.runs }
+      if (stored === undefined) return { ambiguous: [], copies: [], collisions: [], links: [], runs: [] }
+      const task = taskOf(stored.key, stored.prompt)
+      return { task, ambiguous: [], copies: [], collisions: [], links: [], runs: stored.runs }
     })
     owner.handle('run.start', ({ board: boardId, tasks }) => {
       if (this.refuseStart !== null) return { outcome: 'refused', problems: [{ message: this.refuseStart }] }

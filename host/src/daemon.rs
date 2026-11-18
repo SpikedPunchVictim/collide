@@ -3197,8 +3197,27 @@ fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::V
         let rows = runs_of(shared, &params.board, &keys)?;
         result.latest_run = rows.iter().find_map(latest_of);
         result.runs = rows.into_iter().map(|row| row.run).collect();
+        result.ops = ops_of(shared, &params.board, &root, task);
     }
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// The ops the task's source declares for its kind, or none when the source cannot say (a source that is gone is the
+/// write's own error to give).
+fn ops_of(
+    shared: &Shared,
+    board: &str,
+    root: &str,
+    task: &collide_core::provider::Task,
+) -> Vec<collide_core::item::OpDecl> {
+    let name = task
+        .key
+        .split_once(':')
+        .map_or(scratch::SOURCE, |(name, _)| name);
+    match source_of(shared, board, root, name).and_then(|source| source.declared()) {
+        Ok(init) => crate::task_args::declared_ops(&init, task.kind.as_deref()),
+        Err(_) => Vec::new(),
+    }
 }
 
 fn empty_get() -> TaskGetResult {
@@ -3209,6 +3228,8 @@ fn empty_get() -> TaskGetResult {
         collisions: Vec::new(),
         runs: Vec::new(),
         latest_run: None,
+        links: Vec::new(),
+        ops: Vec::new(),
     }
 }
 
@@ -3285,7 +3306,7 @@ fn named_source(source: Option<&str>, apply: &mut ApplyParams) -> Result<String,
 /// `task.apply` on any source (ts-0075-hj, ts-0113-ck): the source's own `ok`, `conflict` or `refused` is the answer. A
 /// source the line does not have, an untrusted line or a source that is gone is an error. With no `checkout` a
 /// ref-scoped source writes the line's root, which the provider was told at `initialize`. `commit` is refused here:
-/// a scratch task is never committed, and committing a write through the daemon comes with the CLI (`ts-0120-wm`).
+/// a scratch task is never committed, and the CLI commits a write it made through the daemon, by its own `--commit`.
 fn task_apply(
     shared: &Shared,
     session: &Session,
@@ -3307,7 +3328,7 @@ fn task_apply(
             if name == scratch::SOURCE {
                 "a scratch task is never committed: it lives in Collide's store, not in the repository".to_string()
             } else {
-                "`commit` is not built yet: a write through the daemon is not committed (Stage 4b, ts-0120-wm)"
+                "the daemon does not commit a write: `collide task <key> <op> --commit` commits the files it reported"
                     .to_string()
             },
         ));

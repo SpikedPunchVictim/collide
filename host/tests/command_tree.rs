@@ -59,7 +59,7 @@ fn help_lists_every_command_of_the_tree_with_a_line_of_its_own() {
 fn help_keeps_the_text_of_the_built_commands() {
     let stdout = text(collide(&["--help"]).stdout);
     for kept in [
-        "collide tasks [--ready] [--kind <kind>] [--json]",
+        "collide tasks [--ready] [--kind <kind>] [--view <name>] [--checkout <path>] [--json]",
         "collide task <id> [--json]",
         "collide sections [--json]",
         "exit codes: 0 ok, 1 failed",
