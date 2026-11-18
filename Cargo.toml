@@ -8,3 +8,8 @@ exclude = ["vendor/cel"]
 
 [workspace.package]
 edition = "2024"
+
+# Dependencies build without debug info, so `target/` grows far slower; Collide's own crates keep full debug info, so
+# their backtraces and debugging are unchanged. Cargo never prunes `target/`: run `cargo clean` when it grows large.
+[profile.dev.package."*"]
+debug = false
