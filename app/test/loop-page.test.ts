@@ -438,6 +438,58 @@ describe('the review item', () => {
   })
 })
 
+describe('the notice after a re-prompt', () => {
+  const sentBack = 'Sent back. The agent is working on it again.'
+
+  /** A re-prompt on the review item of r-1; the daemon starts r-2 on the same task. */
+  async function reprompted(): Promise<{ world: World; loop: Loop }> {
+    const { world, loop } = await inReview()
+    world.onAnswer = () => {
+      world.items = []
+      world.addRun('b-1', run('r-2', 'scratch:1', { started_ms: 6_000 }))
+    }
+    await loop.reprompt('q-review', 'Also fix the title.')
+    return { world, loop }
+  }
+
+  test('a re-prompt followed by the first events of the new run keeps the notice', async () => {
+    const { world, loop } = await reprompted()
+    world.announce('r-2')
+    await loop.idle()
+    expect(loop.getState().followed?.run).toBe('r-2')
+    expect(loop.getState().notice).toBe(sentBack)
+  })
+
+  test('the review item of the new run clears the notice', async () => {
+    const { world, loop } = await reprompted()
+    world.finish('r-2', 'q-2')
+    world.announce('r-2')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-2')
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-2'])
+    expect(loop.getState().notice).toBeNull()
+  })
+
+  test('the old run, still ended and listed before the new one starts, does not clear the notice', async () => {
+    const { world, loop } = await inReview()
+    world.onAnswer = () => {
+      world.items = []
+    }
+    await loop.reprompt('q-review', 'Also fix the title.')
+    world.announce('r-1')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-1')
+    expect(loop.getState().notice).toBe(sentBack)
+  })
+
+  test('a new prompt clears the notice', async () => {
+    const { loop } = await reprompted()
+    await loop.startRun('Something else')
+    await loop.idle()
+    expect(loop.getState().notice).toBeNull()
+  })
+})
+
 describe('closing the window and opening it again', () => {
   test('a run that is live shows the same run, with its words', async () => {
     const world = oneBoard()

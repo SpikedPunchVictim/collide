@@ -37,6 +37,8 @@ export interface LoopState {
   readonly refusal: string | null
   /** What the last answer did, in words. */
   readonly notice: string | null
+  /** A re-prompt went through. Its notice outlives the run change to the new run, until that run needs the person or ends. `from` is the run that was sent back. */
+  readonly sentBack: { readonly from: string | null } | null
   /** Discard was pressed once: the page asks again, and says what is deleted. */
   readonly confirmingDiscard: boolean
 }
@@ -59,6 +61,7 @@ export function initialLoopState(): LoopState {
     sending: false,
     refusal: null,
     notice: null,
+    sentBack: null,
     confirmingDiscard: false,
   }
 }
@@ -82,7 +85,7 @@ export type LoopAction =
   | { type: 'sending' }
   | { type: 'run_started'; followed: Followed }
   | { type: 'refused'; message: string }
-  | { type: 'answered'; notice: string | null }
+  | { type: 'answered'; notice: string | null; sentBack: boolean }
   | { type: 'file_picked'; path: string | null }
   | { type: 'patch_loaded'; patch: FilePatch }
   | { type: 'discard_asked' }
@@ -108,13 +111,26 @@ export function loopReducer(state: LoopState, action: LoopAction): LoopState {
     case 'folder_refused':
       return { ...state, folderProblems: action.problems }
     case 'sending':
-      return { ...state, sending: true, refusal: null, notice: null, problem: null, confirmingDiscard: false }
+      return {
+        ...state,
+        sending: true,
+        refusal: null,
+        notice: null,
+        sentBack: null,
+        problem: null,
+        confirmingDiscard: false,
+      }
     case 'run_started':
       return { ...afterRunChange(state), followed: action.followed, sending: false }
     case 'refused':
       return { ...state, sending: false, refusal: action.message }
     case 'answered':
-      return { ...state, sending: false, notice: action.notice }
+      return {
+        ...state,
+        sending: false,
+        notice: action.notice,
+        sentBack: action.sentBack ? { from: state.run?.id ?? null } : null,
+      }
     case 'file_picked':
       return { ...state, picked: action.path, patch: action.path === null ? null : state.patch }
     case 'patch_loaded':
@@ -126,7 +142,7 @@ export function loopReducer(state: LoopState, action: LoopAction): LoopState {
   }
 }
 
-/** What belongs to one run, which another run does not share. */
+/** What belongs to one run, which another run does not share. A re-prompt's notice is kept: the new run is still working. */
 function afterRunChange(state: LoopState): LoopState {
   return {
     ...state,
@@ -135,7 +151,7 @@ function afterRunChange(state: LoopState): LoopState {
     diff: null,
     picked: null,
     patch: null,
-    notice: null,
+    notice: state.sentBack === null ? null : state.notice,
     refusal: null,
     confirmingDiscard: false,
   }
@@ -149,6 +165,7 @@ function synced(state: LoopState, action: Extract<LoopAction, { type: 'synced' }
   const followedBoard = changed ? (action.followed?.board ?? null) : null
   const boardId = followedBoard ?? (stillThere ? base.boardId : (boards[0]?.id ?? null))
   const picked = action.diff?.files.some((f) => f.path === base.picked) ? base.picked : null
+  const sentBackDone = reachedPerson(base.sentBack, action.items, action.run)
   return {
     ...base,
     loading: false,
@@ -164,7 +181,20 @@ function synced(state: LoopState, action: Extract<LoopAction, { type: 'synced' }
     patch: picked === null ? null : base.patch,
     // A reload that leaves the run as it was leaves what the person was told about it.
     confirmingDiscard: base.confirmingDiscard && reviewWaits(action.items, action.run),
+    notice: sentBackDone ? null : base.notice,
+    sentBack: sentBackDone ? null : base.sentBack,
   }
+}
+
+/** Whether the run a re-prompt started has reached a state that needs the person, or has ended. The run sent back does not count. */
+function reachedPerson(
+  sentBack: LoopState['sentBack'],
+  items: readonly QueueItem[],
+  run: RunSummary | null,
+): boolean {
+  if (sentBack === null || run === null || run.id === sentBack.from) return false
+  if (run.state.state === 'ended') return true
+  return items.some((i) => (i.kind === 'review' || i.kind === 'permission') && i.run === run.id)
 }
 
 /** Whether a review item waits on the run, which is what a question about discarding is about. */

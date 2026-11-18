@@ -361,7 +361,12 @@ class LoopController implements Loop {
     try {
       const result = await this.owner.rpc('queue.answer', { item, answer })
       if (result.outcome === 'refused') this.dispatch({ type: 'refused', message: result.message })
-      else this.dispatch({ type: 'answered', notice: noticeFor(answer, result.outcome) })
+      else
+        this.dispatch({
+          type: 'answered',
+          notice: noticeFor(answer, result.outcome),
+          sentBack: answer.type === 'reprompt' && result.outcome === 'done',
+        })
     } catch (failure) {
       // A failed call may have taken effect, and the shell's message says so; the reload below shows what is true.
       this.dispatch({ type: 'refused', message: toOwnerError(failure).message })
