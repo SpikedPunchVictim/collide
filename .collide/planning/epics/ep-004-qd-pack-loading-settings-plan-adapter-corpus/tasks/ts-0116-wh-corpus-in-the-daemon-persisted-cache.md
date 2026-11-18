@@ -122,5 +122,9 @@ the Orchard fixture adapter (needs `node`, as the built-in pack tests do).
   checkout in that text. If the daemon acts per checkout (marks one checkout's tasks stale and not the others), add a
   `checkout` field to `SourceStale` in `core/src/provider.rs` here, run `pnpm gen`, and have the adapter's `watcher.ts`
   send it.
+- Carried from `ts-0113-ck` (2026-11-17): a provider reads its settings and secrets at start, so a `config set` of one
+  of its pack's keys reaches it only at its next start. `config.set` runs in the daemon: have it stop that pack's
+  providers (every board's, for a user-scope key), so the next call or watch starts them with the new settings, and test
+  it.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation: `task.invalid` is an event and a
   view count now, and a Queue item comes with Stage 6's Queue page.

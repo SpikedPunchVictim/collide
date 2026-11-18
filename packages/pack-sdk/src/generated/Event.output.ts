@@ -217,9 +217,9 @@ export type PermissionAnswer = 'allow' | 'deny' | 'cancel'
  */
 export type BudgetScope = 'run' | 'phase' | 'role'
 /**
- * What made a `task.changed` notification.
+ * What made a `task.changed`: a source's `journal`, or Collide's `store` (scratch).
  */
-export type ChangeCause = 'head' | 'worktree' | 'remote' | 'journal' | 'startup'
+export type ChangeCause = 'head' | 'worktree' | 'remote' | 'journal' | 'store' | 'startup'
 /**
  * One changed field: `{from, to}`, or `{added, removed}` for a set. `from` is null at create and `to` is null
  * at delete.

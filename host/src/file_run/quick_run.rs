@@ -35,6 +35,7 @@ use crate::builtin_roles::BUILDER_ROLE_NAME;
 use crate::run_diff::{self, DiffError};
 use crate::run_store::RunLaunch;
 use crate::scratch::{self, ScratchSource};
+use crate::sources::changed_event;
 use crate::workspace::Git;
 use collide_core::change::{Actor, ActorKind};
 use collide_core::item::Category;
@@ -44,7 +45,7 @@ use collide_core::owner::{
     RunTaskRef,
 };
 use collide_core::ports::TaskProvider;
-use collide_core::provider::{ApplyParams, ApplyResult, GetParams, Task};
+use collide_core::provider::{ApplyParams, ApplyResult, ChangeCause, GetParams, Task};
 use collide_core::state::RunState;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -360,7 +361,7 @@ impl FileRuns {
                             run: Some(run.to_string()),
                             phase: None,
                         },
-                        scratch::changed_event(effect),
+                        changed_event(scratch::SOURCE, effect, ChangeCause::Store, None),
                     );
                     if let Err(error) = written {
                         self.log(&format!(

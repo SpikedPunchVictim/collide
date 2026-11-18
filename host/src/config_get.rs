@@ -31,7 +31,7 @@ use crate::pack_cache::ensure_sdk;
 use crate::pack_location::{Inputs, bundle_sdk, locate_bundle};
 use crate::pack_manage::{ManageSite, pack_add, pack_enable, pack_link, pack_list};
 use crate::pack_update::{PackError, UpdateSite, pack_update};
-use crate::secret_store::{Secret, SecretStore, pack_item};
+use crate::secret_store::{Secret, SecretStore, SecretStoreError, pack_item};
 use crate::settings_files::{UserFiles, read_user_files, user_config_dir};
 use crate::user_packs::UserScope;
 use collide_core::agent_layers::{AgentInputs, AgentLayers, agent_layers};
@@ -258,6 +258,50 @@ impl ConfigService {
             floor: gib.map_or_else(Floor::default, Floor::from_gib),
             problems,
         }
+    }
+
+    /// The settings of the pack `pack` as its provider is given them in `initialize`: each key of the pack without
+    /// the pack's name, with its value through the layers, and a secret read from the secret store at start. A
+    /// setting with no value is left out, and so is a secret the store has no item for. No value is logged, and no
+    /// message here holds one. `line` is the line the pack was loaded from, and `board` is its board.
+    pub fn pack_config(
+        &self,
+        board: BoardRef,
+        line: &LoadedLine,
+        pack: &str,
+    ) -> Result<BTreeMap<String, Value>, String> {
+        let user =
+            read_user_files(self.home()?, Some(board.id)).map_err(|errors| errors.join("\n"))?;
+        let resolved = resolve(&user, Some(line), None);
+        let prefix = format!("{pack}.");
+        let problems: Vec<String> = resolved
+            .settings
+            .problems
+            .iter()
+            .filter(|problem| problem.key.starts_with(&prefix))
+            .map(ToString::to_string)
+            .collect();
+        if !problems.is_empty() {
+            return Err(problems.join("\n"));
+        }
+        let mut config = BTreeMap::new();
+        for entry in &resolved.settings.entries {
+            let Some(key) = entry.key.strip_prefix(&prefix) else {
+                continue;
+            };
+            if entry.secret {
+                match self.secret_store.get(&pack_item(pack, key)) {
+                    Ok(secret) => {
+                        config.insert(key.to_string(), Value::String(secret.expose().to_string()));
+                    }
+                    Err(SecretStoreError::NotFound { .. }) => {}
+                    Err(error) => return Err(error.to_string()),
+                }
+            } else if let Some(value) = &entry.value {
+                config.insert(key.to_string(), value.clone());
+            }
+        }
+        Ok(config)
     }
 
     /// The lines of boards with their trust, over the same loader, home and workspaces ([`crate::board_lines`]).

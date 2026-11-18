@@ -318,7 +318,7 @@ pub struct SourceStale {
     pub reason: String,
 }
 
-/// What made a `task.changed` notification.
+/// What made a `task.changed`: a source's `journal`, or Collide's `store` (scratch).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeCause {
@@ -326,6 +326,7 @@ pub enum ChangeCause {
     Worktree,
     Remote,
     Journal,
+    Store,
     Startup,
 }
 

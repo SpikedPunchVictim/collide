@@ -14,6 +14,7 @@ use crate::config_get::{BoardRef, LoadContextFactory, WorkspaceRoots};
 use crate::pack_manage::review_data;
 use crate::pack_update::file_changes;
 use crate::settings_files::user_config_dir;
+use crate::sources::source_problems;
 use crate::trust::{LineSite, Trust, TrustError, TrustStore};
 use crate::user_packs::UserScope;
 use collide_core::owner::{
@@ -43,6 +44,17 @@ pub struct Lines {
     load_context: LoadContextFactory,
     git_env: Vec<(String, String)>,
     workspaces: WorkspaceRoots,
+}
+
+/// The line a board's sources start from (ts-0113-ck): the line the checkout is on, loaded from the commit its ref
+/// names, with its trust now. `problems` say why a trust state could not be read.
+pub struct SourceLine {
+    pub ref_name: String,
+    pub line: LoadedLine,
+    pub trust: TrustState,
+    pub problems: Vec<String>,
+    /// The loader's context of the load: the built-in packs and the `PATH` a provider's `node` is found on.
+    pub context: LoadContext,
 }
 
 /// What a request over one line starts from: the repository, the loader's context and the user's trust.
@@ -93,6 +105,32 @@ impl Lines {
             context: context.with_user(scope),
             trust,
             workspaces,
+        })
+    }
+
+    /// The line of the checkout `board.root` is on, read as the daemon starts sources from it: the commit the
+    /// checkout's ref names now, never the working copy, and its trust. A line that does not load is
+    /// [`LineError::Refused`], one problem on each line of the message.
+    pub fn for_sources(&self, board: BoardRef, tools: &OsStr) -> Result<SourceLine, LineError> {
+        let checkout = boards::checkout_of(board.root, &self.git_env).map_err(LineError::Failed)?;
+        let commit = boards::head_commit(&checkout.root, &self.git_env).ok_or_else(|| {
+            LineError::Failed(format!(
+                "the checkout `{}` has no commit yet, so it has no line",
+                checkout.root.display()
+            ))
+        })?;
+        let opened = self.open(board, tools)?;
+        let line = opened
+            .load(&commit)
+            .map_err(|problems| LineError::Refused(texts(&problems).join("\n")))?;
+        let root = board.root.display().to_string();
+        let (trust, problems) = state_of(&opened, &root, &checkout.branch, &line);
+        Ok(SourceLine {
+            ref_name: checkout.branch,
+            line,
+            trust,
+            problems,
+            context: opened.context,
         })
     }
 
@@ -157,7 +195,8 @@ impl Lines {
         match opened.load(&snapshot) {
             Err(problems) => Some(summary(unknown, texts(&problems))),
             Ok(line) => {
-                let (trust, problems) = state_of(&opened, root, &checkout.branch, &line);
+                let (trust, mut problems) = state_of(&opened, root, &checkout.branch, &line);
+                problems.extend(source_problems(&line));
                 Some(summary(trust, problems))
             }
         }
@@ -237,6 +276,7 @@ impl Lines {
             }
         };
         let (trust, mut problems) = state_of(&opened, &root, line, &loaded);
+        problems.extend(source_problems(&loaded));
         let site = LineSite {
             repo: &opened.git_dir,
             root: &root,

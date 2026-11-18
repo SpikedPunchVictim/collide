@@ -557,7 +557,7 @@ fn task_invalid_without_a_reason_or_a_path_is_refused() {
 #[test]
 fn a_change_cause_or_removal_cause_outside_its_list_is_refused() {
     let mut changed = notifications()[2].1.clone();
-    for cause in ["head", "worktree", "remote", "journal", "startup"] {
+    for cause in ["head", "worktree", "remote", "journal", "store", "startup"] {
         changed["cause"] = json!(cause);
         assert!(
             serde_json::from_value::<TaskChanged>(changed.clone()).is_ok(),

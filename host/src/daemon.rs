@@ -54,10 +54,10 @@
 //! the built-in builder role, [`crate::file_run`]), `run.start` and `run.diff` (a prompt run of `collide/quick` up to
 //! its review, [`crate::file_run::quick_run`]), `queue.list` and `queue.answer` (the stored Queue,
 //! [`crate::queue`]; accept on a review merges the run's branch into the checkout, [`crate::file_run`]), `board.open`
-//! and `board.list` (a git checkout as a board, [`crate::boards`]), and `task.get` and `task.apply` for scratch tasks
-//! ([`crate::scratch`]), `run.list` and `run.get` (from the store's index of runs, [`crate::run_store`]) and
-//! `daemon.subscribe` are served here; the other methods are other items' and answer
-//! `method not found`.
+//! and `board.list` (a git checkout as a board, [`crate::boards`]), and `task.get`, `task.apply` and `task.preview` for
+//! any source of a board ([`crate::sources`]; the scratch source is [`crate::scratch`]), `run.list` and `run.get`
+//! (from the store's index of runs, [`crate::run_store`]) and `daemon.subscribe` are served here; the other methods
+//! are other items' and answer `method not found`.
 //!
 //! ## The event stream
 //!
@@ -133,11 +133,13 @@ use crate::queue::Queue;
 use crate::run_store::{RunFilter, RunRow};
 use crate::run_summary::summarize;
 use crate::sampler::{Sampler, TICK};
-use crate::scratch::{self, ScratchSource};
+use crate::scratch;
 use crate::secret_store::{MemorySecretStore, SecretStore};
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
+use crate::sources::{Source, SourceError, Sources, SourcesConfig, changed_event};
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
+use crate::supervisor::SupervisorPolicy;
 use collide_core::events::Event;
 use collide_core::owner::{
     BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardTrustParams,
@@ -149,11 +151,10 @@ use collide_core::owner::{
     Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
     RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
     RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
-    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, code, encode_line,
-    parse_request, route,
+    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, TaskPreviewParams, code,
+    encode_line, parse_request, route,
 };
-use collide_core::ports::TaskProvider;
-use collide_core::provider::{ApplyResult, GetParams};
+use collide_core::provider::{ApplyParams, ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -546,6 +547,9 @@ pub struct DaemonOptions {
     /// store in memory, so no daemon touches the OS keychain unless it is given one: `collide-daemon` gives
     /// [`crate::secret_store::system_secret_store`] when it runs for a person (ts-0099-bw).
     pub secret_store: Arc<dyn SecretStore>,
+    /// How the providers of a board's sources are supervised: the timeout of each method and the backoff between
+    /// restarts. A test gives short ones.
+    pub supervisor: SupervisorPolicy,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -602,6 +606,7 @@ impl DaemonOptions {
             feed_rebuilder: None,
             load_context: None,
             secret_store: Arc::new(MemorySecretStore::new()),
+            supervisor: SupervisorPolicy::default(),
         }
     }
 }
@@ -642,6 +647,8 @@ struct Shared {
     claude_refresher: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// What `config.get` reads: the user's files and the loader.
     config: ConfigService,
+    /// The providers behind each board's sources ([`crate::sources`]). They stop with the daemon.
+    sources: Sources,
 }
 
 impl Shared {
@@ -722,6 +729,7 @@ impl Daemon {
             feed_rebuilder,
             load_context,
             secret_store,
+            supervisor,
         } = options;
         let log = Arc::new(DaemonLog {
             sink: Mutex::new(log),
@@ -952,6 +960,20 @@ impl Daemon {
             bind_socket(&paths).inspect_err(|e| log.line(&format!("cannot start: {e}")))?;
         log.line(&format!("listening on {}", paths.socket.display()));
 
+        // The providers of a board's sources: their data folders are beside the runs, and they wait for the first
+        // capture of the base environment like a run does.
+        let sources = Sources::new(SourcesConfig {
+            config: config.clone(),
+            store: store.clone(),
+            data_root: paths.runs_dir.with_file_name("pack-data"),
+            policy: supervisor,
+            base_env: {
+                let env = env.clone();
+                let wait = capture.timeout + CAPTURE_WAIT_MARGIN;
+                Arc::new(move || wait_for_environment(&env, wait))
+            },
+        });
+
         let uid = auth::daemon_uid();
         let tree =
             process_tree.unwrap_or_else(|| Arc::new(system_process_tree(&paths, app_executable)));
@@ -984,6 +1006,7 @@ impl Daemon {
             claude,
             claude_refresher: Mutex::new(None),
             config,
+            sources,
         });
 
         let capturing = shared.clone();
@@ -1097,6 +1120,8 @@ impl Drop for Daemon {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.join();
+        // The providers of the sources end with the daemon: no child outlives it.
+        self.shared.sources.stop();
         // The limit timers end first: one that is resuming a run needs the phases.
         self.shared.file_runs.shutdown();
         self.shared.claude.stop();
@@ -1850,6 +1875,7 @@ fn call(
         Method::BoardTrustReview => board_trust_review(shared, params),
         Method::TaskGet => task_get(shared, params),
         Method::TaskApply => task_apply(shared, session, params),
+        Method::TaskPreview => task_preview(shared, params),
         other => Err(RpcError::new(
             code::METHOD_NOT_FOUND,
             format!(
@@ -2560,22 +2586,48 @@ fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
     Ok(serde_json::to_value(BoardListResult { boards }).expect("a result is JSON"))
 }
 
-/// `task.get` for a scratch task (ts-0075-hj): the task with its whole prompt, or no task when the board has none with
-/// that id. A key of another source is not found: only the scratch source is built yet.
+/// The source `name` of `board`, started if need be ([`Sources::source`]).
+fn source_of(shared: &Shared, board: &str, root: &str, name: &str) -> Result<Source, SourceError> {
+    let board = BoardRef {
+        id: board,
+        root: Path::new(root),
+    };
+    shared.sources.source(board, name, &tools_path(shared))
+}
+
+/// A source's failure as the error of a request.
+fn source_failed(error: SourceError) -> RpcError {
+    match error {
+        SourceError::Refused(message) => RpcError::new(code::CONFLICT, message),
+        SourceError::NoSource(message) | SourceError::Unsupported(message) => {
+            RpcError::new(code::INVALID_PARAMS, message)
+        }
+        SourceError::Unavailable(message) => RpcError::new(code::UNAVAILABLE, message),
+        SourceError::Failed(message) => RpcError::new(code::INTERNAL_ERROR, message),
+    }
+}
+
+/// `task.get` (ts-0075-hj, ts-0113-ck): the task with its whole prompt or body, or no task when the board's source has
+/// none with that id. An id with no source in front of it is a scratch task. A source the board's line does not have
+/// answers no task. A source that cannot answer (an untrusted line, a provider that is gone) is an error that says so.
+/// The copies, collisions and `latest_run` come with the corpus (`ts-0116-wh`).
 fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
     let params: TaskGetParams = read_params("task.get", params)?;
-    board_root(shared, &params.board)?;
+    let root = board_root(shared, &params.board)?;
     let (source, id) = scratch::split_id(&params.id);
-    let task = if source.is_none_or(|source| source == scratch::SOURCE) {
-        ScratchSource::new(shared.store.clone(), &params.board)
-            .get(&GetParams {
-                id: id.to_string(),
-                checkout: None,
-            })
-            .map_err(|e| RpcError::new(code::INTERNAL_ERROR, e.to_string()))?
-            .task
-    } else {
-        None
+    let source = source.unwrap_or(scratch::SOURCE);
+    let task = match source_of(shared, &params.board, &root, source) {
+        Ok(source) => {
+            source
+                .get(&GetParams {
+                    id: id.to_string(),
+                    checkout: params.checkout.clone(),
+                })
+                .map_err(source_failed)?
+                .task
+        }
+        Err(SourceError::NoSource(_)) => None,
+        Err(error) => return Err(source_failed(error)),
     };
     let runs = match &task {
         Some(task) => shared
@@ -2604,34 +2656,14 @@ fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::V
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
-/// `task.apply` on the scratch source (ts-0075-hj): `create` and `setStatus`. The source's own refusal (an unknown
-/// status, an unknown task) is an answer, not an error. Each write records a `task.changed` event with the actor of
-/// the connection. A scratch task is never committed, so `commit` is refused.
-fn task_apply(
-    shared: &Shared,
-    session: &Session,
-    params: &serde_json::Value,
-) -> Result<serde_json::Value, RpcError> {
-    let params: TaskApplyParams = read_params("task.apply", params)?;
-    if shared.stopping() {
-        return Err(RpcError::new(
-            code::UNAVAILABLE,
-            "the daemon is shutting down",
-        ));
-    }
-    if params.commit {
-        return Err(RpcError::new(
-            code::INVALID_PARAMS,
-            "a scratch task is never committed: it lives in Collide's store, not in the repository",
-        ));
-    }
-    board_root(shared, &params.board)?;
-    let mut apply = params.apply;
+/// The source a write or a preview names, and the call it makes: `source` or the id's own prefix (which must agree),
+/// and the id without it.
+fn named_source(source: Option<&str>, apply: &mut ApplyParams) -> Result<String, RpcError> {
     let (from_id, bare_id) = match apply.id.as_deref().map(scratch::split_id) {
         Some((source, bare)) => (source, Some(bare.to_string())),
         None => (None, None),
     };
-    let source = match (params.source.as_deref(), from_id) {
+    let named = match (source, from_id) {
         (Some(named), Some(in_id)) if named != in_id => {
             return Err(RpcError::new(
                 code::INVALID_PARAMS,
@@ -2646,25 +2678,69 @@ fn task_apply(
             ));
         }
     };
-    if source != scratch::SOURCE {
+    let named = named.to_string();
+    apply.id = bare_id;
+    Ok(named)
+}
+
+/// `task.apply` on any source (ts-0075-hj, ts-0113-ck): the source's own `ok`, `conflict` or `refused` is the answer. A
+/// source the line does not have, an untrusted line or a source that is gone is an error. With no `checkout` a
+/// ref-scoped source writes the line's root, which the provider was told at `initialize`. `commit` is refused here:
+/// a scratch task is never committed, and committing a write through the daemon comes with the CLI (`ts-0120-wm`).
+fn task_apply(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: TaskApplyParams = read_params("task.apply", params)?;
+    if shared.stopping() {
         return Err(RpcError::new(
-            code::INVALID_PARAMS,
-            format!(
-                "the daemon serves only the `{}` source so far, and `{source}` is not built yet",
-                scratch::SOURCE
-            ),
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
         ));
     }
-    apply.id = bare_id;
-    let result = ScratchSource::new(shared.store.clone(), &params.board)
-        .apply(&apply)
-        .map_err(|e| RpcError::new(code::INTERNAL_ERROR, e.to_string()))?;
-    if let ApplyResult::Ok { items, .. } = &result {
+    let root = board_root(shared, &params.board)?;
+    let mut apply = params.apply;
+    let name = named_source(params.source.as_deref(), &mut apply)?;
+    if params.commit {
+        return Err(RpcError::new(
+            code::INVALID_PARAMS,
+            if name == scratch::SOURCE {
+                "a scratch task is never committed: it lives in Collide's store, not in the repository".to_string()
+            } else {
+                "`commit` is not built yet: a write through the daemon is not committed (Stage 4b, ts-0120-wm)"
+                    .to_string()
+            },
+        ));
+    }
+    let source = source_of(shared, &params.board, &root, &name).map_err(source_failed)?;
+    let result = write(shared, session, &source, &apply)?;
+    Ok(serde_json::to_value(TaskApplyResult {
+        result,
+        commit: None,
+    })
+    .expect("a result is JSON"))
+}
+
+/// The one function every source's write goes through: the source's `apply`, then one `task.changed` event for each
+/// item the write changed, with the actor of the connection. The guards of `ts-0114-hr` (the line lock, a busy root,
+/// the queue) are added here.
+fn write(
+    shared: &Shared,
+    session: &Session,
+    source: &Source,
+    apply: &ApplyParams,
+) -> Result<ApplyResult, RpcError> {
+    let result = source.apply(apply).map_err(source_failed)?;
+    if let ApplyResult::Ok { task, items, .. } = &result {
         for effect in items {
-            if let Err(error) = shared
-                .phases
-                .append_event(session.actor(), scratch::changed_event(effect))
-            {
+            let event = changed_event(
+                source.name(),
+                effect,
+                source.write_cause(),
+                task.checkout.clone(),
+            );
+            if let Err(error) = shared.phases.append_event(session.actor(), event) {
                 shared.log.line(&format!(
                     "the change of {} was written but its event was not: {error}",
                     effect.key
@@ -2672,11 +2748,28 @@ fn task_apply(
             }
         }
     }
-    Ok(serde_json::to_value(TaskApplyResult {
-        result,
-        commit: None,
-    })
-    .expect("a result is JSON"))
+    Ok(result)
+}
+
+/// `task.preview` (ts-0113-ck): what `task.apply` would do with the same params, with nothing written and no event. A
+/// source that does not declare `preview` is refused, naming it.
+fn task_preview(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: TaskPreviewParams = read_params("task.preview", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let root = board_root(shared, &params.board)?;
+    let mut apply = params.apply;
+    let name = named_source(params.source.as_deref(), &mut apply)?;
+    let source = source_of(shared, &params.board, &root, &name).map_err(source_failed)?;
+    let result = source.preview(&apply).map_err(source_failed)?;
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
 /// `run.stop` (`collide stop`, 0.5): stops the run's processes in the order of [`crate::stop::ORDER`] and answers with

@@ -555,12 +555,13 @@
       "type": "object"
     },
     "ChangeCause": {
-      "description": "What made a `task.changed` notification.",
+      "description": "What made a `task.changed`: a source's `journal`, or Collide's `store` (scratch).",
       "enum": [
         "head",
         "worktree",
         "remote",
         "journal",
+        "store",
         "startup"
       ],
       "type": "string"

@@ -14,14 +14,12 @@
 
 use crate::scratch_store::ScratchRow;
 use crate::store::{Store, StoreError};
-use collide_core::change::{Effect, FieldDiff, ItemState};
-use collide_core::events::EventBody;
+use collide_core::change::{Effect, ItemState};
 use collide_core::item::{Category, OpDecl, StatusDecl};
 use collide_core::ports::{ProviderError, TaskProvider};
 use collide_core::provider::{
-    ApplyParams, ApplyResult, Capabilities, ChangeCause, GetParams, GetResult, InitializeParams,
-    InitializeResult, ListParams, ListResult, PreviewResult, Scope, Task, TaskChanged, WatchParams,
-    WatchResult,
+    ApplyParams, ApplyResult, Capabilities, GetParams, GetResult, InitializeParams,
+    InitializeResult, ListParams, ListResult, PreviewResult, Scope, Task, WatchParams, WatchResult,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -96,37 +94,6 @@ pub fn split_id(id: &str) -> (Option<&str>, &str) {
     match id.split_once(':') {
         Some((source, bare)) => (Some(source), bare),
         None => (None, id),
-    }
-}
-
-/// The `task.changed` event of one write: the effect's key, version and states, and the status as the one field that
-/// changed. The actor is the event's, set by the daemon from the connection; the source names none of its own. The
-/// cause is `journal`, the closest of the five: the change is in the daemon's own record and no checkout, remote or
-/// startup read made it.
-pub fn changed_event(effect: &Effect) -> EventBody {
-    let status = |state: &Option<ItemState>| match state {
-        Some(state) => json!(state.status),
-        None => serde_json::Value::Null,
-    };
-    EventBody::TaskChanged {
-        source: SOURCE.to_string(),
-        task: TaskChanged {
-            key: effect.key.clone(),
-            version: effect.version.clone(),
-            from: effect.from.clone(),
-            to: effect.to.clone(),
-            diff: BTreeMap::from([(
-                "status".to_string(),
-                FieldDiff::Changed {
-                    from: status(&effect.from),
-                    to: status(&effect.to),
-                },
-            )]),
-            cause: ChangeCause::Journal,
-            actor: None,
-            automated: None,
-            checkout: None,
-        },
     }
 }
 

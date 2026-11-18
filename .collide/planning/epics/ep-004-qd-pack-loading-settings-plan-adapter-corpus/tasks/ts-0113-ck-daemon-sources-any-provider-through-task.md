@@ -107,3 +107,84 @@ Write these first.
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation: the board's own enabled pack
   wins over the built-in `collide/plan`, and `ChangeCause::store` is added.
+
+### Built
+
+- `core/src/provider.rs`: `ChangeCause::Store` (a source's `journal` stays; `store` is Collide's own store, where
+  scratch keeps its tasks). `pnpm gen` ran; `schemas/` and `packages/pack-sdk/src/generated/` are in step and a second
+  run leaves no diff.
+- `host/src/sources.rs` (new). `plan(&LoadedLine) -> Plan` names the sources of a line (`Planned`, `Clash`);
+  `source_problems` feeds the line's problems. `Sources::source(board, name, tools) -> Source` is the one door: scratch
+  needs no line; any other name loads the line from its commit snapshot, plans it, refuses a clash, refuses a pack that
+  is not built in on a line that is not trusted (`SourceError::Refused`, "is not trusted"), then starts the provider
+  once, on its first call, with `provider_launch`, the captured base environment, `COLLIDE_PACK_DATA`, the pack's
+  resolved settings and the board's root. `Source::{list, get, apply, preview, write_cause}`; `changed_event` builds the
+  `task.changed` body. `Sources::stop` ends every provider and starts none after. A slot is kept while its identity
+  (pack, provider, cache folder of the snapshot) and trust hold, so a committed script change stops the old child.
+- `host/src/config_get.rs`: `ConfigService::pack_config` resolves one pack's keys through the layers. A secret is read
+  through the `SecretStore` port. It is never logged or put in an error.
+- `host/src/board_lines.rs`: `Lines::for_sources` and `SourceLine`. A clash shows in `line_of` and `review` problems.
+- `host/src/daemon.rs`: `Shared.sources`; `DaemonOptions.supervisor`; `task_get`, `task_apply` and the new
+  `task_preview` all go through `source_of`; `write` is the one function every source's write goes through (for
+  `ts-0114-hr`); `Drop for Daemon` calls `Sources::stop`.
+- `host/src/scratch.rs` loses its `changed_event` (now `sources::changed_event`); `host/src/file_run/quick_run.rs` uses
+  it with cause `store`.
+- Tests: `host/tests/daemon_sources.rs` (19 tests) and `host/tests/fixtures/fake_pack_provider.mjs` (a Node fake that
+  runs as a repo pack's provider; `get` ids `boom`, `missing`, `die`, `echo`, `linger`). Updated:
+  `core/tests/provider_protocol.rs` (cause list), `host/tests/scratch_tasks.rs`.
+- Seen red at runtime. Scratch cause: `each_write_records_a_task_changed_event_with_the_actor_of_the_connection` and the
+  cause-list test (journal against store). The new daemon tests were run against five mutations of the code, each put
+  back after: `Sources::source` answering `NoSource` for all but scratch (17 of the 18 tests then written failed:
+  get, apply, preview, trust, settings, default checkout, event, reference adapter); trust gate off
+  (`before_trust_no_provider_starts_and_after_trust_it_does`,
+  `a_committed_change_to_the_script_asks_for_trust_again_and_stops_the_running_provider`); `pack_config` result
+  dropped (the settings test, the secret test, `a_secret_with_no_item_in_the_store_is_left_out_of_config`); clash
+  rule off (the clash test); board pack no longer winning (the `plan` test and the reference adapter test); slot
+  identity ignored
+  (`a_change_to_the_script_that_is_trusted_before_any_call_replaces_the_running_provider`).
+- Not seen red: `no_provider_outlives_the_daemon`. Dropping `Sources::stop` from `Drop for Daemon` leaves it green,
+  because dropping a `ProviderClient` also stops its child (`impl Drop`). The explicit stop is the second net.
+  `task_preview_of_a_source_that_cannot_preview_says_so` and `a_provider_starts_at_its_first_call...` were not mutated.
+
+### Decisions for the owner
+
+- **Settings and secrets are read when a provider starts.** A changed setting reaches a running provider at its next
+  start (a crash, a changed script, a daemon restart). Alternative: restart on a settings change. Recommend as built;
+  `ts-0116-wh` can restart on `config set`.
+- **Every request reloads the line and its trust** (a few git reads), so a branch change or a trust change is seen at
+  once. Alternative: cache per commit. Recommend as built until the corpus item measures it.
+- **A `Gone` source stays gone until the line changes or the daemon restarts**; the error names the pack, the source and
+  the last failure. Alternative: call `retry` on each request. Recommend as built: the supervisor already backed off.
+- **The pack's data folder is `<daemon data>/pack-data/<board>/<pack>`.** Plan text for 0.7 or 0.10: "a provider's
+  `COLLIDE_PACK_DATA` is `pack-data/<board id>/<pack name>` under the daemon's data folder".
+- **`commit: true` on `task.apply` is refused for every source** (scratch keeps its own text, "never committed") until
+  `ts-0120-wm`. Recommend.
+- **Preview on a source with no preview is `INVALID_PARAMS` naming the source**, not a `refused` answer, since a refused
+  answer means the provider judged the change. Get on an unknown source gives `task: None`; apply and preview on one
+  give `INVALID_PARAMS`.
+- **Error codes:** not trusted and a name clash are `CONFLICT`; a gone source is `UNAVAILABLE`; a provider failure is
+  `INTERNAL_ERROR`. Alternative for not trusted: `NOT_PERMITTED`. Recommend `CONFLICT`: trusting the line fixes it.
+- **A write's event cause is `worktree` for a pack source and `store` for scratch.** The daemon cannot tell `head` from
+  `worktree` yet; `ts-0114-hr` and `ts-0116-wh` know the route. Recommend.
+- **A pack that declares a source named `scratch` is a clash** with the built-in one. Recommend.
+- **`DaemonOptions.supervisor`** carries the `SupervisorPolicy`, so a test can use a zero backoff. Recommend.
+- **`source.stale` with a `checkout` field** (asked by `ts-0112-px`) is not added here: nothing in this item emits
+  `source.stale`. Recommend adding it in `ts-0116-wh`, which watches sources.
+- Provider processes share one lock per source (`SupervisedProvider`), and starting one holds only that source's slot,
+  so a slow start of one source does not block the others.
+
+- Owner decisions (2026-11-17, at the build): every recommendation above, on delegation. The pack data path needs no
+  plan text: 0.7 already says a data directory per pack per board under Collide's data directory, and the subfolder is
+  the code's. A changed setting restarting the pack's providers is carried to `ts-0116-wh`. At review: the trust check
+  in `refresh` survived a mutation, since every test changed the pack's own folder, so
+  `a_committed_change_elsewhere_in_the_line_asks_for_trust_again_and_stops_the_running_provider` was added and seen red
+  under that mutation; the gone message now says a changed pack on the line also starts it again. The adapter test
+  builds the reference pack's name at run time, as `checks/` does: no product code names it (the rule's intent, 0.1).
+
+### Not done, by design
+
+- `task.list`, the corpus, watching, copies, collisions and `latest_run` on `task.get`: `ts-0115-ug` and `ts-0116-wh`.
+  `Source::list` exists for them and is used here only by the reference adapter test.
+- The line lock, root busy, the phase queue and the guards on `write`: `ts-0114-hr`.
+- `commit: true`: `ts-0120-wm`.
+- The real keychain behind `SecretStore`: Stage 5. Board-id reuse and the main-checkout root: 6a.

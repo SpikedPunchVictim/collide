@@ -14,7 +14,8 @@ use collide_core::owner::{
 };
 use collide_core::ports::{ProviderError, TaskProvider};
 use collide_core::provider::{
-    ApplyParams, ApplyResult, GetParams, InitializeParams, ListParams, Task, WatchParams,
+    ApplyParams, ApplyResult, ChangeCause, GetParams, InitializeParams, ListParams, Task,
+    WatchParams,
 };
 use collide_host::base_env::CaptureOptions;
 use collide_host::daemon::{Daemon, DaemonOptions, DaemonPaths};
@@ -71,6 +72,8 @@ fn start(root: &TempRoot) -> Daemon {
     };
     options.home = Some(root.path().to_str().unwrap().to_string());
     options.git_env = git_env(root);
+    // The board's line is loaded from the source packs, so no test depends on a staged bundle.
+    options.load_context = Some(common::config_fixture::plain_factory(root.path()));
     Daemon::start(options).expect("the daemon starts")
 }
 
@@ -462,7 +465,7 @@ fn a_key_from_one_board_is_not_found_on_another() {
 }
 
 #[test]
-fn a_task_of_another_source_is_not_found_and_a_write_to_one_is_refused_as_not_built() {
+fn a_task_of_a_source_the_line_does_not_have_is_not_found_and_a_write_to_it_is_refused() {
     let root = TempRoot::new();
     let repo = checkout(&root, "repo");
     let daemon = start(&root);
@@ -470,13 +473,13 @@ fn a_task_of_another_source_is_not_found_and_a_write_to_one_is_refused_as_not_bu
     let board = board_of(open(&mut client, &repo)).id;
     create(&mut client, &board, "A scratch task");
 
-    assert!(get(&mut client, &board, "plan:1").is_none());
+    assert!(get(&mut client, &board, "github:1").is_none());
     let params = TaskApplyParams {
         board: board.clone(),
         source: None,
         apply: ApplyParams {
             op: "setStatus".to_string(),
-            id: Some("plan:1".to_string()),
+            id: Some("github:1".to_string()),
             args: BTreeMap::from([("status".to_string(), json!("done"))]),
             version: None,
             checkout: None,
@@ -485,7 +488,7 @@ fn a_task_of_another_source_is_not_found_and_a_write_to_one_is_refused_as_not_bu
     };
     let (number, message) = rpc_error(&mut client, "task.apply", &params);
     assert_eq!(number, code::INVALID_PARAMS);
-    assert!(message.contains("plan"), "{message}");
+    assert!(message.contains("github"), "{message}");
 }
 
 #[test]
@@ -646,9 +649,11 @@ fn each_write_records_a_task_changed_event_with_the_actor_of_the_connection() {
         })
         .collect();
     assert_eq!(changes.len(), 3, "{changes:?}");
-    for (actor, source, _) in &changes {
+    for (actor, source, task) in &changes {
         assert_eq!(actor.kind, ActorKind::Person);
         assert_eq!(source, "scratch");
+        // The change is in Collide's own store: no checkout, remote or journal of a source made it.
+        assert_eq!(task.cause, ChangeCause::Store);
     }
     let (_, _, created) = &changes[0];
     assert_eq!(created.key, "scratch:1");

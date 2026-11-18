@@ -63,6 +63,7 @@ pub mod section_view;
 pub mod settings_files;
 pub mod shim;
 pub mod shim_link;
+pub mod sources;
 pub mod stop;
 pub mod stop_cli;
 pub mod store;
