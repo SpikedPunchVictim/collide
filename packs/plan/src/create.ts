@@ -5,10 +5,12 @@ import type { ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile, syncDirectory } from './atomic.ts'
 import { drawFreeId, IdSourceError, KIND_IDS, nextNumber, seededGenerator, takenIds } from './ids.ts'
 import type { CreatableKind, IdHooks } from './ids.ts'
+import { DEFAULT_LAYOUT } from './layout.ts'
+import type { Layout } from './layout.ts'
 import { readItem, stateOf } from './item.ts'
 import { CONTROL, onlyKeys, refused } from './op-util.ts'
 import { readItemFile } from './read-file.ts'
-import { SHARED_ROOT, toTask } from './scan.ts'
+import { readEpicFiles, toTask } from './scan.ts'
 
 export const CREATE = 'create'
 
@@ -89,6 +91,16 @@ async function epicFolder(epicsDir: string, epic: string): Promise<string | null
   return names.find((name) => EPIC_FOLDER.exec(name)?.[1] === epic) ?? null
 }
 
+/** The refusal for an epic the root has no folder for. An epic that a previous root holds is named, with where. */
+async function noEpic(root: string, layout: Layout, epic: string): Promise<string> {
+  const refusal = `there is no epic ${epic} in the working tree (${layout.root}/epics/); create it first`
+  if (layout.previous.length === 0) return refusal
+  const { items } = await readEpicFiles(root, null, layout)
+  const old = items.find((found) => found.item.kind === 'epic' && found.item.id === epic)
+  if (old === undefined) return refusal
+  return `${refusal}; ${epic} is at ${dirname(old.path)}, under a previous root, which a new item does not go to`
+}
+
 /** Makes `dir` and its missing parents, and syncs the directories that gained an entry, so the new file survives a crash. */
 async function makeDirectory(dir: string): Promise<void> {
   const first = await mkdir(dir, { recursive: true })
@@ -102,25 +114,32 @@ async function makeDirectory(dir: string): Promise<void> {
 /**
  * Writes a new item: the number is the next free one for the kind across every ref and the working tree, the suffix is
  * drawn until the id is free, and the file goes in the epic's `tasks/` folder, or its `proposals/` folder for a proposal
- * (an epic gets its own folder with an `epic.md`). The caller holds the lock. The reply carries the item as read back from disk and the file it wrote.
+ * (an epic gets its own folder with an `epic.md`). The item goes under the layout's root, never under a `previous`
+ * one, and the number is free across the roots of all of them. The caller holds the lock. The reply carries the item as
+ * read back from disk and the file it wrote.
  */
-export async function createLocked(root: string, args: Record<string, unknown>, hooks: IdHooks): Promise<ApplyResultInput> {
+export async function createLocked(
+  root: string,
+  args: Record<string, unknown>,
+  hooks: IdHooks,
+  layout: Layout = DEFAULT_LAYOUT,
+): Promise<ApplyResultInput> {
   const kind = (args.kind ?? 'task') as CreatableKind
   const title = args.title as string
   const { prefix, width } = KIND_IDS[kind]
-  const epicsDir = join(root, SHARED_ROOT, 'epics')
+  const epicsDir = join(root, layout.root, 'epics')
 
   let folder: string | null = null
   if (kind !== 'epic') {
     folder = await epicFolder(epicsDir, args.epic as string)
-    if (folder === null) return refused(`there is no epic ${args.epic as string} in the working tree (.collide/planning/epics/); create it first`)
+    if (folder === null) return refused(await noEpic(root, layout, args.epic as string))
   }
 
   const look = hooks.look ?? takenIds
   let id: string
   try {
-    const number = nextNumber(await look(root), prefix)
-    id = await drawFreeId({ prefix, number, width, next: generatorFor(args, hooks), look: () => look(root) })
+    const number = nextNumber(await look(root, layout), prefix)
+    id = await drawFreeId({ prefix, number, width, next: generatorFor(args, hooks), look: () => look(root, layout) })
   } catch (error) {
     if (error instanceof IdSourceError) return refused(`create: ${error.message}`)
     throw error

@@ -247,6 +247,26 @@ fn an_uncommitted_edit_leaves_the_hash_alone_and_a_commit_changes_it() {
 }
 
 #[test]
+fn a_committed_change_of_the_plan_layout_root_in_the_repos_config_changes_the_hash() {
+    let layout =
+        |root: &str| format!("config:\n  collide/plan:\n    layout:\n      root: {root}\n");
+    let fx = Fx::basic();
+    fx.write(".collide/config.yaml", &layout(".collide/planning"));
+    fx.commit();
+    let before = fx.hash();
+
+    fx.write(".collide/config.yaml", &layout("docs/plan"));
+    assert_eq!(fx.hash(), before, "an uncommitted change");
+    fx.commit();
+    let changed = fx.hash();
+    assert_ne!(changed, before, "a committed change");
+
+    fx.write(".collide/config.yaml", &layout(".collide/planning"));
+    fx.commit();
+    assert_eq!(fx.hash(), before, "the same file gives the same hash");
+}
+
+#[test]
 fn a_new_view_a_changed_view_a_new_profile_and_a_changed_profile_each_change_the_hash() {
     let fx = Fx::basic();
     let profile = fs::read_to_string(repo_root().join("fixtures/profiles/small-fix.yaml")).unwrap();

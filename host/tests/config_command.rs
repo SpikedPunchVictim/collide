@@ -181,6 +181,7 @@ fn with_no_key_every_setting_is_listed_one_to_a_line_in_order() {
             "ask.budget_usd",
             "disk.floor_gib",
             "claude.check_published",
+            "collide/plan.layout",
             "ferry.greeting",
             "ferry.lanePool",
             "ferry.layout",

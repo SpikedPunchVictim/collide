@@ -2,12 +2,13 @@ import { execFile } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { SHARED_ROOT } from './scan.ts'
+import { DEFAULT_LAYOUT, epicsDirsOf } from './layout.ts'
+import type { Layout } from './layout.ts'
 
 const run = promisify(execFile)
 
-/** The shared root's epics folder, relative to the repository root, as git writes a path. */
-const EPICS = `${SHARED_ROOT}/epics`
+/** The epics folders of the default layout, relative to the repository root, as git writes a path. */
+const DEFAULT_EPICS = epicsDirsOf(DEFAULT_LAYOUT)
 
 /** Each kind's id prefix and the digits its numbers are padded to (0.10, ids). */
 export const KIND_IDS = {
@@ -32,22 +33,24 @@ const FOLDER_ID = /^(ep-[0-9]{3,}-[a-z]{2})(?:-.*)?$/
  */
 export interface IdHooks {
   generator?: (seed: number) => () => number
-  look?: (root: string) => Promise<Set<string>>
+  look?: (root: string, layout: Layout) => Promise<Set<string>>
 }
 
 /** A problem reading the ids that other refs hold. The op that asked refuses with the message. */
 export class IdSourceError extends Error {}
 
 /**
- * The ids that the item paths name. A path is relative to the repository root, with `/`. An epic folder names its epic
- * (whatever is inside it), and a file directly in a `tasks/` or `proposals/` folder names its item. Nothing is opened: the id is the
- * start of the name (0.10, ids: names on disk are `<id>-<slug>`).
+ * The ids that the item paths name. A path is relative to the repository root, with `/`, and only a path under one of
+ * `epicsDirs` (the epics folders of the layout's roots) counts. An epic folder names its epic (whatever is inside it),
+ * and a file directly in a `tasks/` or `proposals/` folder names its item. Nothing is opened: the id is the start of
+ * the name (0.10, ids: names on disk are `<id>-<slug>`).
  */
-export function idsInPaths(paths: string[]): Set<string> {
+export function idsInPaths(paths: string[], epicsDirs: readonly string[] = DEFAULT_EPICS): Set<string> {
   const ids = new Set<string>()
   for (const path of paths) {
-    if (!path.startsWith(`${EPICS}/`)) continue
-    const [folder, subfolder, file, ...rest] = path.slice(EPICS.length + 1).split('/')
+    const dir = epicsDirs.find((candidate) => path.startsWith(`${candidate}/`))
+    if (dir === undefined) continue
+    const [folder, subfolder, file, ...rest] = path.slice(dir.length + 1).split('/')
     const epic = FOLDER_ID.exec(folder ?? '')?.[1]
     if (epic === undefined) continue
     ids.add(epic)
@@ -69,19 +72,19 @@ async function git(root: string, args: string[]): Promise<string> {
   }
 }
 
-/** The ids on every local branch and every fetched remote ref. Refs on one commit are read once. */
-async function idsInRefs(root: string): Promise<Set<string>> {
+/** The ids on every local branch and fetched remote ref, under the layout's roots. Refs on one commit are read once. */
+async function idsInRefs(root: string, epicsDirs: string[]): Promise<Set<string>> {
   const listing = await git(root, ['for-each-ref', '--format=%(objectname)', 'refs/heads', 'refs/remotes'])
   const ids = new Set<string>()
   for (const commit of new Set(listing.split('\n').filter((line) => line !== ''))) {
-    const names = await git(root, ['ls-tree', '-r', '--name-only', '-z', commit, '--', EPICS])
-    for (const id of idsInPaths(names.split('\0').filter((name) => name !== ''))) ids.add(id)
+    const names = await git(root, ['ls-tree', '-r', '--name-only', '-z', commit, '--', ...epicsDirs])
+    for (const id of idsInPaths(names.split('\0').filter((name) => name !== ''), epicsDirs)) ids.add(id)
   }
   return ids
 }
 
 /** The ids in the working tree: the epic folders and the files in their `tasks/` and `proposals/` folders, as `scan.ts` finds them. */
-async function idsInWorkingTree(root: string): Promise<Set<string>> {
+async function idsInWorkingTree(root: string, epicsDirs: string[]): Promise<Set<string>> {
   const names = async (dir: string): Promise<string[]> => {
     try {
       return await readdir(dir)
@@ -91,19 +94,24 @@ async function idsInWorkingTree(root: string): Promise<Set<string>> {
     }
   }
   const paths: string[] = []
-  for (const folder of await names(join(root, EPICS))) {
-    paths.push(`${EPICS}/${folder}/`)
-    for (const subfolder of ['tasks', 'proposals']) {
-      for (const file of await names(join(root, EPICS, folder, subfolder))) paths.push(`${EPICS}/${folder}/${subfolder}/${file}`)
+  for (const epics of epicsDirs) {
+    for (const folder of await names(join(root, epics))) {
+      paths.push(`${epics}/${folder}/`)
+      for (const subfolder of ['tasks', 'proposals']) {
+        for (const file of await names(join(root, epics, folder, subfolder))) {
+          paths.push(`${epics}/${folder}/${subfolder}/${file}`)
+        }
+      }
     }
   }
-  return idsInPaths(paths)
+  return idsInPaths(paths, epicsDirs)
 }
 
-/** Every id Collide can see: local branches, fetched remote refs and the working tree. */
-export async function takenIds(root: string): Promise<Set<string>> {
-  const ids = await idsInRefs(root)
-  for (const id of await idsInWorkingTree(root)) ids.add(id)
+/** Every id Collide can see under the layout's roots: local branches, fetched remote refs and the working tree. */
+export async function takenIds(root: string, layout: Layout = DEFAULT_LAYOUT): Promise<Set<string>> {
+  const epicsDirs = epicsDirsOf(layout)
+  const ids = await idsInRefs(root, epicsDirs)
+  for (const id of await idsInWorkingTree(root, epicsDirs)) ids.add(id)
   return ids
 }
 

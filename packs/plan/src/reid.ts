@@ -9,6 +9,8 @@ import { checkSeed, generatorFor } from './create.ts'
 import { namesItem } from './feature-target.ts'
 import { drawFreeId, IdSourceError, takenIds } from './ids.ts'
 import type { IdHooks } from './ids.ts'
+import { DEFAULT_LAYOUT } from './layout.ts'
+import type { Layout } from './layout.ts'
 import { stateOf } from './item.ts'
 import { onlyKeys, refused } from './op-util.ts'
 import { findFence, parseFrontmatter, versionOf } from './read-file.ts'
@@ -87,10 +89,16 @@ async function plan(root: string, found: FoundItem, oldId: string, newId: string
  * The order: every file's new content is made and checked first (a refusal writes nothing); then each file is replaced
  * in place, the renamed item's own file last; then the file (or an epic's folder) takes the new name. A kill between
  * two steps leaves every file whole, and at worst some links ahead of the item or a file name behind its id.
- * The caller holds the lock.
+ * Every root of the layout is read, and a file is renamed where it is. The caller holds the lock.
  */
-export async function reidLocked(root: string, id: string, args: Record<string, unknown>, hooks: IdHooks): Promise<ApplyResultInput> {
-  const { items: all } = await readEpicFiles(root)
+export async function reidLocked(
+  root: string,
+  id: string,
+  args: Record<string, unknown>,
+  hooks: IdHooks,
+  layout: Layout = DEFAULT_LAYOUT,
+): Promise<ApplyResultInput> {
+  const { items: all } = await readEpicFiles(root, null, layout)
   const sharing = all.filter((found) => found.item.id === id)
   const target = sharing[1] ?? sharing[0]
   if (target === undefined) return refused(`there is no item ${id}`)
@@ -100,7 +108,9 @@ export async function reidLocked(root: string, id: string, args: Record<string, 
   const look = hooks.look ?? takenIds
   let newId: string
   try {
-    newId = await drawFreeId({ prefix, number: Number(numberText), width: numberText.length, next: generatorFor(args, hooks), look: () => look(root) })
+    const number = Number(numberText)
+    const next = generatorFor(args, hooks)
+    newId = await drawFreeId({ prefix, number, width: numberText.length, next, look: () => look(root, layout) })
   } catch (error) {
     if (error instanceof IdSourceError) return refused(`reid: ${error.message}`)
     throw error
@@ -133,7 +143,7 @@ export async function reidLocked(root: string, id: string, args: Record<string, 
   const written = planned.map(({ absolute }) => posix(root, afterRename(absolute)))
   const files = new Set([...written, ...moved.flatMap((absolute) => [posix(root, absolute), posix(root, afterRename(absolute))])])
 
-  const after = (await readEpicFiles(root)).items
+  const after = (await readEpicFiles(root, null, layout)).items
   const renamedItem = after.find((found) => found.item.id === newId)
   if (renamedItem === undefined) throw new Error(`${newId} does not read back after the write`)
   const changed = after.filter((found) => written.includes(found.path))

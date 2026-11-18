@@ -291,6 +291,7 @@ fn a_packs_keys_show_as_pack_dot_key_and_its_defaults_say_default() {
     assert_eq!(
         &keys[5..],
         [
+            "collide/plan.layout",
             "ferry.greeting",
             "ferry.lanePool",
             "ferry.layout",

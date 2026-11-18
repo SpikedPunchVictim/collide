@@ -10,6 +10,8 @@ import type {
 } from '@collide/pack-sdk'
 import { resolveCheckout } from './checkout.ts'
 import { TITLE_MAX } from './create.ts'
+import { DEFAULT_LAYOUT, resolveLayout } from './layout.ts'
+import type { Layout } from './layout.ts'
 import { BLOCKED_BY, CATEGORIES, ID_PATTERN, IMPLEMENTS, LINK_TO_PATTERN, LINK_TYPES, PROPOSAL, PROPOSAL_STATUSES } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
@@ -96,16 +98,18 @@ export interface PlanProviderOptions {
 
 /**
  * Protocol v0's `initialize`, `list`, `get` and `apply` for the markdown provider. The repository root comes from
- * `initialize`'s `root` and from nowhere else; until it has run, `list` and `get` fail.
+ * `initialize`'s `root` and from nowhere else, and the shared folders from its `config.layout` (checked there: an
+ * `initialize` with a layout that may not be used fails with the reason); until it has run, `list` and `get` fail.
  */
 export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
   let root: string | null = null
+  let layout: Layout = DEFAULT_LAYOUT
 
   const scan = async (checkout: string | null): Promise<Scan> => {
     if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')
     // A named checkout is read in place of the main checkout, so an item is listed with the version that a write
     // there will check; one that is not a checkout of the repository is an error.
-    const result = await scanEpics(checkout === null ? root : await resolveCheckout(root, checkout), checkout)
+    const result = await scanEpics(checkout === null ? root : await resolveCheckout(root, checkout), checkout, layout)
     if (result.invalid.length + result.unknownKind + result.brokenLink > 0) {
       log(`plan: ${result.items.length} items, ${result.invalid.length} invalid, ${result.unknownKind} with an unknown kind, ${result.brokenLink} with a broken link`)
     }
@@ -113,8 +117,10 @@ export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
   }
 
   return {
-    initialize: ({ root: given }) => {
+    initialize: async ({ root: given, config }) => {
       if (typeof given !== 'string' || !isAbsolute(given)) throw new Error(`initialize needs root, the main checkout's absolute path; got ${JSON.stringify(given)}`)
+      // Checked before anything is kept, so a refused layout leaves the provider as it was.
+      layout = await resolveLayout(given, config?.layout)
       root = given
       return INITIALIZE_RESULT
     },
@@ -128,7 +134,7 @@ export function planHandlers({ log }: PlanProviderOptions): ProviderHandlers {
     },
     apply: (params) => {
       if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')
-      return applyOp(root, params)
+      return applyOp(root, params, {}, {}, layout)
     },
   }
 }

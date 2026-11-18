@@ -4,11 +4,10 @@ import type { TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
 import { parseFeatures } from './features.ts'
 import { KNOWN_KINDS, PROPOSAL, readItem, stateOf } from './item.ts'
 import type { Item } from './item.ts'
+import { DEFAULT_LAYOUT, rootsOf } from './layout.ts'
+import type { Layout } from './layout.ts'
 import { isBrokenLink } from './links.ts'
 import { readItemFile } from './read-file.ts'
-
-/** The shared root's default path, relative to the repository root (0.10). */
-export const SHARED_ROOT = '.collide/planning'
 
 const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
 
@@ -45,14 +44,18 @@ async function entries(dir: string) {
 }
 
 /**
- * Reads the items under `<cwd>/.collide/planning/epics/`: each epic folder's `epic.md` and the `.md` files directly in
- * its `tasks/` and `proposals/` folders, and nothing else. Symbolic links are not followed. `spikes/` and `questions/`
- * are never opened. The epic is the folder, so it is reported from the path and never from frontmatter. Every file
- * that reads is returned, in scan order, including a second file with an id another file has (`scanEpics` sets that
- * one aside); `invalid` holds the files that did not read.
+ * Reads the items under `<cwd>/<root>/epics/` for the layout's root and then for each of its `previous` roots (the
+ * default root, `.collide/planning`, when no layout is given): each epic folder's `epic.md` and the `.md` files
+ * directly in its `tasks/` and `proposals/` folders, and nothing else. Symbolic links are not followed. `spikes/` and
+ * `questions/` are never opened. The epic is the folder, so it is reported from the path and never from frontmatter.
+ * Every file that reads is returned, in scan order, including a second file with an id another file has (`scanEpics`
+ * sets that one aside); `invalid` holds the files that did not read.
  */
-export async function readEpicFiles(cwd: string, checkout: string | null = null): Promise<{ items: FoundItem[]; invalid: TaskInvalidOutput[] }> {
-  const epicsDir = join(cwd, SHARED_ROOT, 'epics')
+export async function readEpicFiles(
+  cwd: string,
+  checkout: string | null = null,
+  layout: Layout = DEFAULT_LAYOUT,
+): Promise<{ items: FoundItem[]; invalid: TaskInvalidOutput[] }> {
   const items: FoundItem[] = []
   const invalid: TaskInvalidOutput[] = []
   const reject = (absolute: string, reason: string): void => void invalid.push({ path: posix(cwd, absolute), checkout, reason })
@@ -65,19 +68,22 @@ export async function readEpicFiles(cwd: string, checkout: string | null = null)
     items.push({ item: checked.item, epic, path: posix(cwd, absolute), body: read.body, bodyLine: read.bodyLine, version: read.version })
   }
 
-  for (const folder of (await entries(epicsDir)).filter((entry) => entry.isDirectory())) {
-    const epicDir = join(epicsDir, folder.name)
-    const epic = EPIC_FOLDER.exec(folder.name)?.[1]
-    if (epic === undefined) {
-      reject(epicDir, `epic folder "${folder.name}" must start with an epic id such as ep-002-va`)
-      continue
-    }
-    for (const file of (await entries(epicDir)).filter((entry) => entry.isFile() && entry.name === 'epic.md')) {
-      await readOne(join(epicDir, file.name), null)
-    }
-    for (const subfolder of ['tasks', 'proposals']) {
-      for (const file of (await entries(join(epicDir, subfolder))).filter((entry) => entry.isFile() && entry.name.endsWith('.md'))) {
-        await readOne(join(epicDir, subfolder, file.name), epic)
+  for (const root of rootsOf(layout)) {
+    const epicsDir = join(cwd, root, 'epics')
+    for (const folder of (await entries(epicsDir)).filter((entry) => entry.isDirectory())) {
+      const epicDir = join(epicsDir, folder.name)
+      const epic = EPIC_FOLDER.exec(folder.name)?.[1]
+      if (epic === undefined) {
+        reject(epicDir, `epic folder "${folder.name}" must start with an epic id such as ep-002-va`)
+        continue
+      }
+      for (const file of (await entries(epicDir)).filter((entry) => entry.isFile() && entry.name === 'epic.md')) {
+        await readOne(join(epicDir, file.name), null)
+      }
+      for (const subfolder of ['tasks', 'proposals']) {
+        const inside = await entries(join(epicDir, subfolder))
+        const files = inside.filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+        for (const file of files) await readOne(join(epicDir, subfolder, file.name), epic)
       }
     }
   }
@@ -85,9 +91,13 @@ export async function readEpicFiles(cwd: string, checkout: string | null = null)
   return { items, invalid }
 }
 
-/** The items under `epics/` (see `readEpicFiles`). */
-export async function scanEpics(cwd: string, checkout: string | null = null): Promise<Scan> {
-  const { items, invalid } = await readEpicFiles(cwd, checkout)
+/** The items under `epics/` of every root of the layout (see `readEpicFiles`). */
+export async function scanEpics(
+  cwd: string,
+  checkout: string | null = null,
+  layout: Layout = DEFAULT_LAYOUT,
+): Promise<Scan> {
+  const { items, invalid } = await readEpicFiles(cwd, checkout, layout)
   // Two files with one id: the first in scan order is the item, the others are invalid.
   const seen = new Map<string, FoundItem>()
   const kept: FoundItem[] = []

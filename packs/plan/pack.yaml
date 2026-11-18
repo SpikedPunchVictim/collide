@@ -5,3 +5,31 @@ requires:
     - { name: node, version: ">=22.18" }
 providers:
   plan: { script: src/main.ts }
+
+# Where the shared planning folder is (0.10, Planning sources). The repo's `.collide/config.yaml` sets it, so the whole
+# team reads and writes one place; the user's files may not (`repoOnly`). The provider checks every path at start and
+# refuses one that is outside the repository, under `.git/` or over a protected Collide file (`src/layout.ts`).
+config:
+  layout:
+    type: object
+    repoOnly: true
+    description: Where the shared planning folder is, and the folders it used to be in.
+    default: { root: .collide/planning }
+    additionalProperties: false
+    properties:
+      root:
+        type: string
+        description: The shared root, relative to the repository. New items go to its epics/ folder.
+      previous:
+        type: array
+        items: { type: string }
+        description: Roots that held items before root changed. They are listed and written in place, never added to.
+      paths:
+        type: object
+        description: Where a kind of item lives. Only spike can be placed.
+        properties:
+          spike: { type: string }
+        additionalProperties: { type: string }
+      code:
+        type: string
+        description: Where a spike's scripts go. Accepted now; it has no effect until Stage 9.

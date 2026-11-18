@@ -17,7 +17,9 @@ import type { LockOptions } from './lock.ts'
 import { CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
 import { checkReid, REID, reidLocked } from './reid.ts'
 import { findFence, parseFrontmatter, readItemFile, versionOf } from './read-file.ts'
-import { scanEpics, SHARED_ROOT, toTask } from './scan.ts'
+import { DEFAULT_LAYOUT, rootsOf } from './layout.ts'
+import type { Layout } from './layout.ts'
+import { scanEpics, toTask } from './scan.ts'
 import type { FoundItem, Scan } from './scan.ts'
 
 export { TEMP_SUFFIX } from './atomic.ts'
@@ -156,8 +158,15 @@ async function readBack(found: FoundItem, absolute: string): Promise<FoundItem> 
   return { ...found, item: checked.item, body: read.body, bodyLine: read.bodyLine, version: read.version }
 }
 
-async function writeLocked(root: string, id: string, version: string, spec: OpSpec, args: Record<string, unknown>): Promise<ApplyResultInput> {
-  const scan = await scanEpics(root)
+async function writeLocked(
+  root: string,
+  id: string,
+  version: string,
+  spec: OpSpec,
+  args: Record<string, unknown>,
+  layout: Layout,
+): Promise<ApplyResultInput> {
+  const scan = await scanEpics(root, null, layout)
   const found = scan.items.find((candidate) => candidate.item.id === id)
   if (found === undefined) return refused(`there is no item ${id}`)
   const absolute = join(root, ...found.path.split('/'))
@@ -197,17 +206,37 @@ async function writeLocked(root: string, id: string, version: string, spec: OpSp
   }
 }
 
+/** Whether any of the folders is there. */
+async function anyFolder(paths: string[]): Promise<boolean> {
+  for (const path of paths) {
+    try {
+      await stat(path)
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  return false
+}
+
 /**
  * Protocol v0's `apply` for the markdown provider. `mainRoot` is the main checkout, and a write goes there unless
  * `checkout` names another checkout of the repository (an entry of `git worktree list`; anything else is refused and
- * writes nothing). The shared root is `<checkout>/.collide/planning`, and every write there holds that checkout's own
- * lock file; `create` and `reid` still see every ref when they number or draw an id. `version` is required: a write
- * must say which content it was made against. An op that would change nothing writes nothing and answers `ok` with
- * no `files` and no `items`. Two ops are not about one version of one item: `create` makes an item, so it takes no id
- * and no version, and `reid` rewrites links in several files, each read under the lock, so it takes no version (it
- * refuses one rather than ignore it). `hooks` are for tests.
+ * writes nothing). The shared root is `<checkout>/<layout.root>` (`.collide/planning` by default), and every write
+ * holds that checkout's own lock file in it, whichever root the item is in: a write to an item under a `previous` root
+ * changes that file and no other. `create` and `reid` still see every ref when they number or draw an id. `version` is
+ * required: a write must say which content it was made against. An op that would change nothing writes nothing and
+ * answers `ok` with no `files` and no `items`. Two ops are not about one version of one item: `create` makes an item,
+ * so it takes no id and no version, and `reid` rewrites links in several files, each read under the lock, so it takes
+ * no version (it refuses one rather than ignore it). `hooks` are for tests.
  */
-export async function applyOp(mainRoot: string, params: ApplyParamsOutput, lock: LockOptions = {}, hooks: IdHooks = {}): Promise<ApplyResultInput> {
+export async function applyOp(
+  mainRoot: string,
+  params: ApplyParamsOutput,
+  lock: LockOptions = {},
+  hooks: IdHooks = {},
+  layout: Layout = DEFAULT_LAYOUT,
+): Promise<ApplyResultInput> {
   const { op, id, version, checkout } = params
   const spec = Object.hasOwn(OPS, op) ? OPS[op] : undefined
   if (spec === undefined && op !== CREATE && op !== REID) return refused(`unknown op "${op}"; this provider has ${OP_NAMES.join(', ')}`)
@@ -224,7 +253,7 @@ export async function applyOp(mainRoot: string, params: ApplyParamsOutput, lock:
       throw error
     }
   }
-  const planning = join(root, SHARED_ROOT)
+  const planning = join(root, layout.root)
 
   if (op === CREATE) {
     if (id !== undefined && id !== null) return refused('create makes the id: leave id out')
@@ -232,7 +261,7 @@ export async function applyOp(mainRoot: string, params: ApplyParamsOutput, lock:
     const problem = checkCreate(args)
     if (problem !== null) return refused(`create: ${problem}`)
     await mkdir(planning, { recursive: true })
-    return withLock(join(planning, LOCK_FILE), () => createLocked(root, args, hooks), lock)
+    return withLock(join(planning, LOCK_FILE), () => createLocked(root, args, hooks, layout), lock)
   }
 
   if (typeof id !== 'string' || id === '') return refused(`${op} needs the id of the item to change`)
@@ -246,12 +275,12 @@ export async function applyOp(mainRoot: string, params: ApplyParamsOutput, lock:
   const problem = spec === undefined ? null : spec.check(args)
   if (problem !== null) return refused(`${op}: ${problem}`)
 
-  try {
-    await stat(planning)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return refused(`there is no item ${id}`)
-    throw error
-  }
-  const work = spec === undefined ? () => reidLocked(root, id, args, hooks) : () => writeLocked(root, id, version as string, spec, args)
+  // The lock file lives in the root. A root that is not there yet is made when a previous root has items to write.
+  if (!(await anyFolder(rootsOf(layout).map((path) => join(root, path))))) return refused(`there is no item ${id}`)
+  await mkdir(planning, { recursive: true })
+  const work =
+    spec === undefined
+      ? () => reidLocked(root, id, args, hooks, layout)
+      : () => writeLocked(root, id, version as string, spec, args, layout)
   return withLock(join(planning, LOCK_FILE), work, lock)
 }

@@ -2600,7 +2600,9 @@ layout: { default: board, groupBy: category }
   - the path is set in `.collide/config.yaml` and is part of the trust hash, so a change asks for trust again. A
     path outside the repo, under `.git/` or over Collide's own protected files (`board.yaml`, `packs.lock`,
     `config.yaml`, `views/` and `profiles/`; 0.9) is refused, and the message names the file it would have covered
-    (R5);
+    (R5). A symbolic link in the path is followed to its target, which must be inside the repository; the root is
+    then the target. `layout.paths` takes only `spike`, and `code` is accepted and unused until Stage 9
+    (`ts-0124-xm`);
   - after a change, new items go to the new path. Old items stay readable through `layout.previous`, with an "old
     path" chip, and Collide offers Move: a `git mv` committed with the config change. An entry leaves `previous`
     only when nothing remains there;
