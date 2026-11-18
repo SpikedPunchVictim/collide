@@ -121,3 +121,122 @@ Write these first (the stage's CEL view tests; the view-level ones are in `ts-01
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation: the nine names plus `kind` and
   `fields`, with `deps` and no `depends_on`; the estimate rule as recommended.
+
+### Built
+
+A pure `core` module. No I/O, no daemon, no store, no new crate or package, no `Cargo.toml` change, no generated file.
+
+- `core/src/view_expr.rs` (new, in `core/src/lib.rs`).
+  - `compile(source)` and `compile_with(source, parse)` (the parse is given, so a test can make it panic). Refuses an
+    empty source (`ExprError::Empty`), one over 1,024 bytes before the parser sees it (`TooLong { bytes }`, which names
+    the length and the cap), a syntax error, a panic (`Panicked`), and a name that is no task variable, CEL type name
+    or macro variable (`UnknownName { name }`, which lists `TASK_NAMES`). The walk is scope aware: a macro's variable
+    is known inside its body and not in its range, and not after it.
+  - `estimate(&compiled)` gives `Estimate { steps_per_task, uses_matches }`: S5's walk, saturating, a macro's body
+    times the size of its range (a list in the source has its length, any other list is 64), a membership test adds
+    the list. `check_cost(&compiled, board_tasks, &budgets)` refuses with `TooCostly { per_task, tasks, total, limit }`
+    when `per_task` times `max(board_tasks, 1,600)` is over the pass budget. `MATCHES_NOTE` is the text for the note.
+  - `check_task_caps(task, author)`: 1,000 entries in `labels`, `collections` and the dependencies, 4,096 bytes in
+    each bound string, and the same two caps on every list, object and string inside `fields`. It is the one function
+    the corpus's ingest and the binding call. `CapError { reason }` names the field.
+  - `TaskVars::bind(task, kind, provenance)`: `key`, `source` (from the key), `title`, `status`, `category`, `kind`,
+    `labels`, `collections`, `deps`, `author` (the provenance's, else empty) and `fields`. `TASK_NAMES` lists them.
+    `deps` is the target of each `blocked-by` or `depends_on` link that is not marked `blocking: false`
+    (`DEPENDENCY_LINKS`). A task over a cap is not bound.
+  - `evaluate_pass(&compiled, &tasks, &budgets)` returns `PassOutcome { matched (positions), errors (by reason),
+    over_task_budget, steps, pass_budget_exhausted, not_reached }`. Each task gets `min(per_task, what the pass has
+    left)` steps, so a pass never runs on. A task that errors, panics, answers with a non-boolean or runs out of steps
+    is excluded and counted. `Budgets::default()` is 10,000 and 2,000,000. `evaluate_pass_with` takes the run.
+  - `is_budget_error(&ExecutionError)`: the one function that knows the crate's words (`cost`, `step limit exceeded`).
+  - The parse and each pass run on a thread with a 64 MB stack (`STACK_BYTES`): see Decisions.
+- `core/src/view.rs`: `MAX_LIST_ENTRIES` (1,000) and `MAX_STRING_BYTES` (4,096), and `check_view` refuses `include:` or
+  `exclude:` over 1,000 entries (`ViewError::TooManyTaskKeys { key, entries }`).
+- `core/src/corpus.rs`: `insert` calls `check_task_caps` first. An over-cap task is an invalid item with the reason, at
+  its path and checkout, and any copy held for it is taken out; a later fixed task at that path clears the item. List,
+  `task.changed` with a task, and the startup list all pass through it.
+- Tests: `core/tests/view_expr.rs` (47), `core/tests/corpus.rs` (4 new), `core/tests/views_profiles_locks.rs` (2 new).
+  `core/tests/cel_step_budget.rs` is unchanged and passes.
+- **Seen red at runtime**, each against a stub of the old behavior, put back after:
+  - caps check always `Ok`: 4 corpus tests (`a_task_with_1001_labels_is_an_invalid_item_...`,
+    `a_task_with_a_4097_byte_title_...`, `an_over_cap_task_is_listed_with_the_sources_other_invalid_items`,
+    `a_change_that_brings_an_over_cap_task_...`) and 6 of `view_expr.rs` (the list and string caps, `collections` and
+    `deps`, bytes not characters, a string in a list, in `fields` or as the author, and not bound).
+  - no source cap and no name check: 6 (`a_source_of_1025_bytes_...`, `a_hundred_thousand_nested_brackets_...`, the
+    corpus variable, any unknown name, a macro's own variable, a name in a macro's range).
+  - no step budget in a pass: 4 (the hostile task, a pass never runs on, the counter from zero, the caller's counter).
+  - `is_budget_error` always false: `the_budget_error_is_recognised_by_one_function_...` (the pinned message).
+  - parse and pass on the caller's thread: `a_deep_nesting_does_not_overflow_the_estimate` aborts the test binary with a
+    stack overflow (SIGABRT), and `a_pass_runs_on_its_own_thread_...` fails.
+  - estimate always 1: 5 (`the_estimate_is_never_under_...`, the refusal with the estimate shown, the floor, deep
+    nesting, a list in the source). `matches` never noted, a list's length ignored, the floor removed: one test each.
+  - `check_view` without the key cap: `include_and_exclude_over_the_cap_fail_each_with_its_count`.
+  - a parse panic not turned into an error: `a_compile_that_panics_is_an_error_...`; an evaluation panic not caught for
+    each task: `an_evaluation_that_panics_is_counted_...`.
+  - the pass limit ignoring what the pass has left: 3; the not-reached count dropped when the budget is spent exactly
+    between two tasks: 1 (`a_pass_whose_budget_is_spent_exactly_...`, added after a mutation survived); `blocking:
+    false` ignored: 1; `author` not bound: 2.
+- Not seen red: the 1,023 and 1,024 byte sources, the syntax error, `has(fields.x)`, evaluation errors by reason, the
+  non-boolean answer, the cut reason, and the 500-term sum and 1,000-term `!` chain of the deep-source test.
+- Checks: `cargo build --workspace`, `cargo test --workspace --no-fail-fast` (4,277 tests, none failed),
+  `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `pnpm test`, `pnpm typecheck`,
+  `pnpm --filter @collide/app build`, `pnpm build:packs` and `pnpm check` all pass.
+
+### Decisions for the owner
+
+- **The parse and each pass run on a thread with a 64 MB stack.** A finding: a 394-byte source of twenty macros inside
+  one another overflowed the 2 MB stack of a test thread in the parser, in a debug build. That is a process abort that
+  `catch_unwind` cannot catch, and under the 1 KB cap. S5 measured `+` chains, brackets and `!` chains in release builds
+  on an 8 MB stack and did not try nested macros. Within 1 KB the parser's own recursion limit (96) allows about 45
+  macros inside one another; 8 MB held those in a debug build. The thread costs address space, not memory, and about
+  the time to start a thread. It also keeps a pass's step counter off the caller's thread. Alternative: run on the
+  caller's thread and refuse a nesting over a small depth by counting brackets before the parse (about 12). That needs
+  no thread, but it turns away views the parser accepts, and it covers one shape of deep source. Recommend as built.
+  `evaluate_pass` and `compile` therefore return a `Result` for a thread that cannot start (`ExprError::Thread`).
+  The step budget is for one pass on that one thread; "one thread per pass" is read as that.
+- **`deps` is the target of each `blocked-by` or `depends_on` link that is not `blocking: false`.** The item names
+  `deps` and `depends_on` for the closure and leaves the link types open. The plan provider declares `blocked-by` and
+  Orchard's frontmatter says `depends_on`. Alternative: `blocked-by` only, which matches the ready rule and leaves
+  `ts-0118-wp`'s closure with no `depends_on` link to follow. Recommend as built; `ts-0118-wp` should follow the same
+  `DEPENDENCY_LINKS`.
+- **The caps reach inside `fields`.** A string in `fields` is capped at 4,096 bytes and a list or an object in it at
+  1,000 entries, at any depth, since a view reads `fields.x` and the plan says "the bound string fields". Alternative:
+  cap the top level only; a 5,000-entry list in `fields` would then be the 4.2 s case of S5. Recommend as built.
+- **`kind` is a parameter of `TaskVars::bind`, not read from the task.** A task may leave its kind to the source's only
+  kind, which only the corpus knows (`Corpus::kind_of` is private). `ts-0118-wp` passes it, and either makes that
+  method public or adds an accessor. Recommend.
+- **The author is the provenance's, and the corpus holds none.** `bind` takes `Option<&Provenance>`; the corpus keeps
+  tasks as their source listed them, so its ingest checks the caps with no author, and `bind` checks the author's
+  length. Until Stage 5 `author` is empty for the plan source. As recommended in the item.
+- **CEL's type names stay usable** (`bool`, `int`, `uint`, `double`, `string`, `bytes`, `list`, `map`, `null_type`,
+  `type`), so `type(labels) == list` compiles. They name no data. Alternative: refuse them with the corpus names.
+  Recommend as built.
+- **An evaluation error's reason is cut at 160 bytes.** CEL errors can quote a task's own data (a comparison of two
+  values prints both), and a reason is the key of a count. A long value then gives one reason, cut. Two tasks with
+  different short values still give two reasons. Alternative: count by the error's kind only, which loses "No such key:
+  estimate". Recommend as built.
+- **`Category` has a name function in `board.rs` that is private, so `view_expr.rs` has its own.** Recommend a public
+  `Category::name` in `item.rs` when one of them is next touched; it was left alone here to stay in the item's area.
+- **`check_view` also caps `include:` and `exclude:` at 1,000 entries** (`ViewError::TooManyTaskKeys`), as the item
+  says. It does not cap the length of each key.
+- Plan text proposed for 0.9, after "Compile also runs under `catch_unwind`": "The parse and each pass run on a thread
+  with its own large stack, since a source under 1 KB can nest deep enough to overflow a small one, and that abort
+  cannot be caught."
+
+- Owner decisions (2026-11-18, at the build): every recommendation above, on delegation. The 0.9 text is applied after
+  "Compile also runs under `catch_unwind`", and 0.9's list caps now name `deps`, not `depends_on`. At review: a pass
+  that gives each task its full budget whatever the pass has left failed three tests
+  (`a_pass_never_runs_on_even_when_the_task_budget_is_larger_than_the_pass_budget` among them), and a macro variable
+  left in scope after its macro failed `a_macros_own_variable_is_allowed_inside_it_and_refused_outside`. A probe of the
+  deepest 1 KB sources (brackets, lists, maps, ternaries and calls refused by the parser's depth limit; 500-deep `+`,
+  `&&`, select and index chains compiled) found the name check, the estimate and the drop, which run on the caller's
+  thread, safe on a 2 MB stack.
+
+### Not done, by design
+
+- The set algebra, the closure, `compile_view` and `evaluate_view` (one result for one view, with the counts of
+  errors, budget, unmatched keys and invalid items), and the view's use of `Corpus::kind_of`: `ts-0118-wp`.
+- Reading view files, the daemon's `task.views` and `task.list` with a view, and the estimate run when a view loads
+  and when it is saved: `ts-0119-tj`. `check_cost` takes the board's task count so that call can pass it.
+- The editor's warning text for `matches` (`MATCHES_NOTE` is the text): Stage 6. A memory bound (steps do not bound
+  memory): not here.
+- A GitHub author for `author`: Stage 5.

@@ -12,6 +12,8 @@
 //!   the key is [`Found::Collided`].
 //! - **Categories.** Each status maps to its category through the source's declared statuses. A status the source
 //!   did not declare makes the item an invalid entry, with the status named, and the task is not listed.
+//! - **Caps.** A task whose lists or strings pass the caps of 0.9 (`crate::view_expr::check_task_caps`) is an invalid
+//!   item, with the reason, and is not listed: a view never has to bind it.
 //! - **Links**, one hop out, both directions, across sources ([`Corpus::links_of`]). A link to a key the corpus does
 //!   not hold is reported with `missing` set, never dropped.
 //! - **Updates.** Each notification of a source is applied by a method, and [`reconcile`] is the difference of a
@@ -35,6 +37,7 @@ use crate::provider::{
     TaskChanged, TaskCollision, TaskInvalid, TaskRemoved,
 };
 use crate::short_id;
+use crate::view_expr::check_task_caps;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -1023,10 +1026,22 @@ impl Corpus {
 
     // --- one entry changes ---
 
-    /// Puts a task in, from a list or a notification: its category comes from the source's declared statuses, a
-    /// status that is not declared makes the item an invalid entry, and a task at a path clears the invalid item
-    /// the path had.
+    /// Puts a task in, from a list or a notification: a task over a cap of 0.9 (`check_task_caps`) or with a status
+    /// that is not declared makes the item an invalid entry; its category comes from the source's declared
+    /// statuses; and a task at a path clears the invalid item the path had.
     fn insert(&mut self, source: &str, mut task: Task) {
+        if let Err(cap) = check_task_caps(&task, None)
+            && self.sources.contains_key(source)
+        {
+            let item = TaskInvalid {
+                path: task.path.clone().unwrap_or_else(|| task.key.clone()),
+                checkout: task.checkout.clone(),
+                reason: cap.reason,
+            };
+            self.take_copy(&task.key, &task.checkout);
+            self.add_invalid(source, item);
+            return;
+        }
         let Some(state) = self.sources.get_mut(source) else {
             return;
         };

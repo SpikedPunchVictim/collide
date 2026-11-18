@@ -2181,11 +2181,12 @@ Collide plays the lead, so it does all four, through the pack.
     view (0.10);
   - **a 1 KB source cap.** It is a safety property, not a style one: a 4 KB chain of `+` overflows a 2 MB stack and
     aborts the process, and a deeply nested expression panics inside the parser's error formatter. Compile also runs
-    under `catch_unwind`;
+    under `catch_unwind`. The parse and each pass run on a thread with its own large stack, since a source under 1 KB
+    can nest deep enough to overflow a small one, and that abort cannot be caught (`ts-0117-gu`);
   - **list-length caps when a task is loaded, on the fields bound into CEL only** (R5): `labels`, `collections` and
-    `depends_on` at 1,000 entries, and the bound string fields at about 4 KiB. The task's body is not bound into CEL,
-    so a long body is never cut by this cap. Hiding the corpus is not enough: one task with a 5,000-entry `labels`
-    list took 4.2 s under an innocent `all`/`exists` pair;
+    `deps` at 1,000 entries, and the bound string fields at about 4 KiB. The task's body is not bound into CEL, so a
+    long body is never cut by this cap. Hiding the corpus is not enough: one task with a 5,000-entry `labels` list took
+    4.2 s under an innocent `all`/`exists` pair;
   - **no corpus variable in views**, and a static cost estimate when a view is saved or loaded (0.10).
 
   A thread with a deadline is not a limit: the caller moves on and the thread keeps running (measured S5: about one

@@ -12,8 +12,8 @@ use collide_core::profile::{
 };
 use collide_core::schema;
 use collide_core::view::{
-    Follow, LayoutKind, MAX_CEL_SOURCE_BYTES, SortDir, View, ViewError, check_view,
-    is_namespaced_name,
+    Follow, LayoutKind, MAX_CEL_SOURCE_BYTES, MAX_LIST_ENTRIES, SortDir, View, ViewError,
+    check_view, is_namespaced_name,
 };
 use collide_core::yaml::{load_yaml, load_yaml_file};
 use serde::de::DeserializeOwned;
@@ -795,4 +795,44 @@ fn the_pack_manifest_schema_holds_views_and_profiles() {
     let schema = schema_file("PackManifest.input.json");
     assert!(schema["properties"].get("views").is_some());
     assert!(schema["properties"].get("profiles").is_some());
+}
+
+fn view_with_keys(include: usize, exclude: usize) -> View {
+    let keys = |count: usize| (0..count).map(|index| format!("plan:T-{index}")).collect();
+    View {
+        include: keys(include),
+        exclude: keys(exclude),
+        ..load::<View>("name: MVP\n")
+    }
+}
+
+#[test]
+fn include_and_exclude_of_exactly_the_cap_pass() {
+    assert_eq!(
+        check_view(&view_with_keys(MAX_LIST_ENTRIES, MAX_LIST_ENTRIES)),
+        Ok(())
+    );
+}
+
+#[test]
+fn include_and_exclude_over_the_cap_fail_each_with_its_count() {
+    let errors =
+        check_view(&view_with_keys(MAX_LIST_ENTRIES + 1, MAX_LIST_ENTRIES + 2)).unwrap_err();
+    assert_eq!(
+        errors,
+        vec![
+            ViewError::TooManyTaskKeys {
+                key: "include",
+                entries: 1001
+            },
+            ViewError::TooManyTaskKeys {
+                key: "exclude",
+                entries: 1002
+            },
+        ]
+    );
+    assert_eq!(
+        errors[0].to_string(),
+        "`include:` has 1001 entries; a list is capped at 1000"
+    );
 }

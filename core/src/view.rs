@@ -1,8 +1,8 @@
 //! A view (0.10, Views): a named subset of the corpus, written as a YAML file in `.collide/views/`, in the user's
 //! board settings, or under a pack's `views:`. Membership is `(where ∪ include ∪ closure) − exclude`.
 //!
-//! `where:` is CEL held as text. This module caps its length (0.9, a 1 KB source cap) and nothing else: parsing,
-//! the static cost estimate and evaluation are the CEL stage's (`ts-0044-xq`, Stage 4b). [`check_view`] is the
+//! `where:` is CEL held as text. This module caps its length (0.9, a 1 KB source cap) and the lengths of `include:`
+//! and `exclude:`. Parsing, the static cost estimate and evaluation are [`crate::view_expr`]'s. [`check_view`] is the
 //! pure check a view load runs, with every refusal in one pass.
 
 use schemars::JsonSchema;
@@ -12,6 +12,13 @@ use std::fmt;
 /// The longest CEL source a view may hold, in bytes (0.9: "a 1 KB source cap"). A source of exactly this many
 /// bytes is accepted.
 pub const MAX_CEL_SOURCE_BYTES: usize = 1024;
+
+/// The most entries a list may hold when it is bound into CEL, or listed in a view (0.9: `labels`, `collections` and
+/// the dependencies at 1,000). A list of exactly this many is accepted.
+pub const MAX_LIST_ENTRIES: usize = 1_000;
+
+/// The longest string bound into CEL, in bytes (0.9: "about 4 KiB"). A string of exactly this many is accepted.
+pub const MAX_STRING_BYTES: usize = 4_096;
 
 /// `closure:` follows one kind of edge, from a goal task: the prototype board's run order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -106,6 +113,11 @@ pub enum ViewError {
         key: &'static str,
         index: usize,
     },
+    /// `include:` or `exclude:` has more than [`MAX_LIST_ENTRIES`] entries.
+    TooManyTaskKeys {
+        key: &'static str,
+        entries: usize,
+    },
     EmptyClosureGoal,
     /// A `workflow:` or `profile:` that is empty. A workflow is named `pack/workflow`.
     BadName {
@@ -130,6 +142,10 @@ impl fmt::Display for ViewError {
             ViewError::EmptyTaskKey { key, index } => {
                 write!(f, "`{key}:` entry {index} is empty")
             }
+            ViewError::TooManyTaskKeys { key, entries } => write!(
+                f,
+                "`{key}:` has {entries} entries; a list is capped at {MAX_LIST_ENTRIES}"
+            ),
             ViewError::EmptyClosureGoal => write!(f, "`closure.goal:` is empty"),
             ViewError::BadName { key, name } => {
                 write!(f, "`{key}: {name}` is not a usable name")
@@ -154,8 +170,8 @@ pub fn is_namespaced_name(name: &str) -> bool {
     }
 }
 
-/// Checks a view: its names, task keys and the length of `where:`. Returns every refusal, in the order the keys
-/// are written. CEL syntax and cost are not checked here.
+/// Checks a view: its names, task keys, the length of `where:` and of the two key lists. Returns every refusal, in the
+/// order the keys are written. CEL syntax and cost are checked by [`crate::view_expr`].
 pub fn check_view(view: &View) -> Result<(), Vec<ViewError>> {
     let mut errors = Vec::new();
     if view.name.trim().is_empty() {
@@ -171,6 +187,12 @@ pub fn check_view(view: &View) -> Result<(), Vec<ViewError>> {
         }
     }
     for (key, keys) in [("include", &view.include), ("exclude", &view.exclude)] {
+        if keys.len() > MAX_LIST_ENTRIES {
+            errors.push(ViewError::TooManyTaskKeys {
+                key,
+                entries: keys.len(),
+            });
+        }
         for (index, task_key) in keys.iter().enumerate() {
             if task_key.trim().is_empty() {
                 errors.push(ViewError::EmptyTaskKey { key, index });

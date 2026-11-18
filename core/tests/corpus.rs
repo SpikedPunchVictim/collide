@@ -1639,3 +1639,100 @@ fn the_rows_are_in_key_order_whatever_order_the_lists_came_in() {
         snapshot(&plan_corpus(&reversed, &all_checkouts()))
     );
 }
+
+// --- caps (ts-0117): a task whose lists or strings pass 0.9's caps is an invalid item ---
+
+fn ready_task(short: &str) -> Task {
+    at(short, "ready", ROOT)
+}
+
+fn capped_corpus(tasks: &[Task]) -> Corpus {
+    plan_corpus(tasks, &[ROOT])
+}
+
+#[test]
+fn a_task_with_1001_labels_is_an_invalid_item_with_the_reason_and_is_not_listed() {
+    let mut heavy = ready_task("T-02");
+    heavy.labels = (0..1001).map(|index| format!("l{index}")).collect();
+    let corpus = capped_corpus(&[ready_task("T-01"), heavy]);
+
+    let keys: Vec<_> = corpus
+        .rows()
+        .iter()
+        .map(|row| row.task.key.clone())
+        .collect();
+    assert_eq!(keys, ["plan:T-01"]);
+    let invalid = corpus.invalid();
+    assert_eq!(invalid.len(), 1);
+    assert_eq!(invalid[0].source, "plan");
+    assert_eq!(invalid[0].item.path, "arch/T-02.md");
+    assert_eq!(invalid[0].item.checkout.as_deref(), Some(ROOT));
+    assert!(invalid[0].item.reason.contains("`labels`") && invalid[0].item.reason.contains("1001"));
+}
+
+#[test]
+fn a_task_with_a_4097_byte_title_is_an_invalid_item_and_a_4096_byte_title_is_a_task() {
+    let mut long = ready_task("T-02");
+    long.title = "t".repeat(4097);
+    let mut limit = ready_task("T-03");
+    limit.title = "t".repeat(4096);
+    let corpus = capped_corpus(&[long, limit]);
+
+    let keys: Vec<_> = corpus
+        .rows()
+        .iter()
+        .map(|row| row.task.key.clone())
+        .collect();
+    assert_eq!(keys, ["plan:T-03"]);
+    let invalid = corpus.invalid();
+    assert_eq!(invalid.len(), 1);
+    assert!(invalid[0].item.reason.contains("`title`") && invalid[0].item.reason.contains("4097"));
+}
+
+#[test]
+fn an_over_cap_task_is_listed_with_the_sources_other_invalid_items() {
+    let mut heavy = ready_task("T-02");
+    heavy.collections = (0..1001).map(|index| format!("c{index}")).collect();
+    let mut list = list_of(&[ready_task("T-01"), heavy], ROOT);
+    list.invalid
+        .push(invalid_item("arch/broken.md", ROOT, "conflict markers"));
+    let mut corpus = Corpus::default();
+    corpus.declare_source("plan", &plan_init());
+    corpus.load("plan", Some(ROOT), list).unwrap();
+
+    let paths: Vec<_> = corpus
+        .invalid()
+        .iter()
+        .map(|entry| entry.item.path.clone())
+        .collect();
+    assert_eq!(paths, ["arch/T-02.md", "arch/broken.md"]);
+    assert_eq!(
+        corpus.list_result().invalid.len(),
+        2,
+        "the list answer carries both"
+    );
+}
+
+#[test]
+fn a_change_that_brings_an_over_cap_task_makes_it_invalid_and_a_fixed_one_brings_it_back() {
+    let mut corpus = capped_corpus(&[ready_task("T-01")]);
+    let mut heavy = ready_task("T-01");
+    heavy.labels = (0..1001).map(|index| format!("l{index}")).collect();
+    let event = changed_to("plan:T-01", ROOT, "ready", "v2");
+    assert_eq!(
+        corpus.apply_changed("plan", &event, Some(heavy)).unwrap(),
+        Applied::Done
+    );
+
+    assert!(corpus.rows().is_empty(), "the copy that was held is gone");
+    assert_eq!(corpus.invalid().len(), 1);
+
+    let fixed = ready_task("T-01");
+    let event = changed_to("plan:T-01", ROOT, "ready", "v3");
+    corpus.apply_changed("plan", &event, Some(fixed)).unwrap();
+    assert_eq!(corpus.rows().len(), 1);
+    assert!(
+        corpus.invalid().is_empty(),
+        "the path is fixed, so the item is cleared"
+    );
+}

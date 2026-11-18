@@ -48,6 +48,7 @@ pub mod trust;
 pub mod ui_tools;
 pub mod version_range;
 pub mod view;
+pub mod view_expr;
 pub mod workflow;
 pub mod workflow_check;
 pub mod yaml;
