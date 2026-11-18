@@ -273,7 +273,14 @@ Automated tests it relies on:
 Model and budget: haiku, `--budget 0.50` suggested. Task text for this check (the Bash tool's own default timeout is
 shorter than 180 s, so the task sets one):
 
-> Run `sleep 180` with the Bash tool, with its timeout set to 300000 ms. Then say "done" as your report.
+Corrected on 2026-11-18, at the owner's run: `claude` 2.1.327 refuses a standalone `sleep 180` in its Bash tool (it
+tells the model to wait with a background command instead), so that run ended at once with no permission request and no
+sleep. The task now runs `ping -c 180` to the loopback address, one ping a second, which keeps one call going for about
+three minutes. Whether the installed `claude` lets it run is (unconfirmed) until the next run.
+
+> This is a timing test: the person will put the Mac to sleep while one tool call runs. Run `ping -c 180 127.0.0.1 |
+> tail -3` with the Bash tool, in the foreground (not in the background), with its timeout set to 300000 ms, so the call
+> lasts about three minutes. Then say "done" as your report.
 
 Steps:
 
@@ -285,7 +292,7 @@ Steps:
    ```
 
 2. Answer the permission prompt with `y` at once. The permission wait counts as waiting, so a quick answer keeps it
-   short and apart from the sleep. The `sleep 180` call now runs.
+   short and apart from the sleep. The `ping` call now runs.
 3. In a second terminal, start the watcher (about two minutes; it gives up after 15 minutes, `MAX_S=<seconds>` changes
    that). It prints `watching`.
 
@@ -327,7 +334,7 @@ Look for:
   clock (uptime) has no timeout a hand check can see in 3b, so it rests on the tests below (see Gaps).
 - The sleep counts as waiting: it is a `wait` span and the active time excludes it. A sleep of about 60 s is far under
   the one-hour cache time, so `cold_returns` has no row for the run (a sleep alone is not a cold return).
-- The run ends `ended` with exit code 0. The `sleep 180` call may finish later than 180 s of wall time after the wake;
+- The run ends `ended` with exit code 0. The `ping` call may finish later than 180 s of wall time after the wake;
   that is the call's own timing and not what is checked.
 
 Automated tests it relies on:
@@ -354,6 +361,6 @@ Automated tests it relies on:
 - There is no `collide-daemon stop` or `collide daemon` command. The daemon is stopped with `kill` on the pid in
   `daemon.log`, and it is started by the next `collide run` (or by `"$COLLIDE_BIN/collide-daemon" start`, which prints
   `started` or `already running`).
-- Not verifiable from the code or `--help`: `pgrep`, `ps`, `sqlite3` and `kill` behave as on any Mac; whether the
-  agent keeps to the task text above (the exact `sleep 180` and its timeout); and whether the Bash tool of the
-  installed `claude` accepts a 300000 ms timeout.
+- Not verifiable from the code or `--help`: `pgrep`, `ps`, `sqlite3` and `kill` behave as on any Mac; whether the agent
+  keeps to the task text above (the exact `ping -c 180` in the foreground, and its timeout); and whether the Bash tool
+  of the installed `claude` accepts a 300000 ms timeout.
