@@ -1,7 +1,7 @@
 ---
 id: ts-0085-zs
 kind: task
-status: ready
+status: done
 title: "Page: keep the re-prompt notice across the run change"
 owners: []
 links: []
