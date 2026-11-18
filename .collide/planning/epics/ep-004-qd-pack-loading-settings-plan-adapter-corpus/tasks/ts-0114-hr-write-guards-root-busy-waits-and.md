@@ -1,7 +1,7 @@
 ---
 id: ts-0114-hr
 kind: task
-status: ready
+status: done
 title: "Write guards: root busy waits and writes queue while a phase runs"
 owners: []
 links:
