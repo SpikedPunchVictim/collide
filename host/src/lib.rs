@@ -77,6 +77,7 @@ pub mod task_view;
 pub mod trust;
 pub mod ui_tools;
 pub mod user_packs;
+pub mod views;
 pub mod working_copy;
 pub mod workspace;
 pub mod write_guard;

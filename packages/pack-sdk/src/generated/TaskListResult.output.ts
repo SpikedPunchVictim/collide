@@ -32,6 +32,10 @@ export interface TaskListResult {
   refreshing: boolean
   stale_sources: StaleSource[]
   tasks: Task[]
+  /**
+   * What the view said of itself, for a request that named or gave one.
+   */
+  view?: ViewReport | null
 }
 /**
  * A grouping the source holds itself, such as an epic or a milestone (0.10). Each task names the collections it
@@ -163,4 +167,40 @@ export interface Link {
 export interface ItemState {
   category: Category
   status: string
+}
+/**
+ * What a view reports for one evaluation (0.10, Views): why it has no members, and what went wrong on the way. A clean
+ * view has no `error`, no counts and no unmatched keys. `steps` and `cycle` are the closure's run order.
+ */
+export interface ViewReport {
+  cycle: string[]
+  /**
+   * Why the view has no members, when it was refused. Its other fields are then empty.
+   */
+  error?: string | null
+  /**
+   * The tasks whose `where` raised an error, by reason.
+   */
+  errors: {
+    [k: string]: number
+  }
+  /**
+   * The closure's goal when it matches no task: the closure is then empty.
+   */
+  goal_unmatched?: string | null
+  /**
+   * The board's invalid items, which no view can match.
+   */
+  invalid_items: number
+  /**
+   * How many tasks are members.
+   */
+  members: number
+  name: string
+  not_reached: number
+  over_task_budget: number
+  pass_budget_exhausted: boolean
+  steps: string[][]
+  unmatched_exclude: string[]
+  unmatched_include: string[]
 }

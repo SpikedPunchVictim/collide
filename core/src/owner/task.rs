@@ -11,6 +11,7 @@ use crate::provider::{ApplyParams, ApplyResult, Collection, Task, TaskCollision,
 use crate::view::View;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// A view named in a request: one the board holds, or an ad-hoc one the filter bar made (0.11, Filter bar).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -72,6 +73,56 @@ pub struct TaskListResult {
     /// The first listing of a source is still running, so the tasks are what the last run cached, or fewer.
     #[serde(default)]
     pub refreshing: bool,
+    /// What the view said of itself, for a request that named or gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<ViewReport>,
+}
+
+/// What a view reports for one evaluation (0.10, Views): why it has no members, and what went wrong on the way. A clean
+/// view has no `error`, no counts and no unmatched keys. `steps` and `cycle` are the closure's run order.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ViewReport {
+    pub name: String,
+    /// Why the view has no members, when it was refused. Its other fields are then empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// How many tasks are members.
+    pub members: u32,
+    /// The tasks whose `where` raised an error, by reason.
+    #[serde(default)]
+    pub errors: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub over_task_budget: u64,
+    #[serde(default)]
+    pub pass_budget_exhausted: bool,
+    #[serde(default)]
+    pub not_reached: u32,
+    #[serde(default)]
+    pub unmatched_include: Vec<String>,
+    #[serde(default)]
+    pub unmatched_exclude: Vec<String>,
+    /// The closure's goal when it matches no task: the closure is then empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_unmatched: Option<String>,
+    /// The board's invalid items, which no view can match.
+    #[serde(default)]
+    pub invalid_items: u32,
+    #[serde(default)]
+    pub steps: Vec<Vec<String>>,
+    #[serde(default)]
+    pub cycle: Vec<String>,
+}
+
+impl ViewReport {
+    /// The report of a view that was refused, with `reason`.
+    pub fn failed(name: &str, reason: &str) -> ViewReport {
+        ViewReport {
+            name: name.to_string(),
+            error: Some(reason.to_string()),
+            ..ViewReport::default()
+        }
+    }
 }
 
 /// `task.get` params (`collide task <id>`). `id` may be the short form (`12` or `12-ua`).
@@ -217,6 +268,9 @@ pub struct TaskSaveViewParams {
     pub board: String,
     pub view: View,
     pub target: ViewTarget,
+    /// Replace the file when there is one. Without it a view of the same name is refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub overwrite: bool,
 }
 
 /// `task.save_view` result: the file written.

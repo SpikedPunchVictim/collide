@@ -96,13 +96,15 @@ pub enum PackOrigin {
     Linked,
 }
 
-/// A file of `views/`, listed and not read: Stage 4b parses views.
+/// A file of `views/`, listed and not read: [`crate::views`] reads it from its blob, when the line is trusted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewFile {
     /// The file's name, as `mine.yaml`.
     pub name: String,
     /// Its blob id.
     pub id: String,
+    /// Its size in bytes, so that a file over the YAML cap is not read.
+    pub size: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -698,7 +700,7 @@ impl Load<'_> {
         }
     }
 
-    /// Views are listed by name and blob id and not read: Stage 4b parses them and checks their CEL.
+    /// Views are listed by name, blob id and size and not read: [`crate::views`] parses them and checks their CEL.
     fn list_views(&mut self, dir: &CollideDir, folder: &TreeEntry, files: &mut Files) {
         for entry in self.yaml_entries(dir, folder) {
             let path = dir.file(&format!("views/{}", entry.path));
@@ -717,6 +719,7 @@ impl Load<'_> {
             files.views.push(ViewFile {
                 name: entry.path,
                 id: entry.id,
+                size: entry.size,
             });
         }
     }

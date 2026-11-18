@@ -4,10 +4,13 @@
 
 use collide_core::corpus::{CheckoutInfo, CheckoutKind, Corpus};
 use collide_core::item::{Category, StatusDecl};
+use collide_core::owner::task::ViewReport;
 use collide_core::provider::{Collection, InitializeResult, ListResult, Scope, Task, TaskInvalid};
 use collide_core::testing::{default_initialize, fake_task};
 use collide_core::view::{MAX_LIST_ENTRIES, View, ViewError};
-use collide_core::view_eval::{ViewFailure, ViewResult, compile_view, evaluate_view};
+use collide_core::view_eval::{
+    ViewFailure, ViewResult, compile_view, compile_view_with, evaluate_view, view_report,
+};
 use collide_core::view_expr::{Budgets, DEPENDENCY_LINKS, ExprError};
 use collide_core::yaml::{load_yaml, load_yaml_file};
 use serde_json::json;
@@ -936,4 +939,62 @@ fn a_shuffled_listing_gives_the_same_members_steps_and_counts() {
     for shuffled in [reversed, rotated] {
         assert_eq!(run(yaml, &board(shuffled)), expected);
     }
+}
+
+// --- the injected parse and the report (ts-0119) ---
+
+#[test]
+fn a_parse_that_panics_is_a_failure_of_that_view_and_not_a_crash() {
+    let view = view("name: v\nwhere: \"status == 'ready'\"");
+    let outcome = compile_view_with(&view, 1, &Budgets::default(), &|_| {
+        panic!("the parse broke")
+    });
+    match outcome {
+        Err(ViewFailure::Expr(ExprError::Panicked { message })) => {
+            assert!(message.contains("the parse broke"), "{message}");
+        }
+        other => panic!("expected a panicked parse, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_parse_hook_sees_the_where_text_and_a_view_with_no_where_never_calls_it() {
+    let seen = std::sync::Mutex::new(Vec::new());
+    let record = |source: &str| seen.lock().unwrap().push(source.to_string());
+    let with = view("name: v\nwhere: \"status == 'ready'\"");
+    compile_view_with(&with, 1, &Budgets::default(), &record).expect("it compiles");
+    let without = view("name: w\ninclude: [plan:X1]");
+    compile_view_with(&without, 1, &Budgets::default(), &record).expect("it compiles");
+    assert_eq!(*seen.lock().unwrap(), ["status == 'ready'"]);
+}
+
+#[test]
+fn the_report_of_a_result_carries_its_members_steps_and_counts() {
+    let corpus = board_with_invalid(
+        vec![task("T-01-040", "doing"), task("T-01-042", "ready")],
+        vec![TaskInvalid {
+            path: "tasks/x.md".into(),
+            checkout: None,
+            reason: "no title".into(),
+        }],
+    );
+    let yaml = "name: v\nwhere: \"status == 'doing'\"\ninclude: [plan:nope]\n\
+                closure: { goal: plan:T-01-042, follow: depends_on }";
+    let result = run(yaml, &corpus);
+    let report = view_report("v", &result);
+    assert_eq!(report.name, "v");
+    assert_eq!(report.error, None);
+    assert_eq!(report.members as usize, result.members.len());
+    assert_eq!(report.steps, result.steps);
+    assert_eq!(report.unmatched_include, ["plan:nope"]);
+    assert_eq!(report.invalid_items, 1);
+    assert!(!report.pass_budget_exhausted);
+}
+
+#[test]
+fn a_failed_report_has_the_reason_and_no_members() {
+    let report = ViewReport::failed("v", "`where:` is refused");
+    assert_eq!(report.error.as_deref(), Some("`where:` is refused"));
+    assert_eq!(report.members, 0);
+    assert!(report.steps.is_empty() && report.cycle.is_empty());
 }

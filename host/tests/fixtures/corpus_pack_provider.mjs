@@ -8,7 +8,8 @@
 //   __PAGE__    how many files one page of `list` reads
 //
 // A task file is `{ "short": "12", "title": "...", "status": "todo", "version": "v1", "kind": "task" }`, and its key is
-// `<source>:<short>`. A file that is not JSON, or has no `short`, is an invalid item in `list`.
+// `<source>:<short>`. A file that is not JSON, or has no `short`, is an invalid item in `list`. It may also have
+// `labels` (strings), `collections` (ids) and `links` (`[{ "type": "blocked-by", "to": "41" }]`), which a view reads.
 //
 // The data folder (`COLLIDE_PACK_DATA`) is the test's way in and out:
 //   started       a line with the pid for each `initialize`
@@ -70,6 +71,9 @@ const read = (checkout, file) => {
       fields: {},
     }
     if (data.kind) task.kind = data.kind
+    if (data.labels) task.labels = data.labels
+    if (data.collections) task.collections = data.collections
+    if (data.links) task.links = data.links
     return { task, file }
   } catch (error) {
     return { invalid: { path, checkout, reason: `not JSON: ${error.message}` } }

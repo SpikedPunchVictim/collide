@@ -41,6 +41,7 @@ use crate::view_expr::check_task_caps;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// How far a chain of renames is followed when an old key is resolved.
 const MAX_REDIRECTS: usize = 16;
@@ -126,12 +127,14 @@ pub enum Found {
 }
 
 /// What `task.list` keeps of the corpus: with `ready`, the tasks the ready rule lists; with `kind`, the tasks of that
-/// kind; with `checkout`, the tasks that have a copy there, each as that copy.
+/// kind; with `checkout`, the tasks that have a copy there, each as that copy; with `only`, the tasks whose key it
+/// holds (a view's members). The others apply on top of `only`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ListFilter<'a> {
     pub ready: bool,
     pub kind: Option<&'a str>,
     pub checkout: Option<&'a str>,
+    pub only: Option<&'a BTreeSet<String>>,
 }
 
 /// One page of a list: at most `limit` tasks (all of them when `None`), after the task `cursor` names.
@@ -243,7 +246,13 @@ pub struct Corpus {
     inbound: HashMap<String, BTreeSet<String>>,
     /// (source, checkout, path) to the key of the copy there.
     locations: HashMap<Location, String>,
+    /// What the corpus held last changed to, from one counter for the process. A copy has its original's stamp, so
+    /// what was worked out from a stamp is still true of the copy. See [`Corpus::stamp`].
+    stamp: u64,
 }
+
+/// The last stamp given: a stamp is never given twice, so two corpora with one stamp hold the same.
+static LAST_STAMP: AtomicU64 = AtomicU64::new(0);
 
 fn empty_list() -> TaskListResult {
     TaskListResult {
@@ -255,6 +264,7 @@ fn empty_list() -> TaskListResult {
         collisions: Vec::new(),
         stale_sources: Vec::new(),
         refreshing: false,
+        view: None,
     }
 }
 
@@ -303,9 +313,20 @@ fn names_of(source: &str, task: &Task) -> BTreeSet<String> {
 impl Corpus {
     // --- what the corpus is told ---
 
+    /// A number that is new each time the corpus is told something, and the same for a copy. What was worked out
+    /// from a corpus with this stamp (a view's members) holds for any corpus that has it.
+    pub fn stamp(&self) -> u64 {
+        self.stamp
+    }
+
+    fn touch(&mut self) {
+        self.stamp = LAST_STAMP.fetch_add(1, Ordering::Relaxed) + 1;
+    }
+
     /// The board's checkouts and what each is. They decide the shown copy and the divergences, and nothing is
     /// indexed by them, so this may be called again at any time.
     pub fn set_checkouts(&mut self, checkouts: Vec<CheckoutInfo>) {
+        self.touch();
         self.checkouts = checkouts
             .into_iter()
             .map(|info| (info.path, info.kind))
@@ -315,6 +336,7 @@ impl Corpus {
     /// Declares a source from its `initialize` result, or replaces its declaration. A new declaration applies to
     /// what is loaded or notified next; what is held keeps the category it was given.
     pub fn declare_source(&mut self, name: &str, init: &InitializeResult) {
+        self.touch();
         match self.sources.get_mut(name) {
             Some(source) => source.declare(init),
             None => {
@@ -353,6 +375,7 @@ impl Corpus {
         list: ListResult,
     ) -> Result<(), CorpusError> {
         self.source(source)?;
+        self.touch();
         let checkout = checkout.map(str::to_string);
         self.forget(source, &checkout);
         let state = self.source_mut(source)?;
@@ -418,6 +441,7 @@ impl Corpus {
         task: Option<Task>,
     ) -> Result<Applied, CorpusError> {
         self.source(source)?;
+        self.touch();
         let key = self
             .resolve_key(&event.key)
             .unwrap_or_else(|| event.key.clone());
@@ -453,6 +477,7 @@ impl Corpus {
     /// The copy keeps its `id` until its source lists it again: only the key is in the notification.
     pub fn apply_renamed(&mut self, source: &str, rename: &Rename) -> Result<(), CorpusError> {
         self.source(source)?;
+        self.touch();
         let (from, to) = (&rename.from, &rename.to);
         let Some(entry) = self.entries.get(from) else {
             return Ok(());
@@ -483,6 +508,7 @@ impl Corpus {
         removed: &TaskRemoved,
     ) -> Result<(), CorpusError> {
         self.source(source)?;
+        self.touch();
         if let Some(key) = self.resolve_key(&removed.key) {
             self.remove_copies(&key, removed.checkout.as_deref());
         }
@@ -492,6 +518,7 @@ impl Corpus {
     /// `task.invalid`: the item joins the source's invalid items, and the task at its path leaves the listing.
     pub fn apply_invalid(&mut self, source: &str, item: &TaskInvalid) -> Result<(), CorpusError> {
         self.source(source)?;
+        self.touch();
         let at = (source.to_string(), item.checkout.clone(), item.path.clone());
         if let Some(key) = self.locations.get(&at).cloned() {
             self.take_copy(&key, &item.checkout);
@@ -503,12 +530,14 @@ impl Corpus {
     /// `source.stale`: what the source gave last may be out of date. Links to its tasks say so.
     pub fn mark_stale(&mut self, source: &str, reason: &str) -> Result<(), CorpusError> {
         self.source_mut(source)?.stale = Some(reason.to_string());
+        self.touch();
         Ok(())
     }
 
     /// The source read again: it is no longer stale.
     pub fn mark_fresh(&mut self, source: &str) -> Result<(), CorpusError> {
         self.source_mut(source)?.stale = None;
+        self.touch();
         Ok(())
     }
 
@@ -807,6 +836,7 @@ impl Corpus {
             collisions: Vec::new(),
             stale_sources: Vec::new(),
             refreshing: false,
+            view: None,
         }
     }
 
@@ -824,6 +854,7 @@ impl Corpus {
                 filter
                     .kind
                     .is_none_or(|kind| self.kind_of(source, row.task) == kind)
+                    && filter.only.is_none_or(|keys| keys.contains(&row.task.key))
                     && ready.as_ref().is_none_or(|ids| ids.contains(&row.task.key))
             })
             .collect();

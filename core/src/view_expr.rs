@@ -173,7 +173,19 @@ impl CompiledExpr {
 
 /// Compiles one view expression with the vendored `cel`'s standard environment.
 pub fn compile(source: &str) -> Result<CompiledExpr, ExprError> {
-    compile_with(source, &|text| Env::stdlib().compile(text))
+    compile_with_hook(source, &|_| {})
+}
+
+/// [`compile`] with `before_parse` called with the source just before the standard parse, on the parse's thread. A
+/// test that makes it panic gets the panic of a parser (ts-0119-tj), as [`compile_with`] gives it.
+pub fn compile_with_hook(
+    source: &str,
+    before_parse: &(dyn Fn(&str) + Sync),
+) -> Result<CompiledExpr, ExprError> {
+    compile_with(source, &|text| {
+        before_parse(text);
+        Env::stdlib().compile(text)
+    })
 }
 
 /// [`compile`] with the parse given, so that a test can make it panic.

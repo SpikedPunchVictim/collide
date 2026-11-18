@@ -16,6 +16,7 @@ use collide_core::provider::{
 };
 use collide_core::testing::{FakeProvider, default_initialize, fake_task};
 use serde_json::json;
+use std::collections::BTreeSet;
 
 const ROOT: &str = "/repo";
 const WS_A: &str = "/repo-ws/a";
@@ -1461,6 +1462,69 @@ fn the_ready_filter_keeps_what_the_ready_rule_keeps() {
         &Page::default(),
     );
     assert_eq!(keys_of(&listed), ["plan:T-02", "plan:T-03"]);
+}
+
+#[test]
+fn the_only_filter_keeps_the_listed_keys_and_the_other_filters_apply_on_top() {
+    let corpus = five_tasks();
+    let only: BTreeSet<String> = ["plan:T-02", "plan:T-04", "plan:T-05"]
+        .map(String::from)
+        .into();
+    let by_key = corpus.list(
+        &ListFilter {
+            only: Some(&only),
+            ..Default::default()
+        },
+        &Page::default(),
+    );
+    assert_eq!(keys_of(&by_key), ["plan:T-02", "plan:T-04", "plan:T-05"]);
+    let ready = corpus.list(
+        &ListFilter {
+            only: Some(&only),
+            ready: true,
+            ..Default::default()
+        },
+        &Page::default(),
+    );
+    assert_eq!(keys_of(&ready), ["plan:T-02"]);
+}
+
+#[test]
+fn the_only_filter_with_no_keys_lists_no_task() {
+    let corpus = five_tasks();
+    let only = BTreeSet::new();
+    let listed = corpus.list(
+        &ListFilter {
+            only: Some(&only),
+            ..Default::default()
+        },
+        &Page::default(),
+    );
+    assert!(listed.tasks.is_empty());
+    assert!(listed.next_cursor.is_none());
+}
+
+#[test]
+fn the_stamp_changes_with_each_change_to_the_corpus_and_not_with_a_read() {
+    let mut corpus = five_tasks();
+    let first = corpus.stamp();
+    let _ = corpus.list(&ListFilter::default(), &Page::default());
+    assert_eq!(corpus.stamp(), first, "a read leaves it");
+    assert_eq!(corpus.clone().stamp(), first, "a copy keeps it");
+    corpus.mark_stale("plan", "late").unwrap();
+    let second = corpus.stamp();
+    assert_ne!(second, first);
+    corpus.mark_fresh("plan").unwrap();
+    assert_ne!(corpus.stamp(), second);
+    let third = corpus.stamp();
+    corpus
+        .load(
+            "plan",
+            Some(ROOT),
+            list_of(&[at("T-09", "ready", ROOT)], ROOT),
+        )
+        .unwrap();
+    assert_ne!(corpus.stamp(), third, "a list changes it");
 }
 
 #[test]

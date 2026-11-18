@@ -20,11 +20,12 @@
 
 use crate::corpus::{Corpus, Row};
 use crate::item::Category;
+use crate::owner::task::ViewReport;
 use crate::provider::Task;
 use crate::view::{Closure, Follow, View, ViewError, check_view};
 use crate::view_expr::{
-    Budgets, CompiledExpr, Estimate, ExprError, TaskVars, check_cost, compile, dependencies,
-    evaluate_pass,
+    Budgets, CompiledExpr, Estimate, ExprError, TaskVars, check_cost, compile_with_hook,
+    dependencies, evaluate_pass,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -83,10 +84,21 @@ pub fn compile_view(
     board_tasks: usize,
     budgets: &Budgets,
 ) -> Result<CompiledView, ViewFailure> {
+    compile_view_with(view, board_tasks, budgets, &|_| {})
+}
+
+/// [`compile_view`] with `before_parse` called with the `where` text just before the parse, on the parse's own thread.
+/// A test that makes it panic shows what a panicking parse does to one view and to the others (ts-0119-tj).
+pub fn compile_view_with(
+    view: &View,
+    board_tasks: usize,
+    budgets: &Budgets,
+    before_parse: &(dyn Fn(&str) + Sync),
+) -> Result<CompiledView, ViewFailure> {
     check_view(view).map_err(ViewFailure::Check)?;
     let where_ = match &view.where_ {
         Some(source) => {
-            let compiled = compile(source)?;
+            let compiled = compile_with_hook(source, before_parse)?;
             let estimate = check_cost(&compiled, board_tasks, budgets)?;
             Some((compiled, estimate))
         }
@@ -137,6 +149,30 @@ pub struct ViewResult {
     /// the tasks the layering could not place: these, and the tasks that wait on them.
     pub cycle: Vec<String>,
     pub counts: ViewCounts,
+}
+
+/// The wire report of one evaluation of the view called `name`.
+pub fn view_report(name: &str, result: &ViewResult) -> ViewReport {
+    let counts = &result.counts;
+    ViewReport {
+        name: name.to_string(),
+        error: None,
+        members: wire_count(result.members.len()),
+        errors: counts.errors.clone(),
+        over_task_budget: counts.over_task_budget,
+        pass_budget_exhausted: counts.pass_budget_exhausted,
+        not_reached: wire_count(counts.not_reached),
+        unmatched_include: counts.unmatched_include.clone(),
+        unmatched_exclude: counts.unmatched_exclude.clone(),
+        goal_unmatched: counts.goal_unmatched.clone(),
+        invalid_items: wire_count(counts.invalid_items),
+        steps: result.steps.clone(),
+        cycle: result.cycle.clone(),
+    }
+}
+
+fn wire_count(count: usize) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
 }
 
 /// The members, steps and counts of `compiled` over `corpus`.

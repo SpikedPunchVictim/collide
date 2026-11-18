@@ -4297,7 +4297,8 @@ combined into a corpus, and filtered by views.
 - **Root busy (0.4):** a write to the board root waits while a rebase, merge, cherry-pick, revert or bisect is in
   progress there, and says why. The daemon stores the write, answers `queued` and applies it when the root is free, and
   a Queue item says why (Retry, Dismiss); the CLI waits in place, 10 minutes by default (owner, 2026-11-17;
-  `ts-0114-hr`).
+  `ts-0114-hr`). A view's save (`task.save_view` to the repo) is refused instead, with the reason, since Save as View is
+  the person's own act and they can retry (`ts-0119-tj`).
 - **Corpus** with status categories, identity and collisions.
   - A task whose status its source did not declare is listed with the source's invalid items, with the status named
     (0.10, revision 23).

@@ -254,7 +254,14 @@ fn samples() -> Vec<(Method, Value, Value)> {
         (
             Method::TaskList,
             json!({ "board": "bd-1", "view": { "type": "named", "name": "edge-mvp" }, "ready": true }),
-            json!({ "tasks": [task()], "collections": [], "invalid": [] }),
+            json!({
+                "tasks": [task()], "collections": [], "invalid": [],
+                "view": {
+                    "name": "edge-mvp", "members": 1, "errors": { "no such field": 2 }, "over_task_budget": 0,
+                    "pass_budget_exhausted": false, "not_reached": 0, "unmatched_include": ["plan:x"],
+                    "unmatched_exclude": [], "invalid_items": 1, "steps": [["plan:ts-0001"]], "cycle": []
+                }
+            }),
         ),
         (
             Method::TaskGet,
@@ -285,7 +292,7 @@ fn samples() -> Vec<(Method, Value, Value)> {
         ),
         (
             Method::TaskSaveView,
-            json!({ "board": "bd-1", "view": { "name": "mine" }, "target": "personal" }),
+            json!({ "board": "bd-1", "view": { "name": "mine" }, "target": "personal", "overwrite": true }),
             json!({ "path": "/home/u/.config/collide/boards/bd-1/views/mine.yaml" }),
         ),
         (

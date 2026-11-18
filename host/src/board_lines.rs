@@ -24,7 +24,7 @@ use collide_core::owner::{
 use collide_core::trust::{ChangeKind, DiffDetail, InputDiff, LineDiff};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Why a request about a line has no answer. The daemon words each as an owner error.
 #[derive(Debug, PartialEq, Eq)]
@@ -49,6 +49,8 @@ pub struct Lines {
 /// The line a board's sources start from (ts-0113-ck): the line the checkout is on, loaded from the commit its ref
 /// names, with its trust now. `problems` say why a trust state could not be read.
 pub struct SourceLine {
+    /// The repository's git directory, where the line's blobs are read.
+    pub git_dir: PathBuf,
     pub ref_name: String,
     pub line: LoadedLine,
     pub trust: TrustState,
@@ -84,6 +86,11 @@ impl Lines {
             git_env,
             workspaces,
         }
+    }
+
+    /// The home folder the user's files are in, when the daemon knows one.
+    pub fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
     }
 
     fn open(&self, board: BoardRef, tools: &OsStr) -> Result<Opened, LineError> {
@@ -126,6 +133,7 @@ impl Lines {
         let root = board.root.display().to_string();
         let (trust, problems) = state_of(&opened, &root, &checkout.branch, &line);
         Ok(SourceLine {
+            git_dir: opened.git_dir.clone(),
             ref_name: checkout.branch,
             line,
             trust,

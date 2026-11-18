@@ -109,3 +109,110 @@ Write these first. Daemon tests as in `host/tests/daemon_socket.rs`, in a temp r
   share `core`, `host` and the generated files.
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation.
+
+### Built
+
+No new crate or package. Wire types changed (additive), so `pnpm gen` was run and the generated files are in step.
+
+- `core/src/owner/task.rs`: `ViewReport` (new: `name`, `error`, `members`, the `ViewCounts` fields, `steps`, `cycle`;
+  `ViewReport::failed(name, reason)`). `TaskListResult.view: Option<ViewReport>` (additive).
+  `TaskSaveViewParams.overwrite` (default false).
+- `core/src/view_eval.rs`: `compile_view_with(view, tasks, budgets, before_parse)` (`compile_view` calls it with a
+  no-op) and `view_report(name, &ViewResult)`. `core/src/view_expr.rs`: `compile_with_hook`, the stdlib parse with a
+  hook called on the parse's own thread, so a panic in it is `ExprError::Panicked` as `compile_with` gives it.
+- `core/src/corpus.rs`: `ListFilter.only` (a view's member keys; `ready`, `kind` and `checkout` apply on top) and
+  `Corpus::stamp()`, new at each change through a process-wide counter and the same on a copy.
+- `host/src/views.rs` (new): `personal_dir` (through `UserScope::board_dir`, so an unsafe board id is an error and
+  never a path), `personal_candidates`, `repo_candidates` (blobs of the line's commit, only while the line is
+  trusted, sizes checked before a read), `pack_candidates` (`pack/name`; repo and `git:` packs wait for the line),
+  `ViewCache` (`compile`, `assemble`: first of a name wins, later ones get an error; `evaluate`: kept per board, per
+  corpus stamp, at most 64 for one stamp), `repo_dir`, `save_view` (safe-token name, overwrite refused unless asked,
+  atomic write, refused through a link: `SaveError::Blocked`, added at review).
+- `host/src/board_load.rs`: `ViewFile.size`. `host/src/board_lines.rs`: `SourceLine.git_dir`, `Lines::home()`.
+- `host/src/daemon.rs`: `task_views`, `task_save_view` (refused for a run's agent; a repo save refused while the
+  root is busy, added at review) and `task_list` through a view in
+  place of the old refusal. `DaemonOptions.view_before_parse` (test seam for the panic fixture).
+- Tests: `core/tests/corpus.rs` (`the_only_filter_*` x2, `the_stamp_changes_*`), `core/tests/view_eval.rs` (4: panicking
+  parse, the hook, the report, the failed report), `core/tests/owner_protocol.rs` (samples carry `view` and
+  `overwrite`),
+  `host/tests/views_files.rs` (3: unsafe board ids, non-regular personal files, the cache; added at review:
+  `.collide/views` as a link, `.collide` as a link, `<name>.yaml` as a link with
+  overwrite, a missing folder still made), and in
+  `host/tests/daemon_corpus.rs` 16 tests over the socket, named for each criterion: committed vs working tree vs
+  other branch, trust hash and untrusted line, four broken views, same name, pack view, bad personal view, list by
+  name, filters on a view, inline, counts follow the corpus, closure with the pure test's numbers, a line that does
+  not load, and `save_view` to each target and its refusals. The provider fixture takes `labels`, `collections`
+  and `links`. Added at review: a repo save to a root in a rebase (the refusal, its words, no file, a personal save
+  still works, free again after `rebase --abort`) and a repo save with `.collide/views` as a
+  link (`CONFLICT`), and `a_run_agent_may_not_save_a_view_and_nothing_is_written` (the test binary re-runs itself as a
+  child with the run marker, as `pause.rs` does: both targets answer `NOT_PERMITTED`, no file, and the person's own
+  client then saves with the same calls). I removed
+  `a_view_is_not_served_yet_and_says_which_item_serves_it`: it asserted the old refusal.
+- **Seen red at runtime.** Old behaviour (a view refused, `task.views` and `task.save_view` not served): all 16 daemon
+  tests failed. One mutation each, restored after: `only` ignored (the 2 `only` tests); stamp not changing (the stamp
+  test); hook not called (the 2 hook tests and `four_broken_views_*`); `view_report` dropping steps and invalid items
+  (the report test and the closure test); `is_trusted` always true (the trust test); repo views read from the working
+  tree (`a_committed_view_*`); personal after repo (the same-name test); overwrite and name checks off (the save
+  refusals test); personal path without the safe-name check (the board id test); cache never hits (the cache test).
+  Not red by a mutation: `a_view_on_another_branch_*` (only the old behaviour turns it red, through its positive part:
+  a line lists only its own tree) and `a_failed_report_*` (new type).
+- Seen red at runtime for the review changes, before the code: the rebase test (the save succeeded) and the three
+  link tests (each save wrote through the link). The run-agent test, with `refuse_run_agent` removed from
+  `task_save_view`: both calls answered `ok`. The `CONFLICT` link test was written with the code.
+
+### Decisions for the owner
+
+1. **A file that cannot be read is listed with an empty view.** `ViewEntry.view` is a `View` with only the file name
+   (without `.yaml`) as its name, and the reason in `error`. Alternative: make `view` optional on the wire. Recommend
+   keeping it: the Field needs no special case. Applies to a parse error, a file over 256 KiB, and an untrusted line.
+2. **A view is looked up by its `name:`, not by its file name.** Saving writes `<name>.yaml`, so they agree for what the
+   app writes. Alternative: the file name wins. Recommend keeping.
+3. **`task.save_view` needs a name that is a safe token** (1 to 64 of letters, digits, `.`, `_`, `-`, not starting
+   with `-` or `.`): a name with a space is refused with that reason. This is what the person sees in Save as View.
+   Alternative: turn a free-form name into a file name (`My view` to `my-view.yaml`) and keep the name inside the
+   file. Recommend the alternative when the Filter bar is built (Stage 4c): the dialog is where the person types.
+4. **`error_count` on a view** is the board's invalid items plus the tasks whose `where` raised an error or ran out of
+   steps. The item says "items that failed to read on this view". Alternative: invalid items only.
+5. **A line that does not load refuses `task.views` and a named list** (`CONFLICT`, with the problems), personal views
+   included. An inline view needs no line. Alternative: list the personal views anyway. Recommend keeping: the
+   board is not usable then, and the problems are the message.
+6. **A board id that is not a safe name makes `task.views` and a named list fail** (`CONFLICT`). The daemon makes
+   ids, so this cannot happen from the app. Alternative: one entry with the error.
+7. **Pack views** of `Builtin`, `User` and `Linked` packs are trusted (the user's own or shipped); those of `Repo` and
+   `Git` packs wait for the line. Recommend keeping.
+8. **One name, one view across all three places**, in the order personal, repo, pack. Two repo files with the same
+   `name:` give the first by file name and an error on the second.
+9. **`task_count` is per key, a list row is per path.** They are equal unless a key is held at two paths (a collision),
+   where the list has two rows. Alternative: count rows. Recommend keeping; the Field shows tasks.
+10. **Changed at review: a repo save to a busy root is refused with the reason, not queued and not written straight.**
+    `task.save_view` with `target: repo` checks `checkout::root_busy` on the board root first (with the daemon's git
+    environment). While a rebase, merge, cherry-pick, revert or bisect is in progress there it answers `CONFLICT`,
+    naming what is in progress and saying the person can save a personal view or try again when it is done. Nothing
+    is written. A personal save is not affected. Writing `.collide/views/<name>.yaml` mid-rebase could block the
+    rebase (an untracked file in the way of a commit that adds it) or mix into its conflict resolution. The
+    alternative is a queue kind for view saves. Proposed plan text for 0.5, after the Root busy bullet's first
+    sentence: "A view's save (`task.save_view` to the repo) is refused instead, with the reason, since Save as View
+    is the person's own act and they can retry (`ts-0119-tj`)."
+11. **`TaskSaveViewParams.overwrite`** is the flag's name, and `TaskSaveViewResult.path` is absolute. A personal file is
+    written with mode `0600`, a repo file with `0644`.
+12. Not added: `unresolved_dependencies` (`ts-0118-wp` offered it). Add it with the Field (Stage 4c) if it shows one.
+13. A closure whose goal matches nothing is `goal_unmatched` in the report, not `error`: the view loads and lists none.
+14. **Added at review: a save never writes through a link.** Before a save writes, each folder below the board root
+    (the Collide folder, then `views`) that exists must be a real folder by `symlink_metadata`, and an existing
+    `<name>.yaml` a regular file; otherwise `CONFLICT` names the folder or file and nothing is written, with or
+    without `overwrite`. A missing folder is still made. A repository can commit `.collide` or `.collide/views` as a
+    link, and `save_view` needs no trust, so the text check of `repo_dir` was not enough. The personal target shares
+    the check, below its board folder.
+
+- Owner decisions (2026-11-18, at the build): all taken as recommended, on the owner's delegation. Two were changed or
+  added at review: decision 10, a repo save to a busy root is refused with the reason (plan 0.5 says so), and decision
+  14, no save writes through a link. Decision 3 (a name with a space is refused) is what Save as View shows until the
+  dialog of Stage 4c turns a typed name into a file name.
+
+### Not done, by design
+
+- The CLI: `collide tasks --view <name>` and `--checkout` (`ts-0120-wm`). The plan has no CLI to list or save views;
+  the app's Save as View is the only writer.
+- A parsed repo view is not kept between calls: each `task.views` or named list reads the line again (git reads and the
+  loader). Only the evaluation is kept. Keep the parse by (commit, trust hash) if a call proves slow at 1,600 tasks.
+- `task.sections`, planning pages, the Field's `layout`, launching from a view and saving a Tracks view: later stages.

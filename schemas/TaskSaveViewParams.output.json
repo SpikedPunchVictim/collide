@@ -176,6 +176,10 @@
     "board": {
       "type": "string"
     },
+    "overwrite": {
+      "description": "Replace the file when there is one. Without it a view of the same name is refused.",
+      "type": "boolean"
+    },
     "target": {
       "$ref": "#/$defs/ViewTarget"
     },

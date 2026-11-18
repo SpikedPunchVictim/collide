@@ -17,19 +17,22 @@ use collide_core::non_empty::NonEmpty;
 use collide_core::owner::{
     BoardOpenParams, BoardOpenResult, BoardTrustParams, BoardTrustResult, BoardTrustReviewParams,
     BoardTrustReviewResult, RpcError, TaskApplyParams, TaskApplyResult, TaskGetParams,
-    TaskGetResult, TaskListResult, TrustState,
+    TaskGetResult, TaskListResult, TaskSaveViewResult, TaskViewsParams, TaskViewsResult,
+    TrustState, ViewEntry, ViewSource,
 };
 use collide_core::provider::{ApplyParams, ApplyResult};
 use collide_core::state::RunState;
+use collide_core::view::View;
+use collide_core::yaml::load_yaml_file;
 use collide_host::corpus_store::CorpusCache;
-use collide_host::daemon::DaemonOptions;
-use collide_host::owner_client::ClientError;
+use collide_host::daemon::{DaemonOptions, DaemonPaths};
+use collide_host::owner_client::{ClientError, OwnerClient};
 use collide_host::run_store::RunLaunch;
 use collide_host::secret_store::MemorySecretStore;
 use collide_host::store::Store;
 use collide_host::supervisor::{BackoffPolicy, SupervisorPolicy};
 use common::config_fixture::{CapturedLog, Fixture};
-use common::git_repo::GitRepo;
+use common::git_repo::{GitRepo, git_command};
 use common::{node_missing_message, wait_until};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -37,6 +40,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -584,21 +588,6 @@ fn the_ready_and_checkout_filters_narrow_the_list() {
     assert_eq!(here.tasks.len(), 3);
     let nowhere = rig.list(&board, json!({ "checkout": "/no/such/checkout" }));
     assert!(nowhere.tasks.is_empty());
-}
-
-#[test]
-fn a_view_is_not_served_yet_and_says_which_item_serves_it() {
-    let rig = rig();
-    let board = rig.board_with(&[&FILES], "");
-
-    let error = rpc::<TaskListResult>(
-        &rig,
-        "task.list",
-        &json!({ "board": board, "view": { "type": "named", "name": "all" } }),
-    )
-    .unwrap_err();
-
-    assert!(error.message.contains("ts-0118-wp"), "{}", error.message);
 }
 
 #[test]
@@ -1520,4 +1509,886 @@ fn listing_sixteen_hundred_tasks_through_the_daemon_is_timed_and_complete() {
     eprintln!("1600 tasks listed in {listing:?}, with {events} startup events");
     assert_eq!(list.tasks.len(), 1600);
     assert_eq!(events, 1600);
+}
+
+// ---- views (ts-0119-tj; 0.10, Views) ------------------------------------------------------------------------------
+
+/// A source whose pack has a view of its own. The pack's name is `quay`, so the view is `quay/open`.
+const WITH_VIEW: Src = Src {
+    config: "views:\n  open:\n    name: open\n    where: \"status == 'todo'\"\n",
+    ..FILES
+};
+
+const TODO_VIEW: &str = "name: todo\nwhere: \"status == 'todo'\"\n";
+
+impl Rig {
+    fn views(&self, board: &str) -> Vec<ViewEntry> {
+        let params = TaskViewsParams {
+            board: board.to_string(),
+        };
+        let result: TaskViewsResult = rpc(self, "task.views", &params).unwrap();
+        result.views
+    }
+
+    /// `task.views` until `done` holds of it: the counts are worked out once the corpus is.
+    fn views_until(
+        &self,
+        board: &str,
+        what: &str,
+        done: impl Fn(&[ViewEntry]) -> bool,
+    ) -> Vec<ViewEntry> {
+        let mut last = Vec::new();
+        wait_until(what, DEADLINE, || {
+            last = self.views(board);
+            done(&last)
+        });
+        last
+    }
+
+    /// The hash `board.trust_review` shows for the line `main`.
+    fn hash(&self, board: &str) -> (String, bool) {
+        let review: BoardTrustReviewResult = rpc(
+            self,
+            "board.trust_review",
+            &BoardTrustReviewParams {
+                board: board.to_string(),
+                line: "main".to_string(),
+            },
+        )
+        .unwrap();
+        match review.trust {
+            TrustState::Trusted { hash } => (hash, true),
+            TrustState::Untrusted { hash } => (hash, false),
+        }
+    }
+
+    /// A task file with any fields, such as `labels`, `links` and `kind`.
+    fn task_json(&self, checkout: &Path, rel: &str, data: Value) {
+        self.file(checkout, rel, &format!("{data}\n"));
+    }
+
+    fn view_list(
+        &self,
+        board: &str,
+        view: Value,
+        extra: Value,
+    ) -> Result<TaskListResult, RpcError> {
+        let mut params = json!({ "board": board, "view": view });
+        for (key, value) in extra.as_object().expect("params are an object") {
+            params[key] = value.clone();
+        }
+        rpc(self, "task.list", &params)
+    }
+
+    fn named(&self, board: &str, name: &str, extra: Value) -> Result<TaskListResult, RpcError> {
+        self.view_list(board, json!({ "type": "named", "name": name }), extra)
+    }
+
+    fn save_view(
+        &self,
+        board: &str,
+        view: Value,
+        target: &str,
+        overwrite: bool,
+    ) -> Result<TaskSaveViewResult, RpcError> {
+        let params =
+            json!({ "board": board, "view": view, "target": target, "overwrite": overwrite });
+        rpc(self, "task.save_view", &params)
+    }
+
+    /// A file of the user's board folder, as a person's personal view is.
+    fn personal(&self, board: &str, file: &str, text: &str) {
+        self.f()
+            .write_user(&format!("boards/{board}/views/{file}"), text);
+    }
+
+    fn personal_dir(&self, board: &str) -> PathBuf {
+        self.f()
+            .home()
+            .join(".config/collide/boards")
+            .join(board)
+            .join("views")
+    }
+
+    fn head(&self) -> String {
+        self.f().repo.git(&["rev-parse", "HEAD"])
+    }
+}
+
+fn entry<'a>(views: &'a [ViewEntry], name: &str) -> &'a ViewEntry {
+    let found: Vec<&ViewEntry> = views.iter().filter(|view| view.view.name == name).collect();
+    assert_eq!(found.len(), 1, "one view called {name}: {views:?}");
+    found[0]
+}
+
+fn entry_from<'a>(views: &'a [ViewEntry], name: &str, source: &ViewSource) -> &'a ViewEntry {
+    views
+        .iter()
+        .find(|view| view.view.name == name && &view.source == source)
+        .unwrap_or_else(|| panic!("no view {name} from {source:?}: {views:?}"))
+}
+
+fn error_of(error: &Option<String>) -> &str {
+    error.as_deref().expect("the view has an error")
+}
+
+#[test]
+fn a_committed_view_is_used_and_an_edit_in_the_working_tree_is_not() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/mine.yaml",
+        &TODO_VIEW.replace("name: todo", "name: mine"),
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.task(&root, "2.json", "2", "doing", "v1");
+    rig.settled(&board);
+
+    let views = rig.views_until(&board, "the view counts its task", |views| {
+        views
+            .iter()
+            .any(|view| view.view.name == "mine" && view.task_count == 1)
+    });
+    let mine = entry(&views, "mine");
+    assert_eq!(mine.source, ViewSource::Repo {});
+    assert_eq!(mine.error, None);
+
+    // An edit that is not committed, and a file that is not, are not the line's.
+    rig.f().write(
+        ".collide/views/mine.yaml",
+        "name: mine\nwhere: \"status == 'doing'\"\n",
+    );
+    rig.f().write(
+        ".collide/views/extra.yaml",
+        "name: extra\ninclude: [files:1]\n",
+    );
+    let views = rig.views(&board);
+    assert_eq!(
+        entry(&views, "mine").view.where_.as_deref(),
+        Some("status == 'todo'")
+    );
+    assert!(
+        views.iter().all(|view| view.view.name != "extra"),
+        "{views:?}"
+    );
+
+    // Committed, and trusted again because its hash changed, the same files are the line's.
+    rig.f().commit();
+    rig.trust(&board);
+    let views = rig.views_until(&board, "the committed view is used", |views| {
+        views.iter().any(|view| view.view.name == "extra")
+    });
+    let mine = entry(&views, "mine");
+    assert_eq!(mine.view.where_.as_deref(), Some("status == 'doing'"));
+    assert_eq!(mine.error, None);
+    assert_eq!(entry(&views, "extra").task_count, 1);
+}
+
+#[test]
+fn a_view_on_another_branch_is_not_used() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/here.yaml",
+        "name: here\ninclude: [files:1]\n",
+    );
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    rig.f().repo.git(&["checkout", "--quiet", "-b", "other"]);
+    rig.f().write(
+        ".collide/views/elsewhere.yaml",
+        "name: elsewhere\ninclude: [files:1]\n",
+    );
+    rig.f().commit();
+    rig.f().repo.git(&["checkout", "--quiet", "main"]);
+
+    let views = rig.views(&board);
+
+    assert_eq!(entry(&views, "here").error, None);
+    assert!(
+        views.iter().all(|view| view.view.name != "elsewhere"),
+        "{views:?}"
+    );
+}
+
+#[test]
+fn a_changed_view_blob_changes_the_trust_hash_and_an_untrusted_line_reads_no_view() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/mine.yaml",
+        &TODO_VIEW.replace("name: todo", "name: mine"),
+    );
+    let board = rig.board_with(&[&WITH_VIEW], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.settled(&board);
+    let (trusted_hash, trusted) = rig.hash(&board);
+    assert!(trusted);
+    let views = rig.views(&board);
+    assert_eq!(entry(&views, "mine").error, None);
+    assert_eq!(entry(&views, "quay/open").error, None);
+
+    rig.f().write(
+        ".collide/views/mine.yaml",
+        "name: mine\nwhere: \"status == 'doing'\"\n",
+    );
+    rig.f().commit();
+
+    let (changed_hash, trusted) = rig.hash(&board);
+    assert_ne!(changed_hash, trusted_hash, "a view blob is in the hash");
+    assert!(!trusted);
+    let views = rig.views(&board);
+    for name in ["mine", "quay/open"] {
+        let view = entry(&views, name);
+        assert!(error_of(&view.error).contains("not trusted"), "{view:?}");
+        assert_eq!(view.task_count, 0);
+        assert_eq!(view.view.where_, None, "{name} is listed and not read");
+    }
+    let listed = rig.named(&board, "mine", json!({})).unwrap();
+    assert!(listed.tasks.is_empty());
+    assert!(error_of(&listed.view.expect("a report").error).contains("not trusted"));
+
+    rig.trust(&board);
+    let views = rig.views(&board);
+    assert_eq!(entry(&views, "mine").error, None);
+    assert_eq!(
+        entry(&views, "mine").view.where_.as_deref(),
+        Some("status == 'doing'")
+    );
+}
+
+#[test]
+fn four_broken_views_show_with_their_errors_next_to_a_good_one() {
+    let rig = rig_with(|options| {
+        options.view_before_parse = Some(Arc::new(|text: &str| {
+            assert!(!text.contains("boom"), "the parse of a view panicked");
+        }));
+    });
+    rig.f()
+        .write(".collide/views/broken.yaml", "name: [not closed\n");
+    rig.f().write(
+        ".collide/views/long.yaml",
+        &format!("name: long\nwhere: \"{}\"\n", "x".repeat(2000)),
+    );
+    rig.f().write(
+        ".collide/views/corpus.yaml",
+        "name: corpus\nwhere: \"tasks.size() > 0\"\n",
+    );
+    rig.f().write(
+        ".collide/views/panic.yaml",
+        "name: panic\nwhere: \"status == 'boom'\"\n",
+    );
+    rig.f().write(
+        ".collide/views/good.yaml",
+        &TODO_VIEW.replace("name: todo", "name: good"),
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.settled(&board);
+
+    let views = rig.views_until(&board, "the good view counts", |views| {
+        views
+            .iter()
+            .any(|view| view.view.name == "good" && view.task_count == 1)
+    });
+
+    assert_eq!(entry(&views, "good").error, None);
+    for (name, word) in [
+        ("broken", "broken.yaml"),
+        ("long", "1024"),
+        ("corpus", "tasks"),
+        ("panic", "panic"),
+    ] {
+        let view = entry(&views, name);
+        assert!(error_of(&view.error).contains(word), "{name}: {view:?}");
+        assert_eq!(view.task_count, 0, "{name} has no members");
+    }
+    let listed = rig.named(&board, "long", json!({})).unwrap();
+    assert!(listed.tasks.is_empty());
+    assert!(listed.view.expect("a report").error.is_some());
+}
+
+#[test]
+fn the_personal_view_wins_over_a_repo_view_of_the_same_name() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/shared.yaml",
+        &TODO_VIEW.replace("name: todo", "name: shared"),
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.task(&root, "2.json", "2", "doing", "v1");
+    rig.personal(
+        &board,
+        "shared.yaml",
+        "name: shared\nwhere: \"status == 'doing'\"\n",
+    );
+    rig.settled(&board);
+
+    let views = rig.views_until(&board, "the personal view counts", |views| {
+        views
+            .iter()
+            .any(|view| view.source == ViewSource::Personal {} && view.task_count == 1)
+    });
+
+    let personal = entry_from(&views, "shared", &ViewSource::Personal {});
+    assert_eq!(personal.error, None);
+    assert_eq!(personal.view.where_.as_deref(), Some("status == 'doing'"));
+    let repo = entry_from(&views, "shared", &ViewSource::Repo {});
+    assert!(error_of(&repo.error).contains("personal"), "{repo:?}");
+    assert_eq!(repo.task_count, 0);
+    let listed = rig.named(&board, "shared", json!({})).unwrap();
+    assert_eq!(Rig::keys(&listed), ["files:2"]);
+}
+
+#[test]
+fn a_packs_view_is_listed_as_pack_slash_name_and_listed_by_it() {
+    let rig = rig();
+    let board = rig.board_with(&[&WITH_VIEW], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.settled(&board);
+
+    let views = rig.views_until(&board, "the pack's view counts", |views| {
+        views
+            .iter()
+            .any(|view| view.view.name == "quay/open" && view.task_count == 1)
+    });
+
+    let open = entry(&views, "quay/open");
+    assert_eq!(
+        open.source,
+        ViewSource::Pack {
+            pack: "quay".into()
+        }
+    );
+    assert_eq!(open.error, None);
+    let listed = rig.named(&board, "quay/open", json!({})).unwrap();
+    assert_eq!(Rig::keys(&listed), ["files:1"]);
+}
+
+#[test]
+fn a_bad_personal_view_shows_its_error_and_the_others_list() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.personal(&board, "broken.yaml", "name: [not closed\n");
+    rig.personal(&board, "fine.yaml", "name: fine\ninclude: [files:1]\n");
+    rig.settled(&board);
+
+    let views = rig.views(&board);
+
+    let broken = entry(&views, "broken");
+    assert_eq!(broken.source, ViewSource::Personal {});
+    assert!(
+        error_of(&broken.error).contains("broken.yaml"),
+        "{broken:?}"
+    );
+    assert_eq!(entry(&views, "fine").error, None);
+}
+
+#[test]
+fn task_list_by_name_gives_members_in_corpus_order_with_the_report_and_the_invalid_items() {
+    let rig = rig();
+    rig.f().write(".collide/views/todo.yaml", TODO_VIEW);
+    rig.f().write(
+        ".collide/views/typo.yaml",
+        "name: typo\ninclude: [files:99]\n",
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    for (short, status) in [("3", "todo"), ("1", "todo"), ("2", "doing"), ("4", "done")] {
+        rig.task(&root, &format!("{short}.json"), short, status, "v1");
+    }
+    rig.file(&root, "bad.json", "{ not json");
+    rig.settled(&board);
+
+    let listed = rig.named(&board, "todo", json!({})).unwrap();
+
+    assert_eq!(Rig::keys(&listed), ["files:1", "files:3"]);
+    let report = listed.view.expect("a view brings its report");
+    assert_eq!(report.name, "todo");
+    assert_eq!(report.error, None);
+    assert_eq!(report.members, 2);
+    assert_eq!(report.invalid_items, 1);
+    assert_eq!(listed.invalid.len(), 1);
+    let typo = rig.named(&board, "typo", json!({})).unwrap();
+    assert_eq!(typo.view.expect("a report").unmatched_include, ["files:99"]);
+    assert!(typo.tasks.is_empty());
+    let unknown = rig.named(&board, "nothing-like-it", json!({})).unwrap_err();
+    assert_eq!(unknown.code, -32010);
+}
+
+#[test]
+fn the_ready_kind_and_checkout_filters_apply_on_top_of_a_view() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/open.yaml",
+        "name: open\nwhere: \"status != 'done'\"\n",
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task_json(
+        &root,
+        "1.json",
+        json!({ "short": "1", "status": "todo", "kind": "bug" }),
+    );
+    rig.task_json(
+        &root,
+        "2.json",
+        json!({ "short": "2", "status": "todo", "kind": "story" }),
+    );
+    rig.task_json(
+        &root,
+        "3.json",
+        json!({ "short": "3", "status": "doing", "kind": "bug" }),
+    );
+    rig.task_json(
+        &root,
+        "4.json",
+        json!({ "short": "4", "status": "todo", "kind": "bug" }),
+    );
+    rig.task_json(&root, "5.json", json!({ "short": "5", "status": "done" }));
+    rig.settled(&board);
+    let keys = |extra: Value| Rig::keys(&rig.named(&board, "open", extra).unwrap());
+
+    assert_eq!(
+        keys(json!({})),
+        ["files:1", "files:2", "files:3", "files:4"]
+    );
+    assert_eq!(
+        keys(json!({ "ready": true })),
+        ["files:1", "files:2", "files:4"]
+    );
+    assert_eq!(
+        keys(json!({ "kind": "bug" })),
+        ["files:1", "files:3", "files:4"]
+    );
+    assert_eq!(
+        keys(json!({ "ready": true, "kind": "bug" })),
+        ["files:1", "files:4"]
+    );
+    let there = root.display().to_string();
+    assert_eq!(keys(json!({ "checkout": there })).len(), 4);
+    assert!(keys(json!({ "checkout": "/nowhere/at/all" })).is_empty());
+    assert_eq!(keys(json!({ "limit": 2 })), ["files:1", "files:2"]);
+}
+
+#[test]
+fn an_inline_view_evaluates_without_saving_and_a_bad_one_is_refused_with_the_reason() {
+    let rig = rig_with(|options| {
+        options.view_before_parse = Some(Arc::new(|text: &str| {
+            assert!(!text.contains("boom"), "the parse of a view panicked");
+        }));
+    });
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.task(&root, "2.json", "2", "doing", "v1");
+    rig.settled(&board);
+    let inline =
+        |view: Value| rig.view_list(&board, json!({ "type": "inline", "view": view }), json!({}));
+
+    let listed = inline(json!({ "name": "adhoc", "where": "status == 'doing'" })).unwrap();
+
+    assert_eq!(Rig::keys(&listed), ["files:2"]);
+    assert_eq!(listed.view.expect("a report").name, "adhoc");
+    assert!(
+        !root.join(".collide/views").exists(),
+        "nothing was saved in the repo"
+    );
+    assert!(
+        !rig.personal_dir(&board).exists(),
+        "nothing was saved for the person"
+    );
+    for (view, word) in [
+        (json!({ "name": "x", "where": "tasks.size() > 0" }), "tasks"),
+        (json!({ "name": "x", "where": "status == 'boom'" }), "panic"),
+        (json!({ "name": "x", "where": "   " }), "where"),
+        (json!({ "name": "" }), "name"),
+    ] {
+        let refused = inline(view.clone()).unwrap_err();
+        assert_eq!(refused.code, -32602, "{view}");
+        assert!(
+            refused.message.contains(word),
+            "{view}: {}",
+            refused.message
+        );
+    }
+}
+
+#[test]
+fn the_count_of_a_view_is_the_length_of_its_list_and_follows_the_corpus() {
+    let rig = rig();
+    rig.f().write(".collide/views/todo.yaml", TODO_VIEW);
+    rig.f()
+        .write(".collide/views/all.yaml", "name: all\nwhere: \"true\"\n");
+    let board = rig.board_with(&[&DOCS], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.task(&root, "2.json", "2", "doing", "v1");
+    rig.settled(&board);
+
+    let views = rig.views_until(&board, "the counts are in", |views| {
+        views
+            .iter()
+            .any(|view| view.view.name == "all" && view.task_count == 2)
+    });
+    for view in &views {
+        let listed = rig.named(&board, &view.view.name, json!({})).unwrap();
+        assert_eq!(listed.tasks.len() as u32, view.task_count, "{view:?}");
+    }
+    assert_eq!(entry(&views, "todo").task_count, 1);
+
+    rig.task(&root, "3.json", "3", "todo", "v1");
+    let views = rig.views_until(&board, "the new task is counted", |views| {
+        views
+            .iter()
+            .any(|view| view.view.name == "todo" && view.task_count == 2)
+    });
+    assert_eq!(entry(&views, "all").task_count, 3);
+}
+
+#[test]
+fn a_closure_view_over_the_fixture_corpus_has_the_numbers_of_the_pure_test() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/run-order.yaml",
+        "name: run-order\nclosure: { goal: files:042, follow: depends_on }\n",
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    let task = |short: &str, status: &str, blocked_by: &[&str]| {
+        let links: Vec<Value> = blocked_by
+            .iter()
+            .map(|to| json!({ "type": "blocked-by", "to": to }))
+            .collect();
+        rig.task_json(
+            &root,
+            &format!("{short}.json"),
+            json!({ "short": short, "status": status, "links": links }),
+        );
+    };
+    task("042", "todo", &["040", "041"]);
+    task("040", "doing", &[]);
+    task("041", "done", &["044"]);
+    task("043", "todo", &[]);
+    task("044", "todo", &["045", "046"]);
+    task("045", "todo", &[]);
+    task("046", "todo", &[]);
+    rig.settled(&board);
+
+    let listed = rig.named(&board, "run-order", json!({})).unwrap();
+
+    assert_eq!(Rig::keys(&listed), ["files:040", "files:042"]);
+    let report = listed.view.expect("a report");
+    assert_eq!(report.steps, [vec!["files:040"], vec!["files:042"]]);
+    assert!(report.cycle.is_empty());
+    let views = rig.views(&board);
+    assert_eq!(entry(&views, "run-order").task_count, 2);
+}
+
+#[test]
+fn a_line_that_does_not_load_refuses_the_views_and_a_named_list_and_serves_an_inline_one() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    rig.f()
+        .write(".collide/board.yaml", "packs: [this is not a pack list\n");
+    rig.f().commit();
+    let params = TaskViewsParams {
+        board: board.clone(),
+    };
+
+    let views: Result<TaskViewsResult, RpcError> = rpc(&rig, "task.views", &params);
+    let named = rig.named(&board, "todo", json!({}));
+    let inline = rig.view_list(
+        &board,
+        json!({ "type": "inline", "view": { "name": "adhoc", "where": "true" } }),
+        json!({}),
+    );
+
+    assert_eq!(views.unwrap_err().code, -32011);
+    assert_eq!(named.unwrap_err().code, -32011);
+    assert!(inline.is_ok(), "an inline view needs no line");
+}
+
+// ---- save_view ----------------------------------------------------------------------------------------------------
+
+fn saved() -> Value {
+    json!({
+        "name": "mine",
+        "where": "status == 'todo'",
+        "include": ["files:1"],
+        "layout": { "default": "board", "sort": { "by": "title", "dir": "asc" } },
+    })
+}
+
+#[test]
+fn save_view_to_personal_writes_the_board_folder_and_the_file_reloads_to_the_same_view() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let head = rig.head();
+
+    let result = rig.save_view(&board, saved(), "personal", false).unwrap();
+
+    let expected = rig.personal_dir(&board).join("mine.yaml");
+    assert_eq!(PathBuf::from(&result.path), expected);
+    let written: View = load_yaml_file(&expected).unwrap();
+    assert_eq!(written, serde_json::from_value::<View>(saved()).unwrap());
+    let views = rig.views(&board);
+    assert_eq!(entry(&views, "mine").source, ViewSource::Personal {});
+    assert_eq!(entry(&views, "mine").view, written);
+    assert_eq!(rig.head(), head, "nothing is committed");
+    assert_eq!(rig.f().repo.git(&["status", "--porcelain"]), "");
+}
+
+#[test]
+fn save_view_to_the_repo_writes_a_file_that_is_not_committed_and_the_next_load_reads_it() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let head = rig.head();
+
+    let result = rig.save_view(&board, saved(), "repo", false).unwrap();
+
+    let expected = rig.root().join(".collide/views/mine.yaml");
+    assert_eq!(PathBuf::from(&result.path), expected);
+    assert_eq!(rig.head(), head, "nothing is committed");
+    assert!(
+        rig.f()
+            .repo
+            .git(&["status", "--porcelain"])
+            .contains(".collide/views")
+    );
+    assert!(
+        rig.views(&board)
+            .iter()
+            .all(|view| view.view.name != "mine"),
+        "not on the line yet"
+    );
+    let written: View = load_yaml_file(&expected).unwrap();
+
+    rig.f().commit();
+    rig.trust(&board);
+    let views = rig.views(&board);
+    assert_eq!(entry(&views, "mine").source, ViewSource::Repo {});
+    assert_eq!(entry(&views, "mine").view, written);
+    assert_eq!(written, serde_json::from_value::<View>(saved()).unwrap());
+}
+
+#[test]
+fn save_view_to_the_repo_of_a_root_in_a_rebase_is_refused_with_the_reason_and_a_personal_save_still_works()
+ {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let repo = &rig.f().repo;
+    repo.write("line.txt", b"one\n");
+    repo.commit_all("fixture");
+    repo.git(&["checkout", "--quiet", "-b", "topic"]);
+    repo.write("line.txt", b"topic\n");
+    repo.commit_all("topic edits the line");
+    repo.git(&["checkout", "--quiet", "main"]);
+    repo.write("line.txt", b"main\n");
+    repo.commit_all("main edits the line");
+    repo.git(&["checkout", "--quiet", "topic"]);
+    let rebase = git_command(repo.root().path(), repo.work())
+        .args(["rebase", "main"])
+        .output()
+        .expect("git runs");
+    assert!(
+        !rebase.status.success(),
+        "the rebase should stop on the conflict"
+    );
+
+    let refused = rig.save_view(&board, saved(), "repo", false).unwrap_err();
+
+    assert_eq!(refused.code, -32011, "{}", refused.message);
+    assert!(
+        refused.message.contains("a rebase is in progress"),
+        "names what is going on: {}",
+        refused.message
+    );
+    assert!(
+        refused.message.contains("personal view"),
+        "says what the person can do: {}",
+        refused.message
+    );
+    assert!(
+        !rig.root().join(".collide/views").exists(),
+        "nothing is written to the busy root"
+    );
+    let personal = rig.save_view(&board, saved(), "personal", false).unwrap();
+    assert!(Path::new(&personal.path).is_file());
+    git_command(repo.root().path(), repo.work())
+        .args(["rebase", "--abort"])
+        .output()
+        .expect("git runs");
+    rig.save_view(&board, saved(), "repo", false)
+        .expect("the root is free again");
+}
+
+#[test]
+fn save_view_to_the_repo_refuses_a_views_folder_that_is_a_link_and_writes_nothing_where_it_points()
+{
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let outside = rig.f().repo.root().path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::create_dir_all(rig.root().join(".collide")).unwrap();
+    std::os::unix::fs::symlink(&outside, rig.root().join(".collide/views")).unwrap();
+
+    let refused = rig.save_view(&board, saved(), "repo", true).unwrap_err();
+
+    assert_eq!(refused.code, -32011, "{}", refused.message);
+    assert!(
+        refused.message.contains(".collide/views"),
+        "{}",
+        refused.message
+    );
+    assert!(fs::read_dir(&outside).unwrap().next().is_none());
+}
+
+/// Set in the environment of the child that plays a run's agent: the daemon root and the calls it makes, as JSON.
+const AGENT_CALLS: &str = "COLLIDE_TEST_AGENT_CALLS";
+const AGENT_REPLY: &str = "AGENT-REPLY ";
+
+/// Not a test on its own: it is the client that [`as_a_run_agent`] starts in a child process of this test binary, whose
+/// environment carries the run marker, so the daemon sees a run's agent at the other end of the socket. Run on its own
+/// (no `AGENT_CALLS`) it does nothing. Each call is answered with a line holding the error code, or `ok`.
+#[test]
+fn agent_client_child() {
+    let Ok(text) = std::env::var(AGENT_CALLS) else {
+        return;
+    };
+    let spec: Value = serde_json::from_str(&text).unwrap();
+    let paths = DaemonPaths::under(Path::new(spec["root"].as_str().unwrap()));
+    let mut client = OwnerClient::connect(&paths, "agent-child").expect("the child connects");
+    for call in spec["calls"].as_array().unwrap() {
+        let answer = client.call::<_, Value>(
+            call["method"].as_str().unwrap(),
+            &call["params"],
+            Some(Duration::from_secs(30)),
+        );
+        let reply = match answer {
+            Ok(_) => json!("ok"),
+            Err(ClientError::Rpc(error)) => json!(error.code),
+            Err(other) => json!(format!("{other}")),
+        };
+        println!("{AGENT_REPLY}{reply}");
+    }
+}
+
+/// Makes `calls` (`(method, params)`) from a process whose environment has the run marker, as a run's agent has, and
+/// returns what each came back as: the error code, or `"ok"`.
+fn as_a_run_agent(rig: &Rig, run: &str, calls: &[(&str, Value)]) -> Vec<Value> {
+    let root = rig.f().home();
+    let spec = json!({
+        "root": root,
+        "calls": calls.iter().map(|(method, params)| json!({"method": method, "params": params})).collect::<Vec<_>>(),
+    });
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "agent_client_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env_clear()
+        .env("HOME", root)
+        .env("COLLIDE_DAEMON_ROOT", root)
+        .env(collide_host::auth::RUN_MARKER, run)
+        .env(AGENT_CALLS, spec.to_string())
+        .stdin(Stdio::null())
+        .output()
+        .expect("the child runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    stdout
+        .lines()
+        // The harness prints the test's name on the same line as the first output.
+        .filter_map(|line| line.split_once(AGENT_REPLY).map(|(_, reply)| reply))
+        .map(|reply| serde_json::from_str(reply).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_run_agent_may_not_save_a_view_and_nothing_is_written() {
+    use collide_core::owner::code::NOT_PERMITTED;
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let call = |target: &str| json!({ "board": board, "view": saved(), "target": target, "overwrite": true });
+
+    let replies = as_a_run_agent(
+        &rig,
+        "run-1",
+        &[
+            ("task.save_view", call("personal")),
+            ("task.save_view", call("repo")),
+        ],
+    );
+
+    assert_eq!(
+        replies,
+        [json!(NOT_PERMITTED), json!(NOT_PERMITTED)],
+        "{replies:?}"
+    );
+    assert!(!rig.personal_dir(&board).join("mine.yaml").exists());
+    assert!(!rig.root().join(".collide/views").exists());
+    // The refusal is about the caller: the person's own client saves with the same calls.
+    rig.save_view(&board, saved(), "personal", true).unwrap();
+    rig.save_view(&board, saved(), "repo", true).unwrap();
+}
+
+#[test]
+fn save_view_refuses_an_invalid_view_an_unsafe_name_and_an_overwrite_with_no_flag() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let folders = [
+        ("repo", rig.root().join(".collide/views")),
+        ("personal", rig.personal_dir(&board)),
+    ];
+    for (target, folder) in &folders {
+        for view in [
+            json!({ "name": "bad", "where": "   " }),
+            json!({ "name": "bad", "where": "tasks.size() > 0" }),
+            json!({ "name": "../evil" }),
+            json!({ "name": "a/b" }),
+            json!({ "name": "has space" }),
+            json!({ "name": ".hidden" }),
+            json!({ "name": "" }),
+        ] {
+            let refused = rig
+                .save_view(&board, view.clone(), target, false)
+                .unwrap_err();
+            assert_eq!(refused.code, -32602, "{target} {view}: {}", refused.message);
+        }
+        assert!(
+            !folder.exists() || fs::read_dir(folder).unwrap().next().is_none(),
+            "{target}: a refused view writes nothing"
+        );
+        let first = rig.save_view(&board, saved(), target, false).unwrap();
+        let before = fs::read_to_string(&first.path).unwrap();
+        let mut changed = saved();
+        changed["include"] = json!(["files:2"]);
+
+        let again = rig
+            .save_view(&board, changed.clone(), target, false)
+            .unwrap_err();
+
+        assert_eq!(again.code, -32011, "{target}: {}", again.message);
+        assert_eq!(fs::read_to_string(&first.path).unwrap(), before);
+        rig.save_view(&board, changed, target, true).unwrap();
+        assert_ne!(fs::read_to_string(&first.path).unwrap(), before);
+    }
 }

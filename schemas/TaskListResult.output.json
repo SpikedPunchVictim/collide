@@ -420,6 +420,113 @@
         "reason"
       ],
       "type": "object"
+    },
+    "ViewReport": {
+      "additionalProperties": false,
+      "description": "What a view reports for one evaluation (0.10, Views): why it has no members, and what went wrong on the way. A clean\nview has no `error`, no counts and no unmatched keys. `steps` and `cycle` are the closure's run order.",
+      "properties": {
+        "cycle": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "error": {
+          "description": "Why the view has no members, when it was refused. Its other fields are then empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errors": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default": {},
+          "description": "The tasks whose `where` raised an error, by reason.",
+          "type": "object"
+        },
+        "goal_unmatched": {
+          "description": "The closure's goal when it matches no task: the closure is then empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invalid_items": {
+          "default": 0,
+          "description": "The board's invalid items, which no view can match.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "members": {
+          "description": "How many tasks are members.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "not_reached": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "over_task_budget": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pass_budget_exhausted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "steps": {
+          "default": [],
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "unmatched_exclude": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unmatched_include": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "members",
+        "errors",
+        "over_task_budget",
+        "pass_budget_exhausted",
+        "not_reached",
+        "unmatched_include",
+        "unmatched_exclude",
+        "invalid_items",
+        "steps",
+        "cycle"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -479,6 +586,17 @@
         "$ref": "#/$defs/Task"
       },
       "type": "array"
+    },
+    "view": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ViewReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the view said of itself, for a request that named or gave one."
     }
   },
   "required": [

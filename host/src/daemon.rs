@@ -111,6 +111,7 @@ use crate::auth::{
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::board_lines::LineError;
 use crate::boards;
+use crate::checkout::root_busy;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::config_get::{
@@ -141,6 +142,10 @@ use crate::sources::{Source, SourceError, Sources, SourcesConfig, changed_event}
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use crate::supervisor::SupervisorPolicy;
+use crate::views::{
+    BeforeParse, Loaded, SaveError, ViewCache, pack_candidates, personal_candidates, personal_dir,
+    repo_candidates, repo_dir, save_view,
+};
 use crate::write_guard::{self, Applied, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig};
 use collide_core::change::Actor;
 use collide_core::corpus::{ListFilter, Page};
@@ -156,12 +161,14 @@ use collide_core::owner::{
     RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
     RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams,
     RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
-    TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams, WriteQueued, code,
-    encode_line, parse_request, route,
+    TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams, TaskSaveViewParams,
+    TaskSaveViewResult, TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport,
+    ViewTarget, WriteQueued, code, encode_line, parse_request, route,
 };
 use collide_core::provider::{ApplyParams, ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
-use std::collections::BTreeMap;
+use collide_core::view_eval::view_report;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -561,6 +568,9 @@ pub struct DaemonOptions {
     /// How often a board's corpus looks at its checkouts and at the sources that need a new list ([`CORPUS_RECHECK`]).
     /// A test passes a short one.
     pub corpus_recheck: Duration,
+    /// Called with a view's `where` text just before it is parsed. A test makes it panic, to see that one view whose
+    /// compile panics is that view's error and nothing else's. `None`, the default, parses as usual.
+    pub view_before_parse: Option<BeforeParse>,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -620,6 +630,7 @@ impl DaemonOptions {
             supervisor: SupervisorPolicy::default(),
             write_poll: WRITE_POLL,
             corpus_recheck: CORPUS_RECHECK,
+            view_before_parse: None,
         }
     }
 }
@@ -674,6 +685,8 @@ struct Shared {
     corpora: std::sync::OnceLock<Corpora>,
     /// The line locks, the live phases and the queued writes ([`crate::write_guard`]).
     guard: WriteGuard,
+    /// What each view's members were, for the corpus they were worked out on ([`crate::views`]).
+    views: ViewCache,
 }
 
 impl Shared {
@@ -754,6 +767,7 @@ impl Daemon {
             subscriber_queue,
             write_poll,
             corpus_recheck,
+            view_before_parse,
             feed_rebuilder,
             load_context,
             secret_store,
@@ -1053,6 +1067,7 @@ impl Daemon {
             sources,
             corpora: std::sync::OnceLock::new(),
             guard,
+            views: ViewCache::new(view_before_parse),
         });
         let corpora = make_corpora(&shared, workspaces_dir, corpus_recheck);
         let _ = shared.corpora.set(corpora);
@@ -2065,6 +2080,8 @@ fn call(
         Method::TaskGet => task_get(shared, params),
         Method::TaskApply => task_apply(shared, session, params),
         Method::TaskPreview => task_preview(shared, params),
+        Method::TaskViews => task_views(shared, params),
+        Method::TaskSaveView => task_save_view(shared, session, params),
         other => Err(RpcError::new(
             code::METHOD_NOT_FOUND,
             format!(
@@ -2851,31 +2868,251 @@ fn source_failed(error: SourceError) -> RpcError {
     }
 }
 
-/// `task.list` (ts-0116-wh): the board's corpus with no view, from what the daemon holds: it starts the board's corpus
-/// if it has not, and answers at once with the cached tasks (`refreshing`) while the first listing runs. `ready`,
-/// `kind` and `checkout` narrow it, `limit` and `cursor` page it, and the board-wide lists come with the first page.
-/// A `view` comes with ts-0118-wp.
+/// `task.list` (ts-0116-wh, ts-0119-tj): the board's corpus, through a view when the request names or gives one. It
+/// starts the board's corpus if it has not, and answers at once with the cached tasks (`refreshing`) while the first
+/// listing runs. A named view is one of [`task_views`]: an unknown name is `NOT_FOUND`, and a view that has an error
+/// lists no task and carries the error in `view`. An inline view is checked as a saved one is, and a bad one is
+/// `INVALID_PARAMS` with the reason. `ready`, `kind` and `checkout` narrow what the view gives, `limit` and `cursor`
+/// page it, and the board-wide lists come with the first page.
 fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
     let params: TaskListParams = read_params("task.list", params)?;
-    if params.view.is_some() {
-        return Err(RpcError::new(
-            code::INVALID_PARAMS,
-            "a view is not served yet (Stage 4b, ts-0118-wp): ask with no view",
-        ));
-    }
     let root = board_root(shared, &params.board)?;
     let service = corpus_of(shared, &params.board, &root)?;
-    let result = service.list(
+    let through = match &params.view {
+        None => None,
+        Some(ViewRef::Inline { view }) => {
+            let tasks = service.read(|corpus| corpus.rows().len());
+            let compiled = shared
+                .views
+                .compile(view, tasks)
+                .map_err(|failure| RpcError::new(code::INVALID_PARAMS, failure.to_string()))?;
+            let result = evaluated(shared, &params.board, &service, &compiled)
+                .map_err(|failure| RpcError::new(code::INVALID_PARAMS, failure.to_string()))?;
+            Some((
+                view_report(&view.name, &result),
+                result.members.iter().cloned().collect(),
+            ))
+        }
+        Some(ViewRef::Named { name }) => {
+            let loaded = loaded_views(shared, &params.board, &root, &service)?;
+            let found = loaded
+                .iter()
+                .find(|view| &view.view.name == name)
+                .ok_or_else(|| {
+                    let names: Vec<&str> =
+                        loaded.iter().map(|view| view.view.name.as_str()).collect();
+                    RpcError::new(
+                        code::NOT_FOUND,
+                        format!(
+                            "the board has no view {name:?}; its views are: {}",
+                            names.join(", ")
+                        ),
+                    )
+                })?;
+            Some(match viewed(shared, &params.board, &service, found) {
+                Ok(result) => (
+                    view_report(name, &result),
+                    result.members.iter().cloned().collect(),
+                ),
+                Err(reason) => (ViewReport::failed(name, &reason), BTreeSet::new()),
+            })
+        }
+    };
+    let mut result = service.list(
         &ListFilter {
             ready: params.ready,
             kind: params.kind.as_deref(),
             checkout: params.checkout.as_deref(),
+            only: through.as_ref().map(|(_, members)| members),
         },
         &Page {
             limit: params.limit.map(|limit| limit as usize),
             cursor: params.cursor.as_deref(),
         },
     );
+    result.view = through.map(|(report, _)| report);
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `task.views` (ts-0119-tj): the board's views with their counts, for the Field's view menu: the person's, the
+/// repo's and the packs' ([`crate::views`]). One view's error is on that view and hides no other. A line that does not
+/// load is `CONFLICT` with its problems.
+fn task_views(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: TaskViewsParams = read_params("task.views", params)?;
+    let root = board_root(shared, &params.board)?;
+    let service = corpus_of(shared, &params.board, &root)?;
+    let views = loaded_views(shared, &params.board, &root, &service)?
+        .iter()
+        .map(|loaded| view_entry(shared, &params.board, &service, loaded))
+        .collect();
+    Ok(serde_json::to_value(TaskViewsResult { views }).expect("a result is JSON"))
+}
+
+/// The board's views in the order of precedence, compiled.
+fn loaded_views(
+    shared: &Shared,
+    board: &str,
+    root: &str,
+    service: &crate::corpus_service::BoardCorpus,
+) -> Result<Vec<Loaded>, RpcError> {
+    let lines = shared.config.lines();
+    let line = lines
+        .for_sources(
+            BoardRef {
+                id: board,
+                root: Path::new(root),
+            },
+            &tools_path(shared),
+        )
+        .map_err(line_error)?;
+    let mut candidates = match lines.home() {
+        Some(home) => personal_candidates(home, board)
+            .map_err(|message| RpcError::new(code::CONFLICT, message))?,
+        None => Vec::new(),
+    };
+    candidates.extend(repo_candidates(&line));
+    candidates.extend(pack_candidates(&line));
+    let tasks = service.read(|corpus| corpus.rows().len());
+    Ok(shared.views.assemble(candidates, tasks))
+}
+
+fn evaluated(
+    shared: &Shared,
+    board: &str,
+    service: &crate::corpus_service::BoardCorpus,
+    compiled: &collide_core::view_eval::CompiledView,
+) -> Result<std::sync::Arc<collide_core::view_eval::ViewResult>, collide_core::view_eval::ViewFailure>
+{
+    let stamp = service.read(|corpus| corpus.stamp());
+    shared.views.evaluate(board, compiled, stamp, || {
+        service.read(|corpus| corpus.clone())
+    })
+}
+
+/// The members of a loaded view, or the reason it has none.
+fn viewed(
+    shared: &Shared,
+    board: &str,
+    service: &crate::corpus_service::BoardCorpus,
+    loaded: &Loaded,
+) -> Result<std::sync::Arc<collide_core::view_eval::ViewResult>, String> {
+    if let Some(error) = &loaded.error {
+        return Err(error.clone());
+    }
+    let compiled = loaded.compiled().expect("a view with no error is compiled");
+    evaluated(shared, board, service, compiled).map_err(|failure| failure.to_string())
+}
+
+/// One view of `task.views`: its counts come from the last evaluation, which is made again when the corpus changed.
+/// `error_count` is the board's invalid items, which no view can match, and the tasks whose `where` raised an error or
+/// ran out of steps.
+fn view_entry(
+    shared: &Shared,
+    board: &str,
+    service: &crate::corpus_service::BoardCorpus,
+    loaded: &Loaded,
+) -> ViewEntry {
+    let mut entry = ViewEntry {
+        view: loaded.view.clone(),
+        source: loaded.source.clone(),
+        task_count: 0,
+        error_count: 0,
+        error: None,
+    };
+    match viewed(shared, board, service, loaded) {
+        Ok(result) => {
+            let counts = &result.counts;
+            let errors =
+                counts.invalid_items as u64 + counts.error_count() + counts.over_task_budget;
+            entry.task_count = u32::try_from(result.members.len()).unwrap_or(u32::MAX);
+            entry.error_count = u32::try_from(errors).unwrap_or(u32::MAX);
+        }
+        Err(reason) => entry.error = Some(reason),
+    }
+    entry
+}
+
+/// `task.save_view` (ts-0119-tj): Save as View. The view is checked as a load checks it, and its name must be a safe
+/// file name. The repo's file goes below the line's Collide folder, in the working tree, and the personal one in the
+/// board's folder of the user's settings. An existing file is refused unless `overwrite`. Nothing is committed. A run's
+/// agent may not save one.
+fn task_save_view(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    refuse_run_agent(session, "save a view")?;
+    let params: TaskSaveViewParams = read_params("task.save_view", params)?;
+    let root = board_root(shared, &params.board)?;
+    let service = corpus_of(shared, &params.board, &root)?;
+    let tasks = service.read(|corpus| corpus.rows().len());
+    shared
+        .views
+        .compile(&params.view, tasks)
+        .map_err(|failure| RpcError::new(code::INVALID_PARAMS, failure.to_string()))?;
+    let lines = shared.config.lines();
+    let (base, folder, mode) = match params.target {
+        ViewTarget::Personal => {
+            let home = lines.home().ok_or_else(|| {
+                RpcError::new(code::INTERNAL_ERROR, "the daemon knows no home directory")
+            })?;
+            let folder = personal_dir(home, &params.board)
+                .map_err(|message| RpcError::new(code::CONFLICT, message))?;
+            let base = folder
+                .parent()
+                .expect("a views folder has a parent")
+                .to_path_buf();
+            (base, folder, 0o600)
+        }
+        ViewTarget::Repo => {
+            // Not queued (0.5, Root busy): a save is the person's own act, so a busy root says so and they retry.
+            let busy = root_busy(&shared.git_env, Path::new(&root)).map_err(|error| {
+                RpcError::new(
+                    code::INTERNAL_ERROR,
+                    format!("git could not say whether {root} is busy, so the view was not saved: {error}"),
+                )
+            })?;
+            if let Some(what) = busy {
+                return Err(RpcError::new(
+                    code::CONFLICT,
+                    format!(
+                        "{what} is in progress in {root}, so the view was not saved there: save it as a personal \
+                         view, or try again when it is done"
+                    ),
+                ));
+            }
+            let line = lines
+                .for_sources(
+                    BoardRef {
+                        id: &params.board,
+                        root: Path::new(&root),
+                    },
+                    &tools_path(shared),
+                )
+                .map_err(line_error)?;
+            let dir = line.line.collide_dir.ok_or_else(|| {
+                RpcError::new(
+                    code::CONFLICT,
+                    "the board's line has no Collide folder to keep a view in",
+                )
+            })?;
+            let folder = repo_dir(Path::new(&root), &dir)
+                .map_err(|message| RpcError::new(code::CONFLICT, message))?;
+            (PathBuf::from(&root), folder, 0o644)
+        }
+    };
+    let path = save_view(&params.view, &base, &folder, params.overwrite, mode).map_err(
+        |error| match error {
+            SaveError::Invalid(message) => RpcError::new(code::INVALID_PARAMS, message),
+            SaveError::Exists(message) | SaveError::Blocked(message) => {
+                RpcError::new(code::CONFLICT, message)
+            }
+            SaveError::Failed(message) => RpcError::new(code::INTERNAL_ERROR, message),
+        },
+    )?;
+    let result = TaskSaveViewResult {
+        path: path.display().to_string(),
+    };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 

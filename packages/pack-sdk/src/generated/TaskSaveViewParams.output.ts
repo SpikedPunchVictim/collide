@@ -19,6 +19,10 @@ export type SortDir = 'asc' | 'desc'
  */
 export interface TaskSaveViewParams {
   board: string
+  /**
+   * Replace the file when there is one. Without it a view of the same name is refused.
+   */
+  overwrite?: boolean
   target: ViewTarget
   view: View
 }
