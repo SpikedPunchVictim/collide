@@ -31,19 +31,20 @@ use crate::scratch::{self, ScratchSource};
 use crate::store::Store;
 use crate::supervisor::{SupervisedProvider, SupervisorPolicy};
 use collide_core::adapter::EnvStrip;
+use collide_core::board::CheckoutFilter;
 use collide_core::change::{Effect, FieldDiff, ItemState};
 use collide_core::events::EventBody;
 use collide_core::owner::TrustState;
 use collide_core::ports::{ProviderError, TaskProvider};
 use collide_core::provider::{
-    ApplyParams, ApplyResult, ChangeCause, GetParams, GetResult, InitializeParams, ListParams,
-    ListResult, PreviewResult, TaskChanged,
+    ApplyParams, ApplyResult, ChangeCause, GetParams, GetResult, InitializeParams,
+    InitializeResult, ListParams, ListResult, PreviewResult, TaskChanged, WatchParams,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Why a source gave no answer. The daemon words each as an owner error.
@@ -218,6 +219,11 @@ pub struct Source {
     /// The pack that provides it, `None` for the scratch source.
     pack: Option<String>,
     backing: Backing,
+    /// What the provider answered to `initialize` when it started. `None` for the scratch source, which is asked.
+    init: Option<InitializeResult>,
+    /// Which start of the provider this is: a new one after the provider was stopped or its pack changed. 0 for the
+    /// scratch source.
+    instance: u64,
 }
 
 impl Source {
@@ -240,6 +246,43 @@ impl Source {
         matches!(self.backing, Backing::Pack(_))
     }
 
+    /// What the source declared at `initialize`: its scope, statuses, kinds, links and capabilities.
+    pub fn declared(&self) -> Result<InitializeResult, SourceError> {
+        match &self.init {
+            Some(init) => Ok(init.clone()),
+            None => self
+                .provider()
+                .initialize(&InitializeParams {
+                    config: BTreeMap::new(),
+                    root: String::new(),
+                })
+                .map_err(|e| self.failed(e)),
+        }
+    }
+
+    /// Which start of the provider this is (see the field). A different number than before is a new provider: it was
+    /// told nothing of the old one's `watch`, and its notifications come on a stream of their own.
+    pub fn instance(&self) -> u64 {
+        self.instance
+    }
+
+    /// The pack's supervised provider, `None` for the scratch source. The corpus reads its notifications, and whether
+    /// it is running, gone or stopped.
+    pub fn supervised(&self) -> Option<Arc<SupervisedProvider>> {
+        match &self.backing {
+            Backing::Scratch(_) => None,
+            Backing::Pack(provider) => Some(provider.clone()),
+        }
+    }
+
+    /// Tells the source which checkouts to watch; each call replaces the set (0.10, Protocol).
+    pub fn watch(&self, params: &WatchParams) -> Result<(), SourceError> {
+        self.provider()
+            .watch(params)
+            .map(|_| ())
+            .map_err(|e| self.failed(e))
+    }
+
     fn provider(&self) -> &dyn TaskProvider {
         match &self.backing {
             Backing::Scratch(scratch) => scratch,
@@ -247,7 +290,7 @@ impl Source {
         }
     }
 
-    /// One page of the source's tasks. The corpus (`ts-0116-wh`) is its caller; no daemon method lists yet.
+    /// One page of the source's tasks. The corpus (`ts-0116-wh`) is its caller.
     pub fn list(&self, params: &ListParams) -> Result<ListResult, SourceError> {
         self.provider().list(params).map_err(|e| self.failed(e))
     }
@@ -306,10 +349,18 @@ struct Identity {
     dir: PathBuf,
 }
 
+/// A provider that started, and what it answered to `initialize`.
+#[derive(Clone)]
+struct Started {
+    provider: Arc<SupervisedProvider>,
+    init: InitializeResult,
+    instance: u64,
+}
+
 /// One source of one board, and its provider once it has started.
 struct Slot {
     identity: Identity,
-    started: Mutex<Option<Arc<SupervisedProvider>>>,
+    started: Mutex<Option<Started>>,
 }
 
 impl Slot {
@@ -325,8 +376,8 @@ impl Slot {
     }
 
     fn stop(&self) {
-        if let Some(provider) = locked(&self.started).take() {
-            provider.stop();
+        if let Some(started) = locked(&self.started).take() {
+            started.provider.stop();
         }
     }
 }
@@ -347,6 +398,8 @@ pub struct Sources {
     config: SourcesConfig,
     boards: Mutex<BTreeMap<String, BTreeMap<String, Arc<Slot>>>>,
     stopped: AtomicBool,
+    /// The last number [`Source::instance`] gave.
+    instances: AtomicU64,
 }
 
 impl Sources {
@@ -355,6 +408,7 @@ impl Sources {
             config,
             boards: Mutex::new(BTreeMap::new()),
             stopped: AtomicBool::new(false),
+            instances: AtomicU64::new(0),
         }
     }
 
@@ -377,6 +431,8 @@ impl Sources {
                 name: name.to_string(),
                 pack: None,
                 backing: Backing::Scratch(ScratchSource::new(self.config.store.clone(), board.id)),
+                init: None,
+                instance: 0,
             });
         }
         let current = self
@@ -406,11 +462,13 @@ impl Sources {
         if planned.origin != PackOrigin::Builtin && !trusted(&current) {
             return Err(SourceError::Refused(untrusted_text(planned, &current)));
         }
-        let provider = self.start(board, &current, planned, &slot)?;
+        let started = self.start(board, &current, planned, &slot)?;
         Ok(Source {
             name: name.to_string(),
             pack: Some(planned.pack.clone()),
-            backing: Backing::Pack(provider),
+            backing: Backing::Pack(started.provider),
+            init: Some(started.init),
+            instance: started.instance,
         })
     }
 
@@ -463,10 +521,10 @@ impl Sources {
         current: &SourceLine,
         planned: &Planned,
         slot: &Slot,
-    ) -> Result<Arc<SupervisedProvider>, SourceError> {
+    ) -> Result<Started, SourceError> {
         let mut started = locked(&slot.started);
-        if let Some(provider) = started.as_ref() {
-            return Ok(provider.clone());
+        if let Some(running) = started.as_ref() {
+            return Ok(running.clone());
         }
         let described = format!("the source `{}` of pack `{}`", planned.name, planned.pack);
         let failed = |why: String| SourceError::Failed(format!("{described} did not start: {why}"));
@@ -498,21 +556,69 @@ impl Sources {
             config,
             root: board.root.display().to_string(),
         };
-        if let Err(error) = provider.initialize(&init) {
-            provider.stop();
-            return Err(match error {
-                ProviderError::Failed { message } => SourceError::Failed(message),
-                other => failed(other.to_string()),
-            });
-        }
+        let declared = match provider.initialize(&init) {
+            Ok(declared) => declared,
+            Err(error) => {
+                provider.stop();
+                return Err(match error {
+                    ProviderError::Failed { message } => SourceError::Failed(message),
+                    other => failed(other.to_string()),
+                });
+            }
+        };
         if self.stopped.load(Ordering::SeqCst) {
             provider.stop();
             return Err(SourceError::Unavailable(
                 "the daemon is shutting down".to_string(),
             ));
         }
-        *started = Some(provider.clone());
-        Ok(provider)
+        let running = Started {
+            provider,
+            init: declared,
+            instance: self.instances.fetch_add(1, Ordering::SeqCst) + 1,
+        };
+        *started = Some(running.clone());
+        Ok(running)
+    }
+
+    /// What a board's line plans, with no provider started: the names of its sources besides `scratch`, and the
+    /// board's `checkout_filter`. The corpus asks for each source by name, which starts it if the line allows.
+    pub fn board_plan(&self, board: BoardRef, tools: &OsStr) -> Result<BoardPlan, SourceError> {
+        let current = self
+            .config
+            .config
+            .lines()
+            .for_sources(board, tools)
+            .map_err(line_failed)?;
+        Ok(BoardPlan {
+            sources: plan(&current.line)
+                .sources
+                .into_iter()
+                .map(|planned| planned.name)
+                .collect(),
+            checkout_filter: current.line.board.checkout_filter.clone(),
+        })
+    }
+
+    /// Stops the providers of the pack a settings key belongs to (`<pack>.<setting>`), on `board` or, with `None`, on
+    /// every board: a provider reads its settings and secrets at start, so the next call starts it with the new ones
+    /// (ts-0113-ck). A key of no running pack stops nothing. The stopped provider's notifications end with it.
+    pub fn stop_pack(&self, board: Option<&str>, key: &str) {
+        let slots: Vec<Arc<Slot>> = {
+            let boards = locked(&self.boards);
+            boards
+                .iter()
+                .filter(|(id, _)| board.is_none_or(|only| only == id.as_str()))
+                .flat_map(|(_, slots)| slots.values().cloned())
+                .filter(|slot| {
+                    key.strip_prefix(slot.identity.pack.as_str())
+                        .is_some_and(|rest| rest.starts_with('.'))
+                })
+                .collect()
+        };
+        for slot in slots {
+            slot.stop();
+        }
     }
 
     /// Stops every provider, and starts none after. The daemon's stop calls it: no child outlives the daemon.
@@ -523,6 +629,13 @@ impl Sources {
             slot.stop();
         }
     }
+}
+
+/// What a board's line plans for the corpus: its sources, and which checkouts are not the board's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoardPlan {
+    pub sources: Vec<String>,
+    pub checkout_filter: CheckoutFilter,
 }
 
 fn trusted(current: &SourceLine) -> bool {

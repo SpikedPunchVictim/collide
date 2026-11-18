@@ -16,7 +16,7 @@ use collide_core::owner::{
     QueueKind, QueueListParams, QueueListResult, TaskApplyParams, TaskApplyResult, TaskGetParams,
     TaskGetResult,
 };
-use collide_core::provider::{ApplyParams, ApplyResult};
+use collide_core::provider::{ApplyParams, ApplyResult, ChangeCause};
 use collide_host::base_env::CaptureOptions;
 use collide_host::board_load::LoadContext;
 use collide_host::builtin_packs::{BuiltinPacks, Environment};
@@ -506,14 +506,17 @@ impl Rig {
         )
     }
 
-    /// The keys of the `task.changed` events recorded so far, oldest first, with who made each.
+    /// The keys of the `task.changed` events recorded so far, oldest first, with who made each. The ones the corpus
+    /// records at startup, for the tasks the board already has, are not writes and are left out (ts-0116-wh).
     fn changed(&self) -> Vec<(String, ActorKind)> {
         self.daemon()
             .events_since(0)
             .unwrap()
             .into_iter()
             .filter_map(|event| match event.body {
-                EventBody::TaskChanged { task, .. } => Some((task.key, event.actor.kind)),
+                EventBody::TaskChanged { task, .. } if task.cause != ChangeCause::Startup => {
+                    Some((task.key, event.actor.kind))
+                }
                 _ => None,
             })
             .collect()

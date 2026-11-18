@@ -89,6 +89,73 @@ pub fn head_commit(root: &Path, env: &[(String, String)]) -> Option<String> {
     .filter(|commit| !commit.is_empty())
 }
 
+/// One entry of `git worktree list`: a checkout of the repository, and the branch it is on (`None` when it is on no
+/// branch).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Worktree {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+}
+
+/// The checkouts of the repository at `root`, as `git worktree list --porcelain` gives them, with symbolic links
+/// resolved. An entry whose folder is gone, and a bare one, is left out.
+pub fn worktrees(root: &Path, env: &[(String, String)]) -> Result<Vec<Worktree>, String> {
+    let Some(text) = git(root, env, &["worktree", "list", "--porcelain"])? else {
+        return Err(format!(
+            "`git worktree list` failed in `{}`; is it still a git checkout?",
+            root.display()
+        ));
+    };
+    let mut found = Vec::new();
+    for block in text.split("\n\n") {
+        let mut path = None;
+        let mut branch = None;
+        let mut bare = false;
+        for line in block.lines() {
+            if let Some(listed) = line.strip_prefix("worktree ") {
+                path = Some(listed.to_string());
+            } else if let Some(name) = line.strip_prefix("branch ") {
+                branch = Some(name.strip_prefix("refs/heads/").unwrap_or(name).to_string());
+            } else if line == "bare" {
+                bare = true;
+            }
+        }
+        if let (Some(path), false) = (path, bare)
+            && let Ok(path) = std::fs::canonicalize(&path)
+        {
+            found.push(Worktree { path, branch });
+        }
+    }
+    Ok(found)
+}
+
+/// Whether the board's `checkout_filter.exclude` names `worktree`: a glob (`*` for any run of characters, `?` for
+/// one) that matches its branch name or its path. A checkout on no branch is matched by its path alone.
+pub fn checkout_excluded(globs: &[String], worktree: &Worktree) -> bool {
+    let path = worktree.path.to_string_lossy();
+    globs.iter().any(|glob| {
+        glob_matches(glob, &path)
+            || worktree
+                .branch
+                .as_deref()
+                .is_some_and(|branch| glob_matches(glob, branch))
+    })
+}
+
+fn glob_matches(glob: &str, text: &str) -> bool {
+    fn at(glob: &[char], text: &[char]) -> bool {
+        match glob.split_first() {
+            None => text.is_empty(),
+            Some(('*', rest)) => (0..=text.len()).any(|skip| at(rest, &text[skip..])),
+            Some(('?', rest)) => !text.is_empty() && at(rest, &text[1..]),
+            Some((one, rest)) => text.first() == Some(one) && at(rest, &text[1..]),
+        }
+    }
+    let glob: Vec<char> = glob.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    at(&glob, &text)
+}
+
 /// The `git_repo` check, passed.
 pub fn git_repo_ok(checkout: &Checkout) -> FirstRunCheck {
     git_repo_check(

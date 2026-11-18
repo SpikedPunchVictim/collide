@@ -129,6 +129,8 @@ struct Status {
     crashes: u32,
     last_failure: Option<String>,
     given_up: bool,
+    /// `stop` was called and no `initialize` has come since: nothing starts this provider again.
+    stopped: bool,
     /// The current child's flag that its output closed.
     child_ended: Option<Arc<AtomicBool>>,
 }
@@ -232,6 +234,18 @@ impl SupervisedProvider {
         let mut calls = locked(&self.calls);
         self.drop_child(&mut calls);
         *calls = Calls::default();
+        locked(&self.status).stopped = true;
+    }
+
+    /// Whether the supervisor has given up: its calls answer [`ProviderError::Gone`] until [`Self::retry`]. It does not
+    /// wait for a call in progress.
+    pub fn is_gone(&self) -> bool {
+        locked(&self.status).given_up
+    }
+
+    /// Whether [`Self::stop`] ended it. A new `initialize` makes it live again.
+    pub fn is_stopped(&self) -> bool {
+        locked(&self.status).stopped
     }
 
     fn said(&self, what: impl std::fmt::Display) -> String {

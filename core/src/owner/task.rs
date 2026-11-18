@@ -40,7 +40,17 @@ pub struct TaskListParams {
     pub cursor: Option<String>,
 }
 
-/// `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10).
+/// A source whose last answer may be out of date, and why (`source.stale`, or a provider that is gone).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StaleSource {
+    pub source: String,
+    pub reason: String,
+}
+
+/// `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
+/// lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`) come with the first page only. They
+/// are additive: a reader that does not know them reads the rest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskListResult {
@@ -51,6 +61,17 @@ pub struct TaskListResult {
     pub invalid: Vec<TaskInvalid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    /// The keys on the board whose copy in a workspace differs from the copy at its root.
+    #[serde(default)]
+    pub divergent: Vec<String>,
+    /// The keys that are at different paths in different checkouts.
+    #[serde(default)]
+    pub collisions: Vec<TaskCollision>,
+    #[serde(default)]
+    pub stale_sources: Vec<StaleSource>,
+    /// The first listing of a source is still running, so the tasks are what the last run cached, or fewer.
+    #[serde(default)]
+    pub refreshing: bool,
 }
 
 /// `task.get` params (`collide task <id>`). `id` may be the short form (`12` or `12-ua`).

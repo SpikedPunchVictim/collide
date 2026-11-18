@@ -10,12 +10,27 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
 
 /**
- * `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10).
+ * `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
+ * lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`) come with the first page only. They
+ * are additive: a reader that does not know them reads the rest.
  */
 export interface TaskListResult {
   collections: Collection[]
+  /**
+   * The keys that are at different paths in different checkouts.
+   */
+  collisions: TaskCollision[]
+  /**
+   * The keys on the board whose copy in a workspace differs from the copy at its root.
+   */
+  divergent: string[]
   invalid: TaskInvalid[]
   next_cursor?: string | null
+  /**
+   * The first listing of a source is still running, so the tasks are what the last run cached, or fewer.
+   */
+  refreshing: boolean
+  stale_sources: StaleSource[]
   tasks: Task[]
 }
 /**
@@ -35,6 +50,20 @@ export interface CollectionGroup {
   tasks: string[]
 }
 /**
+ * `task.collision`: one short id at different paths in several checkouts. It is a collision, never a divergence.
+ */
+export interface TaskCollision {
+  locations: Location[]
+  shortId: string
+}
+/**
+ * Where one copy of a task is.
+ */
+export interface Location {
+  checkout: string
+  path: string
+}
+/**
  * `task.invalid`: something the source could not read as a task. Core turns it into a Queue item. `checkout` is
  * null for a source that is not ref-scoped.
  */
@@ -42,6 +71,13 @@ export interface TaskInvalid {
   checkout: string | null
   path: string
   reason: string
+}
+/**
+ * A source whose last answer may be out of date, and why (`source.stale`, or a provider that is gone).
+ */
+export interface StaleSource {
+  reason: string
+  source: string
 }
 /**
  * One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`

@@ -430,6 +430,10 @@ fn notifications() -> Vec<(&'static str, Value)> {
             "task.invalid",
             json!({ "path": "a/bad.md", "checkout": "main", "reason": "frontmatter over its cap" }),
         ),
+        (
+            "source.stale with checkout",
+            json!({ "reason": "the checkout could not be read", "checkout": "wt-1" }),
+        ),
     ]
 }
 

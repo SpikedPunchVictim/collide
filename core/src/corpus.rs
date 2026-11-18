@@ -29,7 +29,7 @@
 use crate::change::{FieldDiff, ItemState, Rename};
 use crate::hook::HookLink;
 use crate::item::{Category, KindDecl, LinkDir, LinkTarget, StatusDecl};
-use crate::owner::task::{TaskCopy, TaskGetResult, TaskListResult};
+use crate::owner::task::{StaleSource, TaskCopy, TaskGetResult, TaskListResult};
 use crate::provider::{
     ChangeCause, Collection, InitializeResult, ListResult, ProviderEvent, RemovedCause, Task,
     TaskChanged, TaskCollision, TaskInvalid, TaskRemoved,
@@ -120,6 +120,22 @@ pub enum Found {
     /// The query fits several keys, in key order.
     Ambiguous(Vec<String>),
     None,
+}
+
+/// What `task.list` keeps of the corpus: with `ready`, the tasks the ready rule lists; with `kind`, the tasks of that
+/// kind; with `checkout`, the tasks that have a copy there, each as that copy.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ListFilter<'a> {
+    pub ready: bool,
+    pub kind: Option<&'a str>,
+    pub checkout: Option<&'a str>,
+}
+
+/// One page of a list: at most `limit` tasks (all of them when `None`), after the task `cursor` names.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Page<'a> {
+    pub limit: Option<usize>,
+    pub cursor: Option<&'a str>,
 }
 
 /// What [`Corpus::apply_changed`] did.
@@ -224,6 +240,32 @@ pub struct Corpus {
     inbound: HashMap<String, BTreeSet<String>>,
     /// (source, checkout, path) to the key of the copy there.
     locations: HashMap<Location, String>,
+}
+
+fn empty_list() -> TaskListResult {
+    TaskListResult {
+        tasks: Vec::new(),
+        collections: Vec::new(),
+        invalid: Vec::new(),
+        next_cursor: None,
+        divergent: Vec::new(),
+        collisions: Vec::new(),
+        stale_sources: Vec::new(),
+        refreshing: false,
+    }
+}
+
+/// A row's place in a list: its key, then its path, so that one key at two paths has two places.
+fn cursor_of(row: &Row<'_>) -> String {
+    format!(
+        "{}\n{}",
+        row.task.key,
+        row.task.path.as_deref().unwrap_or("")
+    )
+}
+
+fn after_cursor(row: &Row<'_>, cursor: &str) -> bool {
+    cursor_of(row).as_str() > cursor
 }
 
 fn short_of(key: &str) -> &str {
@@ -523,6 +565,12 @@ impl Corpus {
 
     /// The task rows of the board, in key order. A collided key has a row for each of its paths.
     pub fn rows(&self) -> Vec<Row<'_>> {
+        self.rows_in(None)
+    }
+
+    /// The rows of one checkout, or of the board with `None`. With a checkout, a task is the copy that is there, and
+    /// a task that has none there has no row.
+    fn rows_in(&self, only: Option<&str>) -> Vec<Row<'_>> {
         let root = self.default_root();
         let mut rows = Vec::new();
         for (key, entry) in &self.entries {
@@ -532,6 +580,9 @@ impl Corpus {
             let mut by_path: BTreeMap<Option<&str>, Vec<(&Option<String>, &Task)>> =
                 BTreeMap::new();
             for (checkout, task) in &entry.copies {
+                if only.is_some() && checkout.as_deref() != only {
+                    continue;
+                }
                 by_path
                     .entry(task.path.as_deref())
                     .or_default()
@@ -748,7 +799,125 @@ impl Corpus {
                 .map(|entry| entry.item.clone())
                 .collect(),
             next_cursor: None,
+            divergent: Vec::new(),
+            collisions: Vec::new(),
+            stale_sources: Vec::new(),
+            refreshing: false,
         }
+    }
+
+    /// `task.list`: the rows that pass `filter`, in key then path order, one page of them. The cursor names the last
+    /// row of the page before, so a change to that row, or its removal, moves no other row. The board-wide lists
+    /// (collections, invalid items, divergent keys, collisions, stale sources) come with the first page only.
+    /// `refreshing` is the caller's to set.
+    pub fn list(&self, filter: &ListFilter<'_>, page: &Page<'_>) -> TaskListResult {
+        let ready = filter.ready.then(|| self.ready_ids());
+        let mut rows: Vec<Row<'_>> = self
+            .rows_in(filter.checkout)
+            .into_iter()
+            .filter(|row| {
+                let source = source_of_key(&row.task.key).unwrap_or_default();
+                filter
+                    .kind
+                    .is_none_or(|kind| self.kind_of(source, row.task) == kind)
+                    && ready.as_ref().is_none_or(|ids| ids.contains(&row.task.key))
+            })
+            .collect();
+        if let Some(cursor) = page.cursor {
+            rows.retain(|row| after_cursor(row, cursor));
+        }
+        let more = page.limit.is_some_and(|limit| rows.len() > limit);
+        if let Some(limit) = page.limit {
+            rows.truncate(limit);
+        }
+        let next_cursor = more
+            .then(|| rows.last().map(|row| cursor_of(row)))
+            .flatten();
+        let first = page.cursor.is_none();
+        let mut result = if first {
+            self.list_result()
+        } else {
+            TaskListResult { ..empty_list() }
+        };
+        result.tasks = rows
+            .into_iter()
+            .map(|row| Task {
+                body: None,
+                ..row.task.clone()
+            })
+            .collect();
+        result.next_cursor = next_cursor;
+        if first {
+            result.divergent = self.divergent_keys();
+            result.collisions = self.collisions();
+            result.stale_sources = self
+                .stale_sources()
+                .into_iter()
+                .map(|(source, reason)| StaleSource {
+                    source: source.to_string(),
+                    reason: reason.to_string(),
+                })
+                .collect();
+        }
+        result
+    }
+
+    fn kind_of(&self, source: &str, task: &Task) -> String {
+        self.sources
+            .get(source)
+            .map_or_else(String::new, |state| state.kind_of(task))
+    }
+
+    /// The keys the ready rule lists, each source on its own: a `blocked-by` target is a name in the holder's source.
+    fn ready_ids(&self) -> BTreeSet<String> {
+        let mut ready = BTreeSet::new();
+        for source in self.sources.keys() {
+            let tasks: Vec<Task> = self
+                .entries
+                .values()
+                .filter(|entry| &entry.source == source)
+                .map(|entry| self.shown(entry).clone())
+                .collect();
+            ready.extend(
+                crate::ready::readiness(&tasks)
+                    .ready
+                    .into_iter()
+                    .map(|id| qualified(source, &id)),
+            );
+        }
+        ready
+    }
+
+    fn divergent_keys(&self) -> Vec<String> {
+        self.entries
+            .keys()
+            .filter(|key| !self.divergences_of(key).is_empty())
+            .cloned()
+            .collect()
+    }
+
+    /// The keys a key was renamed from and that are not held on their own, in key order.
+    pub fn former_keys(&self, key: &str) -> Vec<String> {
+        let Some(key) = self.resolve_key(key) else {
+            return Vec::new();
+        };
+        let mut old: Vec<String> = self
+            .names_for(&key)
+            .into_iter()
+            .filter(|name| self.redirects.contains_key(name) && !self.entries.contains_key(name))
+            .collect();
+        old.sort();
+        old
+    }
+
+    /// The copy of `key` in `checkout` (`None` for a source that is not ref-scoped), with no body.
+    pub fn copy(&self, key: &str, checkout: Option<&str>) -> Option<&Task> {
+        self.entries
+            .get(key)?
+            .copies
+            .iter()
+            .find(|(held, _)| held.as_deref() == checkout)
+            .map(|(_, task)| task)
     }
 
     // --- links ---
@@ -1081,7 +1250,15 @@ fn diff_of(old: &Task, new: &Task) -> BTreeMap<String, FieldDiff> {
 /// is stale, whose lists are not the truth. Renames are not guessed: a key that is gone and a key that is new are
 /// two events.
 pub fn reconcile(cached: &Corpus, fresh: &Corpus) -> Vec<ProviderEvent> {
-    let mut events = Vec::new();
+    reconcile_by_source(cached, fresh)
+        .into_iter()
+        .map(|(_, event)| event)
+        .collect()
+}
+
+/// [`reconcile`] with the name of the source each event is of: an invalid item does not carry it.
+pub fn reconcile_by_source(cached: &Corpus, fresh: &Corpus) -> Vec<(String, ProviderEvent)> {
+    let mut events: Vec<(String, ProviderEvent)> = Vec::new();
     for (name, source) in &fresh.sources {
         if source.stale.is_some() {
             continue;
@@ -1100,17 +1277,20 @@ pub fn reconcile(cached: &Corpus, fresh: &Corpus) -> Vec<ProviderEvent> {
                 if old == Some(task) {
                     continue;
                 }
-                events.push(ProviderEvent::Changed(TaskChanged {
-                    key: key.clone(),
-                    version: task.version.clone(),
-                    from: old.map(|old| old.state.clone()),
-                    to: Some(task.state.clone()),
-                    diff: old.map_or_else(BTreeMap::new, |old| diff_of(old, task)),
-                    cause: ChangeCause::Startup,
-                    actor: None,
-                    automated: None,
-                    checkout: checkout.clone(),
-                }));
+                events.push((
+                    name.clone(),
+                    ProviderEvent::Changed(TaskChanged {
+                        key: key.clone(),
+                        version: task.version.clone(),
+                        from: old.map(|old| old.state.clone()),
+                        to: Some(task.state.clone()),
+                        diff: old.map_or_else(BTreeMap::new, |old| diff_of(old, task)),
+                        cause: ChangeCause::Startup,
+                        actor: None,
+                        automated: None,
+                        checkout: checkout.clone(),
+                    }),
+                ));
             }
         }
         for (key, entry) in cached
@@ -1130,17 +1310,20 @@ pub fn reconcile(cached: &Corpus, fresh: &Corpus) -> Vec<ProviderEvent> {
                         .contains_key(&(checkout.clone(), path.clone()))
                 });
                 if relisted && !held && !invalid {
-                    events.push(ProviderEvent::Removed(TaskRemoved {
-                        key: key.clone(),
-                        cause: RemovedCause::Unknown,
-                        checkout: checkout.clone(),
-                    }));
+                    events.push((
+                        name.clone(),
+                        ProviderEvent::Removed(TaskRemoved {
+                            key: key.clone(),
+                            cause: RemovedCause::Unknown,
+                            checkout: checkout.clone(),
+                        }),
+                    ));
                 }
             }
         }
         for (at, item) in &source.invalid {
             if before.and_then(|before| before.invalid.get(at)) != Some(item) {
-                events.push(ProviderEvent::Invalid(item.clone()));
+                events.push((name.clone(), ProviderEvent::Invalid(item.clone())));
             }
         }
     }

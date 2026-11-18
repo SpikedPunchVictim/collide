@@ -116,6 +116,7 @@ use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
 use crate::config_get::{
     BoardRef, ConfigService, GetError, LoadContextFactory, SetError, system_load_context,
 };
+use crate::corpus_service::{Corpora, CorporaConfig};
 use crate::disk::{FloorSource, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
 use crate::file_run::quick_run::RunDiffError;
@@ -142,19 +143,21 @@ use crate::store::{Store, StoreError};
 use crate::supervisor::SupervisorPolicy;
 use crate::write_guard::{self, Applied, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig};
 use collide_core::change::Actor;
+use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
 use collide_core::owner::{
     BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardTrustParams,
     BoardTrustReviewParams, ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams,
     ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams,
-    ConfigSetParams, DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
-    DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
-    OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueItem,
-    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunDiffParams,
-    RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
-    RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult,
-    RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskGetParams,
-    TaskGetResult, TaskPreviewParams, WriteQueued, code, encode_line, parse_request, route,
+    ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
+    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice,
+    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult,
+    QueueItem, QueueListParams, QueueListResult, Request, Response, Routed, RpcError,
+    RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
+    RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams,
+    RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
+    TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams, WriteQueued, code,
+    encode_line, parse_request, route,
 };
 use collide_core::provider::{ApplyParams, ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
@@ -555,6 +558,9 @@ pub struct DaemonOptions {
     /// How often the writer looks at the queued writes of a checkout that is still busy ([`WRITE_POLL`]). A write
     /// also goes at once when a phase ends. A test passes a short one.
     pub write_poll: Duration,
+    /// How often a board's corpus looks at its checkouts and at the sources that need a new list ([`CORPUS_RECHECK`]).
+    /// A test passes a short one.
+    pub corpus_recheck: Duration,
 }
 
 /// Who is asking, as the daemon reads it when its options give no tree: the system's own answer, with the app known by
@@ -613,9 +619,13 @@ impl DaemonOptions {
             secret_store: Arc::new(MemorySecretStore::new()),
             supervisor: SupervisorPolicy::default(),
             write_poll: WRITE_POLL,
+            corpus_recheck: CORPUS_RECHECK,
         }
     }
 }
+
+/// How often a board's corpus reads the checkouts again and lists the sources that have no `watch` (0.10, Corpus).
+pub const CORPUS_RECHECK: Duration = Duration::from_secs(10);
 
 /// How often a queued write looks again at a checkout that was busy, for what no phase's end tells it: a rebase that
 /// ended (ts-0114-hr).
@@ -658,7 +668,10 @@ struct Shared {
     /// What `config.get` reads: the user's files and the loader.
     config: ConfigService,
     /// The providers behind each board's sources ([`crate::sources`]). They stop with the daemon.
-    sources: Sources,
+    sources: Arc<Sources>,
+    /// The corpus of each board ([`crate::corpus_service`]). Set once, right after `Shared` is made, because its
+    /// threads reach the daemon through a weak reference.
+    corpora: std::sync::OnceLock<Corpora>,
     /// The line locks, the live phases and the queued writes ([`crate::write_guard`]).
     guard: WriteGuard,
 }
@@ -740,6 +753,7 @@ impl Daemon {
             claude_refresh_every,
             subscriber_queue,
             write_poll,
+            corpus_recheck,
             feed_rebuilder,
             load_context,
             secret_store,
@@ -900,6 +914,7 @@ impl Daemon {
             live,
             runs_dir: paths.runs_dir.clone(),
             workspaces_dir: workspaces_dir
+                .clone()
                 .unwrap_or_else(|| paths.runs_dir.with_file_name("workspaces")),
             home: home.clone(),
             clocks: clocks.clone(),
@@ -991,7 +1006,7 @@ impl Daemon {
 
         // The providers of a board's sources: their data folders are beside the runs, and they wait for the first
         // capture of the base environment like a run does.
-        let sources = Sources::new(SourcesConfig {
+        let sources = Arc::new(Sources::new(SourcesConfig {
             config: config.clone(),
             store: store.clone(),
             data_root: paths.runs_dir.with_file_name("pack-data"),
@@ -1001,7 +1016,7 @@ impl Daemon {
                 let wait = capture.timeout + CAPTURE_WAIT_MARGIN;
                 Arc::new(move || wait_for_environment(&env, wait))
             },
-        });
+        }));
 
         let uid = auth::daemon_uid();
         let tree =
@@ -1036,8 +1051,11 @@ impl Daemon {
             claude_refresher: Mutex::new(None),
             config,
             sources,
+            corpora: std::sync::OnceLock::new(),
             guard,
         });
+        let corpora = make_corpora(&shared, workspaces_dir, corpus_recheck);
+        let _ = shared.corpora.set(corpora);
 
         let capturing = shared.clone();
         spawn_named("collide-env-capture", move || {
@@ -1080,6 +1098,10 @@ impl Daemon {
             context: "could not start the queued writes' thread".to_string(),
             source,
         })?;
+        // Each stored board's corpus fills on its own thread, so nothing here waits for a provider.
+        if let Some(corpora) = shared.corpora.get() {
+            corpora.start_stored();
+        }
         Ok(Daemon {
             shared,
             accept: Some(accept),
@@ -1171,6 +1193,10 @@ impl Drop for Daemon {
         self.join();
         // The providers of the sources end with the daemon: no child outlives it.
         self.shared.sources.stop();
+        // The corpus threads end once the sources do: a call that waited on a provider has returned.
+        if let Some(corpora) = self.shared.corpora.get() {
+            corpora.shutdown();
+        }
         // The limit timers end first: one that is resuming a run needs the phases.
         self.shared.file_runs.shutdown();
         self.shared.claude.stop();
@@ -1287,7 +1313,13 @@ fn apply_queued(shared: &Shared, write: QueuedWrite) -> Applied {
         Ok(source) => source,
         Err(error) => return Applied::Problem(source_failed(error).message),
     };
-    match apply_and_record(shared, write.actor.clone(), &source, &write.apply) {
+    match apply_and_record(
+        shared,
+        &write.board,
+        write.actor.clone(),
+        &source,
+        &write.apply,
+    ) {
         Ok(ApplyResult::Ok { .. }) => Applied::Done,
         Ok(ApplyResult::Conflict { current }) => Applied::Problem(format!(
             "{} changed since this write was asked for; it is now {}. Read it and ask again",
@@ -1296,6 +1328,52 @@ fn apply_queued(shared: &Shared, write: QueuedWrite) -> Applied {
         Ok(ApplyResult::Refused { message }) => Applied::Problem(message),
         Err(error) => Applied::Problem(source_failed(error).message),
     }
+}
+
+/// The corpus services of the daemon's boards. Their threads hold the daemon weakly: a daemon that is dropped ends
+/// them.
+fn make_corpora(
+    shared: &Arc<Shared>,
+    workspaces_dir: Option<PathBuf>,
+    recheck: Duration,
+) -> Corpora {
+    let weak = Arc::downgrade(shared);
+    let phases = shared.phases.clone();
+    let log = shared.log.clone();
+    Corpora::new(CorporaConfig {
+        sources: shared.sources.clone(),
+        store: shared.store.clone(),
+        git_env: shared.git_env.clone(),
+        workspaces_dir: workspaces_dir
+            .unwrap_or_else(|| shared.paths.runs_dir.with_file_name("workspaces")),
+        tools: {
+            let weak = weak.clone();
+            Arc::new(move || {
+                weak.upgrade()
+                    .map(|shared| tools_path(&shared))
+                    .unwrap_or_default()
+            })
+        },
+        record: {
+            let log = log.clone();
+            Arc::new(move |body| {
+                let actor = Actor {
+                    kind: collide_core::change::ActorKind::Workflow,
+                    run: None,
+                    phase: None,
+                };
+                if let Err(error) = phases.append_event(actor, body) {
+                    log.line(&format!("a corpus event was not recorded: {error}"));
+                }
+            })
+        },
+        log: {
+            let log = log.clone();
+            Arc::new(move |text: &str| log.line(text))
+        },
+        stopping: Arc::new(move || weak.upgrade().is_none_or(|shared| shared.stopping())),
+        recheck,
+    })
 }
 
 fn spawn_named(name: &str, body: impl FnOnce() + Send + 'static) -> io::Result<JoinHandle<()>> {
@@ -1983,6 +2061,7 @@ fn call(
         Method::BoardInit => board_init(shared, session, params),
         Method::BoardTrust => board_trust(shared, session, params),
         Method::BoardTrustReview => board_trust_review(shared, params),
+        Method::TaskList => task_list(shared, params),
         Method::TaskGet => task_get(shared, params),
         Method::TaskApply => task_apply(shared, session, params),
         Method::TaskPreview => task_preview(shared, params),
@@ -2552,7 +2631,16 @@ fn config_set(
         .zip(root.as_deref())
         .map(|(id, root)| BoardRef { id, root });
     match shared.config.set(&params, board, &tools_path(shared)) {
-        Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
+        Ok(result) => {
+            // A provider reads its settings and secrets when it starts: the next call starts it with the new ones
+            // (ts-0113-ck). A user key stops the pack's providers on every board, a repo key on its board's.
+            let only = match params.layer {
+                ConfigWriteLayer::User => None,
+                ConfigWriteLayer::Repo => params.board.as_deref(),
+            };
+            shared.sources.stop_pack(only, &params.key);
+            Ok(serde_json::to_value(result).expect("a result is JSON"))
+        }
         Err(SetError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
         Err(SetError::Invalid(message)) => Err(RpcError::new(code::INVALID_PARAMS, message)),
         Err(SetError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
@@ -2694,6 +2782,14 @@ fn board_trust(
         .lines()
         .trust(board, &params, &tools_path(shared))
         .map_err(line_error)?;
+    // The corpus lists the packs that were refused until now at its next look; this makes that look now.
+    if let Some(service) = shared
+        .corpora
+        .get()
+        .and_then(|corpora| corpora.get(&params.board))
+    {
+        service.wake();
+    }
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
@@ -2755,53 +2851,171 @@ fn source_failed(error: SourceError) -> RpcError {
     }
 }
 
-/// `task.get` (ts-0075-hj, ts-0113-ck): the task with its whole prompt or body, or no task when the board's source has
-/// none with that id. An id with no source in front of it is a scratch task. A source the board's line does not have
-/// answers no task. A source that cannot answer (an untrusted line, a provider that is gone) is an error that says so.
-/// The copies, collisions and `latest_run` come with the corpus (`ts-0116-wh`).
+/// `task.list` (ts-0116-wh): the board's corpus with no view, from what the daemon holds: it starts the board's corpus
+/// if it has not, and answers at once with the cached tasks (`refreshing`) while the first listing runs. `ready`,
+/// `kind` and `checkout` narrow it, `limit` and `cursor` page it, and the board-wide lists come with the first page.
+/// A `view` comes with ts-0118-wp.
+fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: TaskListParams = read_params("task.list", params)?;
+    if params.view.is_some() {
+        return Err(RpcError::new(
+            code::INVALID_PARAMS,
+            "a view is not served yet (Stage 4b, ts-0118-wp): ask with no view",
+        ));
+    }
+    let root = board_root(shared, &params.board)?;
+    let service = corpus_of(shared, &params.board, &root)?;
+    let result = service.list(
+        &ListFilter {
+            ready: params.ready,
+            kind: params.kind.as_deref(),
+            checkout: params.checkout.as_deref(),
+        },
+        &Page {
+            limit: params.limit.map(|limit| limit as usize),
+            cursor: params.cursor.as_deref(),
+        },
+    );
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// The board's corpus, started if it has not been.
+fn corpus_of(
+    shared: &Shared,
+    board: &str,
+    root: &str,
+) -> Result<Arc<crate::corpus_service::BoardCorpus>, RpcError> {
+    shared
+        .corpora
+        .get()
+        .and_then(|corpora| corpora.ensure(board, Path::new(root)))
+        .ok_or_else(|| RpcError::new(code::UNAVAILABLE, "the daemon is shutting down"))
+}
+
+/// `task.get` (ts-0075-hj, ts-0113-ck, ts-0116-wh): the task with its whole prompt or body, or no task when the board's
+/// source has none with that id. An id with no source in front of it is a scratch task. A source the board's line does
+/// not have answers no task. A source that cannot answer (an untrusted line, a provider that is gone) is an error that
+/// says so. An id the corpus knows (a key, an old key, a short id) also brings the task's copies, the collision of a
+/// key held at two paths, the keys a short id fits, its runs newest first (those of its old keys too) and its latest
+/// finished run.
 fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
     let params: TaskGetParams = read_params("task.get", params)?;
     let root = board_root(shared, &params.board)?;
-    let (source, id) = scratch::split_id(&params.id);
-    let source = source.unwrap_or(scratch::SOURCE);
-    let task = match source_of(shared, &params.board, &root, source) {
-        Ok(source) => {
-            source
-                .get(&GetParams {
-                    id: id.to_string(),
-                    checkout: params.checkout.clone(),
-                })
-                .map_err(source_failed)?
+    let (prefix, id) = scratch::split_id(&params.id);
+    let known = match prefix {
+        Some(_) => corpus_of(shared, &params.board, &root)?.read(|corpus| {
+            let found = corpus.get(&params.id);
+            let former = found
                 .task
+                .as_ref()
+                .map(|task| corpus.former_keys(&task.key))
+                .unwrap_or_default();
+            (found, former)
+        }),
+        None => (empty_get(), Vec::new()),
+    };
+    let (mut result, former) = known;
+    if result.task.is_some() {
+        // What the corpus shows has no body: the source gives the whole task.
+        let shown = result.task.clone().expect("checked");
+        let (name, short) = shown
+            .key
+            .split_once(':')
+            .unwrap_or((scratch::SOURCE, &shown.key));
+        let checkout = params.checkout.clone().or_else(|| shown.checkout.clone());
+        match source_of(shared, &params.board, &root, name) {
+            Ok(source) => {
+                let got = source
+                    .get(&GetParams {
+                        id: short.to_string(),
+                        checkout,
+                    })
+                    .map_err(source_failed)?;
+                if let Some(task) = got.task {
+                    result.task = Some(task);
+                }
+            }
+            Err(SourceError::NoSource(_)) => {}
+            Err(error) => return Err(source_failed(error)),
         }
-        Err(SourceError::NoSource(_)) => None,
-        Err(error) => return Err(source_failed(error)),
-    };
-    let runs = match &task {
-        Some(task) => shared
-            .store
-            .runs(&RunFilter {
-                board: Some(&params.board),
-                task: Some(&task.key),
-                scope: RunScope::All,
-                before: None,
-                limit: RUN_PAGE_MAX,
-            })
-            .map_err(store_failed)?
-            .into_iter()
-            .map(|row| row.run)
-            .collect(),
-        None => Vec::new(),
-    };
-    let result = TaskGetResult {
-        task,
+    } else if result.ambiguous.is_empty() {
+        let source = prefix.unwrap_or(scratch::SOURCE);
+        result.task = match source_of(shared, &params.board, &root, source) {
+            Ok(source) => {
+                source
+                    .get(&GetParams {
+                        id: id.to_string(),
+                        checkout: params.checkout.clone(),
+                    })
+                    .map_err(source_failed)?
+                    .task
+            }
+            Err(SourceError::NoSource(_)) => None,
+            Err(error) => return Err(source_failed(error)),
+        };
+    }
+    if let Some(task) = &result.task {
+        let mut keys = vec![task.key.clone()];
+        keys.extend(former);
+        let rows = runs_of(shared, &params.board, &keys)?;
+        result.latest_run = rows.iter().find_map(latest_of);
+        result.runs = rows.into_iter().map(|row| row.run).collect();
+    }
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+fn empty_get() -> TaskGetResult {
+    TaskGetResult {
+        task: None,
         ambiguous: Vec::new(),
         copies: Vec::new(),
         collisions: Vec::new(),
-        runs,
+        runs: Vec::new(),
         latest_run: None,
+    }
+}
+
+/// The runs of a task under any of `keys`, newest first.
+fn runs_of(
+    shared: &Shared,
+    board: &str,
+    keys: &[String],
+) -> Result<Vec<crate::run_store::RunRow>, RpcError> {
+    let mut rows = Vec::new();
+    for key in keys {
+        rows.extend(
+            shared
+                .store
+                .runs(&RunFilter {
+                    board: Some(board),
+                    task: Some(key),
+                    scope: RunScope::All,
+                    before: None,
+                    limit: RUN_PAGE_MAX,
+                })
+                .map_err(store_failed)?,
+        );
+    }
+    rows.sort_by_key(|row| std::cmp::Reverse(row.opened_seq));
+    rows.dedup_by(|a, b| a.run == b.run);
+    Ok(rows)
+}
+
+/// A run that reached a final state, as the task's `latest_run` (0.5, `latestRun`): its outcome, with no state.
+fn latest_of(row: &crate::run_store::RunRow) -> Option<collide_core::change::LatestRun> {
+    use collide_core::state::RunState;
+    let outcome = match &row.state {
+        RunState::Ended { outcome } => outcome.as_str().to_string(),
+        RunState::Failed {} => "failed".to_string(),
+        RunState::Stopped {} => "stopped".to_string(),
+        RunState::Running {} | RunState::Paused { .. } | RunState::Integrating {} => return None,
     };
-    Ok(serde_json::to_value(result).expect("a result is JSON"))
+    Some(collide_core::change::LatestRun {
+        id: row.run.clone(),
+        workflow: row.workflow.clone(),
+        outcome,
+        state: Default::default(),
+    })
 }
 
 /// The source a write or a preview names, and the call it makes: `source` or the id's own prefix (which must agree),
@@ -2896,12 +3110,14 @@ fn write(
 ) -> Result<Written, RpcError> {
     let actor = session.actor();
     if !source.writes_checkout() {
-        let result = apply_and_record(shared, actor, source, apply).map_err(source_failed)?;
+        let result =
+            apply_and_record(shared, board, actor, source, apply).map_err(source_failed)?;
         return Ok(Written::Applied(Box::new(result)));
     }
     let checkout = write_guard::canonical(Path::new(apply.checkout.as_deref().unwrap_or(root)));
     if !checkout.is_dir() {
-        let result = apply_and_record(shared, actor, source, apply).map_err(source_failed)?;
+        let result =
+            apply_and_record(shared, board, actor, source, apply).map_err(source_failed)?;
         return Ok(Written::Applied(Box::new(result)));
     }
     shared.guard.hold(&checkout, || {
@@ -2922,20 +3138,25 @@ fn write(
                     .map(Written::Queued)
                     .map_err(|message| RpcError::new(code::INTERNAL_ERROR, message))
             }
-            Ok(None) => apply_and_record(shared, actor, source, apply)
+            Ok(None) => apply_and_record(shared, board, actor, source, apply)
                 .map(|result| Written::Applied(Box::new(result)))
                 .map_err(source_failed),
         }
     })
 }
 
-/// The source's `apply`, then one `task.changed` event for each item the write changed, with `actor`.
+/// The source's `apply`, then one `task.changed` event for each item the write changed, with `actor`. The board's
+/// corpus is told of the write under its gate, so the watcher's notice of the same write is dropped and the write is
+/// one event ([`crate::corpus_service`]).
 fn apply_and_record(
     shared: &Shared,
+    board: &str,
     actor: Actor,
     source: &Source,
     apply: &ApplyParams,
 ) -> Result<ApplyResult, SourceError> {
+    let corpus = shared.corpora.get().and_then(|corpora| corpora.get(board));
+    let _gate = corpus.as_ref().map(|corpus| corpus.gate());
     let result = source.apply(apply)?;
     if let ApplyResult::Ok { task, items, .. } = &result {
         for effect in items {
@@ -2951,6 +3172,9 @@ fn apply_and_record(
                     effect.key
                 ));
             }
+        }
+        if let Some(corpus) = &corpus {
+            corpus.note_write(source.name(), task, items);
         }
     }
     Ok(result)

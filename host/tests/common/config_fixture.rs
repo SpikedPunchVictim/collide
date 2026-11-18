@@ -77,6 +77,35 @@ pub fn plain_factory(root: &Path) -> LoadContextFactory {
     })
 }
 
+/// The daemon's options over the folders of `root`: its fake login shell, its git config of nothing, and the loader
+/// over its own cache and SDK stand-in. `configure` is run on them last.
+fn options_for(root: &Path, configure: impl FnOnce(&mut DaemonOptions)) -> DaemonOptions {
+    let shell = root.join("fake-shell");
+    fs::write(&shell, "#!/bin/sh\neval \"$4\"\n").unwrap();
+    fs::set_permissions(&shell, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut options = DaemonOptions::new(
+        DaemonPaths::under(root),
+        shell.to_str().unwrap().to_string(),
+        Box::new(std::io::sink()),
+    );
+    options.process_tree = test_process_tree();
+    options.capture = CaptureOptions {
+        timeout: Duration::from_secs(10),
+        cap_bytes: 1024 * 1024,
+        fallback: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
+    };
+    options.home = Some(root.to_str().unwrap().to_string());
+    options.git_env = vec![
+        ("HOME".to_string(), root.to_str().unwrap().to_string()),
+        ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
+        ("GIT_CONFIG_SYSTEM".to_string(), "/dev/null".to_string()),
+        ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
+    ];
+    options.load_context = Some(plain_factory(root));
+    configure(&mut options);
+    options
+}
+
 impl Fixture {
     /// A checkout on `main` with one commit, and a daemon that has not been told of it yet.
     pub fn new() -> Fixture {
@@ -90,33 +119,25 @@ impl Fixture {
         repo.write("README.md", b"fixture\n");
         repo.commit_all("start");
         let root = repo.root().path().to_path_buf();
-        let sdk = root.join("sdk-copy");
-        make_sdk(&sdk);
-        let shell = root.join("fake-shell");
-        fs::write(&shell, "#!/bin/sh\neval \"$4\"\n").unwrap();
-        fs::set_permissions(&shell, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let mut options = DaemonOptions::new(
-            DaemonPaths::under(&root),
-            shell.to_str().unwrap().to_string(),
-            Box::new(std::io::sink()),
-        );
-        options.process_tree = test_process_tree();
-        options.capture = CaptureOptions {
-            timeout: Duration::from_secs(10),
-            cap_bytes: 1024 * 1024,
-            fallback: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
-        };
-        options.home = Some(root.to_str().unwrap().to_string());
-        options.git_env = vec![
-            ("HOME".to_string(), root.to_str().unwrap().to_string()),
-            ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
-            ("GIT_CONFIG_SYSTEM".to_string(), "/dev/null".to_string()),
-            ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
-        ];
-        let factory = plain_factory(&root);
-        options.load_context = Some(factory);
-        configure(&mut options);
-        let daemon = Daemon::start(options).expect("the daemon starts");
+        make_sdk(&root.join("sdk-copy"));
+        let daemon = Daemon::start(options_for(&root, configure)).expect("the daemon starts");
+        Fixture { repo, daemon }
+    }
+
+    /// A daemon over the folders of `repo`, whose last daemon was stopped by the caller: what a restart is.
+    pub fn restart_over(repo: GitRepo, configure: impl FnOnce(&mut DaemonOptions)) -> Fixture {
+        let root = repo.root().path().to_path_buf();
+        let daemon = Daemon::start(options_for(&root, configure)).expect("the daemon starts again");
+        Fixture { repo, daemon }
+    }
+
+    /// Stops the daemon and starts another over the same folders, with the store it left: what a restart finds. The
+    /// checkout, the store and the user's files are kept. `configure` is run on the new daemon's options.
+    pub fn restart(self, configure: impl FnOnce(&mut DaemonOptions)) -> Fixture {
+        let Fixture { repo, daemon } = self;
+        drop(daemon);
+        let root = repo.root().path().to_path_buf();
+        let daemon = Daemon::start(options_for(&root, configure)).expect("the daemon starts again");
         Fixture { repo, daemon }
     }
 

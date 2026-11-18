@@ -311,11 +311,14 @@ pub struct TaskCollision {
     pub locations: Vec<Location>,
 }
 
-/// `source.stale`: the source could not refresh, and what core holds may be out of date.
+/// `source.stale`: the source could not refresh, and what core holds may be out of date. `checkout` names the one
+/// checkout that could not be read, for a ref-scoped source; absent when the whole source could not refresh.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SourceStale {
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
 }
 
 /// What made a `task.changed`: a source's `journal`, or Collide's `store` (scratch).

@@ -128,3 +128,76 @@ the Orchard fixture adapter (needs `node`, as the built-in pack tests do).
   it.
 - Owner decisions (2026-11-17, at the split): the recommendations above, on delegation: `task.invalid` is an event and a
   view count now, and a Queue item comes with Stage 6's Queue page.
+
+### Built
+
+- Store: migration 10 (`host/src/store.rs`) adds `corpus_tasks`, `corpus_invalid` and `corpus_sources`, keyed by
+  board, source and checkout. `host/src/corpus_store.rs` reads and replaces them. A row that does not read is
+  dropped with a log line and the start goes on. The declaration of each source (`corpus_sources`) is kept too, so a
+  restart can serve the cached list before any provider is up.
+- `host/src/corpus_service.rs`: one service per board. Checkouts come from `git worktree list` through
+  `checkout_filter`; `list` is paged per source and checkout; `watch` is sent to sources that have it; the checkout
+  set is rechecked every 10 s (`DaemonOptions::corpus_recheck`); no-watch sources are listed again at each look. The
+  cache is read and served in `BoardCorpus::start`, before the thread runs, so the first `task.list` after a restart
+  is the cached one with `refreshing: true`. The startup reconcile records `task.changed` (cause `startup`),
+  `task.removed` and `task.invalid`, then replaces the cache. A pump tags each notification with its source.
+  `source.stale` or a gone provider marks the source stale, its last tasks stay listed, a restart brings it back.
+  A rename fetches the renamed copy first and applies rename and task together, so a list never shows the new key
+  with the old id. An untrusted line's providers are never listed or started. Scratch is listed for its own board
+  and a scratch write shows in `task.list` at once.
+- `task.apply` records its event with the connection's actor and remembers (key, checkout, version); a watcher
+  notification with the same triple is dropped. `task.invalid` is an event and a count, with no Queue item.
+  Collisions have no event; the provider's `task.collision` only triggers a relist.
+- Wire (`core/src/owner/task.rs`, `core/src/provider.rs`, `core/src/corpus.rs`): `TaskListResult` gains `divergent`,
+  `collisions`, `stale_sources`, `refreshing`; `task.get` returns copies, collisions, runs (newest first),
+  `latest_run` (newest final-state run, empty `state`) and `ambiguous`. `pnpm gen` was run.
+- ts-0112-px: `SourceStale` has `checkout`; `fixtures/packs/orchard/providers/plan/watcher.ts` sends it, with a test
+  in `fixtures/arch-plan-tests/test/watch.test.ts`.
+- ts-0113-ck: `config.set` calls `Sources::stop_pack`, for every board on a user-scope key and the board's own on a
+  repo key; test `a_config_set_of_a_packs_key_stops_that_packs_providers_...` (it also shows another pack's
+  provider keeps running).
+- Tests: `host/tests/daemon_corpus.rs` (25), `host/tests/corpus_store.rs` (11), `host/tests/corpus_checkouts.rs`
+  (6), additions to `core/tests/corpus.rs`, `core/tests/provider_protocol.rs` and
+  `host/tests/provider_supervisor.rs`. The provider the daemon tests start is
+  `host/tests/fixtures/corpus_pack_provider.mjs`.
+- Existing test changed: `host/tests/write_guard.rs` `Rig::changed()` now leaves out `cause: startup` events, since
+  the board's plan pack tasks are now recorded at startup and the six tests counted them as writes.
+- Seen red at runtime against stubs of the pre-change behaviour (stub in the daemon, tests run, stub removed):
+  `stop_pack` doing nothing (the `config.set` test red); the same-triple drop removed (the `task.apply` event test
+  red); the cache write skipped (four tests red: removed-and-cache, restart-records, bad cache row, restart-serves);
+  `mark_stale` doing nothing (the gone-provider test red). Not seen red by a stub, written after the code: paging,
+  filters, divergence, collision, runs order, scratch, untrusted line, new worktree, no-watch relist, and the
+  store and core tests. The first-start race of the cached list was seen red as a real failure before its fix.
+- Time to list a generated 1,600-task tree through the daemon on the fake (16 folders of 100, page size 100): 3.8 s
+  from `board.open` to a complete list with 1,600 startup events. Not asserted.
+- Checks: `cargo build --workspace`, `cargo test --workspace --no-fail-fast` (149 suites, none failed), `cargo clippy
+  --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`, `pnpm test` (the `packs/plan` suite passed),
+  `pnpm typecheck`, `pnpm --filter @collide/app build`, `pnpm build:packs`, `pnpm check` all pass.
+
+### Decisions for the owner
+
+- A user-scope pack setting is stored per board (`config set` needs a board, and its user file is that board's). The
+  brief asks that a user-scope key stop that pack's providers on every board, so it does, though only the named
+  board's value changes. Recommend keeping it: it is cheap and safe, and a global pack setting may come later. Option:
+  stop only the named board's providers (fewer restarts, but wrong if a global layer arrives).
+- Startup records one `task.changed` per task on every start where the task is new or changed since the cache, and
+  nothing for an unchanged one. A first start of a board with N tasks makes N events. Recommend keeping it (the
+  event log is the history); option is one summary event, which loses the per-task rows the views need.
+- Plan text proposed for 0.10: "A rename gives `task.renamed`; the old key resolves to the new one and the runs
+  follow the key. The corpus cache is not the truth: it is served at start, marked refreshing, and replaced by the
+  first listing."
+- Checkouts read from the cache before git is asked are served as `Other` until the first listing knows their kind,
+  so `divergent` is empty for the first moments of a restart. Recommend accepting.
+
+- Owner decisions (2026-11-18, at the build): every recommendation above, on delegation. The cache half of the proposed
+  0.10 text is applied to the Stage 4b Corpus cache bullet; the rename half was already in 0.10 (`task.renamed`, runs
+  and `latestRun` follow the key). At review, two mutations were caught: a startup that ignores the cache
+  (`a_restart_records_what_changed_while_the_daemon_was_stopped_and_the_next_restart_records_nothing` failed) and a bad
+  cache row left in place (`a_row_that_does_not_read_is_dropped_and_named_and_the_others_are_kept` failed). The
+  `write_guard.rs` rig now leaves out `cause: startup` events, which are not writes.
+
+### Not done, by design
+
+- Views (`ts-0118-wp`, `ts-0119-tj`), the CLI (`ts-0120-wm`), a Queue item for `task.invalid` (Stage 6), the adopted
+  worktree reading and its minute poll (6a), `task.sections` (4c).
+- The 1,600-task time is recorded, not asserted.

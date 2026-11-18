@@ -524,7 +524,12 @@ fn the_fifth_crash_in_a_row_gives_gone_and_nothing_is_started_after_it() {
         checkout: None,
         cursor: None,
     };
+    assert!(!rig.provider.is_gone());
     assert_eq!(rig.provider.list(&list), Err(ProviderError::Gone));
+    assert!(
+        rig.provider.is_gone(),
+        "a gone provider says so without a call"
+    );
     assert_eq!(rig.asked(), seconds(&[1, 2, 4, 8]));
     assert_eq!(rig.provider.crashes_in_a_row(), 5);
     let why = rig.provider.last_failure().expect("the reason");
@@ -748,7 +753,9 @@ fn a_launch_with_no_environment_is_refused_and_starts_no_child() {
 fn stop_closes_the_childs_input_and_the_child_ends_and_calls_need_initialize_again() {
     let rig = Rig::up(&[]);
     let pid = rig.pid();
+    assert!(!rig.provider.is_stopped());
     rig.provider.stop();
+    assert!(rig.provider.is_stopped(), "a stop is told to a reader");
     assert!(!rig.provider.is_running());
     wait_until("the child to be gone", WITHIN, || !pid_alive(pid as u32));
     let message = failed_message(rig.provider.get(&get("fake-1")).unwrap_err());

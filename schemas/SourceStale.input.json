@@ -1,8 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`source.stale`: the source could not refresh, and what core holds may be out of date.",
+  "description": "`source.stale`: the source could not refresh, and what core holds may be out of date. `checkout` names the one\ncheckout that could not be read, for a ref-scoped source; absent when the whole source could not refresh.",
   "properties": {
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "reason": {
       "type": "string"
     }

@@ -4294,8 +4294,9 @@ combined into a corpus, and filtered by views.
 - **Corpus** with status categories, identity and collisions.
   - A task whose status its source did not declare is listed with the source's invalid items, with the status named
     (0.10, revision 23).
-  - The corpus cache persists in the store. On start, core reconciles each source against it and emits one
-    `task.changed` per item with `cause: startup` (0.10; S11).
+  - The corpus cache persists in the store. It is never the truth: it is served at start, marked `refreshing`, and
+    replaced by the first listing. On start, core reconciles each source against it and emits one `task.changed` with
+    `cause: startup` per item that is new or changed, and none for an unchanged one (0.10; S11; `ts-0116-wh`).
   - Links are resolved one hop out, both directions and across sources, into `tasks[].links` (0.5; S11).
   - An unparseable item (conflict markers, a sync conflict file) emits `task.invalid` and counts on its view (S11).
   - The plan adapter declares `preview`, using the plan CLI's `--dry-run` (S11).

@@ -21,6 +21,8 @@ pub mod commit;
 pub mod config_cli;
 pub mod config_get;
 pub mod config_set_cli;
+pub mod corpus_service;
+pub mod corpus_store;
 pub mod daemon;
 pub mod disk;
 pub mod event_hub;

@@ -113,8 +113,8 @@ export function createWatcher(deps: {
     if (stopped) return
     for (const { method, params } of notifications) (notify as (m: string, p: unknown) => void)(method, params)
   }
-  const sendStale = (reason: string): void => {
-    if (!stopped) notify('source.stale', { reason })
+  const sendStale = (reason: string, checkout: string): void => {
+    if (!stopped) notify('source.stale', { reason, checkout })
   }
 
   const enqueue = (job: () => Promise<void>): void => {
@@ -205,7 +205,7 @@ export function createWatcher(deps: {
       if (!entry.stale && !stopped && watched.get(checkout) === entry) {
         entry.stale = true
         closeHandles(entry)
-        sendStale(`the checkout ${checkout} could not be read: ${message(error)}`)
+        sendStale(`the checkout ${checkout} could not be read: ${message(error)}`, checkout)
       }
       return
     }
@@ -271,10 +271,10 @@ export function createWatcher(deps: {
       }),
     )
     if (stopped) return
-    const unreadable: string[] = []
+    const unreadable: { reason: string; checkout: string }[] = []
     for (const { checkout, snapshot, reason } of reads) {
       watched.set(checkout, { snapshot: snapshot ?? emptySnapshot(), stale: snapshot === null, arch: null, head: null })
-      if (reason !== null) unreadable.push(reason)
+      if (reason !== null) unreadable.push({ reason, checkout })
     }
     await Promise.all([...watched].map(([checkout, entry]) => openHandles(checkout, entry)))
 
@@ -293,7 +293,7 @@ export function createWatcher(deps: {
       recheck = timers.setInterval(tick, recheckMs)
     }
     // After the reply, so that the answer to `watch` is the first thing the caller reads.
-    for (const reason of unreadable) setImmediate(() => sendStale(reason))
+    for (const { reason, checkout } of unreadable) setImmediate(() => sendStale(reason, checkout))
   }
 
   const stop = (): void => {

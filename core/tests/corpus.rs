@@ -3,7 +3,8 @@
 
 use collide_core::change::{FieldDiff, ItemState, Rename};
 use collide_core::corpus::{
-    Applied, CheckoutInfo, CheckoutKind, Corpus, CorpusError, Found, reconcile,
+    Applied, CheckoutInfo, CheckoutKind, Corpus, CorpusError, Found, ListFilter, Page, reconcile,
+    reconcile_by_source,
 };
 use collide_core::hook::HookLink;
 use collide_core::item::{Category, KindDecl, LinkDir, LinkTarget, LinkTypeDecl, StatusDecl};
@@ -889,6 +890,32 @@ fn reconcile_of_a_task_that_became_invalid_gives_the_invalid_item_and_no_removal
 }
 
 #[test]
+fn reconcile_by_source_names_the_source_of_each_event_the_invalid_ones_too() {
+    let cached = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    let mut list = list_of(&[at("T-01", "doing", ROOT)], ROOT);
+    list.invalid
+        .push(invalid_item("arch/bad.md", ROOT, "conflict markers"));
+    let mut fresh = Corpus::default();
+    fresh.set_checkouts(checkouts());
+    fresh.declare_source("plan", &plan_init());
+    fresh.load("plan", Some(ROOT), list).unwrap();
+
+    let events = reconcile_by_source(&cached, &fresh);
+    assert_eq!(events.len(), 2);
+    assert!(
+        events.iter().all(|(source, _)| source == "plan"),
+        "{events:?}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .map(|(_, event)| event.clone())
+            .collect::<Vec<_>>(),
+        reconcile(&cached, &fresh)
+    );
+}
+
+#[test]
 fn reconcile_says_nothing_of_what_it_was_not_given_a_list_for() {
     let cached = plan_corpus(
         &[at("T-01", "ready", ROOT), at("T-02", "ready", WS_A)],
@@ -1229,6 +1256,7 @@ fn applying_a_stale_notification_twice_is_the_same_as_once() {
     assert_twice_is_once(&base, |corpus| {
         let stale = SourceStale {
             reason: "could not read".into(),
+            checkout: None,
         };
         corpus.mark_stale("plan", &stale.reason)
     });
@@ -1295,6 +1323,252 @@ fn one_name_in_two_sources_is_ambiguous_until_the_key_says_which() {
         corpus.lookup("gh:acme/edge#7"),
         Found::One("gh:acme/edge#7".into())
     );
+}
+
+// --- task.list: filters and pages (ts-0116-wh) ---
+
+fn keys_of(listed: &TaskListResult) -> Vec<String> {
+    listed.tasks.iter().map(|task| task.key.clone()).collect()
+}
+
+fn five_tasks() -> Corpus {
+    let tasks = [
+        at("T-01", "done", ROOT),
+        at("T-02", "ready", ROOT),
+        with_link(at("T-03", "ready", ROOT), "blocked-by", "T-01"),
+        with_link(at("T-04", "ready", ROOT), "blocked-by", "T-05"),
+        at("T-05", "doing", ROOT),
+    ];
+    plan_corpus(&tasks, &[ROOT])
+}
+
+#[test]
+fn a_list_with_no_filter_and_no_limit_gives_every_row_in_key_order() {
+    let corpus = five_tasks();
+    let listed = corpus.list(&ListFilter::default(), &Page::default());
+    assert_eq!(
+        keys_of(&listed),
+        [
+            "plan:T-01",
+            "plan:T-02",
+            "plan:T-03",
+            "plan:T-04",
+            "plan:T-05"
+        ]
+    );
+    assert_eq!(listed.next_cursor, None);
+}
+
+#[test]
+fn pages_follow_the_cursor_without_a_repeat_or_a_gap() {
+    let corpus = five_tasks();
+    let filter = ListFilter::default();
+    let first = corpus.list(
+        &filter,
+        &Page {
+            limit: Some(2),
+            cursor: None,
+        },
+    );
+    assert_eq!(keys_of(&first), ["plan:T-01", "plan:T-02"]);
+    let cursor = first.next_cursor.clone().expect("more rows follow");
+    let second = corpus.list(
+        &filter,
+        &Page {
+            limit: Some(2),
+            cursor: Some(&cursor),
+        },
+    );
+    assert_eq!(keys_of(&second), ["plan:T-03", "plan:T-04"]);
+    let cursor = second.next_cursor.clone().expect("one row follows");
+    let third = corpus.list(
+        &filter,
+        &Page {
+            limit: Some(2),
+            cursor: Some(&cursor),
+        },
+    );
+    assert_eq!(keys_of(&third), ["plan:T-05"]);
+    assert_eq!(third.next_cursor, None);
+}
+
+#[test]
+fn a_cursor_survives_a_change_to_the_row_it_names() {
+    let mut corpus = five_tasks();
+    let first = corpus.list(
+        &ListFilter::default(),
+        &Page {
+            limit: Some(2),
+            cursor: None,
+        },
+    );
+    let cursor = first.next_cursor.clone().unwrap();
+    corpus
+        .apply_removed(
+            "plan",
+            &TaskRemoved {
+                key: "plan:T-02".into(),
+                cause: RemovedCause::Unknown,
+                checkout: Some(ROOT.into()),
+            },
+        )
+        .unwrap();
+    let second = corpus.list(
+        &ListFilter::default(),
+        &Page {
+            limit: Some(2),
+            cursor: Some(&cursor),
+        },
+    );
+    assert_eq!(keys_of(&second), ["plan:T-03", "plan:T-04"]);
+}
+
+#[test]
+fn only_the_first_page_carries_the_board_wide_lists() {
+    let mut corpus = five_tasks();
+    corpus
+        .apply_invalid("plan", &invalid_item("arch/bad.md", ROOT, "no frontmatter"))
+        .unwrap();
+    let filter = ListFilter::default();
+    let first = corpus.list(
+        &filter,
+        &Page {
+            limit: Some(2),
+            cursor: None,
+        },
+    );
+    assert_eq!(first.invalid.len(), 1);
+    let cursor = first.next_cursor.clone().unwrap();
+    let second = corpus.list(
+        &filter,
+        &Page {
+            limit: Some(2),
+            cursor: Some(&cursor),
+        },
+    );
+    assert!(second.invalid.is_empty() && second.collections.is_empty());
+    assert!(second.divergent.is_empty() && second.collisions.is_empty());
+}
+
+#[test]
+fn the_ready_filter_keeps_what_the_ready_rule_keeps() {
+    let corpus = five_tasks();
+    let listed = corpus.list(
+        &ListFilter {
+            ready: true,
+            ..Default::default()
+        },
+        &Page::default(),
+    );
+    assert_eq!(keys_of(&listed), ["plan:T-02", "plan:T-03"]);
+}
+
+#[test]
+fn the_kind_filter_keeps_the_tasks_of_that_kind() {
+    let mut init = plan_init();
+    init.kinds = ["proposal", "story"]
+        .iter()
+        .map(|name| KindDecl {
+            name: (*name).into(),
+            statuses: vec![],
+            transitions: vec![],
+            ops: vec![],
+            roles: vec![],
+        })
+        .collect();
+    let mut one = at("T-01", "ready", ROOT);
+    one.kind = Some("proposal".into());
+    let mut two = at("T-02", "ready", ROOT);
+    two.kind = Some("story".into());
+    let mut corpus = Corpus::default();
+    corpus.set_checkouts(checkouts());
+    corpus.declare_source("plan", &init);
+    corpus
+        .load("plan", Some(ROOT), list_of(&[one, two], ROOT))
+        .unwrap();
+    let filter = ListFilter {
+        kind: Some("story"),
+        ..Default::default()
+    };
+    assert_eq!(
+        keys_of(&corpus.list(&filter, &Page::default())),
+        ["plan:T-02"]
+    );
+}
+
+#[test]
+fn the_checkout_filter_lists_the_copies_in_that_checkout() {
+    let tasks = [
+        at("T-01", "ready", ROOT),
+        at("T-01", "doing", WS_A),
+        at("T-02", "ready", ROOT),
+        at("T-03", "specified", WS_A),
+    ];
+    let corpus = plan_corpus(&tasks, &[ROOT, WS_A]);
+    let filter = ListFilter {
+        checkout: Some(WS_A),
+        ..Default::default()
+    };
+    let listed = corpus.list(&filter, &Page::default());
+    let rows: Vec<_> = listed
+        .tasks
+        .iter()
+        .map(|task| (task.key.as_str(), task.state.status.as_str()))
+        .collect();
+    assert_eq!(rows, [("plan:T-01", "doing"), ("plan:T-03", "specified")]);
+}
+
+#[test]
+fn the_first_page_names_the_divergent_keys_the_collisions_and_the_stale_sources() {
+    let tasks = [
+        at("T-01", "ready", ROOT),
+        at("T-01", "doing", WS_A),
+        plan_task("T-02", "ready", ROOT, "arch/a/T-02.md"),
+        plan_task("T-02", "ready", WS_A, "arch/b/T-02.md"),
+    ];
+    let mut corpus = plan_corpus(&tasks, &[ROOT, WS_A]);
+    corpus.mark_stale("plan", "rate limited").unwrap();
+    let listed = corpus.list(&ListFilter::default(), &Page::default());
+    assert_eq!(listed.divergent, ["plan:T-01"]);
+    assert_eq!(listed.collisions.len(), 1);
+    assert_eq!(listed.collisions[0].short_id, "T-02");
+    assert_eq!(listed.stale_sources.len(), 1);
+    assert_eq!(listed.stale_sources[0].source, "plan");
+    assert_eq!(listed.stale_sources[0].reason, "rate limited");
+    assert!(
+        !listed.refreshing,
+        "the corpus does not know a listing is running"
+    );
+}
+
+#[test]
+fn a_renamed_key_is_a_former_key_of_the_new_one() {
+    let mut corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    let rename = Rename {
+        from: "plan:T-01".into(),
+        to: "plan:T-05".into(),
+        checkout: Some(ROOT.into()),
+    };
+    corpus.apply_renamed("plan", &rename).unwrap();
+    assert_eq!(corpus.former_keys("plan:T-05"), ["plan:T-01"]);
+    assert_eq!(
+        corpus.former_keys("plan:T-01"),
+        ["plan:T-01"],
+        "the old key resolves to the new one"
+    );
+    assert!(corpus.former_keys("plan:T-09").is_empty());
+}
+
+#[test]
+fn a_copy_is_found_by_key_and_checkout() {
+    let tasks = [at("T-01", "ready", ROOT), at("T-01", "doing", WS_A)];
+    let corpus = plan_corpus(&tasks, &[ROOT, WS_A]);
+    let copy = corpus
+        .copy("plan:T-01", Some(WS_A))
+        .expect("a copy is there");
+    assert_eq!(copy.state.status, "doing");
+    assert!(corpus.copy("plan:T-01", Some(WS_B)).is_none());
+    assert!(corpus.copy("plan:T-09", Some(ROOT)).is_none());
 }
 
 // --- the wire types ---

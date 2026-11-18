@@ -70,7 +70,7 @@ pub struct Migration {
 /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
 /// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
 /// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
-pub const MIGRATIONS: [Migration; 9] = [
+pub const MIGRATIONS: [Migration; 10] = [
     Migration {
         version: 1,
         name: "events",
@@ -140,7 +140,43 @@ pub const MIGRATIONS: [Migration; 9] = [
         name: "queue_item_payload",
         sql: "ALTER TABLE queue_items ADD COLUMN payload TEXT",
     },
+    Migration {
+        version: 10,
+        name: "corpus_cache",
+        sql: CORPUS_SQL,
+    },
 ];
+
+/// The corpus cache (ts-0116-wh; 0.10), see [`crate::corpus_store`]. Each row is what one source last listed, or was
+/// told, for one checkout of one board: `checkout` is empty for a source that is not ref-scoped. `json` is the task
+/// without its body. `path` is the task's file, which an invalid item at the same path replaces. The cache is read at
+/// start only, to be compared with a fresh `list`; nothing else reads it. `corpus_sources` keeps what each source
+/// declared at its last start, so the first list of the next start can be served before a provider is up.
+const CORPUS_SQL: &str = "
+    CREATE TABLE corpus_tasks (
+        board    TEXT NOT NULL,
+        source   TEXT NOT NULL,
+        checkout TEXT NOT NULL,
+        key      TEXT NOT NULL,
+        path     TEXT,
+        json     TEXT NOT NULL,
+        PRIMARY KEY (board, source, checkout, key)
+    );
+    CREATE TABLE corpus_invalid (
+        board    TEXT NOT NULL,
+        source   TEXT NOT NULL,
+        checkout TEXT NOT NULL,
+        path     TEXT NOT NULL,
+        reason   TEXT NOT NULL,
+        PRIMARY KEY (board, source, checkout, path)
+    );
+    CREATE TABLE corpus_sources (
+        board  TEXT NOT NULL,
+        source TEXT NOT NULL,
+        json   TEXT NOT NULL,
+        PRIMARY KEY (board, source)
+    );
+";
 
 /// The index of runs (ts-0076-cw; 0.8, Run), see [`crate::run_store`]. `state` is the run's latest `RunState` as JSON,
 /// and `live` is 1 for a state that is not final. `opened_seq` is the number of the run's first event, so it orders the
@@ -1338,6 +1374,30 @@ mod tests {
         };
         store.set_phase_record("r", "p", &record).unwrap();
         assert_eq!(store.phase_record("r", "p").unwrap(), Some(record));
+    }
+
+    #[test]
+    fn a_store_at_version_nine_gains_the_corpus_tables_and_keeps_what_it_held() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 9);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        conn.execute(
+            "INSERT INTO queue_items (id, run, json, payload) VALUES ('q-1', NULL, '{}', 'p')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let store = Store::open(dir.path()).unwrap();
+        let conn = raw(&store);
+        assert_eq!(user_version(&conn), known_version());
+        assert_eq!(
+            MIGRATIONS.get(9).map(|migration| migration.name),
+            Some("corpus_cache")
+        );
+        assert!(table_exists(&conn, "corpus_tasks"));
+        assert!(table_exists(&conn, "corpus_invalid"));
+        assert!(table_exists(&conn, "corpus_sources"));
+        assert_eq!(store.queue_payload("q-1").unwrap().as_deref(), Some("p"));
     }
 
     fn warning(phase: &str, files: &[&str]) -> RunWarning {

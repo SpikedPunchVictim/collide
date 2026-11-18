@@ -211,6 +211,40 @@
       ],
       "type": "object"
     },
+    "Location": {
+      "additionalProperties": false,
+      "description": "Where one copy of a task is.",
+      "properties": {
+        "checkout": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkout",
+        "path"
+      ],
+      "type": "object"
+    },
+    "StaleSource": {
+      "additionalProperties": false,
+      "description": "A source whose last answer may be out of date, and why (`source.stale`, or a provider that is gone).",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "reason"
+      ],
+      "type": "object"
+    },
     "Task": {
       "additionalProperties": false,
       "description": "One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`\ntake. `checkout` and `path` are set by a ref-scoped source. `kind` may be left out when the provider has one.",
@@ -335,6 +369,26 @@
       ],
       "type": "object"
     },
+    "TaskCollision": {
+      "additionalProperties": false,
+      "description": "`task.collision`: one short id at different paths in several checkouts. It is a collision, never a divergence.",
+      "properties": {
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/Location"
+          },
+          "type": "array"
+        },
+        "shortId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "shortId",
+        "locations"
+      ],
+      "type": "object"
+    },
     "TaskInvalid": {
       "additionalProperties": false,
       "description": "`task.invalid`: something the source could not read as a task. Core turns it into a Queue item. `checkout` is\nnull for a source that is not ref-scoped.",
@@ -361,12 +415,28 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10).",
+  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`) come with the first page only. They\nare additive: a reader that does not know them reads the rest.",
   "properties": {
     "collections": {
       "default": [],
       "items": {
         "$ref": "#/$defs/Collection"
+      },
+      "type": "array"
+    },
+    "collisions": {
+      "default": [],
+      "description": "The keys that are at different paths in different checkouts.",
+      "items": {
+        "$ref": "#/$defs/TaskCollision"
+      },
+      "type": "array"
+    },
+    "divergent": {
+      "default": [],
+      "description": "The keys on the board whose copy in a workspace differs from the copy at its root.",
+      "items": {
+        "type": "string"
       },
       "type": "array"
     },
@@ -382,6 +452,18 @@
         "string",
         "null"
       ]
+    },
+    "refreshing": {
+      "default": false,
+      "description": "The first listing of a source is still running, so the tasks are what the last run cached, or fewer.",
+      "type": "boolean"
+    },
+    "stale_sources": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/StaleSource"
+      },
+      "type": "array"
     },
     "tasks": {
       "items": {
