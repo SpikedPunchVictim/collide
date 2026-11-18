@@ -171,16 +171,20 @@ pub struct Admitted {
 }
 
 /// Checks the peer's uid against `daemon_uid`, then classifies it. A foreign uid is [`SocketError::ForeignUid`] and
-/// nothing else of the peer is read.
+/// nothing else of the peer is read. A peer that closed before its pid was read (`ENOTCONN`, a probe) is
+/// [`SocketError::PeerClosed`]: the uid was the daemon's, so nothing was refused.
 pub fn admit(
     daemon_uid: u32,
     peer: &dyn PeerCredentials,
     tree: &dyn ProcessTree,
 ) -> Result<Admitted, SocketError> {
     peer_uid_checked(daemon_uid, peer)?;
-    let pid = peer.pid().map_err(|source| SocketError::Io {
-        context: "could not read the pid of the connecting peer (LOCAL_PEERPID)".to_string(),
-        source,
+    let pid = peer.pid().map_err(|source| match source.kind() {
+        io::ErrorKind::NotConnected => SocketError::PeerClosed,
+        _ => SocketError::Io {
+            context: "could not read the pid of the connecting peer (LOCAL_PEERPID)".to_string(),
+            source,
+        },
     })?;
     Ok(Admitted {
         caller: classify_peer(tree, pid),

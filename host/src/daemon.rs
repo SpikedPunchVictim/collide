@@ -319,6 +319,9 @@ pub enum SocketError {
         uid: u32,
         daemon_uid: u32,
     },
+    /// A peer closed before its pid could be read (`ENOTCONN`). Nothing asked to come in and nothing was refused: a
+    /// probe that connects and leaves ends here, and [`log_refusal`] does not log it.
+    PeerClosed,
     /// A daemon already answers on the socket, so this one did not take it.
     AlreadyRunning {
         socket: PathBuf,
@@ -364,6 +367,9 @@ impl fmt::Display for SocketError {
                 f,
                 "a connection from uid {uid} is refused: the daemon's user is uid {daemon_uid}"
             ),
+            SocketError::PeerClosed => {
+                write!(f, "the connecting peer closed before its pid was read")
+            }
             SocketError::AlreadyRunning { socket } => write!(
                 f,
                 "a daemon already answers on {}, so this one did not start",
@@ -1676,6 +1682,15 @@ fn drain_then_close(stream: &mut UnixStream) {
     }
 }
 
+/// Logs why [`auth::admit`] turned a connection away. A peer that closed before it was read asked for nothing, so it
+/// is not logged; every other refusal is.
+fn log_refusal(log: &DaemonLog, refused: &SocketError) {
+    if matches!(refused, SocketError::PeerClosed) {
+        return;
+    }
+    log.line(&format!("a connection was refused: {refused}"));
+}
+
 fn serve_connection(shared: &Shared, mut stream: UnixStream) {
     let pid = crate::sysproc::peer_pid(&stream).ok();
     let admitted = match auth::admit(
@@ -1685,9 +1700,7 @@ fn serve_connection(shared: &Shared, mut stream: UnixStream) {
     ) {
         Ok(admitted) => admitted,
         Err(refused) => {
-            shared
-                .log
-                .line(&format!("a connection was refused: {refused}"));
+            log_refusal(&shared.log, &refused);
             return;
         }
     };
@@ -3679,6 +3692,58 @@ mod tests {
     fn the_open_file_limit_is_raised_to_the_wish_and_held_to_the_hard_limit() {
         assert_eq!(open_file_target(256, 10_240, 4096), Some(4096));
         assert_eq!(open_file_target(256, 1024, 4096), Some(1024));
+    }
+
+    /// A log whose lines a test reads back.
+    #[derive(Clone, Default)]
+    struct Lines(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Lines {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// What `log_refusal` wrote for `refused`.
+    fn logged_for(refused: SocketError) -> String {
+        let lines = Lines::default();
+        let log = DaemonLog {
+            sink: Mutex::new(Box::new(lines.clone())),
+            failures: AtomicU64::new(0),
+            clocks: Arc::new(SystemClocks),
+        };
+        log_refusal(&log, &refused);
+        let bytes = lines.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn a_peer_that_closed_before_it_was_read_writes_no_line() {
+        assert_eq!(logged_for(SocketError::PeerClosed), "");
+    }
+
+    #[test]
+    fn a_foreign_uid_still_writes_its_refused_line() {
+        let text = logged_for(SocketError::ForeignUid {
+            uid: 502,
+            daemon_uid: 501,
+        });
+        assert!(text.contains("a connection was refused"), "{text}");
+        assert!(text.contains("502"), "{text}");
+    }
+
+    #[test]
+    fn a_pid_that_could_not_be_read_for_another_reason_still_writes_its_refused_line() {
+        let text = logged_for(SocketError::Io {
+            context: "could not read the pid of the connecting peer (LOCAL_PEERPID)".to_string(),
+            source: io::Error::from(io::ErrorKind::PermissionDenied),
+        });
+        assert!(text.contains("a connection was refused"), "{text}");
     }
 
     #[test]

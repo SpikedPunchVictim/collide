@@ -333,6 +333,25 @@ fn a_client_that_connects_and_says_nothing_is_closed_after_the_handshake_wait() 
 }
 
 #[test]
+fn a_probe_that_connects_and_closes_is_not_logged_as_refused() {
+    let root = TempRoot::new();
+    let (daemon, log) = start(&root);
+    // The probe the CLI makes: a connect that is closed at once. The daemon may read the peer's pid before or after
+    // the close, so many probes make the case where it reads after certain.
+    for _ in 0..50 {
+        drop(UnixStream::connect(&daemon.paths().socket).unwrap());
+    }
+    // The daemon accepts in order and starts a thread for each connection, so a client that is let in and answered
+    // comes after every probe was taken. Its own line is the signal that the daemon went through them.
+    let mut client = connected(&daemon);
+    assert!(client.call(2, "daemon.status", json!({}))["result"].is_object());
+    wait_for("the client's connected line", || {
+        log.text().contains("connected as").then_some(())
+    });
+    assert!(!log.text().contains("refused"), "{}", log.text());
+}
+
+#[test]
 fn clients_that_drop_half_way_leave_the_daemon_serving() {
     let root = TempRoot::new();
     let (daemon, _) = start(&root);

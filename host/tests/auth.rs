@@ -532,6 +532,56 @@ fn a_connection_from_another_uid_is_refused_before_its_token_is_read() {
     );
 }
 
+/// A peer whose uid reads and whose pid fails with `kind`, as `LOCAL_PEERPID` does after the peer closed.
+struct PidFails {
+    uid: u32,
+    kind: io::ErrorKind,
+}
+
+impl PeerCredentials for PidFails {
+    fn uid(&self) -> io::Result<u32> {
+        Ok(self.uid)
+    }
+
+    fn pid(&self) -> io::Result<u32> {
+        Err(io::Error::new(self.kind, "LOCAL_PEERPID failed"))
+    }
+}
+
+#[test]
+fn a_peer_that_closed_before_its_pid_was_read_is_not_a_refusal() {
+    let peer = PidFails {
+        uid: DAEMON_UID,
+        kind: io::ErrorKind::NotConnected,
+    };
+    let error = auth::admit(DAEMON_UID, &peer, &the_machine()).unwrap_err();
+    assert!(matches!(error, SocketError::PeerClosed), "{error}");
+}
+
+#[test]
+fn a_pid_that_cannot_be_read_for_another_reason_is_still_an_io_error_naming_it() {
+    let peer = PidFails {
+        uid: DAEMON_UID,
+        kind: io::ErrorKind::PermissionDenied,
+    };
+    let error = auth::admit(DAEMON_UID, &peer, &the_machine()).unwrap_err();
+    assert!(matches!(error, SocketError::Io { .. }), "{error}");
+    assert!(message(&error).contains("pid"), "{}", message(&error));
+}
+
+#[test]
+fn a_foreign_uid_is_refused_even_when_its_pid_would_not_read() {
+    let peer = PidFails {
+        uid: 502,
+        kind: io::ErrorKind::NotConnected,
+    };
+    let error = auth::admit(DAEMON_UID, &peer, &the_machine()).unwrap_err();
+    assert!(
+        matches!(error, SocketError::ForeignUid { uid: 502, .. }),
+        "{error}"
+    );
+}
+
 #[test]
 fn the_token_reader_is_never_called_for_a_connection_that_was_not_admitted() {
     let token_read = Cell::new(false);
