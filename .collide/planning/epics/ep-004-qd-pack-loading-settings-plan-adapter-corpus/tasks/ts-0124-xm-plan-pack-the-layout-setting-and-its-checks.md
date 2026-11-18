@@ -1,7 +1,7 @@
 ---
 id: ts-0124-xm
 kind: task
-status: ready
+status: done
 title: "Plan pack: the layout setting and its checks"
 owners: []
 links:
