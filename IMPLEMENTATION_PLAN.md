@@ -870,7 +870,11 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
         plugin is written only when that folder exists. A skill's own frontmatter takes effect through it (measured
         `ts-0107-rj`): its `hooks` run and its `allowed-tools` skip the permission request. The owner accepted that
         as plain `claude` does (2026-11-17), so this is the one thing that runs code or skips a request and is not
-        from the snapshot. Each `Skill` call still asks the host first, and `repo_instructions: none` leaves the
+        from the snapshot. A `Skill` call asks the host first only when the skill's frontmatter has a key `claude` does
+        not count as safe, such as `hooks` or `allowed-tools`. A skill of text alone (`name` and `description`, and keys
+        such as `model`, `effort`, `context` and `agent`) loads with no request, as the repository's `CLAUDE.md` does,
+        so its `model` can change the model within the phase's `--max-budget-usd` (seen in `ts-0105-jv` Run 2, read from
+        the Skill tool of `claude` 2.1.327; accepted by the owner, 2026-11-18). `repo_instructions: none` leaves the
         plugin off; the Roles page says so.
     - **Auto memory is off for every phase** (`autoMemoryEnabled: false` in the snapshot settings; owner,
       2026-11-13). It is shared by every worktree of a repo, keyed to the main checkout, so it would carry one run's

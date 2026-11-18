@@ -170,6 +170,10 @@ changed, so `pnpm gen` was not run.
   both guards in place. 5 applied with the owner's choice. The folder `claude` wrote under `~/.claude/projects/` was
   removed by exact name with the owner's OK.
 
+- Later finding (2026-11-18, `ts-0105-jv`): the request measured here came because this skill had `hooks` and
+  `allowed-tools`. `claude` asks for a `Skill` call only when the skill has a key it does not count as safe; a skill of
+  text alone loads with no request. The owner accepted that; plan 0.3 says so.
+
 ### Measured
 
 One gated session on the terms of `### Owner approval`: `claude` 2.1.326, `haiku`, `--max-budget-usd 0.05`, config none

@@ -6,7 +6,8 @@
 //! `<folder>/.claude/skills`, so the skills are read when `claude` loads them and are not copied. Settings, hooks and
 //! MCP config still come from the snapshot. A skill's own frontmatter `hooks` and `allowed-tools` take effect through
 //! the plugin (measured `ts-0107-rj`), as they would in plain `claude` in that folder; the owner accepted that
-//! (2026-11-17). Each `Skill` call still asks the host first.
+//! (2026-11-17). A `Skill` call asks the host first only for a skill whose frontmatter has a key `claude` does not
+//! count as safe (`hooks`, `allowed-tools`); a skill of text alone loads with no request (plan 0.3; `ts-0105-jv`).
 //!
 //! [`is_instruction_path`] is the one list of paths the run's warning reads: a file `claude` loads as instructions.
 //!
