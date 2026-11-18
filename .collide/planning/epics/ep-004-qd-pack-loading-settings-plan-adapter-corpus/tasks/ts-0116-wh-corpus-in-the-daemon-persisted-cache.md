@@ -1,7 +1,7 @@
 ---
 id: ts-0116-wh
 kind: task
-status: ready
+status: done
 title: "Corpus in the daemon: persisted cache, startup reconcile and task events"
 owners: []
 links:
