@@ -543,6 +543,18 @@ pub fn version_lines(agent: &AgentVersions) -> Vec<String> {
     lines
 }
 
+/// The hint for a refused run, or `None` when there is nothing to add. A `models.yaml` that does not load is already
+/// named, with its path and the place of the error, by the daemon's refusal, so it gets no hint: the alias may well
+/// be in the file. A file that loads and maps the alias needs none either.
+fn unmapped_alias_hint(home: Option<&str>, alias: &str) -> Option<String> {
+    let models = load_user_models(home).ok()?;
+    if models.mapping_for("claude").contains_key(alias) {
+        return None;
+    }
+    let exists = models_path(home).is_ok_and(|path| path.is_file());
+    Some(models_hint(home, alias, exists))
+}
+
 /// What to tell a person whose alias has no mapping: where `models.yaml` goes and a mapping for the alias.
 pub fn models_hint(home: Option<&str>, alias: &str, file_exists: bool) -> String {
     let path = models_path(home)
@@ -905,14 +917,8 @@ pub fn run_in(
                         let _ = writeln!(err, "collide run: refused: {}", problem.message);
                     }
                     let alias = args.alias.as_deref().unwrap_or(BUILDER_MODEL_ALIAS);
-                    let mapped = load_user_models(env.home.as_deref())
-                        .ok()
-                        .is_some_and(|models| models.mapping_for("claude").contains_key(alias));
-                    if !mapped {
-                        let exists =
-                            models_path(env.home.as_deref()).is_ok_and(|path| path.is_file());
-                        let _ =
-                            writeln!(err, "{}", models_hint(env.home.as_deref(), alias, exists));
+                    if let Some(hint) = unmapped_alias_hint(env.home.as_deref(), alias) {
+                        let _ = writeln!(err, "{hint}");
                     }
                     return exit::REFUSED;
                 }

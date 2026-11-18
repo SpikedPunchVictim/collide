@@ -730,6 +730,61 @@ fn with_no_models_file_the_message_says_where_it_goes_and_maps_fast() {
 }
 
 #[test]
+fn a_models_file_that_does_not_load_is_named_once_and_no_mapping_is_offered() {
+    let fx = Fixture::new(&recording("report"), Setup::default());
+    let file = fx.root.join("home/.config/collide/models.yaml");
+    fs::write(
+        &file,
+        "tools:\n  claude:\n    fast: { name: haiku }\nagents: {}\n",
+    )
+    .unwrap();
+    let outcome = Cli::of(&fx).run(&[&task_arg(&fx)], "");
+    assert_eq!(outcome.code, 5, "{outcome:?}");
+    assert!(outcome.err.contains("refused"), "{}", outcome.err);
+    assert!(
+        outcome.err.contains(&file.display().to_string()),
+        "{}",
+        outcome.err
+    );
+    assert!(outcome.err.contains("agents"), "{}", outcome.err);
+    assert_eq!(
+        outcome.err.matches("unknown field").count(),
+        1,
+        "{}",
+        outcome.err
+    );
+    assert_eq!(
+        outcome.err.matches("models.yaml").count(),
+        1,
+        "{}",
+        outcome.err
+    );
+    assert!(!outcome.err.contains("does not map"), "{}", outcome.err);
+    assert!(!outcome.err.contains("{ name: haiku }"), "{}", outcome.err);
+}
+
+#[test]
+fn a_models_path_that_cannot_be_read_is_named_and_no_mapping_is_offered() {
+    let fx = Fixture::new(&recording("report"), Setup::default());
+    let file = fx.root.join("home/.config/collide/models.yaml");
+    fs::remove_file(&file).unwrap();
+    fs::create_dir(&file).unwrap();
+    let outcome = Cli::of(&fx).run(&[&task_arg(&fx)], "");
+    assert_eq!(outcome.code, 5, "{outcome:?}");
+    assert!(
+        outcome.err.contains(&file.display().to_string()),
+        "{}",
+        outcome.err
+    );
+    assert!(!outcome.err.contains("does not map"), "{}", outcome.err);
+    assert!(
+        !outcome.err.contains("There is no models.yaml"),
+        "{}",
+        outcome.err
+    );
+}
+
+#[test]
 fn a_budget_that_is_not_above_zero_is_a_usage_error_and_no_daemon_is_asked() {
     let fx = Fixture::new(&recording("report"), Setup::default());
     let cli = Cli::of(&fx);
