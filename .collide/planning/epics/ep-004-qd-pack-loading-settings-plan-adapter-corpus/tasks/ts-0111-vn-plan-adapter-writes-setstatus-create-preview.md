@@ -108,3 +108,77 @@ its root, one commit.
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-17, at the split): the fake plan CLI follows the real one as read from the owner's local copy
   of the Orchard repo, under the rules of `ts-0110-ra`. The rest: the recommendations above.
+
+### Built
+
+- The `plan` adapter writes. `initialize` declares ops `setStatus` and `create` (each with an `args` schema) and
+  capabilities `{ watch: false, create: true, collections: true, preview: true }`. `apply` and `preview` are in
+  `fixtures/packs/orchard/providers/plan/write.ts`, and nothing in them commits.
+  - `run-plan.ts` runs `./plan --root <checkout>/arch ... --format json` with the root as cwd, a time limit and an
+    output cap, and kills the child on either.
+  - `tree-hash.ts` hashes every file under `arch/` before and after. The files touched are the paths whose hash
+    changed.
+  - `scan.ts` gains `findTask`, and `files.ts` gains `inBatches` (moved from `scan.ts`).
+  - The provider takes `env` and `timeoutMs` options, so a test controls the CLI's environment.
+- The fake plan CLI is `fixtures/orchard-arch/plan` (Node, no dependencies, executable). It follows the owner's local
+  copy of the Orchard repo as read read-only on 2026-11-16: the flags, the JSON envelope, the exit codes, the
+  `--dry-run` report and the epic table refresh. Only shapes were taken. Every message, title and name is made up.
+- Tests (all in `fixtures/arch-plan-tests/test/`): `fake-plan.test.ts` (74, the fake itself), `write.test.ts` (65:
+  setStatus, create, a misbehaving CLI, preview, the generated schemas, writes in sequence), plus new cases in
+  `initialize.test.ts` and `provider-stdio.test.ts` (one end-to-end test with a real node child). `repo.ts` makes a
+  temp git repository with an empty global and system git config and a temp home. 213 tests in the folder, all green.
+- Seen red at runtime, not at compile time. The adapter side was run against the old `provider.ts`, `scan.ts`,
+  `files.ts`, `declaration.ts` and `ids.ts` from HEAD: 63 of 213 failed (44 in `write.test.ts`, 18 in
+  `initialize.test.ts`, 1 in `provider-stdio.test.ts`). The bad-call tests and the schema negative check passed there
+  because they pass for any provider that errors. The fake was written before its tests, so its red check is a stub
+  that exits 0 and prints nothing: 68 of the 74 tests in `fake-plan.test.ts` failed.
+- Could not be confirmed in the Orchard copy (it has no installed dependencies, so the CLI was never run, and I did
+  not run it): the exact text of every message; whether `set` with the status a task already has is a no-op or an
+  error (the fake makes it a no-op that lists no file); the full set of write-gate rules (the fake has three:
+  status is declared, the epic exists, `depends_on` resolves); the exit code for a signal-killed run in practice;
+  whether `--dry-run` lists a file whose edits change nothing (the fake lists it, and the adapter leaves it out);
+  and the real transition table (the fake's is one step at a time, with a reopen and a drop).
+- Not run here: the full gates beyond the nine checks of the brief. Results: `cargo build`, `cargo fmt --check`,
+  `cargo clippy -D warnings`, `cargo test --workspace`, `pnpm test`, `pnpm typecheck`, `pnpm --filter @collide/app
+  build`, `pnpm build:packs` and `pnpm check` all passed. No wire type changed, so `pnpm gen` was not needed.
+
+### Decisions for the owner
+
+1. **Exit codes (differs from the item's text).** The plan CLI exits 2 for an illegal transition and for "done needs
+   a review on record", where the item says exit 2 is a provider error. Recommendation: exit 1 and exit 2 are both
+   `refused`, with the CLI's message (the first error of the envelope for exit 1, stderr for exit 2). The adapter
+   built the call well, and the CLI declined it. Any other exit, a CLI that cannot be run, a timeout, and any failure
+   that changed a file are provider errors. Plan text for 0.10 or the Stage 4b bullet: "an exit 1 or 2 of the plan
+   CLI with nothing written is `refused`; any other failure is an error reply".
+2. **Preview cannot know the version after the write.** A dry run writes nothing to hash, so a previewed item has
+   the task's current version (and `""` for a create). The "same `items[]`" criterion holds for key, `from` and `to`,
+   not for `version`. Alternative: run the CLI against a scratch copy of `arch/` and hash the result; it is exact but
+   copies the tree (about 1,600 files in Orchard) on every preview. Recommendation: keep the current version, and
+   take the scratch copy only if a caller needs the written version.
+3. **A category is written as the one status that has it.** `categoryStatus` is declared (active writes `doing`,
+   review writes `in_review`, and so on), and `setStatus` takes `status` or `category`, not both. A category with no
+   status is refused. Recommendation: keep it.
+4. **Preview leaves out an edited file whose edits change nothing**, such as `set` to the status a task already has,
+   so that the preview lists what the write touches. Recommendation: keep it.
+5. **Title rules.** `create` rejects (as an error reply, from the args schema) a title that is empty, over 200
+   characters, has a control character or starts with a dash (the CLI would read it as a flag). Recommendation: keep
+   the 200 and revisit if a real title is longer.
+6. **Write limit.** The CLI may run 120 seconds (`WRITE_TIMEOUT_MS`) and print 8 MiB. Recommendation: keep both; the
+   timeout is an option for tests.
+
+- Owner decisions (2026-11-17, at the build): decisions 2 to 6 as recommended, taken on delegation. Decision 1 as
+  amended at review: exit 2 is `refused` with stderr (the plan CLI's UsageError, which an illegal transition is, read in
+  the copy); exit 1 is `refused` only when its envelope carries the write gate's errors, and otherwise an error reply,
+  since the plan CLI's own failure (`Internal error: ...`) also exits 1, with no envelope. Also at review: the command
+  comes first and the flags after it (`./plan set <id> status=<s> --root <checkout>/arch --format json`), because the
+  plan CLI is oclif 4 and reads its first argument as the command; the fake now refuses a flag before the command with
+  exit 2, and with it 27 adapter tests were red until the adapter was fixed. No plan text: the plan states no exit rule
+  for the adapter.
+
+### Not done, by design
+
+- `watch`, renames and collisions (`ts-0112-px`); the line lock, root busy and the phase queue (`ts-0114-hr`);
+  recording a write in a commit (Stage 7). The SDK answers one request at a time, so writes in this process are
+  already in order, and a test pins it with eight calls at once.
+- No test reads or runs the Orchard copy or its CLI. The real CLI was never run.
+- No IMPLEMENTATION_PLAN.md edit: the text for decision 1 is above.

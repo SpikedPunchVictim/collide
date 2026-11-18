@@ -20,3 +20,15 @@ export async function filesIn(dir: string): Promise<string[]> {
 export async function foldersIn(dir: string): Promise<string[]> {
   return (await entriesIn(dir)).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
 }
+
+/** How many files are open at once. */
+const BATCH = 32
+
+/** Runs `work` over `items` a batch at a time, and returns the results in order. */
+export async function inBatches<T, R>(items: T[], work: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = []
+  for (let at = 0; at < items.length; at += BATCH) {
+    results.push(...(await Promise.all(items.slice(at, at + BATCH).map(work))))
+  }
+  return results
+}

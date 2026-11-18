@@ -1,0 +1,396 @@
+#!/usr/bin/env node
+// A fake of the Orchard repo's plan CLI, for the tests of the `plan` adapter. It is a test fixture, not the plan CLI.
+// It keeps the rules the adapter reads and nothing else:
+//   plan set <task id> status=<status> [--root DIR] [--format text|json] [--dry-run]
+//   plan new task <proposal> <title> --epic <epic> [--depends-on a,b] [--blocked-by a,b] [--root DIR] [--format ...]
+// As in the real CLI, an oclif CLI, the first argument is the command: a flag before it is not a command.
+// The shapes follow the real CLI as read in the owner's copy of the Orchard repo: the flags, the JSON envelope
+// (schema_version 1, command, corpus, data), the exit codes (0 done, 1 the write gate refused it, 2 the CLI would not
+// do what it was asked) and what --dry-run reports. Every value here is made up, and so are the messages.
+//
+// The root is an `arch/` folder. A write changes the task file and refreshes the generated table (the region between
+// `<!-- BEGIN GENERATED tasks -->` and `<!-- END GENERATED -->`) of each epic whose rows change.
+
+import fs from 'node:fs'
+import path from 'node:path'
+
+class UsageError extends Error {}
+
+const STATUSES = ['specified', 'ready', 'doing', 'in_review', 'done', 'dropped']
+// The lifecycle of docs/research/planning.md, one step at a time, with a reopen and a drop from any live status.
+const LEGAL = {
+  specified: ['ready', 'dropped'],
+  ready: ['doing', 'dropped'],
+  doing: ['in_review', 'dropped'],
+  in_review: ['done', 'doing', 'dropped'],
+  done: [],
+  dropped: [],
+}
+
+const TASK_FILE = /^(T-(\d{2})-(\d{3}))-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
+const EPIC_FILE = /^(E-\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
+const PROPOSAL_DIR = /^(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*$/
+const TASK_ID = /^(T-\d{2}-\d{3})(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
+const EPIC_ID = /^(E-\d{2})(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
+const REGION = /(<!-- BEGIN GENERATED tasks -->\n)([\s\S]*?)(<!-- END GENERATED -->)/
+
+// ---------------------------------------------------------------- arguments
+
+const VALUE_FLAGS = ['root', 'format', 'epic', 'depends-on', 'blocked-by']
+const SWITCH_FLAGS = ['dry-run', 'debug']
+
+function parseArguments(argv) {
+  const flags = {}
+  const positionals = []
+  for (let at = 0; at < argv.length; at++) {
+    const arg = argv[at]
+    if (!arg.startsWith('-')) {
+      positionals.push(arg)
+      continue
+    }
+    const [name, inline] = arg.startsWith('--') ? arg.slice(2).split(/=(.*)/s) : [null, undefined]
+    if (name !== null && SWITCH_FLAGS.includes(name) && inline === undefined) flags[name] = true
+    else if (name !== null && VALUE_FLAGS.includes(name)) {
+      const value = inline !== undefined ? inline : argv[++at]
+      if (value === undefined) throw new UsageError(`the flag --${name} needs a value`)
+      flags[name] = value
+    } else throw new UsageError(`there is no flag ${arg}`)
+  }
+  return { flags, positionals }
+}
+
+function resolveContext(flags) {
+  const format = flags.format ?? process.env.PLAN_FORMAT ?? 'text'
+  if (format !== 'text' && format !== 'json') throw new UsageError(`the format ${format} is not text or json`)
+  const root = path.resolve(flags.root ?? process.env.PLAN_ROOT ?? process.cwd())
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new UsageError(`the root ${root} is not a folder`)
+  return { root, format, dryRun: flags['dry-run'] === true }
+}
+
+// ---------------------------------------------------------------- the corpus
+
+const filesIn = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : [])
+
+function readCorpus(root) {
+  const tasks = []
+  const epics = []
+  for (const folder of filesIn(path.join(root, 'proposals'))) {
+    const proposal = PROPOSAL_DIR.exec(folder.name)
+    if (!folder.isDirectory() || proposal === null) continue
+    for (const file of filesIn(path.join(root, 'proposals', folder.name, 'tasks'))) {
+      const match = TASK_FILE.exec(file.name)
+      if (!file.isFile() || match === null) continue
+      const relPath = `proposals/${folder.name}/tasks/${file.name}`
+      tasks.push({
+        shortId: match[1],
+        scope: match[2],
+        num: match[3],
+        dir: `proposals/${folder.name}`,
+        relPath,
+        file: file.name,
+      })
+    }
+  }
+  for (const file of filesIn(path.join(root, 'work', 'epics'))) {
+    const match = EPIC_FILE.exec(file.name)
+    if (file.isFile() && match !== null) epics.push({ shortId: match[1], relPath: `work/epics/${file.name}` })
+  }
+  const proposals = filesIn(path.join(root, 'proposals'))
+    .filter((entry) => entry.isDirectory() && PROPOSAL_DIR.test(entry.name))
+    .map((entry) => ({
+      num: PROPOSAL_DIR.exec(entry.name)[1],
+      dir: `proposals/${entry.name}`,
+    }))
+  return { tasks, epics, proposals }
+}
+
+const readText = (root, relPath) => fs.readFileSync(path.join(root, relPath), 'utf8')
+
+/** The top-level `key: value` lines of a file's frontmatter. A list is a flow list or a block list of plain items. */
+function frontmatterOf(text) {
+  const lines = text.split('\n')
+  const values = {}
+  if (lines[0] !== '---') return values
+  for (let at = 1; at < lines.length && lines[at] !== '---'; at++) {
+    const match = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(lines[at])
+    if (match === null) continue
+    const [, key, rest] = match
+    if (rest === '') {
+      const items = []
+      while (/^\s+-\s+/.test(lines[at + 1] ?? '')) items.push(lines[++at].replace(/^\s+-\s+/, '').trim())
+      values[key] = items.length > 0 ? items : ''
+    } else if (rest.startsWith('[')) {
+      values[key] = rest
+        .slice(1, rest.lastIndexOf(']'))
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    } else {
+      values[key] = rest.replace(/^"(.*)"$/, '$1')
+    }
+  }
+  return values
+}
+
+/** The text with its `status:` line replaced. */
+function withStatus(text, status) {
+  const lines = text.split('\n')
+  const end = lines.indexOf('---', 1)
+  for (let at = 1; at < end; at++) {
+    if (/^status:/.test(lines[at])) {
+      lines[at] = `status: ${status}`
+      return lines.join('\n')
+    }
+  }
+  throw new UsageError('the task has no status line to change')
+}
+
+// ---------------------------------------------------------------- generated tables
+
+/** `texts` is a map of relPath to text for every task, with the pending change laid over the disk. */
+function regenerate(root, corpus, texts) {
+  const rows = (epic) =>
+    corpus.tasks
+      .filter((task) => EPIC_ID.exec(String(frontmatterOf(texts.get(task.relPath)).epic))?.[1] === epic.shortId)
+      .sort((a, b) => (a.shortId < b.shortId ? -1 : 1))
+      .map((task) => {
+        const status = frontmatterOf(texts.get(task.relPath)).status
+        return `| [${task.shortId}](../../${task.relPath}) | ${status} |\n`
+      })
+  const refreshed = []
+  for (const epic of corpus.epics) {
+    const before = readText(root, epic.relPath)
+    const after = before.replace(
+      REGION,
+      (_all, begin, _old, end) => `${begin}| ID | Status |\n|---|---|\n${rows(epic).join('')}${end}`,
+    )
+    if (after !== before) refreshed.push({ relPath: epic.relPath, content: after })
+  }
+  return refreshed
+}
+
+// ---------------------------------------------------------------- the write gate
+
+/** A made-up check run on the file a write makes: its status, its epic and what it depends on must resolve. */
+function gate(corpus, relPath, text) {
+  const values = frontmatterOf(text)
+  const errors = []
+  const error = (rule, message) => errors.push({ file: relPath, severity: 'error', rule, message })
+  if (!STATUSES.includes(values.status)) error('schema', `status ${values.status} is not one of ${STATUSES.join(', ')}`)
+  const epic = EPIC_ID.exec(String(values.epic))?.[1]
+  if (epic === undefined || !corpus.epics.some((candidate) => candidate.shortId === epic)) {
+    error('reference-resolves', `epic ${values.epic} has no epic file`)
+  }
+  for (const entry of Array.isArray(values.depends_on) ? values.depends_on : []) {
+    const shortId = TASK_ID.exec(entry)?.[1]
+    if (shortId === undefined || !corpus.tasks.some((task) => task.shortId === shortId)) {
+      error('reference-resolves', `depends_on ${entry} names no task`)
+    }
+  }
+  return errors
+}
+
+function writeAtomic(root, relPath, content) {
+  const target = path.join(root, relPath)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  const temp = `${target}.${process.pid}.tmp`
+  fs.writeFileSync(temp, content)
+  fs.renameSync(temp, target)
+}
+
+/** Gates the edits together and, when they are clean and this is not a dry run, writes them and the tables. */
+function applyEdits(root, corpus, edits, texts, dryRun) {
+  const errors = edits.flatMap((edit) => gate(corpus, edit.relPath, edit.content))
+  if (errors.length > 0) return { errors, regenerated: [], written: false }
+  const refreshed = regenerate(root, corpus, texts).filter(
+    (entry) => !edits.some((edit) => edit.relPath === entry.relPath),
+  )
+  if (!dryRun) {
+    for (const edit of edits) writeAtomic(root, edit.relPath, edit.content)
+    for (const entry of refreshed) writeAtomic(root, entry.relPath, entry.content)
+  }
+  return {
+    errors: [],
+    regenerated: refreshed.map((entry) => entry.relPath),
+    written: !dryRun,
+  }
+}
+
+// ---------------------------------------------------------------- commands
+
+function commandSet(context, positionals) {
+  const [, id, assignment, ...extra] = positionals
+  if (id === undefined || assignment === undefined) throw new UsageError('set needs a task id and field=value')
+  if (extra.length > 0) throw new UsageError(`set takes two arguments, and got ${extra.length} more`)
+  const parts = /^([A-Za-z_][\w-]*)=(.*)$/s.exec(assignment)
+  if (parts === null) throw new UsageError(`${assignment} is not field=value`)
+  const [, field, value] = parts
+  if (field !== 'status') throw new UsageError(`this fake sets status only, not ${field}`)
+
+  const idMatch = TASK_ID.exec(id)
+  if (idMatch === null) throw new UsageError(`${id} is not a task id`)
+  const corpus = readCorpus(context.root)
+  const task = corpus.tasks.find(
+    (candidate) => candidate.shortId === idMatch[1] && (id === idMatch[1] || candidate.file === `${id}.md`),
+  )
+  if (task === undefined) throw new UsageError(`there is no task ${id}`)
+
+  const text = readText(context.root, task.relPath)
+  const current = frontmatterOf(text)
+  if (!STATUSES.includes(value)) throw new UsageError(`${value} is not a status`)
+  if (current.status !== value && !(LEGAL[current.status] ?? []).includes(value)) {
+    const next = (LEGAL[current.status] ?? []).join(', ') || 'nowhere, it is final'
+    throw new UsageError(`${task.relPath}: ${current.status} cannot move to ${value}; it can move to ${next}`)
+  }
+  if (value === 'done' && current.status !== 'done' && !current.reviewed_by && current.self_review !== 'true') {
+    throw new UsageError(`${task.relPath}: done needs reviewed_by or self_review: true on the task`)
+  }
+
+  const content = withStatus(text, value)
+  const texts = new Map(corpus.tasks.map((candidate) => [candidate.relPath, readText(context.root, candidate.relPath)]))
+  texts.set(task.relPath, content)
+  const done = applyEdits(context.root, corpus, [{ relPath: task.relPath, content }], texts, context.dryRun)
+  const changes = [{ field: 'status', oldValue: current.status, newValue: value }]
+  return {
+    command: 'set',
+    data: {
+      results: [{ relPath: task.relPath, changes, written: done.written }],
+      dryRun: context.dryRun,
+      ...tail(done),
+    },
+    lines: changes.map((change) => `${task.relPath}  ${change.field}: "${change.oldValue}" -> "${change.newValue}"`),
+    files: [task.relPath],
+    done,
+  }
+}
+
+const tail = (done) => ({ errors: done.errors, regenerated: done.regenerated })
+
+const slugify = (title) =>
+  title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/, '') || 'untitled'
+
+const list = (text) =>
+  text === undefined
+    ? []
+    : text
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+const flow = (items) => `[${items.join(', ')}]`
+
+function commandNewTask(context, flags, positionals) {
+  const [, kind, proposalArg, title, ...extra] = positionals
+  if (kind !== 'task') throw new UsageError('new makes a task only')
+  if (proposalArg === undefined || title === undefined) throw new UsageError('new task needs a proposal and a title')
+  if (extra.length > 0) throw new UsageError(`new task takes two arguments, and got ${extra.length} more`)
+  if (flags.epic === undefined) throw new UsageError('new task needs --epic')
+
+  const corpus = readCorpus(context.root)
+  const scope = /^P?(\d{2})$/.exec(proposalArg)?.[1]
+  const proposal = corpus.proposals.find((candidate) => candidate.num === scope)
+  if (proposal === undefined) throw new UsageError(`there is no proposal ${proposalArg}`)
+
+  const taken = corpus.tasks.filter((task) => task.scope === scope).map((task) => Number(task.num))
+  const mapped = fs.existsSync(path.join(context.root, 'ID-MAP.md')) ? readText(context.root, 'ID-MAP.md') : ''
+  const reserved = new Set([...mapped.matchAll(new RegExp(`\\bT-${scope}-(\\d{3})\\b`, 'g'))].map((m) => Number(m[1])))
+  let number = taken.length > 0 ? Math.max(...taken) + 1 : 1
+  while (reserved.has(number)) number++
+  if (number > 999) throw new UsageError(`proposal ${scope} has no task number left`)
+
+  const num = String(number).padStart(3, '0')
+  const slug = slugify(title)
+  const relPath = `${proposal.dir}/tasks/T-${scope}-${num}-${slug}.md`
+  const frontmatter = {
+    title,
+    status: 'specified',
+    epic: flags.epic,
+    depends_on: list(flags['depends-on']),
+    blocked_by: list(flags['blocked-by']),
+  }
+  const content =
+    `---\ntitle: ${JSON.stringify(title)}\nstatus: specified\nepic: ${flags.epic}\n` +
+    `depends_on: ${flow(frontmatter.depends_on)}\nblocked_by: ${flow(frontmatter.blocked_by)}\n---\n\n` +
+    `## Task\n\nA task made by the fake plan CLI.\n`
+
+  const created = {
+    shortId: `T-${scope}-${num}`,
+    scope,
+    num,
+    dir: proposal.dir,
+    relPath,
+    file: `T-${scope}-${num}-${slug}.md`,
+  }
+  const withNew = { ...corpus, tasks: [...corpus.tasks, created] }
+  const texts = new Map(corpus.tasks.map((candidate) => [candidate.relPath, readText(context.root, candidate.relPath)]))
+  texts.set(relPath, content)
+  const done = applyEdits(context.root, withNew, [{ relPath, content }], texts, context.dryRun)
+  return {
+    command: 'new-task',
+    data: {
+      relPath,
+      id: { kind: 'task', num, suffix: '', scope, slug },
+      kind: 'task',
+      frontmatter,
+      written: done.written,
+      dryRun: context.dryRun,
+      ...tail(done),
+    },
+    lines: [relPath],
+    files: [relPath],
+    done,
+  }
+}
+
+// ---------------------------------------------------------------- output
+
+const diagnosticLine = (error) => `${error.file}  ${error.severity}  ${error.rule}  ${error.message}`
+
+function print(context, result) {
+  const { done } = result
+  if (context.format === 'json') {
+    const envelope = {
+      schema_version: 1,
+      command: result.command,
+      corpus: path.basename(context.root),
+      data: result.data,
+    }
+    process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`)
+    return
+  }
+  if (done.errors.length > 0) {
+    process.stdout.write(`${done.errors.map(diagnosticLine).join('\n')}\n`)
+    process.stderr.write(`\n${done.errors.length} error(s): nothing was written.\n`)
+    return
+  }
+  process.stdout.write(`${result.lines.join('\n')}\n`)
+  const files = [...result.files, ...done.regenerated].join(', ')
+  process.stderr.write(context.dryRun ? `\nwould write: ${files}\n` : `\nwrote: ${files}\n`)
+}
+
+function main(argv) {
+  let result
+  let context
+  try {
+    if (argv[0]?.startsWith('-')) throw new UsageError(`there is no command ${argv[0]}; the command comes first`)
+    const { flags, positionals } = parseArguments(argv)
+    context = resolveContext(flags)
+    if (positionals[0] === 'set') result = commandSet(context, positionals)
+    else if (positionals[0] === 'new') result = commandNewTask(context, flags, positionals)
+    else throw new UsageError(`there is no command ${positionals[0] ?? '(none)'}; try set or new task`)
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error
+    process.stderr.write(`${error.message}\n`)
+    process.exitCode = 2
+    return
+  }
+  print(context, result)
+  // Leave the exit code to Node, so that a large write to a pipe is not cut off.
+  process.exitCode = result.done.errors.length > 0 ? 1 : 0
+}
+
+main(process.argv.slice(2))

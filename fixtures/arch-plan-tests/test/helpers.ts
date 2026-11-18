@@ -7,6 +7,13 @@ import { servePlan } from '../../../fixtures/packs/orchard/providers/plan/provid
 
 type Message = Record<string, any>
 
+/** What a test may give the provider besides its streams. `env` is the environment of the plan CLI it runs. */
+export interface ProviderOptions {
+  pageSize?: number
+  env?: NodeJS.ProcessEnv
+  timeoutMs?: number
+}
+
 export const REPO = join(import.meta.dirname, '..', '..', '..')
 export const PACK = join(REPO, 'fixtures', 'packs', 'orchard')
 
@@ -31,7 +38,7 @@ export interface Reply {
 }
 
 /** A fake client for the provider, in this process: one request in, its reply out. */
-export function connect(options: { pageSize?: number } = {}) {
+export function connect(options: ProviderOptions = {}) {
   const input = new PassThrough()
   const output = new PassThrough()
   output.setEncoding('utf8')
@@ -57,15 +64,28 @@ export function connect(options: { pageSize?: number } = {}) {
     if (message.id !== id) throw new Error(`unexpected message: ${JSON.stringify(message)}`)
     return { result: message.result, error: message.error, logs: logs.splice(0) }
   }
+  /** Writes every request before it reads any reply, so the provider has them all at once. Replies come in order. */
+  const requestMany = async (method: string, list: unknown[]): Promise<Reply[]> => {
+    const ids = list.map(() => nextId++)
+    list.forEach((params, at) => input.write(`${JSON.stringify({ jsonrpc: '2.0', id: ids[at], method, params })}\n`))
+    const replies: Reply[] = []
+    for (const id of ids) {
+      while (lines.length === 0) await new Promise<void>((resolve) => waiting.push(resolve))
+      const message: Message = JSON.parse(lines.shift() as string)
+      if (message.id !== id) throw new Error(`unexpected message: ${JSON.stringify(message)}`)
+      replies.push({ result: message.result, error: message.error, logs: logs.splice(0) })
+    }
+    return replies
+  }
   const close = async (): Promise<void> => {
     input.end()
     await done
   }
-  return { request, close }
+  return { request, requestMany, close }
 }
 
 /** A provider that `initialize` has given `root`. `close` ends it. */
-export async function start(root: string, options: { pageSize?: number } = {}) {
+export async function start(root: string, options: ProviderOptions = {}) {
   const client = connect(options)
   const init = await client.request('initialize', { config: {}, root })
   if (init.error !== undefined) throw new Error(`initialize failed: ${JSON.stringify(init.error)}`)

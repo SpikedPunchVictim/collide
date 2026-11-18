@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, expect, test } from 'vitest'
 import { PACK, REPO, tree } from './helpers.ts'
+import { makeRepo, versionOf } from './repo.ts'
 
 const temp = mkdtempSync(join(tmpdir(), 'arch-plan-stdio-'))
 afterAll(() => rmSync(temp, { recursive: true, force: true }))
@@ -89,4 +90,29 @@ test('the provider writes nothing but replies to stdout, and logs to stderr', as
   expect(messages).toHaveLength(2)
   expect(messages.every((message) => message.method === undefined)).toBe(true)
   expect(stderr).toMatch(/E-10-broken-epic\.md/)
+})
+
+test('a real node child previews and applies a setStatus through the plan CLI of its root, and a create', async () => {
+  const repo = makeRepo()
+  const path = repo.taskPath('T-03-003')
+  const version = versionOf(repo, path)
+  const set = { op: 'setStatus', id: 'T-03-003', args: { status: 'doing' }, version }
+  const { messages } = await run([
+    request(1, 'initialize', { config: {}, root: repo.root }),
+    request(2, 'preview', set),
+    request(3, 'apply', set),
+    request(4, 'get', { id: 'T-03-003' }),
+    request(5, 'apply', { op: 'create', args: { proposal: 'P03', title: 'Chart the tides', epic: 'E-07' } }),
+  ])
+  expect(messages).toHaveLength(5)
+  expect(messages[0]).toMatchObject({ id: 1, result: { capabilities: { create: true, preview: true } } })
+  expect(messages[1]).toMatchObject({
+    id: 2,
+    result: { outcome: 'ok', files: [path, 'arch/work/epics/E-07-harbor-plan.md'] },
+  })
+  expect(messages[2]).toMatchObject({ id: 3, result: { outcome: 'ok', task: { state: { status: 'doing' } } } })
+  expect(messages[3]).toMatchObject({ id: 4, result: { task: { state: { status: 'doing' } } } })
+  expect(messages[4]).toMatchObject({ id: 5, result: { outcome: 'ok', task: { key: 'plan:T-03-006' } } })
+  expect(repo.read(path)).toContain('status: doing')
+  expect(repo.git('status', '--porcelain').split('\n').filter(Boolean)).toHaveLength(3)
 })

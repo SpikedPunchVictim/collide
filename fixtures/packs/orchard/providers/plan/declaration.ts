@@ -1,5 +1,5 @@
 import type { InitializeResultInput } from '@collide/pack-sdk'
-import { ID_PATTERN, LABEL_ID_PATTERN, SHORT_ID_PATTERN } from './ids.ts'
+import { EPIC_ARG, ID_PATTERN, LABEL_ID_PATTERN, PROPOSAL_ARG, SHORT_ID_PATTERN } from './ids.ts'
 
 export const BLOCKED_BY = 'blocked-by'
 
@@ -15,9 +15,54 @@ export const STATUSES = [
 
 export type Status = (typeof STATUSES)[number]
 
+/** The status that writing each category produces. Each category has one status in this source. */
+export const CATEGORY_STATUS: Record<string, string> = Object.fromEntries(
+  STATUSES.map((status) => [status.category, status.name]),
+)
+
+/** A title is one line, at most this long. The plan CLI makes the file name from it. */
+export const TITLE_MAX = 200
+
+const noExtraArgs = { additionalProperties: false }
+
 /**
- * What `initialize` answers. No `ops`, `create`, `preview` or `watch` yet: this is the read side. A category is
- * written as the one status that has it, which is what `categoryStatus` says.
+ * `setStatus` takes a status or a category (a category is written as the status in `categoryStatus`). `create` takes
+ * what the plan CLI's `new task` takes: the proposal that specifies the task, a title, the owning epic and, if any,
+ * the tasks it depends on. Neither declares `movesTo`: where a status write goes is the status it names. `checkouts`
+ * is left out (any).
+ */
+const OPS: NonNullable<InitializeResultInput['ops']> = [
+  {
+    name: 'setStatus',
+    args: {
+      type: 'object',
+      properties: {
+        status: { enum: STATUSES.map((status) => status.name) },
+        category: { enum: STATUSES.map((status) => status.category) },
+      },
+      oneOf: [{ required: ['status'] }, { required: ['category'] }],
+      ...noExtraArgs,
+    },
+  },
+  {
+    name: 'create',
+    args: {
+      type: 'object',
+      properties: {
+        proposal: { type: 'string', pattern: PROPOSAL_ARG },
+        title: { type: 'string', minLength: 1, maxLength: TITLE_MAX },
+        epic: { type: 'string', pattern: EPIC_ARG },
+        dependsOn: { type: 'array', items: { type: 'string', pattern: SHORT_ID_PATTERN }, uniqueItems: true },
+      },
+      required: ['proposal', 'title', 'epic'],
+      ...noExtraArgs,
+    },
+  },
+]
+
+/**
+ * What `initialize` answers. No `watch` yet (`ts-0112-px`). A category is written as the one status that has it, which
+ * is what `categoryStatus` says.
  */
 export const INITIALIZE_RESULT: InitializeResultInput = {
   scope: 'ref',
@@ -25,12 +70,12 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
   shortIdPattern: SHORT_ID_PATTERN,
   templateFields: [{ name: 'labelId', pattern: LABEL_ID_PATTERN }],
   statuses: STATUSES.map((status) => ({ ...status })),
-  categoryStatus: Object.fromEntries(STATUSES.map((status) => [status.category, status.name])),
+  categoryStatus: CATEGORY_STATUS,
   fields: [
     { id: 'proposal', type: 'string', filterable: true },
     { id: 'epic', type: 'string', filterable: true },
   ],
-  ops: [],
+  ops: OPS,
   links: [{ name: BLOCKED_BY, dir: 'out', blocking: true }],
-  capabilities: { watch: false, create: false, collections: true, preview: false },
+  capabilities: { watch: false, create: true, collections: true, preview: true },
 }

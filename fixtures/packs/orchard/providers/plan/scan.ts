@@ -2,15 +2,12 @@ import { join } from 'node:path'
 import type { TaskInvalidOutput, TaskInput } from '@collide/pack-sdk'
 import { readCollections } from './collections.ts'
 import type { Collection, Listed } from './collections.ts'
-import { filesIn, foldersIn } from './files.ts'
+import { filesIn, foldersIn, inBatches } from './files.ts'
 import { proposalDir, taskFile } from './ids.ts'
 import { readCorpusFile } from './read-file.ts'
 import { toTask } from './task.ts'
 
 const PROPOSALS = 'arch/proposals'
-
-/** How many files are open at once. */
-const BATCH = 32
 
 export interface FoundTask {
   task: TaskInput
@@ -41,15 +38,6 @@ async function candidates(root: string): Promise<Candidate[]> {
     }
   }
   return found
-}
-
-/** Runs `work` over `items` a batch at a time, and returns the results in order. */
-async function inBatches<T, R>(items: T[], work: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = []
-  for (let at = 0; at < items.length; at += BATCH) {
-    results.push(...(await Promise.all(items.slice(at, at + BATCH).map(work))))
-  }
-  return results
 }
 
 interface Parsed extends Listed {
@@ -109,4 +97,10 @@ export async function scan(root: string, log: (message: string) => void): Promis
     body,
   }))
   return { tasks, collections, invalid }
+}
+
+/** The task that an id names: its long id, its short id, or its key. */
+export function findTask(tasks: FoundTask[], id: string): FoundTask | undefined {
+  const wanted = id.startsWith('plan:') ? id.slice('plan:'.length) : id
+  return tasks.find(({ task }) => task.id === wanted || task.key === `plan:${wanted}`)
 }

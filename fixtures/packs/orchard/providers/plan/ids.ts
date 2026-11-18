@@ -4,6 +4,10 @@ export const ID_PATTERN = '^T-[0-9]{2}-[0-9]{3}-[a-z0-9]+(-[a-z0-9]+)*$'
 export const SHORT_ID_PATTERN = '^T-[0-9]{2}-[0-9]{3}$'
 export const LABEL_ID_PATTERN = '^t\\d{2}-\\d{3}$'
 
+/** What `create` takes for the proposal and the epic: the forms the plan CLI's `new task` is given. */
+export const PROPOSAL_ARG = '^P[0-9]{2}$'
+export const EPIC_ARG = '^E-[0-9]{2}(-[a-z0-9]+)*$'
+
 const TASK_FILE = /^(T-(\d{2})-\d{3})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
 const EPIC_FILE = /^(E-\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
 const PROPOSAL_DIR = /^(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*$/

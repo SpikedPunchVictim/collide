@@ -49,15 +49,52 @@ describe('initialize', () => {
     })
   })
 
-  test('declares the fields, the blocked-by link and collections, and no ops, create, preview or watch', async () => {
+  test('declares the fields and the blocked-by link', async () => {
     const result = await initialize()
     expect(result.fields).toEqual([
       { id: 'proposal', type: 'string', filterable: true },
       { id: 'epic', type: 'string', filterable: true },
     ])
     expect(result.links).toEqual([{ name: 'blocked-by', dir: 'out', blocking: true }])
-    expect(result.ops).toEqual([])
-    expect(result.capabilities).toEqual({ watch: false, create: false, collections: true, preview: false })
+  })
+
+  test('declares setStatus and create, and the capabilities: create, preview, collections, not watch', async () => {
+    const result = await initialize()
+    expect(result.ops.map((op: { name: string }) => op.name)).toEqual(['setStatus', 'create'])
+    expect(result.capabilities).toEqual({ watch: false, create: true, collections: true, preview: true })
+  })
+
+  const argsSchema = async (name: string) => {
+    const result = await initialize()
+    const op = result.ops.find((candidate: { name: string }) => candidate.name === name)
+    return new Ajv2020({ strict: false, allErrors: true }).compile(op.args)
+  }
+
+  test.each([
+    [{ status: 'doing' }, true],
+    [{ category: 'active' }, true],
+    [{}, false],
+    [{ status: 'doing', category: 'active' }, false],
+    [{ status: 'started' }, false],
+    [{ category: 'blocked' }, false],
+    [{ status: 'doing', force: true }, false],
+  ])('the setStatus args schema takes one of status or category: %j is %s', async (args, valid) => {
+    expect((await argsSchema('setStatus'))(args)).toBe(valid)
+  })
+
+  test.each([
+    [{ proposal: 'P03', title: 'Chart', epic: 'E-07' }, true],
+    [{ proposal: 'P03', title: 'Chart', epic: 'E-07-harbor-plan', dependsOn: ['T-03-001'] }, true],
+    [{ title: 'Chart', epic: 'E-07' }, false],
+    [{ proposal: 'P03', epic: 'E-07' }, false],
+    [{ proposal: 'P03', title: 'Chart' }, false],
+    [{ proposal: '3', title: 'Chart', epic: 'E-07' }, false],
+    [{ proposal: 'P03', title: 'Chart', epic: 'harbor' }, false],
+    [{ proposal: 'P03', title: '', epic: 'E-07' }, false],
+    [{ proposal: 'P03', title: 'Chart', epic: 'E-07', dependsOn: ['harbor'] }, false],
+    [{ proposal: 'P03', title: 'Chart', epic: 'E-07', owner: 'me' }, false],
+  ])('the create args schema: %j is %s', async (args, valid) => {
+    expect((await argsSchema('create'))(args)).toBe(valid)
   })
 
   test('validates against the generated InitializeResult schema', async () => {

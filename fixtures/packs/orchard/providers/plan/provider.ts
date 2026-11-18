@@ -3,11 +3,16 @@ import type { Readable, Writable } from 'node:stream'
 import { defineProvider } from '@collide/pack-sdk'
 import type { GetResultInput, ListResultInput, ProviderHandlers } from '@collide/pack-sdk'
 import { INITIALIZE_RESULT } from './declaration.ts'
-import { scan } from './scan.ts'
+import { findTask, scan } from './scan.ts'
 import type { Scan } from './scan.ts'
+import { applyOp, previewOp } from './write.ts'
+import type { WriteContext } from './write.ts'
 
 /** A page of `list` is this many tasks. The corpus has about 1,600, so a full list is a few pages. */
 export const PAGE_SIZE = 500
+
+/** The plan CLI may take this long to write before it is killed. The Orchard tree has about 1,600 files. */
+export const WRITE_TIMEOUT_MS = 120_000
 
 const CURSOR = /^p(\d+)$/
 
@@ -17,29 +22,39 @@ export interface ServeOptions {
   log?: (message: string) => void
   /** Tests make it small to page over a small tree. */
   pageSize?: number
+  /** The environment of the plan CLI that a write runs. The default is this process's. */
+  env?: NodeJS.ProcessEnv
+  /** How long the plan CLI may run before a write fails. */
+  timeoutMs?: number
 }
 
-/** The long id, or the short id, or the key, that a `get` may name a task by. */
-const stripSource = (id: string): string => (id.startsWith('plan:') ? id.slice('plan:'.length) : id)
-
 /**
- * `initialize`, `list` and `get` for one checkout's `arch/` tree. The root comes from `initialize` and from nowhere
- * else; until it has run, `list` and `get` fail. The tree is read again on each call, so a reply is never older than
- * the request.
+ * `initialize`, `list`, `get`, `apply` and `preview` for one checkout's `arch/` tree. The root comes from `initialize`
+ * and from nowhere else; until it has run, every other call fails. The tree is read again on each call, so a reply is
+ * never older than the request. A write runs the checkout's own `./plan`; the SDK answers one request at a time, in
+ * the order they came, so two writes to the checkout never overlap in this process.
  */
-export function planHandlers(options: { log: (message: string) => void; pageSize?: number }): ProviderHandlers {
-  const { log, pageSize = PAGE_SIZE } = options
+export function planHandlers(options: {
+  log: (message: string) => void
+  pageSize?: number
+  env?: NodeJS.ProcessEnv
+  timeoutMs?: number
+}): ProviderHandlers {
+  const { log, pageSize = PAGE_SIZE, env = process.env, timeoutMs = WRITE_TIMEOUT_MS } = options
   let root: string | null = null
 
-  const read = async (checkout: string | undefined): Promise<Scan> => {
+  /** The root a call is for: the one `initialize` gave, which is the only checkout this provider reads or writes. */
+  const rootFor = (checkout: string | undefined): string => {
     if (root === null) {
       throw new Error("the provider has no root yet: send initialize, with the checkout's path as root, first")
     }
     if (checkout !== undefined && resolve(checkout) !== root) {
       throw new Error(`checkout ${JSON.stringify(checkout)} is not the checkout this provider was given (${root})`)
     }
-    return scan(root, log)
+    return root
   }
+  const read = async (checkout: string | undefined): Promise<Scan> => scan(rootFor(checkout), log)
+  const writing = (checkout: string | undefined): WriteContext => ({ root: rootFor(checkout), env, timeoutMs, log })
 
   return {
     initialize: ({ root: given }) => {
@@ -69,14 +84,11 @@ export function planHandlers(options: { log: (message: string) => void; pageSize
       }
     },
     get: async ({ id, checkout }): Promise<GetResultInput> => {
-      const wanted = stripSource(id)
-      const { tasks } = await read(checkout ?? undefined)
-      const found = tasks.find(({ task }) => task.id === wanted || task.key === `plan:${wanted}`)
+      const found = findTask((await read(checkout ?? undefined)).tasks, id)
       return found === undefined ? {} : { task: { ...found.task, body: found.body } }
     },
-    apply: () => {
-      throw new Error('apply is not built yet: this provider reads only')
-    },
+    apply: (params) => applyOp(writing(params.checkout ?? undefined), params),
+    preview: (params) => previewOp(writing(params.checkout ?? undefined), params),
   }
 }
 
@@ -86,6 +98,8 @@ export function servePlan({
   output,
   log = (message) => void process.stderr.write(`${message}\n`),
   pageSize,
+  env,
+  timeoutMs,
 }: ServeOptions = {}): Promise<void> {
-  return defineProvider(planHandlers({ log, pageSize }), { input, output, log })
+  return defineProvider(planHandlers({ log, pageSize, env, timeoutMs }), { input, output, log })
 }
