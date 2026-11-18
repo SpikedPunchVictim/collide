@@ -1,7 +1,7 @@
 ---
 id: ts-0119-tj
 kind: task
-status: ready
+status: done
 title: "Views in the daemon: snapshot files, personal views and task.list"
 owners: []
 links:
