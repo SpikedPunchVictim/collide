@@ -83,6 +83,11 @@ None by a build agent: this check is the owner's. The checklist names the automa
 Checked against the code at f4dad8a on 2026-11-17: no command, path, table or message drifted; two notes added (`pnpm
 install` is needed once, and any older daemon is to be stopped).
 
+Corrected on 2026-11-18, at the owner's first run: `sqlite3 -readonly` fails on the store with `unable to open database
+file (14)`. The store is in WAL mode, and a read-only open needs the `-shm` file, which is gone whenever the daemon has
+the store closed. The queries now open it with `sqlite3 -cmd 'PRAGMA query_only=1'`, which reads and refuses any write
+(checked on a copy of the store).
+
 Written from the code and the Built and Decisions sections of `ts-0077-ws` to `ts-0082-fp`. Every command below is the
 owner's to run; nothing here was run by the build agent, and no command was tried against the real app. Run it after
 the checks of `ts-0071-fd`, so a real run has been seen from the CLI first. The run spends real money on your
@@ -225,7 +230,7 @@ stays off until a repository is chosen and there is text.
   - The scratch task is `review`:
 
     ```sh
-    sqlite3 -readonly "$HOME/Library/Application Support/Collide/store/store.db" \
+    sqlite3 -cmd 'PRAGMA query_only=1' "$HOME/Library/Application Support/Collide/store/store.db" \
       "SELECT b.root, t.num, t.title, t.status FROM scratch_tasks t JOIN boards b ON b.id = t.board;"
     ```
 
@@ -241,7 +246,7 @@ stays off until a repository is chosen and there is text.
   git -C <collide checkout> worktree list                         # the work folder is gone
   git -C <collide checkout> branch --list 'collide/*'             # collide/<run id> is gone
   ls "$HOME/Library/Application Support/Collide/workspaces/"      # no <run id>
-  sqlite3 -readonly "$HOME/Library/Application Support/Collide/store/store.db" \
+  sqlite3 -cmd 'PRAGMA query_only=1' "$HOME/Library/Application Support/Collide/store/store.db" \
     "SELECT b.root, t.num, t.title, t.status FROM scratch_tasks t JOIN boards b ON b.id = t.board;"   # status done
   ```
 

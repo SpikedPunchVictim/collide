@@ -72,6 +72,11 @@ None by a build agent: these checks are the owner's. The checklist names the aut
 Checked against the code at f4dad8a on 2026-11-17: no command, path, table or message drifted; the run now loads the
 worktree's `CLAUDE.md` and skills (a note under Check 1).
 
+Corrected on 2026-11-18, at the owner's first run: `sqlite3 -readonly` fails on the store with `unable to open database
+file (14)`. The store is in WAL mode, and a read-only open needs the `-shm` file, which is gone whenever the daemon has
+the store closed. The queries now open it with `sqlite3 -cmd 'PRAGMA query_only=1'`, which reads and refuses any write
+(checked on a copy of the store).
+
 Written from the code and `collide --help` of the build at the time of writing. Every command below is the owner's to
 run; nothing here was run by the build agent.
 
@@ -151,7 +156,7 @@ Steps:
    ```sh
    git -C <worktree path> status --short
    git -C <worktree path> log --oneline -5
-   sqlite3 -readonly "$HOME/Library/Application Support/Collide/store/store.db" \
+   sqlite3 -cmd 'PRAGMA query_only=1' "$HOME/Library/Application Support/Collide/store/store.db" \
      "SELECT run, phase, state FROM phase_ends WHERE run='<run id>';"
    ```
 
@@ -225,7 +230,7 @@ Steps:
 
    ```sh
    tail -40 "$HOME/Library/Application Support/Collide/daemon.log"
-   sqlite3 -readonly -header -column "$HOME/Library/Application Support/Collide/store/store.db" \
+   sqlite3 -cmd 'PRAGMA query_only=1' -header -column "$HOME/Library/Application Support/Collide/store/store.db" \
      "SELECT id, kind, wait, phase, round((ended_ns - started_ns) / 1e9, 1) AS secs
         FROM spans WHERE run='<run id>' ORDER BY id;"
    ```
@@ -293,13 +298,13 @@ Steps:
 5. Read what the watcher prints, then let the run end. Run the spans query with the run id:
 
    ```sh
-   sqlite3 -readonly -header -column "$HOME/Library/Application Support/Collide/store/store.db" \
+   sqlite3 -cmd 'PRAGMA query_only=1' -header -column "$HOME/Library/Application Support/Collide/store/store.db" \
      "SELECT id, kind, wait, phase,
              round((ended_ns - started_ns) / 1e9, 1) AS secs,
              datetime(started_wall_ms / 1000, 'unixepoch', 'localtime') AS started,
              datetime(ended_wall_ms / 1000, 'unixepoch', 'localtime') AS ended
         FROM spans WHERE run='<run id>' ORDER BY id;"
-   sqlite3 -readonly "$HOME/Library/Application Support/Collide/store/store.db" \
+   sqlite3 -cmd 'PRAGMA query_only=1' "$HOME/Library/Application Support/Collide/store/store.db" \
      "SELECT COUNT(*) FROM cold_returns WHERE run='<run id>';"
    ```
 
@@ -337,10 +342,10 @@ Automated tests it relies on:
 
 **Gaps.**
 
-- No command prints a run's spans, waits or active time. The checks read the store with `sqlite3 -readonly` on
-  `store/store.db` (table `spans`, columns `kind`, `wait`, `phase`, `started_ns`, `ended_ns`, `started_wall_ms`,
-  `ended_wall_ms`), and the owner subtracts by hand. The record that `collide run` prints has no span, wait or active
-  time. A viewer is Stage 6 or later.
+- No command prints a run's spans, waits or active time. The checks read the store with `sqlite3 -cmd 'PRAGMA
+  query_only=1'` on `store/store.db` (table `spans`, columns `kind`, `wait`, `phase`, `started_ns`, `ended_ns`,
+  `started_wall_ms`, `ended_wall_ms`), and the owner subtracts by hand. The record that `collide run` prints has no
+  span, wait or active time. A viewer is Stage 6 or later.
 - The 0.2 table's uptime row (work timeouts) cannot be seen from a run in 3b: the uptime clock times the login
   shell capture at daemon start and the waits of a stop, and neither shows in a run's output. Only the continuous and
   wall rows are checked by hand.
