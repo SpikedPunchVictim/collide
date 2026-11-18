@@ -37,7 +37,10 @@ export interface LoopState {
   readonly refusal: string | null
   /** What the last answer did, in words. */
   readonly notice: string | null
-  /** A re-prompt went through. Its notice outlives the run change to the new run, until that run needs the person or ends. `from` is the run that was sent back. */
+  /**
+   * A re-prompt went through. Its notice outlives the run change to the new run, until that run needs the person or
+   * ends. `from` is the run that was sent back.
+   */
   readonly sentBack: { readonly from: string | null } | null
   /** Discard was pressed once: the page asks again, and says what is deleted. */
   readonly confirmingDiscard: boolean
@@ -142,7 +145,10 @@ export function loopReducer(state: LoopState, action: LoopAction): LoopState {
   }
 }
 
-/** What belongs to one run, which another run does not share. A re-prompt's notice is kept: the new run is still working. */
+/**
+ * What belongs to one run, which another run does not share. A re-prompt's notice is kept: the new run is still
+ * working.
+ */
 function afterRunChange(state: LoopState): LoopState {
   return {
     ...state,
@@ -186,7 +192,10 @@ function synced(state: LoopState, action: Extract<LoopAction, { type: 'synced' }
   }
 }
 
-/** Whether the run a re-prompt started has reached a state that needs the person, or has ended. The run sent back does not count. */
+/**
+ * Whether the run a re-prompt started has reached a state that needs the person, or has ended. The run sent back does
+ * not count.
+ */
 function reachedPerson(
   sentBack: LoopState['sentBack'],
   items: readonly QueueItem[],
