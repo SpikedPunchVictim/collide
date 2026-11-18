@@ -1,7 +1,7 @@
 ---
 id: ts-0111-vn
 kind: task
-status: ready
+status: done
 title: "Plan adapter writes: setStatus, create, preview and the fake plan CLI"
 owners: []
 links:
