@@ -1,7 +1,7 @@
 ---
 id: ts-0120-wm
 kind: task
-status: ready
+status: done
 title: "CLI: task new, tasks --view and --checkout, task --json"
 owners: []
 links:
