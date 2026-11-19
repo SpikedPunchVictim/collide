@@ -10,6 +10,8 @@ import type {
 } from '@collide/pack-sdk'
 import { isMainCheckout, resolveCheckout } from './checkout.ts'
 import { ROOT_NAMES, TITLE_MAX } from './create.ts'
+import { ADD_FEATURE, FEATURE_PATTERN, MOVE_FEATURE } from './feature-ops.ts'
+import { SECTION_MAX } from './features.ts'
 import { DEFAULT_LAYOUT, resolveLayout } from './layout.ts'
 import type { Layout } from './layout.ts'
 import {
@@ -33,6 +35,7 @@ import type { Category } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
 import { ACCEPT, DECISION_MAX, DEFER, NOTE_MAX, REJECT, RESOLVE } from './person-ops.ts'
+import { RENAME_SECTION } from './rename-section.ts'
 import { applyOp } from './write.ts'
 
 const noExtraArgs = { additionalProperties: false }
@@ -80,6 +83,43 @@ const PROPOSAL_OPS: OpDecls = [
   },
   { name: REJECT, args: { type: 'object', properties: { reason: note }, ...noExtraArgs } },
 ]
+/**
+ * The ops that write a proposal's Features part. `section` is a section name of at most `SECTION_MAX` characters,
+ * matched after trimming and in any case, and may be empty, for the Unsorted part. A new feature's number is one past
+ * the highest in the file, so a number that was removed from the file can be given again: the description says so.
+ */
+const sectionArg = (description: string) => ({ type: 'string', maxLength: SECTION_MAX, description })
+const FEATURE_OPS: OpDecls = [
+  {
+    name: ADD_FEATURE,
+    args: {
+      type: 'object',
+      description:
+        'Adds a feature at the end of a section. It takes the next number, one past the highest F<n> in the file, ' +
+        'so a number that was removed from the file can be given again.',
+      properties: {
+        section: sectionArg('The section to add it to, made when it is missing. Empty means Unsorted.'),
+        title: { type: 'string', minLength: 1, maxLength: TITLE_MAX, description: 'One line, with no **.' },
+        summary: { type: 'string', minLength: 1, description: 'One line, or several that continue it.' },
+      },
+      required: ['section', 'title', 'summary'],
+      ...noExtraArgs,
+    },
+  },
+  {
+    name: MOVE_FEATURE,
+    args: {
+      type: 'object',
+      description: 'Moves a feature, with its number and its continuation lines, to the end of a section.',
+      properties: {
+        feature: { type: 'string', pattern: FEATURE_PATTERN, description: 'The feature to move, such as F2.' },
+        section: sectionArg('The section to move it to, made when it is missing. Empty means Unsorted.'),
+      },
+      required: ['feature', 'section'],
+      ...noExtraArgs,
+    },
+  },
+]
 const QUESTION_OPS: OpDecls = [
   {
     name: RESOLVE,
@@ -95,17 +135,18 @@ const QUESTION_OPS: OpDecls = [
   },
 ]
 
-const proposalKind = ownStatusKind(PROPOSAL, PROPOSAL_STATUSES, undefined, PROPOSAL_OPS)
+const proposalKind = ownStatusKind(PROPOSAL, PROPOSAL_STATUSES, undefined, [...PROPOSAL_OPS, ...FEATURE_OPS])
 const spikeKind = ownStatusKind(SPIKE, SPIKE_STATUSES)
 /** A question is resolved by the `resolve` op, which records who and what, so `setStatus` takes the other two. */
 const questionKind = ownStatusKind(QUESTION, QUESTION_STATUSES, ['open', 'dropped'], QUESTION_OPS)
 
 /**
  * The write ops, for every kind. `create` makes an item, so it is sent with no `id` and no `version`; `reid` is sent
- * with an `id` and no `version`; the others change one item and need both. None has `movesTo`: a status write moves
- * the item to the category its argument names, which one fixed category cannot say, and `claim` records an owner
- * without changing the status. `checkouts` is left out (any): `apply` writes in the main checkout, or in the one that
- * `checkout` names.
+ * with an `id` and no `version`; `renameSection` renames a section in every proposal that has it, so it is sent with
+ * neither, and may carry `versions`, the version of each file the caller read; the others change one item and need
+ * both. None has `movesTo`: a status write moves the item to the category its argument names, which one fixed category
+ * cannot say, and `claim` records an owner without changing the status. `checkouts` is left out (any): `apply` writes
+ * in the main checkout, or in the one that `checkout` names.
  */
 const OPS: NonNullable<InitializeResultInput['ops']> = [
   {
@@ -150,6 +191,26 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
     },
   },
   { name: 'reid', args: { type: 'object', properties: { seed: { type: 'integer' } }, ...noExtraArgs } },
+  {
+    name: RENAME_SECTION,
+    args: {
+      type: 'object',
+      description:
+        'Renames a section in every proposal that has it, whatever its status. Where `to` is already a section, ' +
+        'the entries are merged into it.',
+      properties: {
+        from: { type: 'string', minLength: 1, description: 'The section to rename. It cannot be Unsorted.' },
+        to: sectionArg('The new name, 1 to 40 characters.'),
+        versions: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'The version of each proposal you read, by id. A file that has moved on is a conflict.',
+        },
+      },
+      required: ['from', 'to'],
+      ...noExtraArgs,
+    },
+  },
 ]
 
 /**

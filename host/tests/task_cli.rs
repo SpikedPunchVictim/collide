@@ -2320,6 +2320,103 @@ fn sections_do_not_count_the_features_of_rejected_and_superseded_proposals() {
     assert!(!names.contains(&"Superseded only"), "{names:?}");
 }
 
+/// A child that is killed and reaped when it drops, so a failed test leaves no provider behind.
+struct Killed(std::process::Child);
+
+impl Drop for Killed {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Runs `renameSection` on the plan provider itself (`node packs/plan/src/main.ts`, over the repository `repo`) and
+/// returns its `apply` result. `collide` has no command for it until `ts-0136-rr`. The environment is cleared, `PATH`
+/// is kept for `node`, and `HOME` and the daemon root are a temp root; no pack data folder means no private root.
+fn rename_section(repo: &Repo, from: &str, to: &str) -> Value {
+    use std::io::{Read, Write};
+    use std::process::Stdio;
+    let root = TempRoot::new();
+    let main = repo_root().join("packs/plan/src/main.ts");
+    let mut child = Killed(
+        Command::new("node")
+            .arg(main)
+            .current_dir(root.path())
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", root.path())
+            .env("COLLIDE_DAEMON_ROOT", root.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("node should run the plan provider"),
+    );
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "config": {}, "root": repo.dir },
+    });
+    let apply = serde_json::json!({
+        "jsonrpc": "2.0", "id": 2, "method": "apply",
+        "params": { "op": "renameSection", "args": { "from": from, "to": to } },
+    });
+    let mut stdin = child.0.stdin.take().unwrap();
+    writeln!(stdin, "{initialize}").unwrap();
+    writeln!(stdin, "{apply}").unwrap();
+    // The provider serves until its input ends, so closing it ends the child.
+    drop(stdin);
+    let mut stdout = child.0.stdout.take().unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stdout.read_to_string(&mut text);
+        let _ = sender.send(text);
+    });
+    let text = receiver
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the plan provider should answer and exit");
+    let replies: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: {line}")))
+        .collect();
+    assert_eq!(replies.len(), 2, "{text}");
+    replies[1]["result"].clone()
+}
+
+#[test]
+fn sections_json_after_a_rename_has_no_near_duplicate_group_for_the_renamed_name() {
+    let (bundle, repo) = (bundle(), repo_with_sections("sections-rename"));
+    let before = json(&collide(&repo, &bundle, &["sections", "--json"]));
+    assert_eq!(
+        before["nearDuplicates"],
+        serde_json::json!([
+            { "names": ["Packs", "Pack"] },
+            { "names": ["Task view", "task-view"] },
+        ])
+    );
+
+    let reply = rename_section(&repo, "Pack", "packs");
+    assert_eq!(reply["outcome"], "ok", "{reply}");
+    assert_eq!(reply["files"].as_array().unwrap().len(), 1, "{reply}");
+
+    let run = collide(&repo, &bundle, &["sections", "--json"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let after = json(&run);
+    assert_eq!(
+        after["nearDuplicates"],
+        serde_json::json!([{ "names": ["Task view", "task-view"] }])
+    );
+    assert_eq!(
+        after["sections"][0],
+        serde_json::json!({
+            "name": "Packs",
+            "featureCount": 5,
+            "proposalCount": 3,
+            "proposals": ["pr-0001-aa", "pr-0002-bb", "pr-0004-dd"],
+        })
+    );
+}
+
 #[test]
 fn sections_do_not_count_items_that_are_not_proposals() {
     let (bundle, repo) = (bundle(), Repo::new("sections-no-proposals"));

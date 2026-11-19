@@ -7,11 +7,12 @@ export const TEMP_SUFFIX = '.collide-tmp'
 
 /**
  * Test hook: when the environment variable `COLLIDE_FAILPOINT` equals the name of a failpoint, the process kills
- * itself with SIGKILL there. `before-rename` is the one failpoint: it fires after the temp file is written and
- * synced and before it is renamed over the item, so a test can check that a killed writer leaves the old file whole.
- * With the variable unset (every real run) nothing happens.
+ * itself with SIGKILL there. `before-rename` fires after the temp file is written and synced and before it is
+ * renamed over the item, so a test can check that a killed writer leaves the old file whole. `between-files` fires
+ * in a write of several files, after one is replaced and before the next, so a test can check that every file is
+ * whole after a kill. With the variable unset (every real run) nothing happens.
  */
-function failpoint(name: 'before-rename'): void {
+export function failpoint(name: 'before-rename' | 'between-files'): void {
   if (process.env.COLLIDE_FAILPOINT !== name) return
   process.kill(process.pid, 'SIGKILL')
   // The signal can arrive a moment after `kill` returns; do not go on in the meantime.

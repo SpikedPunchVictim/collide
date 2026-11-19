@@ -39,6 +39,8 @@ describe('initialize', () => {
           { name: 'accept', args: expect.objectContaining({ additionalProperties: false }) },
           { name: 'defer', args: expect.objectContaining({ required: ['trigger'] }) },
           { name: 'reject', args: expect.objectContaining({ additionalProperties: false }) },
+          { name: 'addFeature', args: expect.objectContaining({ required: ['section', 'title', 'summary'] }) },
+          { name: 'moveFeature', args: expect.objectContaining({ required: ['feature', 'section'] }) },
         ],
       },
       {

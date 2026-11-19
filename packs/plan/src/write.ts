@@ -6,6 +6,7 @@ import { replaceFile } from './atomic.ts'
 import { CheckoutError, isMainCheckout, resolveCheckout } from './checkout.ts'
 import { addLinkLine, clearOwnersLine, setOwnerLine, setStatusLine } from './frontmatter-edit.ts'
 import { checkCreate, CREATE, createLocked, rootOfCreate } from './create.ts'
+import { FEATURE_OPS } from './feature-ops.ts'
 import type { IdHooks } from './ids.ts'
 import { FEATURE_TARGET_EXAMPLE, parseFeatureTarget } from './feature-target.ts'
 import {
@@ -34,6 +35,7 @@ import { article, CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
 import type { Frontmatter, OpContext, OpSpec, Prepared } from './op-util.ts'
 import { PERSON_OPS, proposalMove } from './person-ops.ts'
 import { checkReid, REID, reidLocked } from './reid.ts'
+import { checkRenameSection, RENAME_SECTION, renameSectionLocked } from './rename-section.ts'
 import { BODY_CAP, findFence, parseFrontmatter, readItemFile, versionOf } from './read-file.ts'
 import { DEFAULT_LAYOUT, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
@@ -131,6 +133,7 @@ function setProposalStatus(
 
 const OPS: Record<string, OpSpec> = {
   ...PERSON_OPS,
+  ...FEATURE_OPS,
   [SET_STATUS]: {
     check: (args) => {
       const { status, category } = args
@@ -256,7 +259,7 @@ const OPS: Record<string, OpSpec> = {
   },
 }
 
-export const OP_NAMES = [...Object.keys(OPS), CREATE, REID]
+export const OP_NAMES = [...Object.keys(OPS), CREATE, REID, RENAME_SECTION]
 
 /** Reads the item back from disk, so the reply is what is on disk. */
 async function readBack(found: FoundItem, absolute: string): Promise<FoundItem> {
@@ -320,7 +323,9 @@ async function writeLocked(
     // The file's own line ending is the one its opening line has. The closing line gets one if it was the last thing.
     const eol = fence.start === 5 ? '\r\n' : '\n'
     const closing = bytes.subarray(fence.end, fence.bodyStart).toString('utf8')
-    const body = prepared.body(bytes.subarray(fence.bodyStart).toString('utf8'), eol)
+    const rewritten = prepared.body(bytes.subarray(fence.bodyStart).toString('utf8'), eol)
+    if (typeof rewritten !== 'string') return refused(rewritten.refuse)
+    const body = rewritten
     tail = Buffer.from(`${closing}${closing.endsWith('\n') ? '' : eol}${body}`, 'utf8')
     if (Buffer.byteLength(body) > BODY_CAP) {
       return refused(`${found.path}: the body would be over the ${BODY_CAP}-byte cap`)
@@ -367,7 +372,9 @@ async function anyFolder(paths: string[]): Promise<boolean> {
  * draw an id. `version` is required: a write must say which content it was made against. An op that would change
  * nothing writes nothing and answers `ok` with no `files` and no `items`. Two ops are not about one version of one
  * item: `create` makes an item, so it takes no id and no version, and `reid` rewrites links in several files, each
- * read under the lock, so it takes no version (it refuses one rather than ignore it). `hooks` are for tests.
+ * read under the lock, so it takes no version (it refuses one rather than ignore it). `renameSection` is of the same
+ * kind and takes no id either: it renames a section in every proposal that has it (`rename-section.ts`). `hooks` are
+ * for tests.
  *
  * `packPlanning` is the private root, `<pack data>/planning`, or null when the pack has no data folder. It belongs to
  * the main checkout: a call that names another checkout neither reads nor writes it. A write to a private item holds
@@ -384,7 +391,9 @@ export async function applyOp(
 ): Promise<ApplyResultInput> {
   const { op, id, version, checkout } = params
   const spec = Object.hasOwn(OPS, op) ? OPS[op] : undefined
-  if (spec === undefined && op !== CREATE && op !== REID) return refused(`unknown op "${op}"; this provider has ${OP_NAMES.join(', ')}`)
+  if (spec === undefined && op !== CREATE && op !== REID && op !== RENAME_SECTION) {
+    return refused(`unknown op "${op}"; this provider has ${OP_NAMES.join(', ')}`)
+  }
   const args = params.args ?? {}
 
   // The checkout to write in: the main checkout unless one is named. The item is found, version-checked, locked (its
@@ -415,38 +424,55 @@ export async function applyOp(
     return withLock(lockOf[into], () => createLocked(root, args, hooks, layout, privateDir), lock)
   }
 
-  if (typeof id !== 'string' || id === '') return refused(`${op} needs the id of the item to change`)
-  if (op === REID) {
-    if (version !== undefined && version !== null) return refused('reid takes no version: it rewrites several files, each read under the lock')
-    const problem = checkReid(args)
-    if (problem !== null) return refused(`reid: ${problem}`)
-  } else if (typeof version !== 'string' || version === '') {
-    return refused(`${op} needs the version you last read: send it, so that a write over a newer file can be told from one over the file you saw`)
+  if (op === RENAME_SECTION) {
+    if (id !== undefined && id !== null) return refused('renameSection works over every proposal: leave id out')
+    if (version !== undefined && version !== null) {
+      const form = 'send versions, an object that maps an item id to its version, to guard the files you read'
+      return refused(`renameSection takes no version: it rewrites several files; ${form}`)
+    }
+    const problem = checkRenameSection(args)
+    if (problem !== null) return refused(`renameSection: ${problem}`)
+  } else {
+    if (typeof id !== 'string' || id === '') return refused(`${op} needs the id of the item to change`)
+    if (op === REID) {
+      if (version !== undefined && version !== null) {
+        return refused('reid takes no version: it rewrites several files, each read under the lock')
+      }
+      const problem = checkReid(args)
+      if (problem !== null) return refused(`reid: ${problem}`)
+    } else if (typeof version !== 'string' || version === '') {
+      const why = 'so that a write over a newer file can be told from one over the file you saw'
+      return refused(`${op} needs the version you last read: send it, ${why}`)
+    }
+    const problem = spec === undefined ? null : spec.check(args)
+    if (problem !== null) return refused(`${op}: ${problem}`)
   }
-  const problem = spec === undefined ? null : spec.check(args)
-  if (problem !== null) return refused(`${op}: ${problem}`)
 
-  // The roots to lock. A write to one item locks the root that item is in; a reid may rewrite files in any root, so it
-  // locks each that exists. A lock file lives in its root, which is made when it has items to write: a shared root
-  // that is not there yet is made when a previous root has items.
+  // The roots to lock. A write to one item locks the root that item is in; a reid or a renameSection may rewrite files
+  // in any root, so it locks each that exists. A lock file lives in its root, which is made when it has items to
+  // write: a shared root that is not there yet is made when a previous root has items.
   const sharedFolders = [...rootsOf(layout), ...spikesDirsOf(layout)].map((path) => join(root, path))
   const locked: RootName[] = []
-  if (op === REID || privateDir === null) {
+  const everyRoot = op === REID || op === RENAME_SECTION
+  if (everyRoot || privateDir === null) {
     if (await anyFolder(sharedFolders)) locked.push('shared')
-    if (op === REID && privateDir !== null && (await anyFolder([privateDir]))) locked.push('private')
+    if (everyRoot && privateDir !== null && (await anyFolder([privateDir]))) locked.push('private')
   } else {
     const holder = (await scanEpics(root, null, layout, privateDir)).items.find((candidate) => candidate.item.id === id)
     if (holder !== undefined) locked.push(holder.root)
   }
-  if (locked.length === 0) return refused(`there is no item ${id}`)
+  if (locked.length === 0) {
+    return refused(op === RENAME_SECTION ? 'renameSection: there is no proposal' : `there is no item ${id}`)
+  }
   for (const name of locked) await mkdir(folderOf[name], { recursive: true })
-  const work =
-    spec === undefined
-      ? () => reidLocked(root, id, args, hooks, layout, privateDir)
-      : () => {
-          const held = locked[0] as RootName
-          const asker = params.actor ?? null
-          return writeLocked(root, id, version as string, spec, args, layout, privateDir, held, op, asker)
-        }
+  const itemId = id as string
+  let work: () => Promise<ApplyResultInput>
+  if (op === RENAME_SECTION) work = () => renameSectionLocked(root, args, layout, privateDir)
+  else if (spec === undefined) work = () => reidLocked(root, itemId, args, hooks, layout, privateDir)
+  else {
+    const asker = params.actor ?? null
+    const held = locked[0] as RootName
+    work = () => writeLocked(root, itemId, version as string, spec, args, layout, privateDir, held, op, asker)
+  }
   return withLocks(locked.map((name) => lockOf[name]), work, lock)
 }

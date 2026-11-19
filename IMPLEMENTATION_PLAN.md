@@ -2504,7 +2504,9 @@ layout: { default: board, groupBy: category }
       - the `###` heading is the section: 1 to 40 characters once trimmed, with no `#`. An entry under `### Unsorted`
         (in any case), or above the first heading, has an empty section;
       - `F<n>` is unique in the proposal and counts from 1. A removed feature's number is not reused, so a link never
-        comes to mean another feature. A link to a number the proposal does not have is a broken link;
+        comes to mean another feature. A file cannot show a number removed from it, so `addFeature` takes one past
+        the highest in the file, and only a removed highest number can come back (`ts-0130-mv`). A link to a number
+        the proposal does not have is a broken link;
       - a proposal needs no Features part. A problem in a `draft` is reported on the item (`featureProblems`, 0.8),
         never as a `task.invalid`, because a draft is still being written. **The move to `proposed` is refused while
         the part has a problem**, with every problem and its line in one message, so the agent that wrote it can fix
@@ -4384,7 +4386,10 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   and may be empty (owner, 2026-11-14), takes the next `F<n>` and writes under that section's heading, or under
   `### Unsorted`, made at the end of the part when it is missing; `moveFeature {feature, section}`; and
   `renameSection {from, to}` over every proposal that uses `from`, which merges when `to` is in use and reports every
-  file it changed in `apply`'s `items[]`. Each leaves the part without problems. The `proposal` kind gets its
+  file it changed in `apply`'s `items[]`. Each leaves the part without problems: it reads the part again and
+  refuses a result with a problem, and a part that has problems before is refused with them. `renameSection` takes
+  an optional `versions` map, edits the private root's proposals too when it runs in the main checkout, and is
+  refused when no proposal has the name (`ts-0130-mv`). The `proposal` kind gets its
   transitions, the person-only rule and `by:` (0.10), with the actor.
 - **Quality parts** (owner, 2026-11-15; revision 18): the provider reads the Decision log, the Assumptions and
   Findings parts and a spike's Pre-registration part (0.10), reports their problems in `partProblems`, and derives

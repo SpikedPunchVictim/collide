@@ -17,6 +17,21 @@ export interface ParsedFeatures {
   problems: FeatureProblem[]
 }
 
+/**
+ * Where the parts of a Features part are, as indexes into the lines of the body (`body.split('\n')`), so that an op can
+ * edit the text. Only what parsed is listed: a heading or an entry that was refused is not here.
+ */
+export interface FeaturePart {
+  /** The index of the `## Features` line. */
+  start: number
+  /** The index of the line after the part: the next `## ` line, or the number of lines. */
+  end: number
+  /** Each `### <section>` heading: its line, and its name as written, trimmed. */
+  headings: Array<{ line: number; name: string }>
+  /** Each entry: its id, its first line and its last, which is its last continuation line. */
+  entries: Array<{ id: string; first: number; last: number }>
+}
+
 /** A section name is 1 to 40 characters once trimmed (0.10, "A proposal's features"). */
 export const SECTION_MAX = 40
 
@@ -54,8 +69,16 @@ const closesFence = (line: string, fence: Fence): boolean => {
  * is one problem on its opening line, and the lines inside it are skipped.
  */
 export function parseFeatures(body: string, firstLine = 1): ParsedFeatures {
+  const { features, problems } = readFeaturePart(body, firstLine)
+  return { features, problems }
+}
+
+/** What `parseFeatures` reads, and where the first part is: null when the body has no `## Features` part. */
+export function readFeaturePart(body: string, firstLine = 1): ParsedFeatures & { part: FeaturePart | null } {
   const features: Feature[] = []
   const problems: FeatureProblem[] = []
+  let part: FeaturePart | null = null
+  let range: { id: string; first: number; last: number } | null = null
   const lines = body.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
   const firstOf = new Map<string, number>()
 
@@ -72,10 +95,12 @@ export function parseFeatures(body: string, firstLine = 1): ParsedFeatures {
     const problem = (reason: string): void => void problems.push({ line: number, reason })
     const closeEntry = (absorb: boolean): void => {
       current = null
+      range = null
       absorbing = absorb
     }
 
     if (state !== 'outside' && line.startsWith('## ')) {
+      if (state === 'in' && part !== null) part.end = index
       state = 'outside'
       fence = null
     }
@@ -94,6 +119,7 @@ export function parseFeatures(body: string, firstLine = 1): ParsedFeatures {
       seenPart = true
       state = 'in'
       section = ''
+      part = { start: index, end: lines.length, headings: [], entries: [] }
       closeEntry(false)
       return
     }
@@ -123,6 +149,7 @@ export function parseFeatures(body: string, firstLine = 1): ParsedFeatures {
       if (length > SECTION_MAX) return problem(`a section name is at most ${SECTION_MAX} characters; this one has ${length}`)
       if (name.includes('#')) return problem('a section name has no #')
       section = /^unsorted$/i.test(name) ? '' : name
+      part?.headings.push({ line: index, name })
       return
     }
     const entry = ENTRY.exec(line)
@@ -139,6 +166,8 @@ export function parseFeatures(body: string, firstLine = 1): ParsedFeatures {
       firstOf.set(id, number)
       current = { id, title, section, summary }
       features.push(current)
+      range = { id, first: index, last: index }
+      part?.entries.push(range)
       absorbing = false
       return
     }
@@ -147,13 +176,15 @@ export function parseFeatures(body: string, firstLine = 1): ParsedFeatures {
       return problem(`an entry is written ${ENTRY_FORM}`)
     }
     if (line.startsWith('  ')) {
-      if (current !== null) (current as Feature).summary += ` ${line.trim()}`
-      else if (!absorbing) problem('a continuation line has no entry before it')
+      if (current !== null) {
+        (current as Feature).summary += ` ${line.trim()}`
+        if (range !== null) range.last = index
+      } else if (!absorbing) problem('a continuation line has no entry before it')
       return
     }
     if (line.startsWith(' ')) return problem('a continuation line is indented by at least two spaces, not one')
     problem(`this line is neither an entry nor a continuation: an entry is written ${ENTRY_FORM}`)
   })
 
-  return { features, problems }
+  return { features, problems, part }
 }

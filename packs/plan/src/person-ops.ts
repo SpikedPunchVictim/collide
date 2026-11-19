@@ -116,7 +116,7 @@ function noteProblem(name: string, value: unknown): string | null {
   return `${name} must be text of ${form}`
 }
 
-const forProposal = (op: string, found: FoundItem): Prepared | null => {
+export const forProposal = (op: string, found: FoundItem): Prepared | null => {
   const { id, kind } = found.item
   return kind === PROPOSAL ? null : refuse(`${id} is ${article(kind)}; ${op} is for a proposal`)
 }

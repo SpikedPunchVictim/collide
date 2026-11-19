@@ -26,8 +26,11 @@ export type Prepared =
       kind: 'edit'
       edit: (text: string) => Edit
       expected: Frontmatter
-      /** Changes the body too, given the body and the file's own line ending. The body is read back after the write. */
-      body?: (body: string, eol: string) => string
+      /**
+       * Changes the body too, given the body and the file's own line ending, or refuses the whole write with the
+       * reason. The body is read back after the write.
+       */
+      body?: (body: string, eol: string) => string | { refuse: string }
     }
 
 /** What an op is told besides the item: who asked. */

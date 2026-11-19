@@ -61,9 +61,11 @@ const declared = async (): Promise<Row> => (await call(repoOf({}), 'initialize')
 const kindOf = async (name: string): Promise<Row> => (await declared()).kinds.find((kind: Row) => kind.name === name)
 
 describe('initialize declares accept, defer, reject and resolve beside setStatus', () => {
-  test('a proposal has setStatus, accept, defer and reject, and no resolve', async () => {
+  test('a proposal has setStatus, accept, defer and reject and the feature ops, and no resolve', async () => {
     const found = await kindOf('proposal')
-    expect(found.ops.map((op: Row) => op.name)).toEqual(['setStatus', 'accept', 'defer', 'reject'])
+    expect(found.ops.map((op: Row) => op.name)).toEqual([
+      'setStatus', 'accept', 'defer', 'reject', 'addFeature', 'moveFeature',
+    ])
   })
 
   test('a question has setStatus and resolve, and a task or an epic has neither', async () => {

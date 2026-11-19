@@ -72,6 +72,10 @@ Write these first.
 
 ## Notes
 
+- Carried from `ts-0130-mv`: `renameSection` has no `id` and takes an optional `versions` map, but `write_op` in
+  `host/src/task_daemon.rs` sends an id and a version for every op except `create`, so the provider refuses it through
+  the daemon. This item gives it a CLI form and carries it through the daemon as `create` is carried; `addFeature` and
+  `moveFeature` need CLI words too.
 - Carried from `ts-0129-uv`: a bare-id write that runs without the daemon carries no `actor`. The plan provider reads
   none as a person, so until this item it refuses `accept` and `resolve` (no date) and does not wall a run's `reject` or
   `defer`. All writes going through the daemon here closes both; a test that a bare-id `accept` from the CLI waits as a
