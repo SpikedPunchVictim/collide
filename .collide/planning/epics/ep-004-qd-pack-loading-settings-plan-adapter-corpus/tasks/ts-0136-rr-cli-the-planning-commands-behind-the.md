@@ -1,7 +1,7 @@
 ---
 id: ts-0136-rr
 kind: task
-status: ready
+status: done
 title: "CLI: the planning commands behind the daemon, task.sections and short ids"
 owners: []
 links:
