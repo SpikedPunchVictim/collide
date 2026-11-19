@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`\nis the proposal of a feature.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "proposal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "description": "What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.",
+      "enum": [
+        "item",
+        "feature",
+        "path"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is\n`low`, `medium` or `high`. `line` is the entry's first line in the item's file.",
+  "properties": {
+    "confidence": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "line": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "passedOn": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "revisitIf": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "text",
+    "passedOn",
+    "evidence",
+    "line"
+  ],
+  "title": "Decision",
+  "type": "object"
+}

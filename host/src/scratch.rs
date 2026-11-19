@@ -130,6 +130,10 @@ fn task_of(
         fields: BTreeMap::new(),
         features: Vec::new(),
         feature_problems: Vec::new(),
+        decisions: Vec::new(),
+        assumptions: Vec::new(),
+        findings: Vec::new(),
+        part_problems: Vec::new(),
     })
 }
 

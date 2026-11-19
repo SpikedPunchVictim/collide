@@ -30,7 +30,8 @@
 
 use crate::change::{Effect, FieldDiff, ItemState, Rename};
 use crate::item::{
-    Category, Checklist, Feature, FeatureProblem, KindDecl, Link, LinkTypeDecl, OpDecl, StatusDecl,
+    Assumption, Category, Checklist, Decision, Feature, FeatureProblem, Finding, KindDecl, Link,
+    LinkTypeDecl, OpDecl, PartProblem, StatusDecl,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -158,6 +159,18 @@ pub struct Task {
     /// The lines of that part that did not parse. Left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub feature_problems: Vec<FeatureProblem>,
+    /// A proposal's Decision log (0.10). Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<Decision>,
+    /// A proposal's Assumptions part. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assumptions: Vec<Assumption>,
+    /// A proposal's Findings part. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<Finding>,
+    /// The lines of those parts that are not right. Left out when there are none. They never refuse a move.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub part_problems: Vec<PartProblem>,
 }
 
 impl Task {

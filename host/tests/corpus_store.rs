@@ -260,6 +260,69 @@ fn a_row_that_does_not_read_is_dropped_and_named_and_the_others_are_kept() {
 }
 
 #[test]
+fn a_task_cached_before_the_quality_parts_reads_back_with_them_empty_and_is_not_dropped() {
+    let root = TempRoot::new();
+    let store = store(&root);
+    store
+        .corpus_put_task(
+            "board-1",
+            "plan",
+            Some("/a"),
+            &task("plan:1", "draft", Some("/a"), None),
+        )
+        .unwrap();
+    // The row as migration 10 first wrote it: features and their problems, none of the keys of revision 18.
+    let older = json!({
+        "key": "plan:1", "id": "1", "title": "title of plan:1", "kind": "proposal",
+        "state": { "status": "draft", "category": "active" }, "version": "v1", "checkout": "/a",
+        "features": [{ "id": "F1", "title": "A", "section": "", "summary": "b" }],
+        "featureProblems": [{ "line": 4, "reason": "stray" }]
+    });
+    let conn = Connection::open(store.db_path()).unwrap();
+    conn.execute(
+        "UPDATE corpus_tasks SET json = ?1 WHERE key = 'plan:1'",
+        [older.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let cache = store.corpus_cache("board-1").unwrap();
+    assert!(cache.dropped.is_empty(), "{:?}", cache.dropped);
+    let read = &cache.tasks[0].task;
+    assert_eq!(read.features.len(), 1);
+    assert_eq!(read.feature_problems.len(), 1);
+    assert!(read.decisions.is_empty() && read.assumptions.is_empty());
+    assert!(read.findings.is_empty() && read.part_problems.is_empty());
+}
+
+#[test]
+fn a_task_with_decisions_and_part_problems_reads_back_as_it_was_put() {
+    let root = TempRoot::new();
+    let store = store(&root);
+    let mut proposal = task("plan:1", "draft", Some("/a"), None);
+    let parts = json!({
+        "decisions": [{
+            "id": "D1", "title": "T", "text": "x", "passedOn": ["y"], "line": 3,
+            "evidence": [{ "target": "sp-0001-aa", "kind": "item", "status": "concluded" }],
+            "confidence": "low"
+        }],
+        "partProblems": [{ "part": "Decision", "line": 3, "reason": "D1 is odd" }]
+    });
+    let mut doc = serde_json::to_value(&proposal).unwrap();
+    doc.as_object_mut()
+        .unwrap()
+        .extend(parts.as_object().unwrap().clone());
+    proposal = serde_json::from_value(doc).unwrap();
+    store
+        .corpus_put_task("board-1", "plan", Some("/a"), &proposal)
+        .unwrap();
+
+    let cache = store.corpus_cache("board-1").unwrap();
+    assert_eq!(cache.tasks[0].task, proposal);
+    assert_eq!(cache.tasks[0].task.decisions[0].passed_on, ["y"]);
+}
+
+#[test]
 fn a_second_handle_on_the_same_folder_reads_what_the_first_wrote_before_it_closed() {
     let root = TempRoot::new();
     let first = store(&root);

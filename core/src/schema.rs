@@ -19,7 +19,10 @@ use crate::change::{Change, Rename, TaskPointPayload};
 use crate::context::ContextRecord;
 use crate::events::Event;
 use crate::hook::{HookInput, HookResult};
-use crate::item::{Feature, FeatureProblem, KindDecl, LinkTypeDecl, PlanningFields};
+use crate::item::{
+    Assumption, Decision, Evidence, Feature, FeatureProblem, Finding, KindDecl, LinkTypeDecl,
+    PartProblem, PlanningFields,
+};
 use crate::lock::{PackLock, UserPacks};
 use crate::observer::{ObserverAck, ObserverEvent};
 use crate::owner;
@@ -104,6 +107,7 @@ pub fn registry() -> Registry {
     registry.add::<AgentEvent>();
     registry.add::<ApplyParams>();
     registry.add::<ApplyResult>();
+    registry.add::<Assumption>();
     registry.add::<Board>();
     registry.add::<Capabilities>();
     registry.add::<Change>();
@@ -111,10 +115,13 @@ pub fn registry() -> Registry {
     registry.add::<ConfigFile>();
     registry.add::<ContextRecord>();
     registry.add::<DaemonMessage>();
+    registry.add::<Decision>();
+    registry.add::<Evidence>();
     registry.add::<Event>();
     registry.add::<ExitRecord>();
     registry.add::<Feature>();
     registry.add::<FeatureProblem>();
+    registry.add::<Finding>();
     registry.add::<GetParams>();
     registry.add::<GetResult>();
     registry.add::<HookInput>();
@@ -130,6 +137,7 @@ pub fn registry() -> Registry {
     registry.add::<ObserverEvent>();
     registry.add::<PackLock>();
     registry.add::<PackManifest>();
+    registry.add::<PartProblem>();
     registry.add::<PermissionReply>();
     registry.add::<PermissionRequest>();
     registry.add::<PhaseState>();

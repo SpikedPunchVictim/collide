@@ -1,12 +1,14 @@
 import { lstat, readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import type { TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
+import { readDecisions } from './decisions.ts'
+import type { ItemLookup } from './decisions.ts'
 import { parseFeatures } from './features.ts'
 import { KNOWN_KINDS, PROPOSAL, readItem, stateOf } from './item.ts'
 import type { Item } from './item.ts'
 import { DEFAULT_LAYOUT, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
-import { isBrokenLink } from './links.ts'
+import { featuresOf, isBrokenLink } from './links.ts'
 import { readItemFile } from './read-file.ts'
 
 const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
@@ -179,13 +181,26 @@ export async function scanEpics(
   return { items: kept, invalid, unknownKind, brokenLink }
 }
 
+/** What the scan knows of an item, for an evidence id: the first item of that id in `items`. */
+const lookupIn =
+  (items: readonly FoundItem[]): ItemLookup =>
+  (id) => {
+    const found = items.find((candidate) => candidate.item.id === id)
+    if (found === undefined) return undefined
+    const features = found.item.kind === PROPOSAL ? featuresOf(found).map((feature) => feature.id) : []
+    return { status: found.item.status, features }
+  }
+
 /**
  * One item as the provider reports it. `body` is left out of `list`, which carries every item. A proposal also carries
- * its features and the problems of its Features part, which are read from the body whether or not it is sent.
+ * its features and the problems of its Features part, and its Decision log with the problems of that part, which are
+ * read from the body whether or not it is sent. `items` is the scan, which says what an evidence id names.
  */
-export function toTask(found: FoundItem, withBody: boolean): TaskInput {
+export function toTask(found: FoundItem, withBody: boolean, items: readonly FoundItem[]): TaskInput {
   const { item } = found
-  const { features, problems } = item.kind === PROPOSAL ? parseFeatures(found.body, found.bodyLine) : { features: [], problems: [] }
+  const isProposal = item.kind === PROPOSAL
+  const { features, problems } = isProposal ? parseFeatures(found.body, found.bodyLine) : { features: [], problems: [] }
+  const log = isProposal ? readDecisions(found.body, found.bodyLine, lookupIn(items)) : { decisions: [], problems: [] }
   const partOf = found.epic === null ? [] : [{ type: 'part-of', to: found.epic }]
   // A private item says so in `fields.root`, over any `root` field the file has.
   const own = Object.keys(item.fields).length === 0 ? null : item.fields
@@ -205,5 +220,7 @@ export function toTask(found: FoundItem, withBody: boolean): TaskInput {
     ...(fields === null ? {} : { fields }),
     ...(features.length === 0 ? {} : { features }),
     ...(problems.length === 0 ? {} : { featureProblems: problems }),
+    ...(log.decisions.length === 0 ? {} : { decisions: log.decisions }),
+    ...(log.problems.length === 0 ? {} : { partProblems: log.problems }),
   }
 }

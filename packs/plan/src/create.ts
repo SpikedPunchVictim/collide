@@ -209,7 +209,8 @@ export async function createLocked(
   const found = { item: checked.item, epic, root: into, path, absolute, body, bodyLine, version }
   return {
     outcome: 'ok',
-    task: toTask(found, true),
+    // A new item's body is the template's, which has no entry of any part, so nothing is looked up in the scan.
+    task: toTask(found, true, [found]),
     version: found.version,
     files: into === 'private' ? [] : [path],
     items: [{ key: `plan:${id}`, version: found.version, from: null, to: stateOf(kind, found.item.status) }],

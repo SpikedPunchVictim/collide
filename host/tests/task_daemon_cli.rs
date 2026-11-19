@@ -1204,6 +1204,42 @@ fn json_lists_the_features_of_a_proposal_and_the_problems_of_its_features_part()
 }
 
 #[test]
+fn json_lists_the_decisions_of_a_proposal_and_the_problems_of_its_log_through_task_get() {
+    let log = "## Decision\n\n- **D1 Keep the files**: Plain files.\n  Evidence: ts-9999-zz\n\
+               - **D2 Use a lock**: A lock file.\n  Passed on: A daemon, since it is one more process.\n  \
+               Evidence: ts-0003-cc\n";
+    let text = proposal_text(None).replace("## Decision\n", log);
+    let rig = Rig::with_files(&[(PROPOSAL, text)]);
+
+    let document = json(&rig.cli(&["task", "pr-0003-km", "--json"]).1);
+
+    let task = &document["task"];
+    let ids: Vec<&str> = task["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|decision| decision["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["D1", "D2"], "{task}");
+    assert_eq!(task["decisions"][1]["evidence"][0]["status"], "ready");
+    let problems = task["partProblems"].as_array().unwrap();
+    assert_eq!(problems.len(), 2, "{task}");
+    assert!(problems.iter().all(|problem| problem["part"] == "Decision"));
+    assert!(problems[0]["reason"].as_str().unwrap().starts_with("D1 "));
+}
+
+#[test]
+fn json_of_a_proposal_with_a_plain_text_decision_section_has_no_decisions_or_part_problems() {
+    let text = proposal_text(None).replace("## Decision\n", "## Decision\n\nWe chose files.\n");
+    let rig = Rig::with_files(&[(PROPOSAL, text)]);
+    let document = json(&rig.cli(&["task", "pr-0003-km", "--json"]).1);
+    let task = &document["task"];
+    for key in ["decisions", "assumptions", "findings", "partProblems"] {
+        assert!(task.get(key).is_none(), "{key} in {task}");
+    }
+}
+
+#[test]
 fn json_of_a_proposal_with_no_features_part_has_neither_features_nor_problems() {
     let rig = Rig::with_files(&[(PROPOSAL, proposal_text(None))]);
     let document = json(&rig.cli(&["task", "pr-0003", "--json"]).1);

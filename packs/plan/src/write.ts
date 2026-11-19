@@ -299,7 +299,7 @@ async function writeLocked(
 
   const bytes = await readFile(absolute)
   if (versionOf(bytes) !== found.version) return refused(`${found.path} changed while it was being read; send the op again`)
-  if (version !== found.version) return { outcome: 'conflict', current: toTask(found, true) }
+  if (version !== found.version) return { outcome: 'conflict', current: toTask(found, true, scan.items) }
 
   const fence = findFence(bytes, bytes.length)
   if (!fence.ok) return refused(`${found.path}: ${fence.reason}`)
@@ -309,7 +309,9 @@ async function writeLocked(
 
   const prepared = spec.prepare(found, scan, args, parsed.value, { asker })
   if (prepared.kind === 'refuse') return refused(prepared.message)
-  if (prepared.kind === 'nothing') return { outcome: 'ok', task: toTask(found, true), version: found.version, files: [], items: [] }
+  if (prepared.kind === 'nothing') {
+    return { outcome: 'ok', task: toTask(found, true, scan.items), version: found.version, files: [], items: [] }
+  }
 
   const edited = prepared.edit(text)
   if (!edited.ok) return refused(`${found.path}: ${edited.reason}`)
@@ -338,7 +340,11 @@ async function writeLocked(
   const key = `plan:${id}`
   return {
     outcome: 'ok',
-    task: toTask(after, true),
+    task: toTask(
+      after,
+      true,
+      scan.items.map((item) => (item === found ? after : item)),
+    ),
     version: after.version,
     files: after.root === 'private' ? [] : [after.path],
     items: [{ key, version: after.version, from: stateOf(found.item.kind, found.item.status), to: stateOf(after.item.kind, after.item.status) }],

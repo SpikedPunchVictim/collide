@@ -1,0 +1,42 @@
+{
+  "$defs": {
+    "EvidenceKind": {
+      "description": "What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.",
+      "enum": [
+        "item",
+        "feature",
+        "path"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`\nis the proposal of a feature.",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/EvidenceKind"
+    },
+    "proposal": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "target",
+    "kind"
+  ],
+  "title": "Evidence",
+  "type": "object"
+}

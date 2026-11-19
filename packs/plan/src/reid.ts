@@ -194,7 +194,7 @@ export async function reidLocked(
   const changed = after.filter((found) => written.includes(found.path))
   return {
     outcome: 'ok',
-    task: toTask(renamedItem, true),
+    task: toTask(renamedItem, true, after),
     version: renamedItem.version,
     files: [...files].filter((path) => !path.startsWith(PRIVATE_PREFIX)),
     items: changed.map((found) => ({

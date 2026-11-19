@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`\nis the proposal of a feature.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "proposal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "description": "What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.",
+      "enum": [
+        "item",
+        "feature",
+        "path"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.",
+  "properties": {
+    "evidence": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "line": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "spike": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "text",
+    "line"
+  ],
+  "title": "Assumption",
+  "type": "object"
+}

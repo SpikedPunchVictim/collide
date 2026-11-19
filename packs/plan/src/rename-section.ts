@@ -84,7 +84,7 @@ export async function renameSectionLocked(
       return refused(`${found.path} changed while it was being read; send the op again`)
     }
     if (versions[found.item.id] !== undefined && versions[found.item.id] !== found.version) {
-      return { outcome: 'conflict', current: toTask(found, true) }
+      return { outcome: 'conflict', current: toTask(found, true, items) }
     }
     bytesOf.set(found, bytes)
   }
@@ -123,7 +123,7 @@ export async function renameSectionLocked(
   const first = changed[0] as FoundItem
   return {
     outcome: 'ok',
-    task: toTask(first, true),
+    task: toTask(first, true, after),
     version: first.version,
     files: changed.filter((found) => found.root === 'shared').map((found) => found.path),
     items: changed.map((found) => ({

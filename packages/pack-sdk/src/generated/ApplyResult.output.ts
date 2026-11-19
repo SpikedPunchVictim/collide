@@ -26,6 +26,10 @@ export type ApplyResult =
  */
 export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dropped'
 /**
+ * What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.
+ */
+export type EvidenceKind = 'item' | 'feature' | 'path'
+/**
  * The state of one checklist item. Only a person marks `done` or `n/a`; the gate is a pack's (ts-0012).
  */
 export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
@@ -52,10 +56,18 @@ export interface ItemState {
  */
 export interface Task {
   aliases: string[]
+  /**
+   * A proposal's Assumptions part. Left out when there are none.
+   */
+  assumptions?: Assumption[]
   body?: string | null
   checklist?: Checklist | null
   checkout?: string | null
   collections: string[]
+  /**
+   * A proposal's Decision log (0.10). Left out when there are none.
+   */
+  decisions?: Decision[]
   /**
    * The lines of that part that did not parse. Left out when there are none.
    */
@@ -67,12 +79,20 @@ export interface Task {
   fields: {
     [k: string]: unknown
   }
+  /**
+   * A proposal's Findings part. Left out when there are none.
+   */
+  findings?: Finding[]
   id: string
   key: string
   kind?: string | null
   labels: string[]
   links: Link[]
   owners: string[]
+  /**
+   * The lines of those parts that are not right. Left out when there are none. They never refuse a move.
+   */
+  partProblems?: PartProblem[]
   path?: string | null
   state: ItemState
   templateFields: {
@@ -80,6 +100,28 @@ export interface Task {
   }
   title: string
   version: string
+}
+/**
+ * One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.
+ */
+export interface Assumption {
+  evidence: Evidence[]
+  id: string
+  line: number
+  spike?: string | null
+  state?: string | null
+  text: string
+  title: string
+}
+/**
+ * One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`
+ * is the proposal of a feature.
+ */
+export interface Evidence {
+  kind: EvidenceKind
+  proposal?: string | null
+  status?: string | null
+  target: string
 }
 /**
  * The checklist field type: the state of one template's items, pinned as `name@n`.
@@ -95,6 +137,20 @@ export interface ChecklistItem {
   id: string
   reason?: string | null
   state: ChecklistState
+}
+/**
+ * One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is
+ * `low`, `medium` or `high`. `line` is the entry's first line in the item's file.
+ */
+export interface Decision {
+  confidence?: string | null
+  evidence: Evidence[]
+  id: string
+  line: number
+  passedOn: string[]
+  revisitIf?: string | null
+  text: string
+  title: string
 }
 /**
  * A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.
@@ -114,6 +170,21 @@ export interface Feature {
   title: string
 }
 /**
+ * One entry `R<n>` of a proposal's Findings part (0.10). `section` is `Red-team` or `Pre-mortem`. A finding with
+ * neither `accepted` nor `dismissed` is open.
+ */
+export interface Finding {
+  accepted?: string | null
+  dismissed?: string | null
+  id: string
+  line: number
+  section: string
+  severity: string
+  target?: string | null
+  text: string
+  title: string
+}
+/**
  * A typed link on an item (0.8).
  */
 export interface Link {
@@ -123,4 +194,13 @@ export interface Link {
   blocking?: boolean | null
   to: string
   type: string
+}
+/**
+ * A line of a proposal's quality part (the Decision log, the Assumptions or the Findings) that is not right, with why
+ * (0.8, 0.10). `part` is the part's name, as `Decision`. `line` counts from 1 in the item's file.
+ */
+export interface PartProblem {
+  line: number
+  part: string
+  reason: string
 }

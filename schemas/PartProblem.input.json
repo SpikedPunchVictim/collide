@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A line of a proposal's quality part (the Decision log, the Assumptions or the Findings) that is not right, with why\n(0.8, 0.10). `part` is the part's name, as `Decision`. `line` counts from 1 in the item's file.",
+  "properties": {
+    "line": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "part": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "part",
+    "line",
+    "reason"
+  ],
+  "title": "PartProblem",
+  "type": "object"
+}

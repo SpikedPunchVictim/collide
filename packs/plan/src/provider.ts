@@ -277,11 +277,12 @@ export function planHandlers({ log, packData }: PlanProviderOptions): ProviderHa
     },
     list: async ({ checkout }): Promise<ListResultInput> => {
       const { items, invalid } = await scan(checkout ?? null)
-      return { tasks: items.map((found) => toTask(found, false)), invalid }
+      return { tasks: items.map((found) => toTask(found, false, items)), invalid }
     },
     get: async ({ id, checkout }): Promise<GetResultInput> => {
-      const found = (await scan(checkout ?? null)).items.find((candidate) => candidate.item.id === id)
-      return found === undefined ? {} : { task: toTask(found, true) }
+      const { items } = await scan(checkout ?? null)
+      const found = items.find((candidate) => candidate.item.id === id)
+      return found === undefined ? {} : { task: toTask(found, true, items) }
     },
     apply: (params) => {
       if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')

@@ -222,6 +222,124 @@ fn a_feature_or_a_problem_with_a_missing_or_extra_key_is_refused() {
     refused::<Task>(snake);
 }
 
+/// A proposal that carries the quality parts (revision 18) as the provider reports them.
+fn proposal_with_quality_parts() -> Value {
+    let mut doc = proposal();
+    doc["decisions"] = json!([{
+        "id": "D1",
+        "title": "Use files",
+        "text": "Plain files in the repo.",
+        "passedOn": ["A database, because it needs a server."],
+        "evidence": [
+            { "target": "sp-0001-aa", "kind": "item", "status": "concluded" },
+            { "target": "pr-0003-km#F2", "kind": "feature", "proposal": "pr-0003-km" },
+            { "target": "core/src/item.rs", "kind": "path" }
+        ],
+        "revisitIf": "the files pass 10 MB.",
+        "confidence": "medium",
+        "line": 12
+    }]);
+    doc["assumptions"] = json!([{
+        "id": "A1",
+        "title": "Files are enough",
+        "text": "The plan leans on it.",
+        "state": "unverified",
+        "evidence": [{ "target": "ts-0001-aa", "kind": "item", "status": "ready" }],
+        "spike": "sp-0001-aa",
+        "line": 20
+    }]);
+    doc["findings"] = json!([{
+        "id": "R1",
+        "section": "Red-team",
+        "severity": "high",
+        "title": "Two writers",
+        "text": "Two writers race.",
+        "target": "D1",
+        "dismissed": "The lock covers it.",
+        "line": 30
+    }]);
+    doc["partProblems"] =
+        json!([{ "part": "Decision", "line": 12, "reason": "D1 has no alternative" }]);
+    doc
+}
+
+#[test]
+fn a_task_carries_the_quality_parts_and_their_problems_and_they_round_trip() {
+    let parsed: Task = round_trip(proposal_with_quality_parts());
+    assert_eq!(parsed.decisions[0].passed_on.len(), 1);
+    assert_eq!(
+        parsed.decisions[0].evidence[0].status.as_deref(),
+        Some("concluded")
+    );
+    assert_eq!(
+        parsed.decisions[0].evidence[1].proposal.as_deref(),
+        Some("pr-0003-km")
+    );
+    assert_eq!(parsed.decisions[0].confidence.as_deref(), Some("medium"));
+    assert_eq!(parsed.assumptions[0].spike.as_deref(), Some("sp-0001-aa"));
+    assert_eq!(parsed.findings[0].severity, "high");
+    assert_eq!(parsed.part_problems[0].part, "Decision");
+}
+
+#[test]
+fn the_quality_part_keys_are_in_the_task_schema() {
+    for key in ["decisions", "assumptions", "findings", "partProblems"] {
+        assert!(keys_of("Task").contains(key), "{key}");
+    }
+}
+
+#[test]
+fn a_task_with_no_quality_parts_serializes_none_of_their_keys() {
+    let parsed: Task = round_trip(proposal());
+    assert!(parsed.decisions.is_empty() && parsed.assumptions.is_empty());
+    assert!(parsed.findings.is_empty() && parsed.part_problems.is_empty());
+    let value = serde_json::to_value(&parsed).unwrap();
+    for key in ["decisions", "assumptions", "findings", "partProblems"] {
+        assert!(value.get(key).is_none(), "{key} in {value}");
+    }
+}
+
+#[test]
+fn a_task_written_before_the_quality_parts_reads_with_them_empty() {
+    // What a cached row or an older provider holds: features and their problems, none of the new keys.
+    let older: Task = serde_json::from_value(proposal()).unwrap();
+    assert_eq!(older.features.len(), 2);
+    assert!(older.decisions.is_empty() && older.assumptions.is_empty());
+    assert!(older.findings.is_empty() && older.part_problems.is_empty());
+}
+
+#[test]
+fn a_decision_or_a_problem_with_a_missing_or_extra_key_is_refused() {
+    let mut no_id = proposal_with_quality_parts();
+    no_id["decisions"][0].as_object_mut().unwrap().remove("id");
+    refused::<Task>(no_id);
+    let mut extra = proposal_with_quality_parts();
+    extra["decisions"][0]["extra"] = json!(1);
+    refused::<Task>(extra);
+    let mut extra_evidence = proposal_with_quality_parts();
+    extra_evidence["decisions"][0]["evidence"][0]["extra"] = json!(1);
+    refused::<Task>(extra_evidence);
+    let mut extra_problem = proposal_with_quality_parts();
+    extra_problem["partProblems"][0]["extra"] = json!(1);
+    refused::<Task>(extra_problem);
+    let mut no_part = proposal_with_quality_parts();
+    no_part["partProblems"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("part");
+    refused::<Task>(no_part);
+    let mut snake = proposal_with_quality_parts();
+    snake["part_problems"] = json!([]);
+    refused::<Task>(snake);
+}
+
+#[test]
+fn an_evidence_kind_that_is_not_item_feature_or_path_is_refused() {
+    let mut bad = proposal_with_quality_parts();
+    bad["decisions"][0]["evidence"][0]["kind"] = json!("url");
+    refused::<Task>(bad);
+}
+
 #[test]
 fn watch_params_and_result_round_trip() {
     round_trip::<WatchParams>(json!({ "checkouts": ["main", "wt-1"] }));

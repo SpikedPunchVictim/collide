@@ -1,5 +1,51 @@
 {
   "$defs": {
+    "Assumption": {
+      "additionalProperties": false,
+      "description": "One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.",
+      "properties": {
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spike": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "text",
+        "line"
+      ],
+      "type": "object"
+    },
     "Category": {
       "description": "The category every source status maps to, so views and columns work across sources (0.10).",
       "enum": [
@@ -82,6 +128,59 @@
       ],
       "type": "string"
     },
+    "Decision": {
+      "additionalProperties": false,
+      "description": "One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is\n`low`, `medium` or `high`. `line` is the entry's first line in the item's file.",
+      "properties": {
+        "confidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "passedOn": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "revisitIf": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "text",
+        "line"
+      ],
+      "type": "object"
+    },
     "Effect": {
       "additionalProperties": false,
       "description": "One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.",
@@ -118,6 +217,44 @@
         "version"
       ],
       "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`\nis the proposal of a feature.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "proposal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "description": "What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.",
+      "enum": [
+        "item",
+        "feature",
+        "path"
+      ],
+      "type": "string"
     },
     "Feature": {
       "additionalProperties": false,
@@ -163,6 +300,59 @@
       ],
       "type": "object"
     },
+    "Finding": {
+      "additionalProperties": false,
+      "description": "One entry `R<n>` of a proposal's Findings part (0.10). `section` is `Red-team` or `Pre-mortem`. A finding with\nneither `accepted` nor `dismissed` is open.",
+      "properties": {
+        "accepted": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dismissed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "section": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "section",
+        "severity",
+        "title",
+        "text",
+        "line"
+      ],
+      "type": "object"
+    },
     "ItemState": {
       "additionalProperties": false,
       "description": "An item's status and its category.",
@@ -204,6 +394,29 @@
       ],
       "type": "object"
     },
+    "PartProblem": {
+      "additionalProperties": false,
+      "description": "A line of a proposal's quality part (the Decision log, the Assumptions or the Findings) that is not right, with why\n(0.8, 0.10). `part` is the part's name, as `Decision`. `line` counts from 1 in the item's file.",
+      "properties": {
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "part": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "part",
+        "line",
+        "reason"
+      ],
+      "type": "object"
+    },
     "Task": {
       "additionalProperties": false,
       "description": "One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`\ntake. `checkout` and `path` are set by a ref-scoped source. `kind` may be left out when the provider has one.",
@@ -212,6 +425,13 @@
           "default": [],
           "items": {
             "type": "string"
+          },
+          "type": "array"
+        },
+        "assumptions": {
+          "description": "A proposal's Assumptions part. Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Assumption"
           },
           "type": "array"
         },
@@ -244,6 +464,13 @@
           },
           "type": "array"
         },
+        "decisions": {
+          "description": "A proposal's Decision log (0.10). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Decision"
+          },
+          "type": "array"
+        },
         "featureProblems": {
           "description": "The lines of that part that did not parse. Left out when there are none.",
           "items": {
@@ -262,6 +489,13 @@
           "additionalProperties": true,
           "default": {},
           "type": "object"
+        },
+        "findings": {
+          "description": "A proposal's Findings part. Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          },
+          "type": "array"
         },
         "id": {
           "type": "string"
@@ -293,6 +527,13 @@
           "default": [],
           "items": {
             "type": "string"
+          },
+          "type": "array"
+        },
+        "partProblems": {
+          "description": "The lines of those parts that are not right. Left out when there are none. They never refuse a move.",
+          "items": {
+            "$ref": "#/$defs/PartProblem"
           },
           "type": "array"
         },

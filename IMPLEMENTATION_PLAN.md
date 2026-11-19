@@ -2538,7 +2538,9 @@ layout: { default: board, groupBy: category }
         what would reopen it; and, optional, `Confidence:` `low`, `medium` or `high`, the person's own and never
         derived. An evidence id that names no item is a problem, and a cited spike shows its status. Text in the
         section that is not an entry is kept and shown as written, so a Decision section written before revision
-        18 reads unchanged;
+        18 reads unchanged. A piece of `Evidence:` with an item id before any `#` is an item, or a feature with
+        one; anything else is a path, checked for shape only (relative, no `..`). `Confidence:` is lowercase. A
+        question's `## Decision` is its decision text, not a Decision log (`ts-0131-jh`);
       - **Assumption ledger.** A `## Assumptions` part with entries `A<n>`, each a claim the plan leans on.
         Labels: `State:`, one of `unverified` (when the label is missing), `verified`, `contradicted` and
         `accepted risk`, which the agent writes only on the person's word; `Evidence:`, as above; and `Spike:`, the

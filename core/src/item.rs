@@ -183,6 +183,92 @@ pub struct FeatureProblem {
     pub reason: String,
 }
 
+/// A line of a proposal's quality part (the Decision log, the Assumptions or the Findings) that is not right, with why
+/// (0.8, 0.10). `part` is the part's name, as `Decision`. `line` counts from 1 in the item's file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PartProblem {
+    pub part: String,
+    pub line: u32,
+    pub reason: String,
+}
+
+/// What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EvidenceKind {
+    Item,
+    Feature,
+    Path,
+}
+
+/// One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`
+/// is the proposal of a feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Evidence {
+    pub target: String,
+    pub kind: EvidenceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<String>,
+}
+
+/// One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is
+/// `low`, `medium` or `high`. `line` is the entry's first line in the item's file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Decision {
+    pub id: String,
+    pub title: String,
+    pub text: String,
+    #[serde(default)]
+    pub passed_on: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revisit_if: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<String>,
+    pub line: u32,
+}
+
+/// One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Assumption {
+    pub id: String,
+    pub title: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spike: Option<String>,
+    pub line: u32,
+}
+
+/// One entry `R<n>` of a proposal's Findings part (0.10). `section` is `Red-team` or `Pre-mortem`. A finding with
+/// neither `accepted` nor `dismissed` is open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Finding {
+    pub id: String,
+    pub section: String,
+    pub severity: String,
+    pub title: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dismissed: Option<String>,
+    pub line: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KindError {
     UnknownKind(String),

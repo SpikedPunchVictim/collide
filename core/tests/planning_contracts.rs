@@ -4,8 +4,8 @@
 use collide_core::change::{Change, TaskPointPayload};
 use collide_core::feature::{self, FeatureState, FeatureTargetError};
 use collide_core::item::{
-    self, Category, Feature, FeatureProblem, KindDecl, KindError, Link, LinkTarget, LinkTypeDecl,
-    PlanningFields,
+    self, Category, Evidence, Feature, FeatureProblem, KindDecl, KindError, Link, LinkTarget,
+    LinkTypeDecl, PlanningFields,
 };
 use collide_core::pack::{PackManifest, RunBudget};
 use collide_core::points::{self, DerivedPoint, Point, PointError};
@@ -784,6 +784,79 @@ fn the_feature_keys_are_in_the_schema() {
         set(&["id", "section", "summary", "title"])
     );
     assert_eq!(keys_of("FeatureProblem", None), set(&["line", "reason"]));
+}
+
+#[test]
+fn the_registry_holds_the_quality_part_types() {
+    let names: BTreeSet<String> = schema::registry().render().into_keys().collect();
+    for name in [
+        "Assumption",
+        "Decision",
+        "Evidence",
+        "Finding",
+        "PartProblem",
+    ] {
+        for side in ["input", "output"] {
+            assert!(
+                names.contains(&format!("{name}.{side}.json")),
+                "{name} {side}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_quality_part_keys_are_in_the_schema() {
+    assert_eq!(
+        keys_of("Decision", None),
+        set(&[
+            "confidence",
+            "evidence",
+            "id",
+            "line",
+            "passedOn",
+            "revisitIf",
+            "text",
+            "title"
+        ])
+    );
+    assert_eq!(
+        keys_of("Assumption", None),
+        set(&["evidence", "id", "line", "spike", "state", "text", "title"])
+    );
+    assert_eq!(
+        keys_of("Finding", None),
+        set(&[
+            "accepted",
+            "dismissed",
+            "id",
+            "line",
+            "section",
+            "severity",
+            "target",
+            "text",
+            "title"
+        ])
+    );
+    assert_eq!(
+        keys_of("Evidence", None),
+        set(&["kind", "proposal", "status", "target"])
+    );
+    assert_eq!(
+        keys_of("PartProblem", None),
+        set(&["line", "part", "reason"])
+    );
+}
+
+#[test]
+fn an_evidence_entry_is_an_item_a_feature_or_a_path_and_nothing_else() {
+    for kind in ["item", "feature", "path"] {
+        let doc = json!({ "target": "x", "kind": kind });
+        let parsed: Evidence = serde_json::from_value(doc.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), doc);
+    }
+    assert!(serde_json::from_value::<Evidence>(json!({ "target": "x", "kind": "url" })).is_err());
+    assert!(serde_json::from_value::<Evidence>(json!({ "kind": "item" })).is_err());
 }
 
 // Feature links (revision 14): the link type's target, the target's parse and the derived state.

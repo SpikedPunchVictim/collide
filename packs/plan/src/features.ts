@@ -41,17 +41,17 @@ const ENTRY = /^- \*\*F(0|[1-9][0-9]*) (.+?)\*\*: (.*)$/
 const ENTRY_FORM = '- **F<n> <title>**: <summary>'
 
 /** A fenced code block that is open: its fence character and how many of them opened it. */
-interface Fence {
+export interface Fence {
   char: string
   length: number
 }
 
-const openingFence = (line: string): Fence | null => {
+export const openingFence = (line: string): Fence | null => {
   const match = /^(`{3,}|~{3,})/.exec(line.trimStart())
   return match === null ? null : { char: match[1]![0]!, length: match[1]!.length }
 }
 
-const closesFence = (line: string, fence: Fence): boolean => {
+export const closesFence = (line: string, fence: Fence): boolean => {
   const trimmed = line.trim()
   return trimmed.length >= fence.length && [...trimmed].every((char) => char === fence.char)
 }

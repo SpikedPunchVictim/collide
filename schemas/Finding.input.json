@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One entry `R<n>` of a proposal's Findings part (0.10). `section` is `Red-team` or `Pre-mortem`. A finding with\nneither `accepted` nor `dismissed` is open.",
+  "properties": {
+    "accepted": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dismissed": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "line": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "section": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string"
+    },
+    "target": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "section",
+    "severity",
+    "title",
+    "text",
+    "line"
+  ],
+  "title": "Finding",
+  "type": "object"
+}
