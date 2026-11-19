@@ -13,7 +13,7 @@ links: []
 so a grandchild that keeps a pipe open (a hook, an ssh master) cannot hold the daemon. A reader that has not delivered
 by then gives empty output (`unwrap_or_default`), with the child's real exit code. A caller that reads stdout then takes
 missing output for the reply: in the gates of `ts-0148-cv` (2026-11-19, load about 28), `git rev-parse` exited 0 and was
-read as "expected a commit id, got \"\"", failing a `task_daemon_cli` test that passed in the round before and alone.
+read as "expected a commit id, got "", failing a `task_daemon_cli` test that passed in the round before and alone.
 Output that was not read to its end must never look like an empty reply.
 
 ## Success criteria
