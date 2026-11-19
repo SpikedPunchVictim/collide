@@ -1,7 +1,7 @@
 ---
 id: ts-0131-jh
 kind: task
-status: ready
+status: done
 title: "Plan pack: the Decision log and the quality parts' wire shape"
 owners: []
 links:
