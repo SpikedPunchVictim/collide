@@ -1347,6 +1347,95 @@ fn a_line_that_is_not_trusted_starts_nothing_until_it_is_trusted() {
 }
 
 #[test]
+fn a_source_that_never_started_is_named_with_its_reason_until_it_starts() {
+    let rig = rig();
+    rig.pack(&FILES);
+    rig.board_yaml(&["quay"], "");
+    rig.f().commit();
+    let board = rig.f().board();
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+
+    let list = rig.settled(&board);
+
+    assert!(list.tasks.is_empty());
+    // This rig has no built bundle, so the built-in plan source does not start either, and says why.
+    let names: Vec<&str> = list.not_started.iter().map(|s| s.source.as_str()).collect();
+    assert_eq!(names, ["files", "plan"], "{:?}", list.not_started);
+    assert!(
+        list.not_started[0].reason.contains("not trusted"),
+        "{:?}",
+        list.not_started
+    );
+    assert!(
+        list.not_started[1].reason.contains("not in the bundle"),
+        "{:?}",
+        list.not_started
+    );
+    assert_eq!(list.sources_started, 0);
+    assert!(list.stale_sources.is_empty(), "{:?}", list.stale_sources);
+
+    rig.trust(&board);
+    let list = rig.list_until(&board, "the source starts once it is trusted", |list| {
+        !list.tasks.is_empty()
+    });
+    let names: Vec<&str> = list.not_started.iter().map(|s| s.source.as_str()).collect();
+    assert_eq!(names, ["plan"], "{:?}", list.not_started);
+    assert_eq!(list.sources_started, 1);
+}
+
+#[test]
+fn a_source_the_line_no_longer_names_is_not_listed_as_unstarted() {
+    let rig = rig();
+    rig.pack(&FILES);
+    rig.board_yaml(&["quay"], "");
+    rig.f().commit();
+    let board = rig.f().board();
+    let list = rig.list_until(&board, "files is named", |list| {
+        !list.refreshing && list.not_started.iter().any(|s| s.source == "files")
+    });
+    assert_eq!(list.not_started[0].source, "files");
+
+    rig.f().write(".collide/board.yaml", "packs: []\n");
+    rig.f().commit();
+
+    rig.list_until(&board, "files is no longer named", |list| {
+        !list.not_started.iter().any(|s| s.source == "files")
+    });
+}
+
+#[test]
+fn a_source_that_failed_after_it_declared_is_stale_and_not_in_the_list_of_those_that_did_not_start()
+{
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.list_until(&board, "the source lists", |list| !list.tasks.is_empty());
+
+    // A committed change to what runs makes the line untrusted: the next look cannot start the source again.
+    rig.f().write(".collide/packs/quay/README", "changed\n");
+    rig.f().commit();
+
+    let list = rig.list_until(&board, "the source is stale", |list| {
+        !list.stale_sources.is_empty()
+    });
+    assert_eq!(list.stale_sources[0].source, "files");
+    let names: Vec<&str> = list.not_started.iter().map(|s| s.source.as_str()).collect();
+    assert_eq!(
+        names,
+        ["plan"],
+        "files is stale, not unstarted: {:?}",
+        list.not_started
+    );
+    assert_eq!(
+        Rig::keys(&list),
+        ["files:1"],
+        "it keeps what it last listed"
+    );
+}
+
+#[test]
 fn a_config_set_of_a_packs_key_stops_that_packs_providers_on_every_board_and_no_other_pack() {
     let rig = rig();
     let quay = Src {

@@ -482,6 +482,23 @@
       ],
       "type": "object"
     },
+    "NotStartedSource": {
+      "additionalProperties": false,
+      "description": "A source of the board that is not running, and why: its pack did not load, was not trusted, or its provider did not\nstart. It never declared anything this run, so it is not in `stale_sources`.",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "reason"
+      ],
+      "type": "object"
+    },
     "PartProblem": {
       "additionalProperties": false,
       "description": "A line of a proposal's quality part (the Decision log, the Assumptions or the Findings) that is not right, with why\n(0.8, 0.10). `part` is the part's name, as `Decision`. `line` counts from 1 in the item's file.",
@@ -939,7 +956,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`) come with the first page only. They\nare additive: a reader that does not know them reads the rest.",
+  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`) and `sources_started`\ncome with the first page only. They are additive: a reader that does not know them reads the rest.",
   "properties": {
     "collections": {
       "default": [],
@@ -977,10 +994,25 @@
         "null"
       ]
     },
+    "not_started": {
+      "default": [],
+      "description": "The sources of the board that could not start and have no declaration to show, with the reason.",
+      "items": {
+        "$ref": "#/$defs/NotStartedSource"
+      },
+      "type": "array"
+    },
     "refreshing": {
       "default": false,
       "description": "The first listing of a source is still running, so the tasks are what the last run cached, or fewer.",
       "type": "boolean"
+    },
+    "sources_started": {
+      "default": 0,
+      "description": "How many of the board's sources are running, the scratch source apart.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     },
     "stale_sources": {
       "default": [],
@@ -1014,6 +1046,8 @@
     "divergent",
     "collisions",
     "stale_sources",
+    "not_started",
+    "sources_started",
     "refreshing"
   ],
   "title": "TaskListResult",

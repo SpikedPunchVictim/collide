@@ -1792,3 +1792,124 @@ fn the_spikes_view_over_a_copy_of_collides_own_planning_lists_its_ten_spikes_and
         assert!(path.ends_with("/record.md"), "{path}");
     }
 }
+
+// ---- a source of the board that could not start ---------------------------------------------------------------------
+
+const BROKEN_PACK: &str = ".collide/packs/crash";
+
+/// A repo pack whose one provider, named `source`, ends at once, so the source cannot start. The line lists it.
+fn crashing_pack(source: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            ".collide/board.yaml",
+            format!("packs:\n  - source: repo:{BROKEN_PACK}\n"),
+        ),
+        (
+            ".collide/packs/crash/pack.yaml",
+            format!(
+                "apiVersion: collide/v0\nname: crash\nversion: 1.0.0\nproviders:\n  {source}: \
+                 {{ script: providers/{source}.mjs }}\n"
+            ),
+        ),
+        (
+            ".collide/packs/crash/providers/crash.mjs",
+            "process.exit(1);\n".to_string(),
+        ),
+        (
+            ".collide/packs/crash/providers/plan.mjs",
+            "process.exit(1);\n".to_string(),
+        ),
+    ]
+}
+
+fn crash_rig(source: &str) -> Rig {
+    let files = crashing_pack(source);
+    let borrowed: Vec<(&str, String)> = files
+        .iter()
+        .map(|(path, text)| (*path, text.clone()))
+        .collect();
+    Rig::with_files(&borrowed)
+}
+
+#[test]
+fn a_listing_names_a_source_that_could_not_start_and_lists_the_others_and_exits_0() {
+    let rig = crash_rig("crash");
+
+    let (code, out, err) = rig.cli(&["tasks"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(
+        first_words(&out).contains(&"plan:ts-0001-aa".to_string()),
+        "{out}"
+    );
+    let line = err
+        .lines()
+        .find(|line| line.starts_with("collide: source crash could not start: "))
+        .unwrap_or_else(|| panic!("a line for the source in {err:?}"));
+    assert!(
+        line.len() > "collide: source crash could not start: ".len(),
+        "{line}"
+    );
+    assert_eq!(err.lines().count(), 1, "{err}");
+}
+
+#[test]
+fn the_same_line_comes_with_a_view_and_with_ready() {
+    let rig = crash_rig("crash");
+
+    for words in [
+        vec!["tasks", "--view", "ready-now"],
+        vec!["tasks", "--ready"],
+    ] {
+        let (code, _, err) = rig.cli(&words);
+
+        assert_eq!(code, exit::OK, "{words:?}: {err}");
+        assert!(
+            err.contains("collide: source crash could not start: "),
+            "{words:?}: {err}"
+        );
+    }
+}
+
+#[test]
+fn a_listing_exits_1_when_no_source_of_the_board_started() {
+    let rig = crash_rig("plan");
+
+    let (code, out, err) = rig.cli(&["tasks"]);
+
+    assert_eq!(code, exit::FAILED, "{err}");
+    assert_eq!(out, "");
+    assert!(
+        err.contains("collide: source plan could not start: "),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_board_with_nothing_wrong_says_nothing_and_an_honestly_empty_one_exits_0() {
+    let rig = Rig::new();
+    let (code, _, err) = rig.cli(&["tasks"]);
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+
+    let (code, out, err) = rig.cli(&["tasks", "--kind", "spike"]);
+
+    assert_eq!((code, out.as_str(), err.as_str()), (exit::OK, "", ""));
+}
+
+#[test]
+fn json_carries_the_unstarted_source_on_the_wire() {
+    let rig = crash_rig("crash");
+
+    let (code, out, _) = rig.cli(&["tasks", "--json"]);
+
+    assert_eq!(code, exit::OK);
+    let listed = json(&out);
+    assert_eq!(listed["not_started"][0]["source"], "crash");
+    assert!(
+        !listed["not_started"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(listed["sources_started"], 1);
+}

@@ -52,9 +52,18 @@ pub struct StaleSource {
     pub reason: String,
 }
 
+/// A source of the board that is not running, and why: its pack did not load, was not trusted, or its provider did not
+/// start. It never declared anything this run, so it is not in `stale_sources`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NotStartedSource {
+    pub source: String,
+    pub reason: String,
+}
+
 /// `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
-/// lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`) come with the first page only. They
-/// are additive: a reader that does not know them reads the rest.
+/// lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`) and `sources_started`
+/// come with the first page only. They are additive: a reader that does not know them reads the rest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskListResult {
@@ -73,6 +82,12 @@ pub struct TaskListResult {
     pub collisions: Vec<TaskCollision>,
     #[serde(default)]
     pub stale_sources: Vec<StaleSource>,
+    /// The sources of the board that could not start and have no declaration to show, with the reason.
+    #[serde(default)]
+    pub not_started: Vec<NotStartedSource>,
+    /// How many of the board's sources are running, the scratch source apart.
+    #[serde(default)]
+    pub sources_started: u32,
     /// The first listing of a source is still running, so the tasks are what the last run cached, or fewer.
     #[serde(default)]
     pub refreshing: bool,

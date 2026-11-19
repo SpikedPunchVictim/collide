@@ -67,6 +67,8 @@ the command exits 1 and reads nothing itself.
 collide tasks: list the board's items (epics, tasks, proposals, spikes and questions), one line each: key, status,
   kind, title, in the order the daemon lists them. The folders it reads are the board's: the layout setting's, and the
   private root's. --kind keeps only items of that kind. --json prints the daemon's answer.
+  A source of the board that could not start is named on stderr with the reason; the others are still listed. When
+  none started, the command exits 1.
 collide tasks --ready: the members of the built-in `ready` view: the items that can be started now. A blocked-by cycle
   and a blocked-by target that is no item keep their items from being ready and are reported on stderr.
 collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a

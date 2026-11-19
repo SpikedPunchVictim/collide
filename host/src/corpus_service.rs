@@ -44,7 +44,7 @@ use collide_core::corpus::{
     CheckoutInfo, CheckoutKind, Corpus, ListFilter, Page, reconcile_by_source,
 };
 use collide_core::events::EventBody;
-use collide_core::owner::task::TaskListResult;
+use collide_core::owner::task::{NotStartedSource, TaskListResult};
 use collide_core::provider::{
     ChangeCause, GetParams, InitializeResult, ListParams, ListResult, ProviderEvent, Scope,
     SourceStale, Task, TaskChanged, WatchParams,
@@ -177,6 +177,12 @@ struct StaleAt {
     checkouts: BTreeSet<String>,
 }
 
+struct Failing {
+    times: u32,
+    next: Instant,
+    reason: String,
+}
+
 #[derive(Default)]
 struct State {
     corpus: Corpus,
@@ -186,8 +192,8 @@ struct State {
     runs: BTreeMap<String, Run>,
     /// (key, checkout, version) of the writes made through `task.apply`, oldest first.
     written: VecDeque<(String, Option<String>, String)>,
-    /// Sources that did not start: how many times in a row, and when they are tried again.
-    failing: BTreeMap<String, (u32, Instant)>,
+    /// Sources that did not start: how many times in a row, when they are tried again, and why the last try failed.
+    failing: BTreeMap<String, Failing>,
     /// Sources to list again at the next look, for a `task.collision` hint.
     wanted: BTreeSet<String>,
 }
@@ -244,6 +250,28 @@ impl BoardCorpus {
         let state = locked(&self.inner.state);
         let mut result = state.corpus.list(filter, page);
         result.refreshing = state.refreshing;
+        if page.cursor.is_none() {
+            // A source that failed after it declared is in `stale_sources` already, with the tasks it last listed.
+            let stale: Vec<&str> = result
+                .stale_sources
+                .iter()
+                .map(|stale| stale.source.as_str())
+                .collect();
+            result.not_started = state
+                .failing
+                .iter()
+                .filter(|(name, _)| !stale.contains(&name.as_str()))
+                .map(|(name, failing)| NotStartedSource {
+                    source: name.clone(),
+                    reason: failing.reason.clone(),
+                })
+                .collect();
+            result.sources_started = state
+                .runs
+                .keys()
+                .filter(|name| name.as_str() != scratch::SOURCE)
+                .count() as u32;
+        }
         result
     }
 
@@ -700,17 +728,21 @@ impl Inner {
 
     fn failed_to_start(&self, name: &str, error: &SourceError) {
         let mut state = locked(&self.state);
-        let (times, _) = state
+        let times = state
             .failing
             .get(name)
-            .copied()
-            .unwrap_or((0, Instant::now()));
-        let times = times.saturating_add(1);
+            .map_or(0, |failing| failing.times)
+            .saturating_add(1);
         let wait = self.config.recheck * 2u32.saturating_pow(times).min(BACKOFF_CAP);
         let first = !state.failing.contains_key(name);
-        state
-            .failing
-            .insert(name.to_string(), (times, Instant::now() + wait));
+        state.failing.insert(
+            name.to_string(),
+            Failing {
+                times,
+                next: Instant::now() + wait,
+                reason: source_text(error),
+            },
+        );
         let declared = state.runs.contains_key(name);
         if declared {
             let _ = state.corpus.mark_stale(name, &source_text(error));
@@ -800,6 +832,10 @@ impl Inner {
         };
         let mut names = vec![scratch::SOURCE.to_string()];
         names.extend(plan.sources);
+        // A source the line no longer names is not a failure of the board.
+        locked(&self.state)
+            .failing
+            .retain(|name, _| names.contains(name));
         for name in names {
             self.look_at(&name, &checkouts, changed, wanted.contains(&name));
         }
@@ -817,8 +853,8 @@ impl Inner {
         checkouts_changed: bool,
         hinted: bool,
     ) {
-        if let Some((_, next)) = locked(&self.state).failing.get(name)
-            && Instant::now() < *next
+        if let Some(failing) = locked(&self.state).failing.get(name)
+            && Instant::now() < failing.next
         {
             return;
         }

@@ -329,6 +329,13 @@ fn tasks(
     for item in &listed.invalid {
         let _ = writeln!(err, "collide: skipped {}: {}", item.path, item.reason);
     }
+    for unstarted in &listed.not_started {
+        let _ = writeln!(
+            err,
+            "collide: source {} could not start: {}",
+            unstarted.source, unstarted.reason
+        );
+    }
     for stale in &listed.stale_sources {
         let _ = writeln!(
             err,
@@ -336,6 +343,12 @@ fn tasks(
             stale.source, stale.reason
         );
     }
+    // Sources that failed and none that run: the empty list is not an honestly empty board.
+    let listed_ok = if !listed.not_started.is_empty() && listed.sources_started == 0 {
+        exit::FAILED
+    } else {
+        exit::OK
+    };
     let failed = listed.view.as_ref().filter(|report| report.error.is_some());
     if options.json {
         let document = serde_json::to_string(&listed).expect("a result is JSON");
@@ -344,7 +357,7 @@ fn tasks(
         emit(out, &list_text(&listed.tasks))?;
     }
     let Some(report) = &listed.view else {
-        return Ok(exit::OK);
+        return Ok(listed_ok);
     };
     if let Some(error) = &report.error {
         let _ = writeln!(err, "collide: view `{}` has an error: {error}", report.name);
@@ -375,7 +388,7 @@ fn tasks(
             report.name, report.part_problems
         );
     }
-    Ok(exit::OK)
+    Ok(listed_ok)
 }
 
 /// One line per task: its key, status, kind (`-` for a task with none) and title, the first three in columns.

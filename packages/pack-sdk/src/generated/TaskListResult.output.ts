@@ -15,8 +15,8 @@ export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dro
 
 /**
  * `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
- * lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`) come with the first page only. They
- * are additive: a reader that does not know them reads the rest.
+ * lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`) and `sources_started`
+ * come with the first page only. They are additive: a reader that does not know them reads the rest.
  */
 export interface TaskListResult {
   collections: Collection[]
@@ -31,9 +31,17 @@ export interface TaskListResult {
   invalid: TaskInvalid[]
   next_cursor?: string | null
   /**
+   * The sources of the board that could not start and have no declaration to show, with the reason.
+   */
+  not_started: NotStartedSource[]
+  /**
    * The first listing of a source is still running, so the tasks are what the last run cached, or fewer.
    */
   refreshing: boolean
+  /**
+   * How many of the board's sources are running, the scratch source apart.
+   */
+  sources_started: number
   stale_sources: StaleSource[]
   tasks: Task[]
   /**
@@ -79,6 +87,14 @@ export interface TaskInvalid {
   checkout: string | null
   path: string
   reason: string
+}
+/**
+ * A source of the board that is not running, and why: its pack did not load, was not trusted, or its provider did not
+ * start. It never declared anything this run, so it is not in `stale_sources`.
+ */
+export interface NotStartedSource {
+  reason: string
+  source: string
 }
 /**
  * A source whose last answer may be out of date, and why (`source.stale`, or a provider that is gone).

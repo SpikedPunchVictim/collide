@@ -44,3 +44,6 @@ exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit faile
 (also: a --checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was
 written), 5 refused by the provider, 10 the view has an error of its own, 11 the write is queued in the daemon and not
 applied yet, 12 a person-only op: a confirmation waits in the app
+
+  A source of the board that could not start is named on stderr with the reason; the others are still listed. When
+  none started, the command exits 1.
