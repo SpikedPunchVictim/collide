@@ -1,7 +1,7 @@
 ---
 id: ts-0145-cq
 kind: task
-status: ready
+status: done
 title: "Orchard adapter: a create reads the real plan CLI's id"
 owners: []
 links: []
