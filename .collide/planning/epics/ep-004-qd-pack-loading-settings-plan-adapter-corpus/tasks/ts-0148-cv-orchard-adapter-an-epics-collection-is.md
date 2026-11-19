@@ -1,7 +1,7 @@
 ---
 id: ts-0148-cv
 kind: task
-status: ready
+status: done
 title: "Orchard adapter: an epic's collection is its tasks' epic field"
 owners: []
 links: []
