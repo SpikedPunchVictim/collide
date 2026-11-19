@@ -620,7 +620,7 @@ describe('initialize declares the feature ops with argument schemas', () => {
   test('renameSection is a source op, declared beside create, with from and to required', async () => {
     const ops = (await declared()).ops as Row[]
     expect(ops.map((op) => op.name)).toEqual([
-      'setStatus', 'link', 'claim', 'unclaim', 'create', 'reid', 'renameSection',
+      'setStatus', 'link', 'claim', 'unclaim', 'create', 'move', 'reid', 'renameSection',
     ])
     expect(ops.find((op) => op.name === 'renameSection')?.args).toMatchObject({
       required: ['from', 'to'],

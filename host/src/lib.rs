@@ -27,6 +27,7 @@ pub mod daemon;
 pub mod disk;
 pub mod event_hub;
 pub mod file_run;
+pub mod follow_ups;
 pub mod git_fetch;
 pub mod git_objects;
 pub mod hooks;

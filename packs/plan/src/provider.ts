@@ -9,7 +9,8 @@ import type {
   ProviderHandlers,
 } from '@collide/pack-sdk'
 import { isMainCheckout, resolveCheckout } from './checkout.ts'
-import { ROOT_NAMES, TITLE_MAX } from './create.ts'
+import { ROOT_NAMES, RUN_MAX, TITLE_MAX } from './create.ts'
+import { MOVE } from './move.ts'
 import { ADD_FEATURE, FEATURE_PATTERN, MOVE_FEATURE } from './feature-ops.ts'
 import { SECTION_MAX } from './features.ts'
 import { DEFAULT_LAYOUT, resolveLayout } from './layout.ts'
@@ -185,8 +186,19 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
         title: { type: 'string', minLength: 1, maxLength: TITLE_MAX },
         seed: { type: 'integer' },
         root: { enum: [...ROOT_NAMES] },
+        raisedBy: { type: 'string', pattern: ID_PATTERN, description: 'The item that raised it: a raised-by link.' },
+        run: { type: 'string', minLength: 1, maxLength: RUN_MAX, description: 'The run that raised it: a run: line.' },
       },
       required: ['title'],
+      ...noExtraArgs,
+    },
+  },
+  {
+    name: MOVE,
+    args: {
+      type: 'object',
+      description: 'Keeps one private item: moves it to the shared root, in the folder of its epic, under its id.',
+      properties: {},
       ...noExtraArgs,
     },
   },

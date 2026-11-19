@@ -203,15 +203,11 @@ fn initialize_sends_the_packs_settings_and_the_root_and_returns_what_the_provide
 }
 
 #[test]
-fn a_result_that_fails_check_initialize_is_refused_naming_the_provider_and_the_reason() {
-    let rig = Rig::with(TempRoot::new(), &["bad-initialize"], policy(), |_| {});
-    let message = failed_message(rig.provider.initialize(&params()).unwrap_err());
-    assert!(message.contains(NAME), "{message}");
-    assert!(
-        message.contains("`move`") && message.contains("reserved"),
-        "{message}"
-    );
-    assert!(!rig.provider.is_running(), "a refused child is stopped");
+fn a_result_that_declares_move_is_accepted_since_keep_defined_it() {
+    let rig = Rig::with(TempRoot::new(), &["declares-move"], policy(), |_| {});
+    let result = rig.provider.initialize(&params()).unwrap();
+    assert_eq!(result.ops[0].name, "move");
+    assert!(rig.provider.is_running());
 }
 
 #[test]

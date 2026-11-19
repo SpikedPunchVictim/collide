@@ -6,9 +6,9 @@ requires:
 providers:
   plan: { script: src/main.ts }
 
-# Views a board adopts by name (0.10, Views): `collide/plan/spikes` and `collide/plan/decisions-needed`, or just
-# `spikes` while no other pack has that name. `ready` is built into core and is not declared here: a view's expression
-# sees one task, and whether a task is ready depends on its blockers' states.
+# Views a board adopts by name (0.10, Views): `collide/plan/spikes`, `collide/plan/decisions-needed` and
+# `collide/plan/follow-ups`, or just `spikes` while no other pack has that name. `ready` is built into core and is
+# not declared here: a view's expression sees one task, and whether a task is ready depends on its blockers' states.
 views:
   spikes:
     name: spikes
@@ -19,6 +19,15 @@ views:
     name: decisions-needed
     where: "(kind == 'question' && category == 'ready') || (kind == 'proposal' && status == 'proposed')"
     queue: true
+  # What a run's agent raised and nobody has kept or dismissed: open private items with a `raised-by` link, newest
+  # first (0.10, Follow-ups). `link_types` is the type of each link the task has, blocking or not.
+  follow-ups:
+    name: follow-ups
+    where: >-
+      'root' in fields && fields.root == 'private' && !(category in ['done', 'dropped'])
+      && 'raised-by' in link_types
+    layout:
+      sort: { by: id, dir: desc }
 
 # Where the shared planning folder is (0.10, Planning sources). The repo's `.collide/config.yaml` sets it, so the whole
 # team reads and writes one place; the user's files may not (`repoOnly`). The provider checks every path at start and

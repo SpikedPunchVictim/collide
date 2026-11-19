@@ -7,7 +7,7 @@ import { drawFreeId, IdSourceError, KIND_IDS, nextNumber, seededGenerator, taken
 import type { CreatableKind, IdHooks } from './ids.ts'
 import { DEFAULT_LAYOUT, spikeDirOf } from './layout.ts'
 import type { Layout } from './layout.ts'
-import { readItem, stateOf } from './item.ts'
+import { ID_PATTERN, RAISED_BY, readItem, stateOf } from './item.ts'
 import { CONTROL, onlyKeys, refused } from './op-util.ts'
 import { readItemFile } from './read-file.ts'
 import { pathOf, readEpicFiles, toTask } from './scan.ts'
@@ -28,6 +28,10 @@ const SLUG_WORDS = 6
 const SLUG_WORD_MAX = 40
 const EPIC_ID = /^ep-[0-9]{3,}-[a-z]{2}$/
 const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
+const ITEM_ID = new RegExp(ID_PATTERN)
+
+/** The longest `run` a create writes: a run id is short, and the field is one line of the item. */
+export const RUN_MAX = 200
 
 /**
  * The slug of a title: its first six words, lower case, joined by hyphens, as the item files here are named. A word is
@@ -73,7 +77,14 @@ export function checkCreate(args: Record<string, unknown>): string | null {
   } else if (typeof epic !== 'string' || !EPIC_ID.test(epic)) {
     return `a ${(kind as string | undefined) ?? 'task'} needs epic, the id of its epic, such as ep-002-va`
   }
-  return checkSeed(args) ?? onlyKeys(args, ['kind', 'epic', 'title', 'seed', 'root'])
+  const { raisedBy, run } = args
+  if (raisedBy !== undefined && !(typeof raisedBy === 'string' && ITEM_ID.test(raisedBy))) {
+    return `raisedBy must be the id of an item, matching ${ID_PATTERN}`
+  }
+  if (run !== undefined && !(typeof run === 'string' && run !== '' && run.length <= RUN_MAX && !CONTROL.test(run))) {
+    return `run must be text of 1 to ${RUN_MAX} characters, with no line break or other control character`
+  }
+  return checkSeed(args) ?? onlyKeys(args, ['kind', 'epic', 'title', 'seed', 'root', 'raisedBy', 'run'])
 }
 
 const DRAFT_BODY = '## Features\n\n## Decision\n'
@@ -83,11 +94,16 @@ const QUESTION_BODY = '## Question\n\n## Decision\n'
 /**
  * A new item: a task or an epic starts `ready`, with the parts a task has; a proposal starts as a `draft`, with the two
  * parts 0.10 names; a spike starts `planned`, with its title as the one heading; a question starts `open`, with the
- * question and, for later, its decision.
+ * question and, for later, its decision. A `run` is written as a `run:` line right after `status:`, where the provider
+ * puts every field of its own, and a `raisedBy` as the item's one `raised-by` link.
  */
-const fileOf = (id: string, kind: CreatableKind, title: string): string => {
+const fileOf = (id: string, kind: CreatableKind, title: string, args: Record<string, unknown>): string => {
   const status = { task: 'ready', epic: 'ready', proposal: 'draft', spike: 'planned', question: 'open' }[kind]
-  const fields = `id: ${id}\nkind: ${kind}\nstatus: ${status}\ntitle: ${JSON.stringify(title)}\nowners: []\nlinks: []`
+  const run = typeof args.run === 'string' ? `run: ${JSON.stringify(args.run)}\n` : ''
+  const raised = typeof args.raisedBy === 'string' ? `\n  - { type: ${RAISED_BY}, to: ${args.raisedBy} }` : ' []'
+  const links = `links:${raised}`
+  const first = `id: ${id}\nkind: ${kind}\nstatus: ${status}\n${run}`
+  const fields = `${first}title: ${JSON.stringify(title)}\nowners: []\n${links}`
   const head = `---\n${fields}\n---\n\n`
   if (kind === 'spike') return `${head}# ${title}\n`
   return head + { task: TASK_BODY, epic: TASK_BODY, proposal: DRAFT_BODY, question: QUESTION_BODY }[kind]
@@ -104,7 +120,7 @@ const exists = async (path: string): Promise<boolean> => {
 }
 
 /** The folder in the working tree that holds epic `epic`, or null. */
-async function epicFolder(epicsDir: string, epic: string): Promise<string | null> {
+export async function epicFolder(epicsDir: string, epic: string): Promise<string | null> {
   let names: string[]
   try {
     names = (await readdir(epicsDir, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
@@ -130,7 +146,7 @@ async function noEpic(root: string, layout: Layout, epic: string, into: RootName
 }
 
 /** Makes `dir` and its missing parents, and syncs the directories that gained an entry, so the new file survives a crash. */
-async function makeDirectory(dir: string): Promise<void> {
+export async function makeDirectory(dir: string): Promise<void> {
   const first = await mkdir(dir, { recursive: true })
   if (first === undefined) return
   for (let made = dir; ; made = dirname(made)) {
@@ -196,7 +212,7 @@ export async function createLocked(
         : join(epicsDir, folder as string, subfolder, `${name}.md`)
   if (await exists(absolute)) return refused(`${absolute} already exists; nothing was written`)
   await makeDirectory(dirname(absolute))
-  await replaceFile(absolute, Buffer.from(fileOf(id, kind, title), 'utf8'), 0o644)
+  await replaceFile(absolute, Buffer.from(fileOf(id, kind, title, args), 'utf8'), 0o644)
 
   const read = await readItemFile(absolute)
   if (!read.ok) throw new Error(`${absolute} does not read back after the write: ${read.reason}`)

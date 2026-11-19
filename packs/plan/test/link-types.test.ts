@@ -18,6 +18,7 @@ describe('the link types the provider declares', () => {
       informs: 'informed by',
       includes: 'included in',
       supersedes: 'superseded by',
+      'raised-by': 'raised',
     })
   })
 
@@ -29,6 +30,12 @@ describe('the link types the provider declares', () => {
       blocking: false,
       target: 'feature',
       inverse: 'implemented by',
+    })
+    expect(links.find((decl) => decl.name === 'raised-by')).toEqual({
+      name: 'raised-by',
+      dir: 'out',
+      blocking: false,
+      inverse: 'raised',
     })
     expect(links.find((decl) => decl.name === 'blocked-by')).toMatchObject({ dir: 'out', blocking: true })
   })

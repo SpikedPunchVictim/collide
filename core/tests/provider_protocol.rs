@@ -5,8 +5,8 @@ use collide_core::item::{Category, LinkTarget};
 use collide_core::observer::{ObserverAck, ObserverEvent};
 use collide_core::provider::{
     self, ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult,
-    ListParams, ListResult, PreviewResult, ProviderError, ProviderEvent, SourceStale, Task,
-    TaskChanged, TaskCollision, TaskInvalid, TaskRemoved, WatchParams, WatchResult,
+    ListParams, ListResult, PreviewResult, ProviderEvent, SourceStale, Task, TaskChanged,
+    TaskCollision, TaskInvalid, TaskRemoved, WatchParams, WatchResult,
 };
 use collide_core::schema;
 use serde::Serialize;
@@ -996,7 +996,7 @@ fn an_op_may_carry_an_argument_schema_and_the_checkouts_it_may_target() {
     assert!(result.ops[1].args.is_none() && result.ops[1].checkouts.is_empty());
 }
 
-// The reserved op name.
+// Op names.
 
 fn with_ops(top: &[&str], kind: &[&str]) -> InitializeResult {
     let mut doc = initialize_result();
@@ -1006,24 +1006,14 @@ fn with_ops(top: &[&str], kind: &[&str]) -> InitializeResult {
 }
 
 #[test]
-fn a_provider_op_named_move_is_refused() {
+fn move_is_a_declarable_op_name_since_keep_defined_it() {
     assert_eq!(
         provider::check_initialize(&with_ops(&["setStatus", "move"], &[])),
-        Err(vec![ProviderError::ReservedOp {
-            op: "move".into(),
-            kind: None
-        }])
+        Ok(())
     );
-}
-
-#[test]
-fn a_kind_op_named_move_is_refused_with_its_kind() {
     assert_eq!(
         provider::check_initialize(&with_ops(&["setStatus"], &["move"])),
-        Err(vec![ProviderError::ReservedOp {
-            op: "move".into(),
-            kind: Some("task".into())
-        }])
+        Ok(())
     );
 }
 
@@ -1031,14 +1021,6 @@ fn a_kind_op_named_move_is_refused_with_its_kind() {
 fn rehome_and_other_names_are_allowed() {
     let result = with_ops(&["rehome", "moveTo", "Move"], &["rehome"]);
     assert_eq!(provider::check_initialize(&result), Ok(()));
-}
-
-#[test]
-fn every_refusal_is_reported() {
-    let errors = provider::check_initialize(&with_ops(&["move"], &["move"])).unwrap_err();
-    assert_eq!(errors.len(), 2);
-    assert!(errors[0].to_string().contains("`move`"));
-    assert!(errors[0].to_string().contains("Share"));
 }
 
 // Framing.

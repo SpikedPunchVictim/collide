@@ -39,8 +39,10 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// Op names that a provider may not declare. `move` is Share's (0.10); plan's `move --epic` is declared `rehome`.
-const RESERVED_OPS: &[&str] = &["move"];
+/// Op names that a provider may not declare. None now: `move` was held back for Share until Keep (ts-0139-wq; 0.10,
+/// Follow-ups) defined it, as the op that moves one private item to the shared root. A provider that has a private
+/// root declares it; plan's `move --epic` is declared `rehome`.
+const RESERVED_OPS: &[&str] = &[];
 
 /// `initialize` params: the pack's settings (`config`, 0.7), already checked against the pack's own schema, and
 /// `root`, the main checkout's absolute path (owner, 2026-11-14). A provider never infers the root from its working

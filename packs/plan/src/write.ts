@@ -34,6 +34,7 @@ import type { LockOptions } from './lock.ts'
 import { article, CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
 import type { Frontmatter, OpContext, OpSpec, Prepared } from './op-util.ts'
 import { PERSON_OPS, proposalMove } from './person-ops.ts'
+import { checkMove, MOVE, moveLocked, moveWall } from './move.ts'
 import { checkReid, REID, reidLocked } from './reid.ts'
 import { checkRenameSection, RENAME_SECTION, renameSectionLocked } from './rename-section.ts'
 import { BODY_CAP, findFence, parseFrontmatter, readItemFile, versionOf } from './read-file.ts'
@@ -259,7 +260,7 @@ const OPS: Record<string, OpSpec> = {
   },
 }
 
-export const OP_NAMES = [...Object.keys(OPS), CREATE, REID, RENAME_SECTION]
+export const OP_NAMES = [...Object.keys(OPS), CREATE, MOVE, REID, RENAME_SECTION]
 
 /** Reads the item back from disk, so the reply is what is on disk. */
 async function readBack(found: FoundItem, absolute: string): Promise<FoundItem> {
@@ -397,7 +398,7 @@ export async function applyOp(
 ): Promise<ApplyResultInput> {
   const { op, id, version, checkout } = params
   const spec = Object.hasOwn(OPS, op) ? OPS[op] : undefined
-  if (spec === undefined && op !== CREATE && op !== REID && op !== RENAME_SECTION) {
+  if (spec === undefined && op !== CREATE && op !== MOVE && op !== REID && op !== RENAME_SECTION) {
     return refused(`unknown op "${op}"; this provider has ${OP_NAMES.join(', ')}`)
   }
   const args = params.args ?? {}
@@ -428,6 +429,23 @@ export async function applyOp(
     if (into === 'private' && privateDir === null) return refused(NOT_MAIN)
     await mkdir(folderOf[into], { recursive: true })
     return withLock(lockOf[into], () => createLocked(root, args, hooks, layout, privateDir), lock)
+  }
+
+  if (op === MOVE) {
+    if (typeof id !== 'string' || id === '') return refused('move needs the id of the item to keep')
+    const wall = moveWall(id, params.actor ?? null)
+    if (wall !== null) return refused(wall)
+    if (typeof version !== 'string' || version === '') {
+      return refused('move needs the version you last read: send it, so that a move of a changed file can be told')
+    }
+    const problem = checkMove(args)
+    if (problem !== null) return refused(`move: ${problem}`)
+    if (packPlanning === null) return refused(NO_PACK_DATA.replace('create:', 'move:'))
+    if (privateDir === null) return refused('move: the private root is the main checkout\'s; leave checkout out')
+    await mkdir(folderOf.shared, { recursive: true })
+    await mkdir(folderOf.private, { recursive: true })
+    const keep = () => moveLocked(root, id, version, hooks, layout, privateDir)
+    return withLocks([lockOf.shared, lockOf.private], keep, lock)
   }
 
   if (op === RENAME_SECTION) {

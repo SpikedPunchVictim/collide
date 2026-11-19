@@ -2333,8 +2333,9 @@ Why the plan adapter parses files itself:
 - Optional capability `preview` takes `apply`'s arguments, writes nothing, and returns `apply`'s three outcomes
   (owner, 2026-11-14): `ok` with `items[]` and `files`, `conflict` with the current task, or `refused` with the
   source's message.
-- The op name `move` is reserved for Share; Keep uses it for one item from Stage 4c (0.10, Follow-ups). plan's `move
-  --epic` is declared as `rehome`.
+- The op `move` is Share's: Keep's for one item from Stage 4c (0.10, Follow-ups), and Share's for many in the
+  second-pack stage. Core no longer refuses it at `initialize` (`ts-0139-wq`); the daemon refuses it to a run's agent on
+  any source. plan's `move --epic` is declared as `rehome`.
 
 **Versions.**
 - Every task has a `version`. For plan, it is a hash of the task file's content.
@@ -2679,8 +2680,8 @@ layout: { default: board, groupBy: category }
   is not branch-scoped publishes in its own way. `record` commits exactly the files written.
 - **Follow-ups** (owner, 2026-11-18; revision 24). What a run finds that is not its task's work is an item, never only a
   line in its last reply. Suggested work is a task; something it needs from a person, such as a sample file, is a
-  question with `needs: human`. The agent files them with `collide task new`, as the built-in workflows' prompts tell it
-  to:
+  question with `needs: human`. The agent files them with `collide task create`, as the built-in workflows' prompts tell
+  it to (`collide task new` makes a scratch task, which is no follow-up):
   - an item a run's agent creates goes to the board's private root, in the folder of the run's item's epic, whatever
     root it names, so nothing reaches the shared plan or a commit until it is kept from the app, the CLI or the Desk;
   - the daemon links it `raised-by` to the run's item (a task; from Stage 9d also a proposal or a spike) and writes
@@ -3003,7 +3004,7 @@ Details:
     Conclude does it. Accepting the session's run lands its scripts and record. The spike's `out/` folder is
     git-ignored, so at accept Collide moves it into the main checkout's spike folder, where it stays uncommitted;
   - small thinking with no record stays in the Desk or the user's own terminal. If it grows, the agent makes it a spike
-    with `collide task new`.
+    with `collide task create`.
 - **Continue as…** (owner, 2026-11-18; revision 24; Stage 9d): a menu on a session's bar, Spike, Planning or Task, that
   carries the session on as another kind without losing its conversation. It is not a mode switch:
   - it makes the new item, linked `informs` to the old one, and first runs a handoff turn: the old session writes what
@@ -3023,7 +3024,7 @@ Details:
     among task runs, Spike… and Plan…, either way. The Desk and the user's own terminal start runs and do not switch;
   - a resumed session carries all its tokens, sent again each turn. When it is large, the dialog shows its size and
     offers Start fresh from the handoff. The new run has its own budget cap;
-  - until Stage 9d, an agent can make the item with `collide task new`, but the conversation does not come along.
+  - until Stage 9d, an agent can make the item with `collide task create`, but the conversation does not come along.
 - **The Desk** (owner, 2026-11-18; revision 24; Stage 9e): one long-lived interactive Claude Code session per board,
   docked at the bottom of every page, in the main checkout. It coordinates work and edits no code; code work is still a
   run, with a worktree and review:
@@ -4552,15 +4553,16 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   private root, with `raised-by` and `fields.run` written by the daemon); Keep, the markdown provider's `move` op for
   one private item; and the built-in `follow-ups` view (`ts-0139-wq`).
 - **Your own terminal** (revision 24): `collide guide` prints a short guide for an agent: what Collide is, the commands
-  it may use (`run`, `tasks` and `task`, with the forms `task new`, `task <id>` and `task <id> link`), exit codes 10, 11
+  it may use (`run`, `tasks` and `task`, with the forms `task create` for an item of the plan, `task new` for a scratch
+  task, `task <id>` and `task <id> link`), exit codes 10, 11
   and 12, and that the person-only ops (accept, defer, reject, resolve, reopen) wait for the person in the app. Its
   command list is built from the CLI's own, so it cannot drift, and it needs no daemon. A docs page covers using Collide
   from the user's own Claude Code session: `collide` on `PATH`, and one line in the repository's or the user's CLAUDE.md
   ("This repo is planned in Collide; run `collide guide`."). Collide writes nothing into the user's Claude config. Every
   write goes through the daemon, so the app shows it as it lands, and a run started this way appears on the loop page.
   Every run gets `collide` first on its `PATH` and `Bash(collide:*)` on Claude's launch line (0.2), and the quick run's
-  builder definition tells the agent to file follow-ups with `collide task new`; the planning workflow's prompt gets the
-  same paragraph in Stage 9d (`ts-0140-gk`).
+  builder definition tells the agent to file follow-ups with `collide task create`; the planning workflow's prompt gets
+  the same paragraph in Stage 9d (`ts-0140-gk`).
 
 **Success Criteria**:
 - Planning:
@@ -4587,7 +4589,7 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
     `proposed`. With three features and two included tasks, one implementing a feature and one implementing none,
     `coverage` names the two features with no task and the second task. A Decision section of plain text reads
     unchanged, with no problem.
-  - follow-ups (revision 24): a `task new` from a run's agent lands in the private root with `raised-by` to the run's
+  - follow-ups (revision 24): a `task create` from a run's agent lands in the private root with `raised-by` to the run's
     task and `fields.run` set, whatever root or link it asked for; `move` from the CLI moves a private item to the
     shared root under the same id and commits exactly its files, and from a run's agent it is refused; the `follow-ups`
     view lists open private items with a `raised-by` link;

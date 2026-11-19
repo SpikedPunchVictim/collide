@@ -39,7 +39,7 @@ describe('initialize declares the write ops', () => {
     const { result } = await call(standard(), 'initialize', { config: {} })
     const ops = result?.ops as Array<Record<string, any>>
     expect(ops.map((op) => op.name)).toEqual([
-      'setStatus', 'link', 'claim', 'unclaim', 'create', 'reid', 'renameSection',
+      'setStatus', 'link', 'claim', 'unclaim', 'create', 'move', 'reid', 'renameSection',
     ])
     expect(ops.every((op) => op.movesTo === undefined && op.args.type === 'object')).toBe(true)
     const five = ['ready', 'active', 'review', 'done', 'dropped']

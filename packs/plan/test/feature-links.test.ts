@@ -46,6 +46,7 @@ describe('the declaration', () => {
       { name: 'informs', dir: 'out', blocking: false, inverse: 'informed by' },
       { name: 'includes', dir: 'out', blocking: false, inverse: 'included in' },
       { name: 'supersedes', dir: 'out', blocking: false, inverse: 'superseded by' },
+      { name: 'raised-by', dir: 'out', blocking: false, inverse: 'raised' },
     ])
   })
 

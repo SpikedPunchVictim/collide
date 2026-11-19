@@ -15,7 +15,7 @@ with `=` and a value when it takes one:
     garbage-on=METHOD       answer a request for METHOD with a line that is not JSON
     unknown=METHOD          answer a request for METHOD with the JSON-RPC error "method not found"
     down-file=PATH          exit with code 5 at once, before it reads anything, while the file PATH exists
-    bad-initialize          answer `initialize` with an op named `move`, which a provider may not declare
+    declares-move           answer `initialize` with an op named `move`, which a provider may declare (Keep, 0.10)
     no-preview              declare `preview: false` in the capabilities
     events-after=METHOD     write the six `watch` notifications after the reply to METHOD
     events-before=METHOD    write the six `watch` notifications before the reply to METHOD
@@ -76,7 +76,7 @@ def effect():
 
 
 def initialize_result():
-    ops = [{"name": "move"}] if "bad-initialize" in MODES else [{"name": "setStatus"}]
+    ops = [{"name": "move"}] if "declares-move" in MODES else [{"name": "setStatus"}]
     return {
         "scope": "global",
         "idPattern": "^fake-[0-9]+$",

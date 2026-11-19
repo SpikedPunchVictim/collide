@@ -235,7 +235,7 @@ fn every_task_name_is_bound_to_a_value() {
     let compiled = must_compile(
         "size(key) > 0 && size(source) > 0 && size(title) > 0 && size(status) > 0 && size(category) > 0 \
          && size(kind) > 0 && size(labels) > 0 && size(collections) > 0 && size(deps) > 0 \
-         && size(author) > 0 && size(fields) > 0",
+         && size(link_types) > 0 && size(author) > 0 && size(fields) > 0",
     );
     let mut task = task("a title");
     task.labels = vec!["mvp".into()];
@@ -328,6 +328,39 @@ fn deps_are_the_targets_of_the_blocking_dependency_links_in_order() {
 }
 
 #[test]
+fn link_types_are_the_names_of_every_link_once_blocking_or_not_in_order() {
+    let mut task = task("t");
+    let mut loose = link("blocked-by", "T-04");
+    loose.blocking = Some(false);
+    task.links = vec![
+        link("part-of", "E-01"),
+        link("raised-by", "T-02"),
+        link("part-of", "E-02"),
+        loose,
+        link("raised-by", "T-03"),
+    ];
+    assert_eq!(
+        TaskVars::bind(&task, "", None).unwrap().link_types,
+        ["part-of", "raised-by", "blocked-by"]
+    );
+}
+
+#[test]
+fn a_view_can_ask_whether_a_task_has_a_link_of_one_type() {
+    let compiled = must_compile("'raised-by' in link_types && !('blocked-by' in link_types)");
+    let mut with = task("with");
+    with.links = vec![link("raised-by", "T-02")];
+    let without = task("without");
+    let tasks = [
+        TaskVars::bind(&with, "", None).unwrap(),
+        TaskVars::bind(&without, "", None).unwrap(),
+    ];
+    let outcome = evaluate_pass(&compiled, &tasks, &unlimited());
+    assert_eq!(outcome.matched, [0]);
+    assert_eq!(outcome.error_count(), 0, "{:?}", outcome.errors);
+}
+
+#[test]
 fn has_of_a_source_field_is_false_for_a_task_without_it_and_true_for_one_with_it() {
     let compiled = must_compile("has(fields.estimate) && fields.estimate > 2");
     let mut with = task("with");
@@ -407,6 +440,22 @@ fn links_that_are_not_dependencies_do_not_count_toward_the_cap() {
         .map(|to| link("relates-to", to))
         .collect();
     assert_eq!(check_task_caps(&task, None), Ok(()));
+}
+
+#[test]
+fn link_types_over_the_list_cap_are_refused_by_name_and_many_links_of_one_type_are_not() {
+    let mut task = task("t");
+    task.links = names("T-", MAX_LIST_ENTRIES + 1)
+        .iter()
+        .map(|to| link("relates-to", to))
+        .collect();
+    assert_eq!(check_task_caps(&task, None), Ok(()));
+    task.links = names("type-", MAX_LIST_ENTRIES + 1)
+        .iter()
+        .map(|link_type| link(link_type, "T-02"))
+        .collect();
+    let reason = check_task_caps(&task, None).unwrap_err().reason;
+    assert!(reason.contains("link_types"), "{reason}");
 }
 
 #[test]

@@ -143,6 +143,7 @@ fn task_get_carries_the_link_types_of_the_plan_source_with_their_inverse() {
             ("informs", Some("informed by")),
             ("includes", Some("included in")),
             ("supersedes", Some("superseded by")),
+            ("raised-by", Some("raised")),
         ]
     );
 }

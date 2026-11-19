@@ -17,6 +17,7 @@ use collide_core::setting_value::{check_setting_schema, check_value};
 use collide_core::settings::ConfigFile;
 use collide_core::settings_layers::{LayerInputs, PackSettings, Settings, settings_layers};
 use collide_core::testing::{default_initialize, fake_task};
+use collide_core::view::SortDir;
 use collide_core::view_eval::{compile_view, evaluate_view};
 use collide_core::view_expr::Budgets;
 use collide_core::yaml::{load_yaml, load_yaml_file};
@@ -102,11 +103,12 @@ fn the_manifest_passes_the_checks_and_validates_against_the_generated_schema() {
 }
 
 #[test]
-fn the_pack_declares_two_views_and_only_decisions_needed_feeds_the_queue() {
+fn the_pack_declares_three_views_and_only_decisions_needed_feeds_the_queue() {
     let manifest = manifest();
     let names: Vec<&str> = manifest.views.keys().map(String::as_str).collect();
-    assert_eq!(names, ["decisions-needed", "spikes"]);
+    assert_eq!(names, ["decisions-needed", "follow-ups", "spikes"]);
     assert!(manifest.views["decisions-needed"].queue);
+    assert!(!manifest.views["follow-ups"].queue);
     assert!(!manifest.views["spikes"].queue);
     assert_eq!(
         manifest.views["spikes"].where_.as_deref(),
@@ -115,12 +117,32 @@ fn the_pack_declares_two_views_and_only_decisions_needed_feeds_the_queue() {
 }
 
 #[test]
+fn follow_ups_is_open_private_items_with_a_raised_by_link_newest_first() {
+    let view = &manifest().views["follow-ups"];
+    let source = view.where_.as_deref().unwrap();
+    for part in [
+        "fields.root == 'private'",
+        "'raised-by' in link_types",
+        "'done'",
+        "'dropped'",
+    ] {
+        assert!(source.contains(part), "{part} in {source}");
+    }
+    let sort = view
+        .layout
+        .as_ref()
+        .and_then(|layout| layout.sort.as_ref())
+        .unwrap();
+    assert_eq!((sort.by.as_str(), sort.dir), ("id", SortDir::Desc));
+}
+
+#[test]
 fn the_pack_does_not_declare_ready_because_core_holds_it() {
     assert!(!manifest().views.contains_key("ready"));
 }
 
 #[test]
-fn both_views_compile_and_check() {
+fn every_view_compiles_and_checks() {
     for (key, view) in &manifest().views {
         assert_eq!(&view.name, key);
         compile_view(view, 100, &Budgets::default())

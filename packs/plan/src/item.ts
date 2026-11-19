@@ -52,13 +52,16 @@ export const IMPLEMENTS = 'implements'
 export const INFORMS = 'informs'
 export const INCLUDES = 'includes'
 export const SUPERSEDES = 'supersedes'
+export const RAISED_BY = 'raised-by'
 
 /**
  * The link types the provider holds. `blocked-by` is the one that blocks. `implements` is a task's link to the feature
  * it builds, so its target is `feature` (revision 14); the others name an item, which is what a declaration with no
  * `target` means. `informs` is a link to what a spike informs, `includes` is a proposal's link to the tasks, spikes and
- * questions it holds, and `supersedes` is a proposal's link to the proposal it replaces, or a spike's to a spike. None
- * of the three blocks anything. `inverse` is what the other end calls the link, which Collide shows from there.
+ * questions it holds, and `supersedes` is a proposal's link to the proposal it replaces, or a spike's to a spike.
+ * `raised-by` is a follow-up's link to the item whose run raised it (0.10, Follow-ups); the daemon writes it when a
+ * run's agent creates an item, and the `link` op does not. None of the four blocks anything. `inverse` is what the
+ * other end calls the link, which Collide shows from there.
  */
 export const LINK_TYPES: ReadonlyArray<LinkTypeDeclInput> = [
   { name: BLOCKED_BY, dir: 'out', blocking: true, inverse: 'blocks' },
@@ -67,6 +70,7 @@ export const LINK_TYPES: ReadonlyArray<LinkTypeDeclInput> = [
   { name: INFORMS, dir: 'out', blocking: false, inverse: 'informed by' },
   { name: INCLUDES, dir: 'out', blocking: false, inverse: 'included in' },
   { name: SUPERSEDES, dir: 'out', blocking: false, inverse: 'superseded by' },
+  { name: RAISED_BY, dir: 'out', blocking: false, inverse: 'raised' },
 ]
 
 /** What a link of `type` points at: a feature when the type is declared so, otherwise an item. */

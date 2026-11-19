@@ -122,6 +122,7 @@ use crate::disk::{FloorSource, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
 use crate::file_run::quick_run::RunDiffError;
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
+use crate::follow_ups::{RunTask, shape_create};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
 use crate::metrics::Metrics;
@@ -3502,8 +3503,9 @@ fn judged_write(
     board: &str,
     root: &str,
     source: &Source,
-    apply: ApplyParams,
+    mut apply: ApplyParams,
 ) -> Result<TaskApplyResult, RpcError> {
+    shape_run_agent_create(shared, session, source, &mut apply);
     let (mut result, mut queued, mut confirmation) = (None, None, None);
     match judge_write(shared, session, board, root, source, &apply) {
         Verdict::Allow => match write(shared, session.actor(), board, root, source, &apply)? {
@@ -3534,6 +3536,48 @@ fn judged_write(
         queued,
         confirmation,
         commit: None,
+    })
+}
+
+/// The create rule for a run's agent (ts-0139-wq; 0.10, Follow-ups): a `create` on the planning source by the agent of
+/// a run is made private, from the main checkout, in the epic of the run's task, with `raised-by` to that task and the
+/// run id in `run` ([`shape_create`]). The run's task is the first task the run's launch recorded, when it is an item
+/// of the planning source. A run that has none, or whose task is not found, gets only the run id. Nothing else is
+/// shaped: a person's create goes where it asks.
+fn shape_run_agent_create(
+    shared: &Shared,
+    session: &Session,
+    source: &Source,
+    apply: &mut ApplyParams,
+) {
+    let Caller::RunAgent { run } = session.caller() else {
+        return;
+    };
+    if apply.op != "create" || source.name() != PLANNING_SOURCE {
+        return;
+    }
+    let task = run_task_of(shared, source, run);
+    shape_create(apply, run, task.as_ref());
+}
+
+/// The planning-source task the run `run` works on, with its epic, or `None`.
+fn run_task_of(shared: &Shared, source: &Source, run: &str) -> Option<RunTask> {
+    let row = shared.store.run(run).ok().flatten()?;
+    let key = &row.tasks.first()?.key;
+    let (name, id) = key.split_once(':')?;
+    if name != PLANNING_SOURCE {
+        return None;
+    }
+    let found = source
+        .get(&GetParams {
+            id: id.to_string(),
+            checkout: None,
+        })
+        .ok()?
+        .task?;
+    Some(RunTask {
+        id: found.id.clone(),
+        epic: found.epic().map(str::to_string),
     })
 }
 
@@ -3677,6 +3721,19 @@ fn judge_write(
     };
     if source.name() == scratch::SOURCE {
         return Verdict::Allow;
+    }
+    // `move` is Share's op, and Keep's for one item: the app and the CLI may, and a run's agent may not, on any source,
+    // since any provider may now declare it.
+    if let (Caller::RunAgent { run }, "move") = (session.caller(), apply.op.as_str()) {
+        return Verdict::Refuse(
+            RpcError::new(
+                code::NOT_PERMITTED,
+                format!(
+                    "run {run} may not keep {id}: only a person does that, in the app or the CLI"
+                ),
+            )
+            .with_data(serde_json::json!({"run": run, "op": "move", "item": id})),
+        );
     }
     // The app may do all of it, and most ops are never person-only: neither asks the corpus or the provider anything.
     let to_status = apply.args.get("status").and_then(serde_json::Value::as_str);

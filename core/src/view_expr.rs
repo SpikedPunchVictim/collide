@@ -46,7 +46,7 @@ pub const ESTIMATE_LIST_SIZE: u128 = 64;
 pub const MIN_ESTIMATE_TASKS: u128 = 1_600;
 
 /// The names a view may use for a task (0.10, Fields), and `kind` and `fields`.
-pub const TASK_NAMES: [&str; 11] = [
+pub const TASK_NAMES: [&str; 12] = [
     "key",
     "source",
     "title",
@@ -56,6 +56,7 @@ pub const TASK_NAMES: [&str; 11] = [
     "labels",
     "collections",
     "deps",
+    "link_types",
     "author",
     "fields",
 ];
@@ -503,6 +504,18 @@ pub fn dependencies(task: &Task) -> Vec<String> {
         .collect()
 }
 
+/// The link types of a task, each once, in the order they first appear, blocking or not: what a view reads as
+/// `link_types`, to ask whether a task has a link of one type (`'raised-by' in link_types`).
+pub fn link_types(task: &Task) -> Vec<String> {
+    let mut types: Vec<String> = Vec::new();
+    for link in &task.links {
+        if !types.contains(&link.link_type) {
+            types.push(link.link_type.clone());
+        }
+    }
+    types
+}
+
 /// The caps of 0.9 on what a view reads of a task: [`MAX_LIST_ENTRIES`] in `labels`, `collections` and the
 /// dependencies, and [`MAX_STRING_BYTES`] in each string, `fields` included (a list or an object inside `fields` has
 /// the list cap). The body is not bound, so it is not checked. `author` is the provenance's author, when there is
@@ -520,6 +533,7 @@ pub fn check_task_caps(task: &Task, author: Option<&str>) -> Result<(), CapError
     check_strings("labels", &task.labels)?;
     check_strings("collections", &task.collections)?;
     check_strings("deps", &dependencies(task))?;
+    check_strings("link_types", &link_types(task))?;
     if task.fields.len() > MAX_LIST_ENTRIES {
         return Err(too_many("fields", task.fields.len()));
     }
@@ -553,6 +567,7 @@ pub struct TaskVars {
     pub labels: Vec<String>,
     pub collections: Vec<String>,
     pub deps: Vec<String>,
+    pub link_types: Vec<String>,
     pub author: String,
     pub fields: BTreeMap<String, Json>,
 }
@@ -581,6 +596,7 @@ impl TaskVars {
             labels: task.labels.clone(),
             collections: task.collections.clone(),
             deps: dependencies(task),
+            link_types: link_types(task),
             author: author.unwrap_or_default().to_string(),
             fields: task.fields.clone(),
         })
@@ -601,6 +617,7 @@ impl TaskVars {
         bind("labels", cel::to_value(&self.labels));
         bind("collections", cel::to_value(&self.collections));
         bind("deps", cel::to_value(&self.deps));
+        bind("link_types", cel::to_value(&self.link_types));
         bind("author", cel::to_value(&self.author));
         bind("fields", cel::to_value(&self.fields));
         context
