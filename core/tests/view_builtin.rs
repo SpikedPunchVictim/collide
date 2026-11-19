@@ -5,7 +5,7 @@ use collide_core::corpus::Corpus;
 use collide_core::item::{Category, StatusDecl};
 use collide_core::owner::task::ViewReport;
 use collide_core::provider::{Collection, ListResult, Scope, Task, TaskInvalid};
-use collide_core::ready::{UnknownTarget, readiness};
+use collide_core::ready::UnknownTarget;
 use collide_core::testing::{default_initialize, fake_task};
 use collide_core::view_builtin::{READY, ready_view};
 use collide_core::view_eval::{CompiledView, ViewResult, evaluate_view, view_report};
@@ -187,15 +187,32 @@ fn the_members_are_what_the_rule_lists_over_one_source() {
         task("plan", "g", "dropped", &[]),
         task("plan", "h", "ready", &["g", "a"]),
     ];
-    let expected = readiness(&tasks).ready;
     let board = corpus(&[("plan", tasks)], 0);
     let found: Vec<String> = ready(&board)
         .members
         .iter()
         .map(|key| key.strip_prefix("plan:").unwrap().to_string())
         .collect();
-    assert_eq!(found, expected);
     assert_eq!(found, ["b", "h"]);
+}
+
+#[test]
+fn a_blocker_named_by_its_short_id_makes_the_view_list_the_task_that_it_blocks() {
+    let mut done = task("plan", "T-01", "done", &[]);
+    done.id = "T-01-survey-the-quay".into();
+    let mut blocked = task("plan", "T-02", "ready", &["T-01", "T-99"]);
+    blocked.id = "T-02-map-the-moorings".into();
+    let mut free = task("plan", "T-03", "ready", &["T-01"]);
+    free.id = "T-03-price-the-berths".into();
+    let result = ready(&corpus(&[("plan", vec![done, blocked, free])], 0));
+    assert_eq!(result.members, keys("plan", &["T-03"]));
+    assert_eq!(
+        result.unknown_blockers,
+        [UnknownTarget {
+            from: "plan:T-02".into(),
+            to: "T-99".into()
+        }]
+    );
 }
 
 #[test]

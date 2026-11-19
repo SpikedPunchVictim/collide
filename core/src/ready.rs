@@ -1,7 +1,8 @@
 //! The ready rule (0.10, Collide's own build tasks): an item is ready when its status category is `ready` and every
 //! `blocked-by` target is `done` or `dropped`. A `blocked-by` cycle is reported and none of its items is ready. A
 //! `blocked-by` target that is no item is reported, and its item is not ready: a typo in a link must not make an
-//! item look free to start. A pure function over the items a provider lists; it reads nothing else.
+//! item look free to start. A pure function over the items a provider lists; it reads nothing else. Which item a
+//! target names is not its business: the caller passes the resolver, the one that `follow` walks.
 
 use crate::item::Category;
 use crate::provider::Task;
@@ -20,12 +21,12 @@ pub struct UnknownTarget {
     pub to: String,
 }
 
-/// What the rule found over a set of items.
+/// What the rule found over a set of items. Items are named by `key`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Readiness {
-    /// The ids of the ready items, in the order the items were given.
+    /// The keys of the ready items, in the order the items were given.
     pub ready: Vec<String>,
-    /// Each `blocked-by` cycle (or an item that blocks itself): its ids in sorted order, cycles sorted.
+    /// Each `blocked-by` cycle (or an item that blocks itself): its keys in sorted order, cycles sorted.
     pub cycles: Vec<Vec<String>>,
     /// Each blocker that is no item, in the order of the items.
     pub unknown_targets: Vec<UnknownTarget>,
@@ -38,21 +39,23 @@ fn blockers(task: &Task) -> impl Iterator<Item = &str> {
         .map(|link| link.to.as_str())
 }
 
-/// Applies the rule to `tasks`. Items are matched by `id`; with two items of one id the first one counts.
-pub fn readiness(tasks: &[Task]) -> Readiness {
-    let mut index: HashMap<&str, usize> = HashMap::new();
+/// Applies the rule to `tasks`. `resolve` gives the key of the item a link's target names, or `None` when it names
+/// none. A key it gives that is not one of `tasks` counts as no item. With two items of one key the first one counts.
+pub fn readiness(tasks: &[Task], resolve: impl Fn(&str) -> Option<String>) -> Readiness {
+    let mut by_key: HashMap<&str, usize> = HashMap::new();
     for (position, task) in tasks.iter().enumerate() {
-        index.entry(task.id.as_str()).or_insert(position);
+        by_key.entry(task.key.as_str()).or_insert(position);
     }
+    let index = |target: &str| resolve(target).and_then(|key| by_key.get(key.as_str()).copied());
 
     let mut unknown_targets = Vec::new();
     let mut edges: Vec<Vec<usize>> = vec![Vec::new(); tasks.len()];
     for (position, task) in tasks.iter().enumerate() {
         for target in blockers(task) {
-            match index.get(target) {
-                Some(&to) => edges[position].push(to),
+            match index(target) {
+                Some(to) => edges[position].push(to),
                 None => unknown_targets.push(UnknownTarget {
-                    from: task.id.clone(),
+                    from: task.key.clone(),
                     to: target.to_string(),
                 }),
             }
@@ -79,17 +82,17 @@ pub fn readiness(tasks: &[Task]) -> Readiness {
         .filter(|(position, task)| {
             task.state.category == Category::Ready
                 && !in_cycle[*position]
-                && blockers(task).all(|target| index.get(target).is_some_and(|&to| finished(to)))
+                && blockers(task).all(|target| index(target).is_some_and(finished))
         })
-        .map(|(_, task)| task.id.clone())
+        .map(|(_, task)| task.key.clone())
         .collect();
 
     let mut cycles: Vec<Vec<String>> = cycles
         .into_iter()
         .map(|members| {
-            let mut ids: Vec<String> = members.iter().map(|&m| tasks[m].id.clone()).collect();
-            ids.sort();
-            ids
+            let mut keys: Vec<String> = members.iter().map(|&m| tasks[m].key.clone()).collect();
+            keys.sort();
+            keys
         })
         .collect();
     cycles.sort();

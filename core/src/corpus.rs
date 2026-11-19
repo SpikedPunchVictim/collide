@@ -979,8 +979,9 @@ impl Corpus {
             .map_or_else(String::new, |state| state.kind_of(task))
     }
 
-    /// The ready rule over the corpus, each source on its own: a `blocked-by` target is a name in the holder's source.
-    /// Keys are qualified (`plan:ts-0001-aa`). The `to` of an unknown blocker stays as it was written.
+    /// The ready rule over the corpus, each source on its own: a `blocked-by` target is resolved as `follow` resolves
+    /// a link ([`Corpus::resolve_target`]), and a target that lands in another source is no item of this one. Keys
+    /// are qualified (`plan:ts-0001-aa`). The `to` of an unknown blocker stays as it was written.
     pub fn readiness(&self) -> CorpusReadiness {
         let mut found = CorpusReadiness::default();
         for source in self.sources.keys() {
@@ -990,27 +991,10 @@ impl Corpus {
                 .filter(|entry| &entry.source == source)
                 .map(|entry| self.shown(entry).clone())
                 .collect();
-            let result = crate::ready::readiness(&tasks);
-            found
-                .ready
-                .extend(result.ready.iter().map(|id| qualified(source, id)));
-            found.cycles.extend(
-                result
-                    .cycles
-                    .iter()
-                    .map(|cycle| cycle.iter().map(|id| qualified(source, id)).collect()),
-            );
-            found
-                .unknown_blockers
-                .extend(
-                    result
-                        .unknown_targets
-                        .into_iter()
-                        .map(|unknown| UnknownTarget {
-                            from: qualified(source, &unknown.from),
-                            to: unknown.to,
-                        }),
-                );
+            let result = crate::ready::readiness(&tasks, |to| self.resolve_target(source, to));
+            found.ready.extend(result.ready);
+            found.cycles.extend(result.cycles);
+            found.unknown_blockers.extend(result.unknown_targets);
         }
         found
     }

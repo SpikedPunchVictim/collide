@@ -1,7 +1,8 @@
-//! Tests for the ready rule (ts-0020): a pure function over the tasks a provider lists.
+//! Tests for the ready rule (ts-0020): a pure function over the tasks a provider lists. Here a link's target is the
+//! id of a task, as `plan:<id>` (the corpus resolves names; its tests are in `corpus.rs`).
 
 use collide_core::provider::Task;
-use collide_core::ready::{UnknownTarget, readiness};
+use collide_core::ready::{Readiness, UnknownTarget};
 use serde_json::json;
 
 /// A task in `category` that is blocked by each of `blocked_by`.
@@ -21,8 +22,20 @@ fn task(id: &str, category: &str, blocked_by: &[&str]) -> Task {
     .unwrap()
 }
 
+/// The rule with the resolver these tests use: a target is the id of a task, whose key is `plan:<id>`.
+fn readiness(tasks: &[Task]) -> Readiness {
+    collide_core::ready::readiness(tasks, |to| Some(format!("plan:{to}")))
+}
+
+/// The ids of the ready tasks (the keys, without `plan:`).
 fn ready_ids(tasks: &[Task]) -> Vec<String> {
-    readiness(tasks).ready
+    ids(&readiness(tasks).ready)
+}
+
+fn ids(keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .map(|key| key.strip_prefix("plan:").unwrap().to_string())
+        .collect()
 }
 
 #[test]
@@ -130,8 +143,8 @@ fn a_two_item_cycle_is_reported_and_neither_item_is_ready() {
         task("ts-0003-cc", "ready", &[]),
     ];
     let result = readiness(&tasks);
-    assert_eq!(result.ready, ["ts-0003-cc"]);
-    assert_eq!(result.cycles, [["ts-0001-aa", "ts-0002-bb"]]);
+    assert_eq!(ids(&result.ready), ["ts-0003-cc"]);
+    assert_eq!(result.cycles, [["plan:ts-0001-aa", "plan:ts-0002-bb"]]);
 }
 
 #[test]
@@ -158,8 +171,8 @@ fn a_longer_cycle_and_a_self_link_are_each_reported_once() {
     assert_eq!(
         result.cycles,
         [
-            vec!["ts-0001-aa", "ts-0002-bb", "ts-0003-cc"],
-            vec!["ts-0004-dd"]
+            vec!["plan:ts-0001-aa", "plan:ts-0002-bb", "plan:ts-0003-cc"],
+            vec!["plan:ts-0004-dd"]
         ]
     );
 }
@@ -173,7 +186,7 @@ fn a_task_blocked_by_a_cycle_member_is_blocked_and_is_not_in_the_cycle() {
     ];
     let result = readiness(&tasks);
     assert!(result.ready.is_empty());
-    assert_eq!(result.cycles, [["ts-0001-aa", "ts-0002-bb"]]);
+    assert_eq!(result.cycles, [["plan:ts-0001-aa", "plan:ts-0002-bb"]]);
 }
 
 #[test]
@@ -184,7 +197,7 @@ fn a_chain_that_is_not_a_cycle_is_not_reported() {
         task("ts-0003-cc", "ready", &["ts-0002-bb"]),
     ];
     let result = readiness(&tasks);
-    assert_eq!(result.ready, ["ts-0003-cc"]);
+    assert_eq!(ids(&result.ready), ["ts-0003-cc"]);
     assert!(result.cycles.is_empty());
 }
 
@@ -195,11 +208,11 @@ fn a_blocker_that_is_no_item_blocks_and_is_reported() {
         task("ts-0002-bb", "ready", &[]),
     ];
     let result = readiness(&tasks);
-    assert_eq!(result.ready, ["ts-0002-bb"]);
+    assert_eq!(ids(&result.ready), ["ts-0002-bb"]);
     assert_eq!(
         result.unknown_targets,
         [UnknownTarget {
-            from: "ts-0001-aa".into(),
+            from: "plan:ts-0001-aa".into(),
             to: "ts-9999-zz".into()
         }]
     );
@@ -209,4 +222,26 @@ fn a_blocker_that_is_no_item_blocks_and_is_reported() {
 fn an_unknown_blocker_is_reported_even_when_the_item_is_not_ready_anyway() {
     let tasks = [task("ts-0001-aa", "active", &["ts-9999-zz"])];
     assert_eq!(readiness(&tasks).unknown_targets.len(), 1);
+}
+
+#[test]
+fn a_target_is_what_the_resolver_says_it_names() {
+    let tasks = [
+        task("ts-0001-aa", "done", &[]),
+        task("ts-0002-bb", "ready", &["ts-0001"]),
+        task("ts-0003-cc", "ready", &["ts-0009"]),
+    ];
+    let result = collide_core::ready::readiness(&tasks, |to| {
+        (to == "ts-0001").then(|| "plan:ts-0001-aa".to_string())
+    });
+    assert_eq!(ids(&result.ready), ["ts-0002-bb"]);
+    assert_eq!(result.unknown_targets.len(), 1);
+}
+
+#[test]
+fn a_resolved_key_that_is_not_one_of_the_tasks_names_no_item() {
+    let tasks = [task("ts-0001-aa", "ready", &["elsewhere"])];
+    let result = collide_core::ready::readiness(&tasks, |_| Some("other:ts-0001-aa".to_string()));
+    assert!(result.ready.is_empty());
+    assert_eq!(result.unknown_targets.len(), 1);
 }

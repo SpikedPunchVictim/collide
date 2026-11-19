@@ -14,6 +14,7 @@ use collide_core::provider::{
     ChangeCause, ListParams, ListResult, ProviderEvent, RemovedCause, Scope, SourceStale, Task,
     TaskChanged, TaskInvalid, TaskRemoved,
 };
+use collide_core::ready::UnknownTarget;
 use collide_core::testing::{FakeProvider, default_initialize, fake_task};
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -1755,6 +1756,115 @@ fn the_ready_filter_keeps_what_the_ready_rule_keeps() {
         &Page::default(),
     );
     assert_eq!(keys_of(&listed), ["plan:T-02", "plan:T-03"]);
+}
+
+/// A task of a board whose key holds the short id, whose id is the file stem, and whose links name the short id.
+fn stem_task(short: &str, slug: &str, status: &str, blocked_by: &[&str]) -> Task {
+    let mut task = at(short, status, ROOT);
+    task.id = format!("{short}-{slug}");
+    for to in blocked_by {
+        task = with_link(task, "blocked-by", to);
+    }
+    task
+}
+
+#[test]
+fn a_blocker_named_by_its_short_id_is_the_task_it_names_for_the_ready_filter() {
+    let corpus = plan_corpus(
+        &[
+            stem_task("T-01", "survey", "done", &[]),
+            stem_task("T-02", "map", "ready", &["T-01"]),
+            stem_task("T-03", "price", "active", &[]),
+            stem_task("T-04", "draft", "ready", &["T-03"]),
+            stem_task("T-05", "lone", "ready", &[]),
+        ],
+        &[ROOT],
+    );
+    let listed = corpus.list(
+        &ListFilter {
+            ready: true,
+            ..Default::default()
+        },
+        &Page::default(),
+    );
+    assert_eq!(keys_of(&listed), ["plan:T-02", "plan:T-05"]);
+}
+
+#[test]
+fn a_blocker_named_by_id_alias_or_key_is_the_task_it_names_for_the_ready_rule() {
+    let mut aliased = stem_task("T-03", "price", "done", &[]);
+    aliased.aliases = vec!["three".into()];
+    let corpus = plan_corpus(
+        &[
+            stem_task("T-01", "survey", "done", &[]),
+            aliased,
+            stem_task("T-10", "by-id", "ready", &["T-01-survey"]),
+            stem_task("T-11", "by-alias", "ready", &["three"]),
+            stem_task("T-12", "by-key", "ready", &["plan:T-01"]),
+        ],
+        &[ROOT],
+    );
+    let found = corpus.readiness();
+    let ready: Vec<_> = found.ready.iter().map(String::as_str).collect();
+    assert_eq!(ready, ["plan:T-10", "plan:T-11", "plan:T-12"]);
+    assert!(
+        found.unknown_blockers.is_empty(),
+        "{:?}",
+        found.unknown_blockers
+    );
+}
+
+#[test]
+fn only_a_blocker_that_names_no_task_is_reported_unknown_with_the_holders_key() {
+    let corpus = plan_corpus(
+        &[
+            stem_task("T-01", "survey", "done", &[]),
+            stem_task("T-02", "map", "ready", &["T-01", "T-99"]),
+        ],
+        &[ROOT],
+    );
+    let found = corpus.readiness();
+    assert_eq!(
+        found.unknown_blockers,
+        [UnknownTarget {
+            from: "plan:T-02".into(),
+            to: "T-99".into()
+        }]
+    );
+    assert!(!found.ready.contains("plan:T-02"));
+}
+
+#[test]
+fn a_cycle_of_short_id_links_is_reported_by_key() {
+    let corpus = plan_corpus(
+        &[
+            stem_task("T-01", "one", "ready", &["T-02"]),
+            stem_task("T-02", "two", "ready", &["T-01"]),
+        ],
+        &[ROOT],
+    );
+    let found = corpus.readiness();
+    assert_eq!(found.cycles, [["plan:T-01", "plan:T-02"]]);
+    assert!(found.ready.is_empty());
+}
+
+#[test]
+fn a_blocker_name_that_fits_two_tasks_is_not_resolved() {
+    let mut first = stem_task("T-01", "one", "done", &[]);
+    first.aliases = vec!["twin".into()];
+    let mut second = stem_task("T-02", "two", "done", &[]);
+    second.aliases = vec!["twin".into()];
+    let corpus = plan_corpus(
+        &[
+            first,
+            second,
+            stem_task("T-03", "three", "ready", &["twin"]),
+        ],
+        &[ROOT],
+    );
+    let found = corpus.readiness();
+    assert!(!found.ready.contains("plan:T-03"));
+    assert_eq!(found.unknown_blockers.len(), 1);
 }
 
 #[test]

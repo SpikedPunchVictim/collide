@@ -2717,8 +2717,10 @@ layout: { default: board, groupBy: category }
   - A task's statuses are the five categories themselves (`ready`, `active`, `review`, `done`, `dropped`), as for
     scratch tasks.
   - Links: `blocked-by`, which blocks. The folder gives the epic. A task is **ready to start** when its status is
-    `ready` and every `blocked-by` target is `done` or `dropped`. `collide tasks --ready` lists those. A
-    `blocked-by` cycle is reported, and none of its items is ready.
+    `ready` and every `blocked-by` target is `done` or `dropped`. `collide tasks --ready` lists those. A `blocked-by`
+    cycle is reported, and none of its items is ready. A `blocked-by` target is resolved as `follow` resolves a link, so
+    a short id, an alias or an old key names its task; one that names no task of the holder's source, or fits two, is
+    reported as an unknown blocker, and its item is not ready (`ts-0144-eh`).
   - Frontmatter: `id`, an optional `alias`, `kind`, `status`, `title`, `owners` (the claim) and `links`. Body
     sections: Goal, Success criteria, Tests, Notes.
   - Until the planning slice lands, items are written by hand, and an agent picks a ready one by reading their
