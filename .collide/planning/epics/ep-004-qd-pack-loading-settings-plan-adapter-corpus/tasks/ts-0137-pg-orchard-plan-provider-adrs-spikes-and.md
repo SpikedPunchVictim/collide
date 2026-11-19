@@ -1,7 +1,7 @@
 ---
 id: ts-0137-pg
 kind: task
-status: ready
+status: done
 title: "Orchard plan provider: ADRs, spikes and questions"
 owners: []
 links:
