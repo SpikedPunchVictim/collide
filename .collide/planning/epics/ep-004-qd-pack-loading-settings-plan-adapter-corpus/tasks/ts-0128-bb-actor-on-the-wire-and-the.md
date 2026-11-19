@@ -1,7 +1,7 @@
 ---
 id: ts-0128-bb
 kind: task
-status: ready
+status: done
 title: "Actor on the wire and the person-only rule in the daemon"
 owners: []
 links:
