@@ -1,7 +1,7 @@
 ---
 id: ts-0129-uv
 kind: task
-status: ready
+status: done
 title: "Plan pack: proposal and question transitions, by: and resolve"
 owners: []
 links:
