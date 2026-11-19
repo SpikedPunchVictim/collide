@@ -1220,11 +1220,54 @@ fn a_queued_write_that_a_person_dismisses_exits_5_says_so_and_writes_nothing() {
     assert_eq!(out, "", "it does not say applied");
     assert!(
         err.contains(
-            "the queued write is no longer queued and plan:ts-0002-bb did not change: \
-             it was dismissed in the Queue, or it changed nothing"
+            "the queued write is no longer queued and was not applied: \
+             it was dismissed in the Queue, or the daemon has no record of it"
         ),
         "{err}"
     );
+    assert_eq!(rig.status_of(SECOND_FILE), "ready");
+}
+
+#[test]
+fn a_queued_write_a_person_dismisses_after_the_file_changed_is_not_reported_applied() {
+    let rig = Rig::new();
+    let live = rig.daemon.live_phases();
+    live.started("R-7", &rig.work(), false);
+    let paths = rig.paths();
+    let cwd = rig.work();
+    let command = parsed(&["task", "plan:ts-0002-bb", "setStatus", "active"]);
+    let cli = std::thread::spawn(move || {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run_with(&paths, &command, &cwd, &mut out, &mut err);
+        (
+            code,
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
+    });
+    wait_until("the write is queued", DEADLINE, || !rig.queue().is_empty());
+    let item = rig.queue()[0].id.clone();
+    // The version of the task changes, by a person's edit, and the write is dropped: it never landed.
+    let file = rig.repo.work().join(EPIC).join(SECOND_FILE);
+    let text = fs::read_to_string(&file).unwrap();
+    fs::write(
+        &file,
+        format!("{text}\nEdited by a person while the write waited.\n"),
+    )
+    .unwrap();
+    let answered: QueueAnswerResult = rig.call(
+        "queue.answer",
+        &QueueAnswerParams {
+            item,
+            answer: QueueAnswer::Dismiss {},
+        },
+    );
+    let (code, out, err) = cli.join().unwrap();
+    live.ended("R-7");
+
+    assert_eq!(answered, QueueAnswerResult::Done {});
+    assert_eq!(code, exit::REFUSED, "{err}");
+    assert_eq!(out, "", "it does not say applied");
     assert_eq!(rig.status_of(SECOND_FILE), "ready");
 }
 
@@ -1259,6 +1302,7 @@ fn a_queued_write_whose_file_changed_while_it_waited_is_not_applied_and_exits_5_
 
     assert_eq!(code, exit::REFUSED, "{err}");
     assert!(err.contains("the queued write was not applied"), "{err}");
+    assert!(err.contains("changed since"), "the reason: {err}");
     assert_eq!(rig.status_of(SECOND_FILE), "ready");
 }
 

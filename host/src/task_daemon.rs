@@ -41,10 +41,9 @@ use crate::task_cli::{
 use crate::task_view::{heading, show_text};
 use collide_core::item::OpDecl;
 use collide_core::owner::{
-    QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueKind, QueueListParams, QueueListResult,
-    TaskApplyParams, TaskApplyResult, TaskCreateParams, TaskGetParams, TaskGetResult,
-    TaskListParams, TaskListResult, TaskReidParams, TaskReidResult, TaskSectionsParams, ViewRef,
-    ViewReport, WriteQueued, code,
+    QueueAnswer, QueueAnswerParams, QueueAnswerResult, TaskApplyParams, TaskApplyResult,
+    TaskCreateParams, TaskGetParams, TaskGetResult, TaskListParams, TaskListResult, TaskReidParams,
+    TaskReidResult, TaskSectionsParams, ViewRef, ViewReport, WriteQueued, code,
 };
 use collide_core::provider::{ApplyParams, ApplyResult, Task};
 use collide_core::section::Sections;
@@ -67,9 +66,6 @@ const SETTLE_POLL: Duration = Duration::from_millis(100);
 
 /// How often a queued write is looked at again while the command waits for it.
 const QUEUE_POLL: Duration = Duration::from_millis(500);
-/// How often, and for how long, the command looks for the outcome of a write that left the Queue.
-const OUTCOME_POLL: Duration = Duration::from_millis(250);
-const OUTCOME_WAIT: Duration = Duration::from_secs(10);
 
 /// Runs a command against the daemon this process's environment names.
 pub fn run(command: &Command, cwd: &Path, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
@@ -669,7 +665,6 @@ fn write_op(
     let answer: TaskApplyResult = session.call("task.apply", &params)?;
     let waiting = Waiting {
         label: &current.key,
-        current: Some(current),
     };
     let result = match settled_write(
         session,
@@ -803,7 +798,6 @@ fn create(
     )?;
     let waiting = Waiting {
         label: "the new item",
-        current: None,
     };
     let result = match settled_write(
         session,
@@ -860,10 +854,8 @@ fn reid(
         },
     )?;
     if let Some(queued) = &answer.queued {
-        // A reid moves the item to a new key, so its old key never shows a new version: it waits as a create does.
         let waiting = Waiting {
             label: &current.key,
-            current: None,
         };
         return wait_for_queued(
             session,
@@ -949,7 +941,6 @@ fn rename_section(
     )?;
     let waiting = Waiting {
         label: "renameSection",
-        current: None,
     };
     let result = match settled_write(
         session,
@@ -1082,27 +1073,24 @@ fn confirmation_waits(
 
 // ---- a write that is queued ----------------------------------------------------------------------------------------
 
-/// How a queued write ended, as far as the command could tell.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// How a queued write ended, as far as the command could tell. The daemon says it: a write that left the Queue is
+/// told as applied only by the daemon, never from what the command sees of the task (ts-0142-ua).
+#[derive(Clone, PartialEq, Eq)]
 enum Settled {
-    /// It was taken out of the Queue and the task's version changed: the write landed. Before [`settle`] has looked,
-    /// it is only "the item is gone".
+    /// The daemon took it out of the Queue and wrote it.
     Applied,
-    /// It left the Queue, no Queue item says it was undone, and the task did not change: it was dismissed by a
-    /// person, or it changed nothing.
+    /// It left the Queue and was not applied, or the daemon has no record of it: a person dismissed it, or the daemon
+    /// restarted, or it has forgotten the write.
     Unchanged,
-    /// It was taken out of the Queue and the daemon could not apply it: a new Queue item says why.
-    NotApplied,
+    /// The daemon took it out of the Queue and could not apply it. The words are the daemon's.
+    NotApplied(String),
     /// It is in the Queue still.
     Queued,
 }
 
-/// What a command waits for: the item the write is to change (`current`, read before the write), when it has one, and
-/// how the command names it. A write that makes an item, or gives it a new id, has none, so it cannot see the version
-/// change: a write that left the Queue with no Queue item that says it was undone is taken as applied.
+/// What a command waits for: how it names the item the write is for.
 struct Waiting<'a> {
     label: &'a str,
-    current: Option<&'a Task>,
 }
 
 /// Says why the write is queued and which Queue item holds it, then waits for it as `--wait` and `--no-wait` say. A
@@ -1135,17 +1123,10 @@ fn wait_for_queued(
         Wait::Never => Settled::Queued,
         wait => retry_until(session, &queued.item, wait.limit())?,
     };
-    // Retry answers `Done` when the item is gone, which is also so when a person dismissed it or another drain of the
-    // checkout took it, and that drain may still be applying it. The command says applied only when it sees the
-    // version of the task change.
-    let settled = match settled {
-        Settled::Applied => settle(session, queued, waiting.current)?,
-        other => other,
-    };
     if json {
-        let word = match settled {
+        let word = match &settled {
             Settled::Applied => "applied",
-            Settled::NotApplied | Settled::Unchanged => "not_applied",
+            Settled::NotApplied(_) | Settled::Unchanged => "not_applied",
             Settled::Queued => "queued",
         };
         let document =
@@ -1165,20 +1146,13 @@ fn wait_for_queued(
         Settled::Unchanged => {
             let _ = writeln!(
                 err,
-                "collide: the queued write is no longer queued and {} did not change: it was dismissed in the Queue, \
-                 or it changed nothing",
-                waiting.label
+                "collide: the queued write is no longer queued and was not applied: it was dismissed in the Queue, or \
+                 the daemon has no record of it"
             );
             Ok(exit::REFUSED)
         }
-        Settled::NotApplied => {
-            let title = undone_of(
-                session,
-                queued,
-                waiting.current.map(|task| task.key.as_str()),
-            )?
-            .unwrap_or_default();
-            let _ = writeln!(err, "collide: the queued write was not applied: {title}");
+        Settled::NotApplied(message) => {
+            let _ = writeln!(err, "collide: the queued write was not applied: {message}");
             Ok(exit::REFUSED)
         }
         Settled::Queued => {
@@ -1195,43 +1169,21 @@ fn wait_for_queued(
     }
 }
 
-/// After the queue item is gone: waits up to [`OUTCOME_WAIT`] to see what became of the write. A Queue item that says
-/// it was undone is not applied; a version of the task that differs from the one the write was sent at is applied;
-/// the deadline with neither is `Unchanged`.
-fn settle(
-    session: &mut Session,
-    queued: &WriteQueued,
-    current: Option<&Task>,
-) -> Result<Settled, CliError> {
-    let key = current.map(|task| task.key.as_str());
-    let started = Instant::now();
-    loop {
-        if undone_of(session, queued, key)?.is_some() {
-            return Ok(Settled::NotApplied);
-        }
-        let Some(current) = current else {
-            return Ok(Settled::Applied);
-        };
-        let got: TaskGetResult = session.call(
-            "task.get",
-            &TaskGetParams {
-                board: session.board.clone(),
-                id: current.key.clone(),
-                checkout: session.checkout_arg(),
-            },
-        )?;
-        if got.task.is_some_and(|task| task.version != current.version) {
-            return Ok(Settled::Applied);
-        }
-        if started.elapsed() >= OUTCOME_WAIT {
-            return Ok(Settled::Unchanged);
-        }
-        std::thread::sleep(OUTCOME_POLL);
+/// What a Retry of a queued write says of its end, or `None` while the write is in the Queue still. The daemon answers
+/// `done` for a write it applied and `refused`, with the reason, for one it took and could not apply.
+fn settled_by(answer: QueueAnswerResult) -> Result<Option<Settled>, CliError> {
+    match answer {
+        QueueAnswerResult::Queued { .. } => Ok(None),
+        QueueAnswerResult::Done {} => Ok(Some(Settled::Applied)),
+        QueueAnswerResult::Refused { message } => Ok(Some(Settled::NotApplied(message))),
+        other => Err(CliError::failed(format!(
+            "the daemon answered a Retry of a queued write in a way this command does not know: {other:?}"
+        ))),
     }
 }
 
-/// Asks the daemon to retry the queued write until it leaves the Queue or `limit` has passed. `Applied` here only
-/// means that the item is gone: [`settle`] says what became of the write.
+/// Asks the daemon to retry the queued write until it leaves the Queue or `limit` has passed, and says what became of
+/// it. The daemon answers only when the drain that took the write has ended, so an answer is final.
 fn retry_until(session: &mut Session, item: &str, limit: Duration) -> Result<Settled, CliError> {
     let started = Instant::now();
     loop {
@@ -1239,59 +1191,23 @@ fn retry_until(session: &mut Session, item: &str, limit: Duration) -> Result<Set
             item: item.to_string(),
             answer: QueueAnswer::Retry {},
         };
-        let answer: QueueAnswerResult = match session.client.call("queue.answer", &params, None) {
-            Ok(answer) => answer,
-            // The item is gone: a person dismissed it, or another drain of the checkout took it.
+        match session.client.call("queue.answer", &params, None) {
+            Ok(answer) => {
+                if let Some(settled) = settled_by(answer)? {
+                    return Ok(settled);
+                }
+            }
+            // The item is gone and the daemon has no fate for it: a person dismissed it, or the daemon forgot it.
             Err(ClientError::Rpc(rpc)) if rpc.code == code::NOT_FOUND => {
-                return Ok(Settled::Applied);
+                return Ok(Settled::Unchanged);
             }
             Err(other) => return Err(rpc_failed(other)),
-        };
-        match answer {
-            QueueAnswerResult::Queued { .. } => {}
-            QueueAnswerResult::Refused { message } => return Err(CliError::failed(message)),
-            _ => return Ok(Settled::Applied),
         }
         if started.elapsed() >= limit {
             return Ok(Settled::Queued);
         }
         std::thread::sleep(QUEUE_POLL);
     }
-}
-
-/// The title of the Queue item that says a write of the task `key` (of any task, when the write names none) was taken
-/// and not applied, made after `queued` was. Its id is `write-<ms>-<n>-undone`, and the queued item's `write-<ms>-<n>`.
-fn undone_of(
-    session: &mut Session,
-    queued: &WriteQueued,
-    key: Option<&str>,
-) -> Result<Option<String>, CliError> {
-    let since = queued_at(&queued.item);
-    let listed: QueueListResult = session.call(
-        "queue.list",
-        &QueueListParams {
-            board: None,
-            run: None,
-            kinds: vec![QueueKind::Conflict],
-        },
-    )?;
-    Ok(listed
-        .items
-        .into_iter()
-        .find(|item| {
-            item.id.ends_with("-undone")
-                && key.is_none_or(|key| item.task.as_deref() == Some(key))
-                && queued_at(&item.id) >= since
-        })
-        .map(|item| item.title))
-}
-
-/// The millisecond in a write's Queue id, `write-<ms>-<n>`; 0 for an id that is not one.
-fn queued_at(id: &str) -> u64 {
-    id.split('-')
-        .nth(1)
-        .and_then(|ms| ms.parse().ok())
-        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -1331,6 +1247,37 @@ mod tests {
             String::from_utf8(out).unwrap(),
             String::from_utf8(err).unwrap(),
         )
+    }
+
+    #[test]
+    fn a_retry_answered_done_is_applied() {
+        let settled = settled_by(QueueAnswerResult::Done {}).unwrap();
+        assert!(settled == Some(Settled::Applied));
+    }
+
+    #[test]
+    fn a_retry_refused_is_not_applied_and_keeps_the_daemons_words() {
+        let answer = QueueAnswerResult::Refused {
+            message: "it changed".to_string(),
+        };
+        let settled = settled_by(answer).unwrap();
+        assert!(settled == Some(Settled::NotApplied("it changed".to_string())));
+    }
+
+    #[test]
+    fn a_retry_that_says_queued_is_not_settled() {
+        let answer = QueueAnswerResult::Queued {
+            item: "write-1-0".to_string(),
+        };
+        assert!(settled_by(answer).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_retry_answer_that_is_not_about_a_write_is_an_error_and_never_applied() {
+        let answer = QueueAnswerResult::Merged {
+            commit: "abc".to_string(),
+        };
+        assert!(settled_by(answer).is_err());
     }
 
     #[test]

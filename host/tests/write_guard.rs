@@ -9,12 +9,12 @@
 
 mod common;
 
-use collide_core::change::ActorKind;
+use collide_core::change::{Actor, ActorKind};
 use collide_core::events::EventBody;
 use collide_core::owner::{
     BoardOpenParams, BoardOpenResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueItem,
     QueueKind, QueueListParams, QueueListResult, TaskApplyParams, TaskApplyResult, TaskGetParams,
-    TaskGetResult,
+    TaskGetResult, code,
 };
 use collide_core::provider::{ApplyParams, ApplyResult, ChangeCause};
 use collide_host::base_env::CaptureOptions;
@@ -23,11 +23,15 @@ use collide_host::builtin_packs::{BuiltinPacks, Environment};
 use collide_host::checkout::root_busy;
 use collide_host::config_get::LoadContextFactory;
 use collide_host::daemon::{Daemon, DaemonOptions, DaemonPaths};
-use collide_host::owner_client::OwnerClient;
+use collide_host::owner_client::{ClientError, OwnerClient};
 use collide_host::pack_cache::ensure_sdk;
 use collide_host::pack_location::bundle_sdk;
+use collide_host::queue::Queue;
 use collide_host::store::Store;
-use collide_host::write_guard::{LineLocks, LivePhases};
+use collide_host::write_guard::{
+    Applied, FATES_KEPT, Fate, LineLocks, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig,
+    canonical,
+};
 use common::git_repo::{GitRepo, git_command};
 use common::{Bundle, TempRoot, repo_root, wait_until};
 use serde::Serialize;
@@ -39,6 +43,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::Duration;
 
 const DEADLINE: Duration = Duration::from_secs(20);
@@ -300,6 +305,170 @@ fn a_checkout_is_the_same_one_by_a_link_to_it() {
     let live = LivePhases::new();
     live.started("R-1", &real, false);
     assert_eq!(live.blocking(&link).as_deref(), Some("R-1"));
+}
+
+// ---- what became of a stored write, with no daemon (ts-0142-ua) ---------------------------------------------------
+
+/// A guard over a store in a temp root, and a repository that is the checkout its writes go to.
+struct GuardRig {
+    _root: TempRoot,
+    repo: GitRepo,
+    guard: Arc<WriteGuard>,
+}
+
+impl GuardRig {
+    fn new() -> GuardRig {
+        let root = TempRoot::new();
+        let store = Arc::new(Store::open(&root.join("store")).unwrap());
+        let queue = Arc::new(Queue::load(store, Arc::new(|_: &str| {})));
+        let repo = committed_repo();
+        let guard = Arc::new(WriteGuard::new(WriteGuardConfig {
+            queue,
+            live: Arc::new(LivePhases::new()),
+            git_env: git_env(repo.root().path()),
+            now_ms: Arc::new(|| 1_000),
+            log: Arc::new(|_: &str| {}),
+        }));
+        GuardRig {
+            _root: root,
+            repo,
+            guard,
+        }
+    }
+
+    fn checkout(&self) -> PathBuf {
+        canonical(self.repo.work())
+    }
+
+    /// Stores one `setStatus` write for the checkout, and returns the id of its Queue item.
+    fn store_write(&self) -> String {
+        let write = QueuedWrite {
+            board: "board".to_string(),
+            source: "plan".to_string(),
+            apply: ApplyParams {
+                actor: None,
+                op: "setStatus".to_string(),
+                id: Some(SECOND.to_string()),
+                args: BTreeMap::new(),
+                version: None,
+                checkout: None,
+            },
+            checkout: self.checkout(),
+            actor: Actor {
+                kind: ActorKind::Person,
+                run: None,
+                phase: None,
+            },
+        };
+        self.guard
+            .enqueue(&write, "a rebase is in progress")
+            .unwrap()
+            .item
+    }
+
+    fn drain(&self, apply: &mut dyn FnMut(QueuedWrite) -> Applied) {
+        let checkout = self.checkout();
+        self.guard
+            .hold(&checkout, || self.guard.drain(&checkout, apply));
+    }
+}
+
+#[test]
+fn a_write_a_drain_applied_has_the_fate_applied() {
+    let rig = GuardRig::new();
+    let item = rig.store_write();
+    rig.drain(&mut |_| Applied::Done);
+    assert_eq!(rig.guard.fate_of(&item), Some(Fate::Applied));
+}
+
+#[test]
+fn a_write_a_drain_could_not_apply_has_the_fate_not_applied_with_the_words() {
+    let rig = GuardRig::new();
+    let item = rig.store_write();
+    rig.drain(&mut |_| Applied::Problem("it changed".to_string()));
+    assert_eq!(
+        rig.guard.fate_of(&item),
+        Some(Fate::NotApplied("it changed".to_string()))
+    );
+}
+
+#[test]
+fn a_write_is_in_flight_from_the_moment_it_is_taken_until_its_apply_returns() {
+    let rig = GuardRig::new();
+    let item = rig.store_write();
+    let mut seen = None;
+    rig.drain(&mut |_| {
+        seen = Some(rig.guard.fate_of(&item));
+        Applied::Done
+    });
+    assert_eq!(seen, Some(Some(Fate::InFlight(rig.checkout()))));
+}
+
+#[test]
+fn a_write_a_person_dismissed_has_no_fate() {
+    let rig = GuardRig::new();
+    let item = rig.store_write();
+    assert!(rig.guard.dismiss(&item));
+    rig.drain(&mut |_| panic!("a dismissed write is not applied"));
+    assert_eq!(rig.guard.fate_of(&item), None);
+}
+
+#[test]
+fn the_fate_of_a_write_in_flight_is_not_told_until_the_drain_has_ended() {
+    let rig = GuardRig::new();
+    let item = rig.store_write();
+    let (applying_tx, applying_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let drain = {
+        let (guard, checkout) = (rig.guard.clone(), rig.checkout());
+        std::thread::spawn(move || {
+            guard.hold(&checkout, || {
+                guard.drain(&checkout, &mut |_| {
+                    applying_tx.send(()).unwrap();
+                    let _ = release_rx.recv_timeout(DEADLINE);
+                    Applied::Done
+                });
+            });
+        })
+    };
+    applying_rx.recv_timeout(DEADLINE).expect("the apply began");
+    let (asking_tx, asking_rx) = mpsc::channel();
+    let (told_tx, told_rx) = mpsc::channel();
+    let asker = {
+        let (guard, item) = (rig.guard.clone(), item.clone());
+        std::thread::spawn(move || {
+            asking_tx.send(()).unwrap();
+            told_tx.send(guard.settled_fate(&item)).unwrap();
+        })
+    };
+    asking_rx.recv_timeout(DEADLINE).expect("the asker began");
+
+    // A write that was applied is told "applied" only after its apply returned: not while it is in flight.
+    assert!(
+        told_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+        "the fate was told while the write was in flight"
+    );
+    release_tx.send(()).unwrap();
+    assert_eq!(
+        told_rx.recv_timeout(DEADLINE).expect("the fate is told"),
+        Some(Fate::Applied)
+    );
+    drain.join().unwrap();
+    asker.join().unwrap();
+}
+
+#[test]
+fn the_guard_forgets_the_oldest_fate_after_it_holds_as_many_as_it_keeps() {
+    let rig = GuardRig::new();
+    let items: Vec<String> = (0..=FATES_KEPT).map(|_| rig.store_write()).collect();
+    rig.drain(&mut |_| Applied::Done);
+    assert_eq!(
+        rig.guard.fate_of(&items[0]),
+        None,
+        "the oldest is forgotten"
+    );
+    assert_eq!(rig.guard.fate_of(&items[1]), Some(Fate::Applied));
+    assert_eq!(rig.guard.fate_of(&items[FATES_KEPT]), Some(Fate::Applied));
 }
 
 // ---- the daemon ---------------------------------------------------------------------------------------------------
@@ -730,6 +899,64 @@ fn retry_applies_a_queued_write_that_can_go_now_and_says_when_it_cannot() {
             false
         }
     });
+}
+
+#[test]
+fn retry_of_a_write_the_writer_applied_says_done() {
+    let rig = Rig::new();
+    stop_in_a_rebase(&rig.repo);
+    let (item, _) = queued(&rig.set_status(SECOND, "active", None));
+    abort_the_rebase(&rig.repo);
+    rig.wait_for_status(SECOND, "active");
+
+    // The item is gone and the writer may be recording the write's events still: the answer waits for it.
+    assert_eq!(
+        rig.answer(&item, QueueAnswer::Retry {}),
+        QueueAnswerResult::Done {}
+    );
+}
+
+#[test]
+fn retry_of_a_write_the_writer_could_not_apply_refuses_with_the_reason() {
+    let rig = Rig::new();
+    let live = rig.daemon().live_phases();
+    live.started("R-7", &rig.work(), false);
+    let (item, _) = queued(&rig.set_status(SECOND, "active", None));
+    let file = rig.repo.work().join(task_file(SECOND));
+    let text = fs::read_to_string(&file).unwrap();
+    fs::write(&file, text.replacen("status: ready", "status: review", 1)).unwrap();
+    live.ended("R-7");
+    wait_until("the stale write to become a conflict", DEADLINE, || {
+        rig.queue().iter().any(|held| held.id != item)
+    });
+
+    let QueueAnswerResult::Refused { message } = rig.answer(&item, QueueAnswer::Retry {}) else {
+        panic!("a write that was not applied is not answered done");
+    };
+    assert!(message.contains("changed since"), "{message}");
+}
+
+#[test]
+fn retry_of_a_write_a_person_dismissed_finds_no_item() {
+    let rig = Rig::new();
+    stop_in_a_rebase(&rig.repo);
+    let (item, _) = queued(&rig.set_status(SECOND, "active", None));
+    assert_eq!(
+        rig.answer(&item, QueueAnswer::Dismiss {}),
+        QueueAnswerResult::Done {}
+    );
+
+    let mut client = OwnerClient::connect(rig.daemon().paths(), "write-guard-test").unwrap();
+    let params = QueueAnswerParams {
+        item,
+        answer: QueueAnswer::Retry {},
+    };
+    let answered: Result<QueueAnswerResult, ClientError> =
+        client.call("queue.answer", &params, WAIT);
+    let Err(ClientError::Rpc(error)) = answered else {
+        panic!("a dismissed write is not answered: {answered:?}");
+    };
+    assert_eq!(error.code, code::NOT_FOUND);
 }
 
 #[test]

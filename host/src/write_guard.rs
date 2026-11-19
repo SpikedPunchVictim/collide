@@ -30,7 +30,7 @@ use collide_core::change::Actor;
 use collide_core::owner::{AnswerKind, QueueItem, QueueKind, WriteQueued};
 use collide_core::provider::ApplyParams;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -155,6 +155,51 @@ pub enum Applied {
     Problem(String),
 }
 
+// ---- what became of a stored write ---------------------------------------------------------------------------------
+
+/// How many ended writes a guard remembers. An older one is forgotten, and a command that asks after it is told there
+/// is no record, which it does not take for "applied".
+pub const FATES_KEPT: usize = 128;
+
+/// What became of a stored write that a drain took out of the Queue (ts-0142-ua). The item is gone from the Queue as
+/// soon as the write is taken, before it is applied, so the Queue alone cannot say whether the write landed. A write
+/// that a person dismissed has no fate: nothing took it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fate {
+    /// Taken, and its apply has not returned. The drain holds the line lock of this checkout until it has.
+    InFlight(PathBuf),
+    /// Written, and its events recorded.
+    Applied,
+    /// Not written: the words are Collide's, the same as the `Conflict` item that was made.
+    NotApplied(String),
+}
+
+/// The fates the guard remembers, oldest first, so that the oldest can go.
+#[derive(Default)]
+struct Fates {
+    by_item: HashMap<String, Fate>,
+    order: VecDeque<String>,
+}
+
+impl Fates {
+    fn set(&mut self, item: &str, fate: Fate) {
+        if self.by_item.insert(item.to_string(), fate).is_none() {
+            self.order.push_back(item.to_string());
+        }
+        while self.order.len() > FATES_KEPT {
+            if let Some(oldest) = self.order.pop_front() {
+                self.by_item.remove(&oldest);
+            }
+        }
+    }
+
+    fn forget(&mut self, item: &str) {
+        if self.by_item.remove(item).is_some() {
+            self.order.retain(|held| held != item);
+        }
+    }
+}
+
 // ---- the guard ----------------------------------------------------------------------------------------------------
 
 /// What a [`WriteGuard`] is made of.
@@ -173,6 +218,7 @@ pub struct WriteGuard {
     config: WriteGuardConfig,
     locks: LineLocks,
     counter: AtomicU64,
+    fates: Mutex<Fates>,
 }
 
 impl WriteGuard {
@@ -197,6 +243,7 @@ impl WriteGuard {
             config,
             locks: LineLocks::new(),
             counter: AtomicU64::new(next),
+            fates: Mutex::new(Fates::default()),
         }
     }
 
@@ -334,6 +381,21 @@ impl WriteGuard {
         }
     }
 
+    /// What became of the write behind `item`, as it stands: [`Fate::InFlight`] while a drain is applying it. `None`
+    /// for an item that was never taken by a drain, or that the guard has forgotten.
+    pub fn fate_of(&self, item: &str) -> Option<Fate> {
+        locked(&self.fates).by_item.get(item).cloned()
+    }
+
+    /// The fate of the write behind `item` once any drain that took it has finished: a write in flight waits for the
+    /// line lock of its checkout, which the drain holds until its apply and its `Conflict` item are done.
+    pub fn settled_fate(&self, item: &str) -> Option<Fate> {
+        if let Some(Fate::InFlight(checkout)) = self.fate_of(item) {
+            self.hold(&checkout, || ());
+        }
+        self.fate_of(item)
+    }
+
     /// The checkout the stored write behind `item` goes to.
     pub fn checkout_of(&self, item: &str) -> Option<PathBuf> {
         self.waiting()
@@ -388,7 +450,7 @@ impl WriteGuard {
     /// Applies the stored writes of `checkout`, oldest first, while it is free; stops at the first it must still wait
     /// for and tells that item why. The caller holds the line lock of `checkout`. Each write is taken out of the Queue
     /// before `apply` runs, so it is never applied twice; one that comes back as a [`Applied::Problem`] becomes a
-    /// `Conflict` item that can only be dismissed.
+    /// `Conflict` item that can only be dismissed. Each write's [`Fate`] is kept, for a command that waits on it.
     pub fn drain(&self, checkout: &Path, apply: &mut dyn FnMut(QueuedWrite) -> Applied) {
         let checkout = canonical(checkout);
         loop {
@@ -410,12 +472,20 @@ impl WriteGuard {
                 }
                 Ok(None) => {}
             }
+            // In flight before the item is taken: a command that finds the item gone finds the fate, and waits.
+            locked(&self.fates).set(&id, Fate::InFlight(checkout.clone()));
             if self.config.queue.take(&id).is_none() {
+                locked(&self.fates).forget(&id);
                 continue;
             }
-            if let Applied::Problem(message) = apply(write.clone()) {
-                self.give_up(&write, &message);
-            }
+            let fate = match apply(write.clone()) {
+                Applied::Done => Fate::Applied,
+                Applied::Problem(message) => {
+                    self.give_up(&write, &message);
+                    Fate::NotApplied(message)
+                }
+            };
+            locked(&self.fates).set(&id, fate);
         }
     }
 

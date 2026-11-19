@@ -149,7 +149,9 @@ use crate::views::{
     BeforeParse, Loaded, Lookup, SaveError, ViewCache, builtin_candidates, find_view,
     pack_candidates, personal_candidates, personal_dir, repo_candidates, repo_dir, save_view,
 };
-use crate::write_guard::{self, Applied, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig};
+use crate::write_guard::{
+    self, Applied, Fate, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig,
+};
 use collide_core::change::{Actor, ActorKind};
 use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
@@ -2424,7 +2426,7 @@ fn queue_answer(
     if shared.guard.is_confirmation(&params.item) {
         return confirmation_answer(shared, session, &params);
     }
-    if shared.guard.is_queued_write(&params.item) {
+    if shared.guard.is_queued_write(&params.item) || shared.guard.fate_of(&params.item).is_some() {
         return queued_write_answer(shared, &params);
     }
     match shared
@@ -2439,6 +2441,11 @@ fn queue_answer(
 
 /// The answer to the Queue item of a queued write (ts-0114-hr). Retry looks again now: the write is applied when the
 /// checkout is free, and the item stays, with its reason, when it is not. Dismiss drops the write.
+///
+/// A Retry also says what became of a write that left the Queue (ts-0142-ua), once the drain that took it has ended:
+/// `done` when it was applied, `refused` with the reason when it was taken and could not be. A write that a person
+/// dismissed, or one the daemon has no record of (the record is kept in memory and for the last few writes only), is
+/// not found, and the command that asks does not take that for applied.
 fn queued_write_answer(
     shared: &Shared,
     params: &QueueAnswerParams,
@@ -2459,7 +2466,16 @@ fn queued_write_answer(
                     item: params.item.clone(),
                 }
             } else {
-                QueueAnswerResult::Done {}
+                match shared.guard.settled_fate(&params.item) {
+                    Some(Fate::Applied) => QueueAnswerResult::Done {},
+                    Some(Fate::NotApplied(message)) => QueueAnswerResult::Refused { message },
+                    Some(Fate::InFlight(_)) | None => {
+                        return Err(RpcError::new(
+                            code::NOT_FOUND,
+                            format!("the Queue has no item {:?}", params.item),
+                        ));
+                    }
+                }
             }
         }
         _ => {
