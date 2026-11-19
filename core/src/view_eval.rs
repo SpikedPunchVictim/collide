@@ -9,8 +9,12 @@
 //!   still matches). A bare id is not a key: it is unmatched and counted, never guessed.
 //! - **The closure** walks from the goal along the dependencies of [`crate::view_expr::dependencies`], the ones a
 //!   view's `deps` holds, so the two cannot disagree. It walks open tasks only (a category other than `done` or
-//!   `dropped`). The goal is always in, and is walked from even when it is done. The walk goes through a task that
-//!   `exclude` names: exclude removes members, it does not cut the walk.
+//!   `dropped`). The goal is always in, but a goal that is done is the whole closure: nothing is walked from it and it
+//!   is no step, as the prototype board's generator has it. The walk goes through a task that `exclude` names:
+//!   exclude removes members, it does not cut the walk.
+//! - **A goal that matches no task** is [`ViewFailure::GoalUnmatched`] for a view whose members come from the closure
+//!   alone (no `where`, no `include`), as the generator stops with an error. Beside a `where` or an `include` it is
+//!   [`ViewCounts::goal_unmatched`]: the closure is empty and the other members stay.
 //! - **The steps** are the closure's layers. The first holds the tasks with no dependency in the set, and each later
 //!   one the tasks whose dependencies are all in earlier steps, in key order. When the layering stalls, a cycle is
 //!   below it: the last step holds every task it could not place, and [`ViewResult::cycle`] names the ones on a cycle.
@@ -39,6 +43,8 @@ pub enum ViewFailure {
     Check(Vec<ViewError>),
     /// Its `where` did not compile, names something a view may not, is too costly, or could not run.
     Expr(ExprError),
+    /// A view of the closure alone names a goal that matches no task, so there is nothing to show.
+    GoalUnmatched { goal: String },
 }
 
 impl fmt::Display for ViewFailure {
@@ -49,6 +55,9 @@ impl fmt::Display for ViewFailure {
                 write!(f, "{}", reasons.join("; "))
             }
             ViewFailure::Expr(error) => write!(f, "`where:` is refused: {error}"),
+            ViewFailure::GoalUnmatched { goal } => {
+                write!(f, "`closure.goal` `{goal}` matches no task")
+            }
         }
     }
 }
@@ -144,7 +153,7 @@ pub struct ViewCounts {
     pub unmatched_include: Vec<String>,
     /// The keys of `exclude` that match no task.
     pub unmatched_exclude: Vec<String>,
-    /// The closure's goal, when it matches no task. This is an error on the view, and the closure is empty.
+    /// The closure's goal, when it matches no task and the view has a `where` or an `include`: the closure is empty.
     pub goal_unmatched: Option<String>,
     /// The corpus's invalid items. Every view counts them: an unreadable file has no fields to match.
     pub invalid_items: usize,
@@ -231,6 +240,11 @@ pub fn evaluate_view(
     if let Some(spec) = &view.closure {
         match corpus.resolve_key(&spec.goal) {
             Some(goal) => closure = walk(corpus, &rows, spec, &goal),
+            None if view.where_.is_none() && view.include.is_empty() => {
+                return Err(ViewFailure::GoalUnmatched {
+                    goal: spec.goal.clone(),
+                });
+            }
             None => counts.goal_unmatched = Some(spec.goal.clone()),
         }
     }
@@ -321,7 +335,8 @@ fn resolve_keys(corpus: &Corpus, wanted: &[String]) -> (BTreeSet<String>, Vec<St
     (found, unmatched)
 }
 
-/// A closure: its tasks, and the dependencies each has inside the set.
+/// A closure: its tasks, and the dependencies each walked task has inside the set. A done goal is in `set` and is not
+/// walked, so it has no entry in `needs` and is no step ([`layers`] places the tasks of `needs`).
 #[derive(Debug, Default)]
 struct Reach {
     set: BTreeSet<String>,
@@ -332,11 +347,18 @@ fn is_open(task: &Task) -> bool {
     !matches!(task.state.category, Category::Done | Category::Dropped)
 }
 
-/// The closure of `goal`: the goal, and every open task it reaches through open tasks.
+/// The closure of `goal`: the goal, and every open task it reaches through open tasks. A goal that is not open is the
+/// whole closure: the generator walks nothing from a done goal.
 fn walk(corpus: &Corpus, rows: &[Row<'_>], spec: &Closure, goal: &str) -> Reach {
     let mut by_key: HashMap<&str, &Task> = HashMap::new();
     for row in rows {
         by_key.entry(row.task.key.as_str()).or_insert(row.task);
+    }
+    if !by_key.get(goal).is_some_and(|task| is_open(task)) {
+        return Reach {
+            set: BTreeSet::from([goal.to_string()]),
+            needs: BTreeMap::new(),
+        };
     }
     let mut reached: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut pending = vec![goal.to_string()];
@@ -382,7 +404,7 @@ fn walk(corpus: &Corpus, rows: &[Row<'_>], spec: &Closure, goal: &str) -> Reach 
 fn layers(closure: &Reach) -> (Vec<Vec<String>>, Vec<String>) {
     let mut steps = Vec::new();
     let mut placed: BTreeSet<&String> = BTreeSet::new();
-    let mut remaining: BTreeSet<&String> = closure.set.iter().collect();
+    let mut remaining: BTreeSet<&String> = closure.needs.keys().collect();
     while !remaining.is_empty() {
         let layer: Vec<&String> = remaining
             .iter()

@@ -855,6 +855,32 @@ fn a_view_with_an_error_in_json_still_prints_one_document_with_no_task() {
     assert_eq!(document["tasks"].as_array().unwrap().len(), 0);
 }
 
+const LOST_GOAL: &str = "name: lost-goal\nclosure: { goal: plan:NO-SUCH, follow: depends_on }\n";
+const LOST_GOAL_WHERE: &str = "name: lost-goal-where\nwhere: \"status == 'ready'\"\n\
+                               closure: { goal: plan:NO-SUCH, follow: depends_on }\n";
+
+#[test]
+fn a_closure_view_whose_goal_names_no_task_exits_10_and_names_the_goal() {
+    let rig = Rig::with_files(&[(".collide/views/lost-goal.yaml", LOST_GOAL.into())]);
+    let (code, out, err) = rig.cli(&["tasks", "--view", "lost-goal"]);
+    assert_eq!(code, exit::VIEW_FAILED, "{err}");
+    assert_eq!(out, "", "no member is printed");
+    assert!(err.contains("plan:NO-SUCH"), "{err}");
+}
+
+#[test]
+fn a_view_with_a_where_beside_a_goal_that_names_no_task_still_lists_its_other_members() {
+    let rig = Rig::with_files(&[(
+        ".collide/views/lost-goal-where.yaml",
+        LOST_GOAL_WHERE.into(),
+    )]);
+    let (code, out, err) = rig.cli(&["tasks", "--view", "lost-goal-where"]);
+    assert_eq!(code, exit::OK, "{err}");
+    let (_, by_where, _) = rig.cli(&["tasks", "--view", "ready-now"]);
+    assert!(!out.is_empty(), "the fixture has ready tasks");
+    assert_eq!(out, by_where);
+}
+
 #[test]
 fn a_view_the_board_does_not_have_exits_3_and_names_the_views_it_has() {
     let rig = Rig::new();

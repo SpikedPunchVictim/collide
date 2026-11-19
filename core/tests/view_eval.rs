@@ -424,27 +424,55 @@ fn a_dropped_dependency_is_not_walked_through_either() {
 }
 
 #[test]
-fn a_done_goal_is_in_the_set_and_its_open_dependencies_are_walked() {
+fn a_done_goal_is_the_only_member_nothing_is_walked_from_it_and_it_is_no_step() {
     let corpus = board(vec![
         depends(task("A", "done"), "B"),
         depends(task("B", "ready"), "C"),
-        task("C", "done"),
+        task("C", "ready"),
     ]);
     let result = run(&closure("plan:A"), &corpus);
-    assert_eq!(result.members, keys(&["A", "B"]));
-    assert_eq!(result.steps, [step(&["B"]), step(&["A"])]);
+    assert_eq!(result.members, keys(&["A"]));
+    assert!(result.steps.is_empty());
+    assert!(result.cycle.is_empty());
+    assert_eq!(result.counts.goal_unmatched, None);
 }
 
 #[test]
-fn a_done_goal_with_nothing_open_below_it_is_alone() {
-    let corpus = board(vec![depends(task("A", "done"), "B"), task("B", "done")]);
+fn a_dropped_goal_is_treated_as_a_done_one() {
+    let corpus = board(vec![depends(task("A", "dropped"), "B"), task("B", "ready")]);
     let result = run(&closure("plan:A"), &corpus);
     assert_eq!(result.members, keys(&["A"]));
-    assert_eq!(result.steps, [step(&["A"])]);
+    assert!(result.steps.is_empty());
 }
 
 #[test]
-fn a_goal_that_matches_nothing_is_reported_and_the_other_parts_still_count() {
+fn a_goal_that_names_no_task_in_a_view_of_the_closure_alone_is_a_view_error_naming_the_goal() {
+    let corpus = board(vec![task("A", "ready"), task("B", "ready")]);
+    let view = view(&closure("plan:GONE"));
+    let failure = try_run(&view, &corpus, &Budgets::default()).unwrap_err();
+    assert_eq!(
+        failure,
+        ViewFailure::GoalUnmatched {
+            goal: "plan:GONE".into()
+        }
+    );
+    assert!(failure.to_string().contains("plan:GONE"), "{failure}");
+}
+
+#[test]
+fn a_goal_that_names_no_task_beside_a_where_keeps_the_other_members_and_is_counted() {
+    let corpus = board(vec![task("A", "ready"), task("B", "todo")]);
+    let result = run(
+        "name: v\nwhere: \"status == 'ready'\"\nclosure: { goal: plan:GONE, follow: depends_on }",
+        &corpus,
+    );
+    assert_eq!(result.counts.goal_unmatched.as_deref(), Some("plan:GONE"));
+    assert_eq!(result.members, keys(&["A"]));
+    assert!(result.steps.is_empty());
+}
+
+#[test]
+fn a_goal_that_names_no_task_beside_an_include_keeps_the_included_members_and_is_counted() {
     let corpus = board(vec![task("A", "ready"), task("B", "ready")]);
     let result = run(
         "name: v\ninclude: [plan:A]\nclosure: { goal: plan:GONE, follow: depends_on }",
@@ -458,9 +486,9 @@ fn a_goal_that_matches_nothing_is_reported_and_the_other_parts_still_count() {
 #[test]
 fn a_bare_id_as_the_goal_is_not_guessed() {
     let corpus = board(vec![task("T-01-042", "ready")]);
-    let result = run(&closure("T-01-042"), &corpus);
-    assert_eq!(result.counts.goal_unmatched.as_deref(), Some("T-01-042"));
-    assert!(result.members.is_empty());
+    let view = view(&closure("T-01-042"));
+    let failure = try_run(&view, &corpus, &Budgets::default()).unwrap_err();
+    assert!(failure.to_string().contains("T-01-042"), "{failure}");
 }
 
 #[test]

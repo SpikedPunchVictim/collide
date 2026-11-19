@@ -2474,6 +2474,13 @@ layout: { default: board, groupBy: category }
     T-01-046).
   - `follow: depends_on` walks the dependency links, `blocked-by` and `depends_on`, except a link marked
     `blocking: false`: the same set as the `deps` variable (`ts-0118-wp`).
+  - **A done goal** is the whole closure: the goal is a member, nothing is walked from it, and it is no step. The
+    generator walks nothing from it either (no open run; its former dependencies are stranded). A dropped goal is the
+    same (`ts-0147-ve`).
+  - **A goal that names no task** is a view error for a view whose members come from the closure alone (no `where`,
+    no `include`): the view has no members, the CLI exits 10, and the message names the goal. The generator stops with
+    an error the same way. A view with a `where` or an `include` beside the closure keeps its other members and counts
+    the goal in `goal_unmatched`, so one stale goal does not hide a view that has other parts (`ts-0147-ve`).
 - A view is a lens owned by Collide. It never writes membership into a source. Where the source has the grouping (a
   collection), the view reads it, so membership stays the source's truth. `include` and `exclude` cover the
   hand-picked subsets the source does not encode.
