@@ -9,6 +9,13 @@ links:
   - { type: blocked-by, to: ts-0139-wq }
   - { type: blocked-by, to: ts-0140-gk }
   - { type: blocked-by, to: ts-0141-sn }
+  - { type: blocked-by, to: ts-0143-ah }
+  - { type: blocked-by, to: ts-0144-eh }
+  - { type: blocked-by, to: ts-0145-cq }
+  - { type: blocked-by, to: ts-0146-se }
+  - { type: blocked-by, to: ts-0147-ve }
+  - { type: blocked-by, to: ts-0148-cv }
+  - { type: blocked-by, to: ts-0149-kq }
 ---
 
 ## Goal

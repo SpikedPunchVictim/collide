@@ -101,6 +101,10 @@ None by a build agent: this check is the owner's. The checklist names the automa
 
 ### Owner checklist
 
+**Run by an agent on 2026-11-19**, at the owner's ask, on a temp clone of the owner's copy with a temp `HOME` and daemon
+root and the stand-in `claude`. Its results are in step 9. A line it found wrong is fixed or followed by a line that
+begins **(agent run)**.
+
 Written 2026-11-18 from the code at `83d9915` and the Built sections of `ts-0108-dq` to `ts-0120-wm`. **Every command
 below was not run by the writer.** A line marked **(unconfirmed)** is a step or an expected output that the writer
 could not confirm from code; it says what was looked for. If a pass line does not come out, that is a result: write it
@@ -212,6 +216,10 @@ cd "$COPY" && ./plan --help | head -5
    only, and write what you needed in step 9 (awkward). Whether that needs your real `HOME` is **(unconfirmed)**; if
    it does, say so in step 9 and do the install in a terminal that has not sourced `env.sh`.
 
+   **(agent run)** It failed: after the README's `npm install` alone no command is found, since the CLI's `dist/` is not
+   committed. `npm install` and then `npm run build`, in `<check copy>` with the temp `HOME`, made it work. A worktree
+   made later needs the same (step 5a).
+
 4. Pick the tasks. Each is a short id (`T-NN-NNN`) from your own `arch/`. Statuses and the lifecycle are the real
    repo's; the commands below assume `specified`, `ready`, `doing`, `done`, as `fixtures/orchard-arch/plan` does.
 
@@ -317,9 +325,9 @@ collide trust
    Then "Trusted line ... at <hash>." The exact review lines are `render_review` in `host/src/pack_cli.rs`, which the
    writer did not read; take the shape of step 3 of `ts-0105-jv`.
 
-2. List the board. `collide tasks` with no flag reads Collide's own planning folder and ignores the pack; the daemon
-   forms are `--view` and `--checkout`. A task key is `plan:<short id>`, such as `plan:T-01-042`. A bare short id is
-   malformed in the daemon (`short_id::resolve`), so always give the key.
+2. List the board. Since `ts-0136-rr` every form of `collide tasks` goes through the daemon, and `--checkout` lists one
+   checkout. A task key is `plan:<short id>`, such as `plan:T-01-042`. A bare short id of a plan task is refused (agent
+   run: "not an item id", `ts-0149-kq`), so always give the key.
 
 ```sh
 cd "$COPY"
@@ -359,7 +367,7 @@ collide tasks --checkout "$COPY" | grep "$T_DIV"
    `divergent` is `["plan:<T_DIV>"]` and no other key. The two listings show `doing` and `ready`. The change is seen
    by the watch within a few seconds; if the first read still shows `ready`, read again, and write the delay in step
    9. If the file path in `status_of` shows nothing, your `arch/` layout differs from the fixtures: write it in step
-   8.
+   8. **(agent run)** At 5 s there was one copy; the second showed at about 20 s.
 
 ### 3. Views
 
@@ -602,7 +610,8 @@ under `<temp>/root/data/workspaces/`, and a write to that checkout waits while t
 
    Pass: `<temp>/bin/claude`. If any other path is printed, **stop and skip 5a**: the run would start your real
    `claude`. Then a task file for the run, and the run. `--budget 0.01` is a backstop only; the stand-in costs
-   nothing. It holds for up to 120 seconds, then the stand-in ends.
+   nothing. **(agent run)** After its 120 second sleep the stand-in waits on its standard input and never ends by
+   itself: sub-step 3's stop ends it.
 
 ```sh
 cd "$COPY"
@@ -613,7 +622,8 @@ collide run check-phase.md --budget 0.01
 
    Pass: `claude in use: 2.1.325`, a `claude published:` line, then `run <id> started on <file>`. Note the run id.
    Leave A running. If the run says the version is not usable, or ends at once, the stand-in did not pass (see Set up,
-   sub-step 5): write it in step 9 and go to 5b.
+   sub-step 5): write it in step 9 and go to 5b. **(agent run)** No `claude published:` line was printed
+   (`ts-0150-dj`).
 
 2. Terminal B. Find the run's worktree and write to it, without waiting.
 
@@ -646,6 +656,11 @@ status_of "$T_Q1" "$RUNWT"
    the writer read `write_guard.rs` and `file_run.rs` and did not find which. If it is gone, a queue item titled `A
    ... was not applied: ...` is the other outcome (`write_guard.rs`); write what you see.
 
+   **(agent run)** The worktree is kept. `collide stop` signalled no process (`ts-0143-ah`); the run ended when the
+   stand-in's standard input closed. The queued write then failed: the run's worktree has no build of the plan CLI (step
+   1). With `npm install` and `npm run build` made in that worktree while a second run's phase was live, the write
+   queued and then applied.
+
 **5b. A rebase at the root.** `root_busy` reads git's own state files: `rebase-merge`, `rebase-apply`, `MERGE_HEAD`,
 `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `BISECT_LOG` (`host/src/checkout.rs`). This makes a rebase stop on a conflict in
 `<check copy>`, which is the board root.
@@ -668,7 +683,8 @@ git status | head -3
    branch is detached while it lasts. Whether the daemon still finds the line then is **(unconfirmed)**: the writer
    read `root_busy`, not how the line is found. If the write is refused as "not trusted" or "no line" instead of
    waiting, write it in step 9, abort the rebase, and repeat with `git merge check-side` in place of the rebase
-   (`MERGE_HEAD`).
+   (`MERGE_HEAD`). **(agent run)** Refused at once, exit 1, "the line `HEAD` is not trusted" (`ts-0146-se`);
+   the merge passes.
 
 2. Terminal B. A write to the root, which waits.
 
@@ -704,6 +720,7 @@ branch, `check-wt`, so the edits go there.
 1. Edit the script and a view on `check-wt`, and commit. The script edit writes a marker file when the provider
    starts, so you can see whether it ran. That the provider may write there is **(unconfirmed)**; if the marker never
    appears after step 3 either, read `<temp>/root/data/daemon.log` for the provider's start instead.
+   **(agent run)** The marker works.
 
 ```sh
 . "$CHECK/env.sh"
@@ -737,8 +754,8 @@ collide trust
 
    Pass: "view unchanged" (the goal is still in the set; the branch's `exclude` is not applied) and `ls` says there is
    no `marker`. `collide trust --line check-wt` shows a hash that is not the line's, and `Changes:` with the
-   edited `providers/plan.ts` and the view in it. Since that branch was never trusted, they may show as added files
-   and not as changed lines (unconfirmed). Answer `n`: "Nothing was trusted." The plain `collide trust` after it says
+   edited `providers/plan.ts` and the view in it. Since that branch was never trusted, they show as added files
+   and not as changed lines (agent run). Answer `n`: "Nothing was trusted." The plain `collide trust` after it says
    the line is already trusted at its own hash.
 
 3. The same two edits on the line. Cherry-pick the commit; it is a changed hash, and nothing is trusted yet.
@@ -879,40 +896,74 @@ real one's rule is the one to write if it differs.
 
 ### 9. Record
 
-Fill this in. It is the owner's judgement; nothing here is an agent's. Copy anything you want to keep out of `<temp>`
-first: Clean up removes it.
+Lines marked **agent run** are the results of the run the owner asked an agent to make (2026-11-19), on a temp clone of
+the owner's copy. What was awkward and the date Stage 4b is done are the owner's.
 
-- Date and start and end time: ____ Total time taken: ____
-- Time per step: 1 Set up ____, 2 Read side ____, 3 Views ____, 4 Writes ____, 5 Queue ____, 6 Trust ____, 7 Scratch
-  ____, 8 Fixtures ____
-- First `collide tasks --checkout` on the real tree (about 1,660 files): ____ s. After a daemon restart: ____ s.
-- Result per step, pass or fail, with the criterion's words:
-  - 2 Read side: a task `doing` in one worktree and `ready` at the root, divergence in `task <key> --json` and `tasks
-    --json`: ____
-  - 3 Views: the closure's set and steps against the generator, goal `____`, tasks that differ ____ ; the E-07 set
-    against the epic and the generator ____ ; the two exits 10 and 3 ____
-  - 4 Writes: illegal `refused` with plan's message ____ ; legal write touches the task file and the epic table only
-    ____ ; `category=active` writes `doing` ____
-  - 5 Queue: queued behind a live phase, applied after ____ ; waits during a rebase, applies after it ends ____
-  - 6 Trust: edits on a branch not used ____ ; changed hash asks again ____
-  - 7 Scratch: listed for its board only ____
-  - 8 Fixtures: shapes and plan CLI match, or the differences below ____
-- Decision, a done goal is walked from (`ts-0118-wp`): as built / alternative, the generator's output was ____
-- Decision, a goal that matches nothing is a count (`ts-0118-wp`): as built / alternative, the generator's output was
-  ____
-- Differences found, each with the real text beside the fixture's, and the fix item it becomes: ____
-- What was awkward: ____
-- The unconfirmed lines that turned out wrong (setup `PATH`, the stand-in `claude`, the worktree after a stop, the
-  detached head during a rebase, the marker file, `./plan` in a fresh clone): ____
-- Date the owner judges Stage 4b done: ____
+- Date and time (agent run): 2026-11-19, 09:58 to 10:25 UTC, 27 minutes at an agent's pace.
+- Time per step (agent run): 1 Set up 5 min, 2 Read side 2, 3 Views 4, 4 Writes 1, 5 Queue 9 (with the stop's diagnosis
+  and a second run), 6 Trust 1, 7 Scratch under 1, 8 Fixtures 4, Clean up 1.
+- First `collide tasks --checkout` on the real tree (agent run): 5.7 s for 1,659 tasks. After a daemon restart: 5.5 s,
+  then 0.5 s each (`ts-0150-dj`).
+- The picks (agent run): `T-01-042` and `E-07` are not in the copy. The goal (`<goal>` below) was a task with 13 open
+  dependencies, and the epic `<epic>` one with a generated table; the writes used `E-73`'s tasks.
+- Result per step (agent run):
+  - 1 Set up: pass. The plan CLI needed `npm install` and `npm run build` in the clone; the temp `HOME` was enough.
+  - 2 Read side: pass. 1,659 lines for 1,659 task files, none skipped, `refreshing` false. At about 20 s, two copies
+    (`ready` at the root, `doing` in the worktree) and `divergent` `["plan:T-36-044"]`, the listings `doing` and
+    `ready`. A bare `collide task <goal>` is refused (`ts-0149-kq`); the text of `task <key>` has a blank `kind` line
+    (`ts-0150-dj`).
+  - 3 Views: closure for `<goal>`: 14 tasks, the generator's 14 (its 13 open and the goal), the same 5 steps, no cycle:
+    pass. `<epic>`: fail, Collide 452, the epic's table 428, the board page 645 (`ts-0148-cv`). Exits 10 and 3, and the
+    example view: pass. Not in the checklist: `collide tasks --ready` lists nothing and names 1,022 blockers as not
+    items (`ts-0144-eh`).
+  - 4 Writes: pass. Illegal: exit 5, `refused:` with the plan CLI's message word for word (the plan CLI itself exits 2),
+    nothing written. Legal: the task file and the `E-73` epic file, one row of its generated table, `doing`.
+    `category=active`: the same two files, `doing`.
+  - 5 Queue: behind a live phase: queued (exit 11, both lines, the worktree clean), and applied once the phase ended,
+    after the plan CLI was built in the worktree: pass. `collide stop` signalled no process (`ts-0143-ah`). During a
+    rebase: fail, refused at once (`ts-0146-se`). With `git merge` instead: pass, applied 8 s after `--abort`, exit 0.
+  - 6 Trust: pass. The branch's edits were not used and no marker was written; `trust --line check-wt` showed another
+    hash, every file as added. On the line, before trust: exit 10, "view `closure-check` has an error: the line is not
+    trusted, so this view is not read", no marker. After trust the goal left the set and the marker was written. The
+    next listing still warned the line was not trusted (`ts-0150-dj`).
+  - 7 Scratch: pass. `scratch:1` on each board; each lists its own only, with no `plan:` task.
+  - 8 Fixtures: the differences below.
+- Decision, a done goal is walked from (`ts-0118-wp`) (agent run): the alternative. The generator walks nothing (no open
+  run; the 13 are listed as stranded); Collide gives 14 (`ts-0147-ve`).
+- Decision, a goal that matches nothing is a count (agent run): the alternative, for a closure-only view. Collide's side
+  passes (no task, exit 0, `goal_unmatched`, the mixed view equals the epic's). The generator stops, exit 2: no task
+  file carries that id (`ts-0147-ve`).
+- Differences found (agent run):
+  - Create: the real `data.id` is a string, the full id with its slug; the fake's is an object (`kind`, `num`, `suffix`,
+    `scope`, `slug`). Every create through the adapter on the real CLI fails (`ts-0145-cq`). The CLI's `task create`
+    takes only the Collide plan's arguments (`ts-0149-kq`).
+  - An illegal move: both exit 2 with nothing on standard output. The real message names the transition and the legal
+    moves, on two lines; the fake's is one line in other words (`ts-0150-dj`).
+  - Task frontmatter: the fixture's keys. `title`, `status`, `epic`, `depends_on` and `blocked_by` are in every file;
+    `reviewed_by`, `self_review`, `backlog_id`, `migrated`, `awaiting` and `clears` in some. `epic:` is a bare id in
+    1,129 files and an id with its slug in 530; `depends_on` is a block list in 471. The fixture has each shape: no
+    item.
+  - The epic file and its generated region: the same shape. `ID-MAP.md`: the fourth column has another name; the adapter
+    reads the first two cells. `arch/` and its proposal folders hold more kinds of folder and file than the fixture; the
+    adapter ignores them.
+  - A set's envelope: the same keys; paths relative to `arch/`; `regenerated` holds the epic; a dry run writes nothing.
+- What was awkward: ____ (owner)
+- The unconfirmed lines (agent run): the setup `PATH`, right (in the login shell only `<temp>/bin` holds `claude`). The
+  stand-in passes the version check but never ends by itself. The worktree after a stop is kept. The detached head
+  during a rebase is wrong: the write is refused. The marker file works. `./plan` in a fresh clone needs `npm install`
+  and `npm run build`. A never-trusted branch's review shows every file as added.
+- Installs (agent run): the plan CLI's packages and build in the clone and in the second run's worktree, and the
+  generator's packages (`--ignore-scripts`) in the clone. All were inside `<temp>` and went with it.
+- Date the owner judges Stage 4b done: ____ (owner). Two criteria failed in the agent run: the epic's set (`ts-0148-cv`)
+  and the write during a rebase (`ts-0146-se`).
 
 ### Clean up
 
 Do the steps in this order. Nothing here uses a glob with `rm`. In a new terminal `CHECK` is unset: take the folder
 name from the `echo` in step 1 and `export CHECK=<temp>` before anything below.
 
-1. Stop any run still going, first: `. "$CHECK/env.sh"`, then `collide stop <run id>` (step 5a). The stand-in sleeps for
-   120 seconds and then ends by itself; check `ps -ax | grep fake_claude` shows nothing from this check.
+1. Stop any run still going, first: `. "$CHECK/env.sh"`, then `collide stop <run id>` (step 5a). The stand-in does not
+   end by itself; check `ps -ax | grep fake_claude` shows nothing from this check.
 2. Stop the daemon this check started. Its log has its pid; check the row says `collide-daemon` before you signal it.
    There is no `collide-daemon stop`; `collide stop` stops a run. Do not signal a daemon that is not this one.
 
@@ -939,8 +990,7 @@ case "$CHECK" in /tmp/collide-check.*) chmod -R u+w "$CHECK" && rm -rf "$CHECK" 
 
 What you will meet, and the item it is carried to or from. None of it is a failure of this check.
 
-- **`ts-0108-dq`.** The direct forms of `collide task` start a provider without the supervisor's timeouts until Stage
-  4c. A provider that exits while idle is noticed at the next call, not at once.
+- **`ts-0108-dq`.** A provider that exits while idle is noticed at the next call, not at once.
 - **`ts-0109-qj`.** The staged SDK has no `.d.ts` files, so `tsc` in a pack sees no types for
   `@collide/pack-sdk/yaml`.
 - **`ts-0110-ra`.** A plan task has no `labels`, `owners` or `checklist`, so `"mvp" in labels` matches nothing.
@@ -957,9 +1007,8 @@ What you will meet, and the item it is carried to or from. None of it is a failu
   second `follow` variant is 4c's; only `depends_on` exists.
 - **`ts-0119-tj`.** The plan has no CLI to list or save views; the app's Save as View is the only writer. A repo view
   is read again on every call; only the evaluation is kept.
-- **`ts-0120-wm`.** Bare `collide tasks`, the text of `collide task <id>`, `task create`, `task reid` and `sections`
-  do not go through the daemon until Stage 4c, and a bare id with an op writes directly. The text form of a view does
-  not show `goal_unmatched`, `unmatched_include` or `unmatched_exclude`; `--json` does.
+- **`ts-0120-wm`.** The text form of a view does not show `goal_unmatched`, `unmatched_include` or `unmatched_exclude`;
+  `--json` does. Since `ts-0136-rr` every task command goes through the daemon.
 - **Here.** No fixture workflow phase runs `sleep`; step 5a uses a stand-in `claude` (see the start). The fixture
   pack's own `pack.yaml` is not loaded; the minimal manifest is. `fixtures/orchard-arch/` and the fake plan CLI are
   made up; their header says they follow the shapes read in your copy.
