@@ -4,6 +4,7 @@
 //   plan set <task id> status=<status> [--root DIR] [--format text|json] [--dry-run]
 //   plan new task <proposal> <title> --epic <epic> [--depends-on a,b] [--blocked-by a,b] [--root DIR] [--format ...]
 //   plan renumber <old id> <new id> [--file PATH] [--force] [--root DIR] [--format text|json] [--dry-run]
+//   plan status [--root DIR] [--format text|json]
 // As in the real CLI, an oclif CLI, the first argument is the command: a flag before it is not a command.
 // The shapes follow the real CLI as read in the owner's copy of the Orchard repo: the flags, the JSON envelope
 // (schema_version 1, command, corpus, data), the exit codes (0 done, 1 the write gate refused it, 2 the CLI would not
@@ -12,6 +13,9 @@
 // citations it can safely reach, refreshes the generated tables, and adds a row to `ID-MAP.md` at the root of the
 // folder: `| old id | new id | day | moved: <path>[; survivors: <paths>] |`, both ids with their slug. Not here: the
 // real flag `--incoming`, frozen spans, other kinds of id, and the second gate (that exit 1 is for).
+// `status` follows the same copy: the envelope's data has the keys `proposals`, `epics`, `blockedTasks`, `queue`,
+// `evidence`, `velocity` and `suppressed`. Only `queue` is filled here: the open questions that need a person
+// (`needs` is human or either), in id order, each `{ question, file, needs, blocks }` with the question's id and slug.
 //
 // The root is an `arch/` folder. A write changes the task file and refreshes the generated table (the region between
 // `<!-- BEGIN GENERATED tasks -->` and `<!-- END GENERATED -->`) of each epic whose rows change.
@@ -35,6 +39,7 @@ const LEGAL = {
 const TASK_FILE = /^(T-(\d{2})-(\d{3}))-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
 const EPIC_FILE = /^(E-\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
 const PROPOSAL_DIR = /^(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*$/
+const QUESTION_FILE = /^Q-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
 const TASK_ID = /^(T-\d{2}-\d{3})(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
 const EPIC_ID = /^(E-\d{2})(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/
 const REGION = /(<!-- BEGIN GENERATED tasks -->\n)([\s\S]*?)(<!-- END GENERATED -->)/
@@ -534,6 +539,34 @@ function commandRenumber(context, flags, positionals) {
   }
 }
 
+// ---------------------------------------------------------------- status
+
+/** The open questions that need a person, in id order. A question is a file under `proposals/<folder>/questions`. */
+function commandStatus(context, positionals) {
+  if (positionals.length > 1) throw new UsageError(`status takes no arguments, and got ${positionals.length - 1}`)
+  const queue = []
+  for (const folder of filesIn(path.join(context.root, 'proposals'))) {
+    if (!folder.isDirectory() || !PROPOSAL_DIR.test(folder.name)) continue
+    for (const file of filesIn(path.join(context.root, 'proposals', folder.name, 'questions'))) {
+      if (!file.isFile() || !QUESTION_FILE.test(file.name)) continue
+      const relPath = `proposals/${folder.name}/questions/${file.name}`
+      const values = frontmatterOf(readText(context.root, relPath))
+      if (values.status !== 'open' || !['human', 'either'].includes(values.needs)) continue
+      const blocks = Array.isArray(values.blocks) ? values.blocks : []
+      queue.push({ question: file.name.slice(0, -'.md'.length), file: relPath, needs: values.needs, blocks })
+    }
+  }
+  queue.sort((a, b) => (a.question < b.question ? -1 : 1))
+  return {
+    command: 'status',
+    read: true,
+    data: { proposals: [], epics: [], blockedTasks: [], queue, evidence: [], velocity: {}, suppressed: [] },
+    lines: queue.map((entry) => `${entry.question}  needs ${entry.needs}`),
+    files: [],
+    done: { errors: [], regenerated: [], written: false },
+  }
+}
+
 // ---------------------------------------------------------------- output
 
 const diagnosticLine = (error) => `${error.file}  ${error.severity}  ${error.rule}  ${error.message}`
@@ -556,6 +589,7 @@ function print(context, result) {
     return
   }
   process.stdout.write(`${result.lines.join('\n')}\n`)
+  if (result.read) return
   const files = [...result.files, ...done.regenerated].join(', ')
   process.stderr.write(context.dryRun ? `\nwould write: ${files}\n` : `\nwrote: ${files}\n`)
 }
@@ -570,7 +604,11 @@ function main(argv) {
     if (positionals[0] === 'set') result = commandSet(context, positionals)
     else if (positionals[0] === 'new') result = commandNewTask(context, flags, positionals)
     else if (positionals[0] === 'renumber') result = commandRenumber(context, flags, positionals)
-    else throw new UsageError(`there is no command ${positionals[0] ?? '(none)'}; try set, new task or renumber`)
+    else if (positionals[0] === 'status') result = commandStatus(context, positionals)
+    else {
+      const known = 'set, new task, renumber or status'
+      throw new UsageError(`there is no command ${positionals[0] ?? '(none)'}; try ${known}`)
+    }
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
     process.stderr.write(`${error.message}\n`)

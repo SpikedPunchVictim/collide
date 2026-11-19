@@ -44,7 +44,7 @@ export interface PlanHandlers extends ProviderHandlers {
  * directory. Until `initialize` has run, every other call fails. A call that names a checkout means that folder, which
  * must exist. The tree is read again on each call, so a reply is never older than the request. A write runs the
  * checkout's own `./plan`; the SDK answers one request at a time, in the order they came, so two writes in this
- * process never overlap.
+ * process never overlap. `list` and `get` run `./plan status` too when a question is open, for the human queue.
  */
 export function planHandlers(options: {
   log: (message: string) => void
@@ -67,7 +67,9 @@ export function planHandlers(options: {
     if (!(await isFolder(checkout))) throw new Error(`checkout ${JSON.stringify(checkout)} is not a folder`)
     return resolve(checkout)
   }
-  const read = async (checkout: string | undefined): Promise<Scan> => scan(await checkoutFor(checkout), log)
+  /** The checkout as `list` and `get` show it: with the human queue, read by the plan CLI when a question is open. */
+  const read = async (checkout: string | undefined): Promise<Scan> =>
+    scan(await checkoutFor(checkout), log, { env, timeoutMs })
   const writing = async (checkout: string | undefined): Promise<WriteContext> => ({
     root: await checkoutFor(checkout),
     env,

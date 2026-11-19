@@ -1,5 +1,13 @@
 import type { InitializeResultInput } from '@collide/pack-sdk'
-import { EPIC_ARG, ID_PATTERN, LABEL_ID_PATTERN, PROPOSAL_ARG, SHORT_ID_PATTERN } from './ids.ts'
+import { KIND_LINK_TYPES, KINDS } from './kinds.ts'
+import {
+  ANY_ID_PATTERN,
+  ANY_SHORT_ID_PATTERN,
+  EPIC_ARG,
+  LABEL_ID_PATTERN,
+  PROPOSAL_ARG,
+  SHORT_ID_PATTERN,
+} from './ids.ts'
 
 export const BLOCKED_BY = 'blocked-by'
 
@@ -62,11 +70,13 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
 
 /**
  * What `initialize` answers. A category is written as the one status that has it, which is what `categoryStatus` says.
+ * The statuses at the top are a task's, and the kinds are the ones that are not tasks: an ADR, a spike and a question.
+ * The ops are a task's too: `setStatus` and `create` on another kind are refused (`write.ts`).
  */
 export const INITIALIZE_RESULT: InitializeResultInput = {
   scope: 'ref',
-  idPattern: ID_PATTERN,
-  shortIdPattern: SHORT_ID_PATTERN,
+  idPattern: ANY_ID_PATTERN,
+  shortIdPattern: ANY_SHORT_ID_PATTERN,
   templateFields: [{ name: 'labelId', pattern: LABEL_ID_PATTERN }],
   statuses: STATUSES.map((status) => ({ ...status })),
   categoryStatus: CATEGORY_STATUS,
@@ -74,7 +84,8 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
     { id: 'proposal', type: 'string', filterable: true },
     { id: 'epic', type: 'string', filterable: true },
   ],
+  kinds: KINDS,
   ops: OPS,
-  links: [{ name: BLOCKED_BY, dir: 'out', blocking: true }],
+  links: [{ name: BLOCKED_BY, dir: 'out', blocking: true }, ...KIND_LINK_TYPES],
   capabilities: { watch: true, create: true, collections: true, preview: true },
 }

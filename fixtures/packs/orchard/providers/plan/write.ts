@@ -28,6 +28,9 @@ type Done =
   | { kind: 'refused'; message: string }
 
 const refused = (message: string): Done => ({ kind: 'refused', message })
+
+/** Why a write on an ADR, a spike or a question is refused. */
+const CLI_CHANGES = 'the plan CLI changes these, so change it there'
 const withBody = ({ task, body }: FoundTask): TaskInput => ({ ...task, body })
 const shortIdOf = (task: TaskInput): string => task.key.slice('plan:'.length)
 
@@ -241,6 +244,10 @@ async function setStatus(ctx: WriteContext, call: SetStatusCall, dryRun: boolean
   if ('refusal' in wanted) return refused(wanted.refusal)
   const found = findTask((await scan(ctx.root, ctx.log)).tasks, call.id)
   if (found === undefined) return refused(`there is no task ${call.id} in this checkout`)
+  // An ADR, a spike and a question have statuses of their own. This source does not call the plan CLI for them.
+  if (found.task.kind !== undefined && found.task.kind !== null) {
+    return refused(`${found.task.key} is ${found.task.kind === 'adr' ? 'an' : 'a'} ${found.task.kind}: ${CLI_CHANGES}`)
+  }
   if (call.version !== found.task.version) return { kind: 'conflict', current: withBody(found) }
 
   const shortId = shortIdOf(found.task)

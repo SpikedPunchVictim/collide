@@ -96,4 +96,92 @@ Write these first.
 - Stage 4c item (revision 23 scope, split 2026-11-18). Items of Stage 4c run one at a time, in id order, because they
   share `core`, `host`, `packs/plan` and the generated files.
 - Nothing here runs a real `claude`. No dependency is added.
-- Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+- Owner decisions: 2026-11-18, the shapes come from the owner's local copy of the Orchard repo, read only: stand-in
+  names and made-up content, nothing verbatim, and no agent runs its plan CLI. The rest on delegation.
+
+### Built
+
+- Fixtures: `fixtures/orchard-arch/kinds/arch/` (new, all made up): six ADRs (every status), four spikes (every status;
+  one with a hyphenated suffix, `S4d-dock`), five questions (open human, open either, open with evidence, resolved,
+  and one in a second proposal), one task. The `basic` tree's one question file is removed: the new reader would list
+  it as an item, and the old task tests count eight tasks.
+- Fake plan CLI `fixtures/orchard-arch/plan`: `commandStatus` answers `status --root <arch> --format json` with the
+  envelope (`schema_version`, `command`, `corpus`, `data.queue` and the other `data` keys, empty). A queue entry is
+  `{ question, file, needs, blocks }`: open questions that need `human` or `either`, sorted by id.
+- Provider `fixtures/packs/orchard/providers/plan/`: `kinds.ts` (new: the status tables, `KINDS`, `KIND_LINK_TYPES`,
+  `toKindTask`), `queue.ts` (new: `readQueue`, `QUEUE_ID`), `ids.ts` (file and ref readers for the three kinds, with
+  deterministic regexes), `scan.ts` (`candidates` finds ADRs, spike folders with a `PLAN.md` and questions;
+  `scan(root, log, queue?)` adds the `plan:queue` collection and each member's `collections`), `declaration.ts`
+  (`kinds`, the three link types with `inverse`, id patterns for every kind), `provider.ts` (`list` and `get` pass the
+  queue options; the watcher and the write path do not), `write.ts` (`setStatus` on an item with a `kind` is refused:
+  "the plan CLI changes these"; no `execute`, so no plan CLI call; applies to preview too).
+- Statuses and categories: ADR proposed=review, accepted=done, rejected, deprecated and superseded=dropped. Spike
+  open=ready, running=active, concluded=done, abandoned and superseded=dropped. Question open=ready, resolved=done,
+  dropped=dropped.
+- Links (none blocking): `evidence` (inverse "evidence for") ADR to spike; `supersedes` (inverse "superseded by") ADR to
+  ADR and spike to spike; `blocks` (inverse "blocked by") question to an obligation. A malformed ref makes the file
+  `task.invalid`; a well-formed ref to a missing id is a link to nothing.
+- `fixtures/packs/orchard/pack.yaml`: `views:` `decisions-needed` (`where: "'plan:queue' in collections"`,
+  `queue: true`) and `spikes` (`kind == 'spike'`), and `config.roles` (default: decision [adr], spike [spike],
+  question [question], proposal []).
+- Tests, `fixtures/arch-plan-tests/test/`: `kinds.test.ts` (initialize, each kind and status, links and the evidence
+  table, invalid files, the S5 hazards for each kind (unquoted `no`, `1e10`, duplicate key, alias bomb, merge key, 64
+  KiB frontmatter, 1 MiB body, conflict marker), 2,000 ADR files and 2,000 question files in pages of 500, refused
+  writes with no plan CLI call), `queue.test.ts` (the queue equals the fake's JSON in its order, a scripted other
+  answer, the view follows a changed fake, nine bad answers, a missing and a hanging plan CLI, no spawn when no
+  question is open). `initialize.test.ts` is edited: the exact id patterns and the exact `links` list no longer hold.
+  `host/tests/daemon_reference_kinds.rs` (new; the file name has no pack name, for the no-names check): the pack as a
+  `repo:` source in a fixture repository, a trusted line and a temp root: `task.views`, the queue view equals the
+  fake's JSON, the view over a canned answer, spikes view, "evidence for" from the spike side, a missing link, the
+  roles check, a refused write with `plan-calls.log` unchanged.
+- Red at runtime before the code (`pnpm exec vitest run test/kinds.test.ts test/queue.test.ts`): 109 of the 120 failed
+  (empty lists, `undefined` results, the old refusal text), and the 11 that passed are the ones that hold of the old
+  code (no spawn, basic tree has no kind, `get` of a closed question). Daemon tests: all nine failed against the old
+  provider files and `pack.yaml` (from `git show HEAD:`), at the wait for sixteen items; that is the cause for each,
+  so they are not red one by one.
+
+### Decisions for the owner
+
+- **Queue is read by running the plan CLI.** One `./plan status` per `list` or `get` while a question is open; none
+  when no question is open; at most 30 s. Alternative: cache by the arch tree hash. Recommend keeping it until a
+  checkout is slow.
+- **The queue is a snapshot of the last full listing.** The watcher scans without the CLI, and the corpus keeps
+  collections from its first listing (as for epics), so a question answered on disk leaves the view only at the next
+  listing. Alternative: the provider sends collections with `task.changed`, or the daemon relists. Recommend a small
+  item before the owner's run; a view over `status` would otherwise look stale.
+- **A named view lists in corpus order (by key), not the collection's group order.** The plan CLI sorts by id, so they
+  agree. The group carries the CLI's order for a reader of the collection.
+- **No spike `informs` link.** The real spike has no such field, so none is emitted. The item's wording is dropped.
+- **No `part-of` link for questions**, as there is no proposal item. A question's `proposal` field holds its folder's
+  digits.
+- **`config.roles.proposal` is `[]`.** The item says `proposal: proposal`, which would report a missing kind on every
+  line. Alternative: declare a `proposal` kind later.
+- **Required fields** are `title` and `status`. The ADR's `domain`, `docType` and the rest are not enforced; `needs`
+  and `resolved_by` are not validated.
+- **`blocks` is non-blocking**, and its target (an obligation) is not an item, so it always reads as missing.
+- **Writes on the new kinds** are refused by the provider, because a kind cannot declare "no ops". The daemon's status
+  check lets only task statuses through, so a person cannot even reach an ADR status.
+- **Tasks stay kindless.** Only `adr`, `spike` and `question` are declared. Plan text to propose: "The Orchard plan
+  provider declares the kinds adr, spike and question; a task has no kind."
+- **Package path** is `fixtures/arch-plan-tests`, not `packs/orchard-fixture-tests` as the item says.
+
+### Not done, by design
+
+- A `task` kind and a `kind` on tasks (`ts-0150-dj`, first bullet: `--kind widget` now exits 2, but the blank `kind`
+  line in the text of a task remains).
+- A live queue (see the second decision). No `reid` for the new kinds, as decided.
+- `ts-0144-eh`, `ts-0145-cq` and `ts-0148-cv` are not touched and not changed by this item.
+
+### At review
+
+- Shapes checked against the owner's copy, read only: ADR, question and spike `PLAN.md` frontmatter keys, the ADR
+  (`ADR-NNN`) and spike (`S<num><suffix>`) id forms of the plan CLI's `ids.ts`, the status envelope (`schema_version` 1,
+  `command`, `data.queue[].question`), the queue rule (open, `needs` `human` or `either`) and its sort by short id. No
+  fixture line of 30 characters or more is in the copy. In the copy every question's `blocks` and every ADR's
+  `supersedes` is empty, so the always-missing `blocks` link costs nothing there.
+- Mutations, each red then restored: the kind refusal in `write.ts` (15 vitest, the daemon write test), the "evidence
+  for" label (1 vitest, the daemon link test), the open-question gate on the queue (3), the queue's order (4), the ADR
+  `proposed` category (3).
+- Decision 2 confirmed in `apply_changed`: a held copy keeps its collections. Follow-up `ts-0151-fk`, and `ts-0138-pn`
+  is blocked by it.
+- Plan text added to Stage 4c, where the Orchard provider reads ADRs, spikes and questions.

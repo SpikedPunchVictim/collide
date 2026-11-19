@@ -120,3 +120,36 @@ workflows:
 
 providers:
   plan: { script: providers/plan.ts }          # scope: ref; parses arch/ directly; writes via a line root's ./plan
+
+# Views a board adopts by name: `orchard/spikes` and `orchard/decisions-needed`, or just the name while no other pack
+# has it. The queue is not a rule written here. The provider reads it from the plan CLI (`plan status --format json`)
+# and puts each question it names in the collection `plan:queue`, so this view lists what the plan CLI lists, in its
+# order. `queue: true` feeds a Queue lane.
+views:
+  decisions-needed:
+    name: decisions-needed
+    where: "'plan:queue' in collections"
+    queue: true
+  spikes:
+    name: spikes
+    where: "kind == 'spike'"
+
+# Which kinds of the plan source play each role. Orchard has no proposal kind in the provider, so `proposal` names none:
+# an empty role is a choice, and the roles check reports no problem for it. A kind the source lacks is reported.
+config:
+  roles:
+    type: object
+    description: Which kinds of the planning source play each role. A kind the source lacks is reported on the line.
+    default:
+      proposal: []
+      question: [question]
+      spike: [spike]
+      decision: [adr]
+      deferred: []
+    additionalProperties: false
+    properties:
+      proposal: { type: array, items: { type: string }, description: Kinds that hold a proposal. }
+      question: { type: array, items: { type: string }, description: Kinds that hold a question. }
+      spike: { type: array, items: { type: string }, description: Kinds that hold a spike. }
+      decision: { type: array, items: { type: string }, description: Kinds that wait for a decision. }
+      deferred: { type: array, items: { type: string }, description: Kinds that can be put off. }

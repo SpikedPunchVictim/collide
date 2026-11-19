@@ -4533,7 +4533,9 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   root and the layout setting; kinds, op effects and links in the corpus; `collide/plan`'s record parser (claim
   blocks) and `roles` mapping; pack views, with the slice's `--ready` as a built-in view. The slice's CLI moves
   behind the provider supervisor; every task command goes through the daemon (`ts-0136-rr`). The Orchard pack's
-  plan provider reads ADRs, spikes and questions.
+  plan provider reads ADRs, spikes and questions, as the kinds `adr`, `spike` and `question` (a task has no kind),
+  and puts the questions that `plan status --format json` queues in the collection `plan:queue`, which its
+  `decisions-needed` view lists; a write on those kinds is refused, since the plan CLI changes them (`ts-0137-pg`).
 - **Feature ops** (revision 14): `addFeature {section, title, summary}` on a proposal, whose `section` is required
   and may be empty (owner, 2026-11-14), takes the next `F<n>` and writes under that section's heading, or under
   `### Unsorted`, made at the end of the part when it is missing; `moveFeature {feature, section}`; and

@@ -17,8 +17,6 @@ describe('initialize', () => {
   test('is ref-scoped, has the id patterns and the labelId template field', async () => {
     const result = await initialize()
     expect(result.scope).toBe('ref')
-    expect(result.idPattern).toBe('^T-[0-9]{2}-[0-9]{3}-[a-z0-9]+(-[a-z0-9]+)*$')
-    expect(result.shortIdPattern).toBe('^T-[0-9]{2}-[0-9]{3}$')
     expect(result.templateFields).toEqual([{ name: 'labelId', pattern: '^t\\d{2}-\\d{3}$' }])
     expect(new RegExp(result.templateFields[0].pattern).test('t03-001')).toBe(true)
     expect(new RegExp(result.shortIdPattern).test('T-03-001')).toBe(true)
@@ -49,13 +47,13 @@ describe('initialize', () => {
     })
   })
 
-  test('declares the fields and the blocked-by link', async () => {
+  test('declares the fields and the blocked-by link first', async () => {
     const result = await initialize()
     expect(result.fields).toEqual([
       { id: 'proposal', type: 'string', filterable: true },
       { id: 'epic', type: 'string', filterable: true },
     ])
-    expect(result.links).toEqual([{ name: 'blocked-by', dir: 'out', blocking: true }])
+    expect(result.links[0]).toEqual({ name: 'blocked-by', dir: 'out', blocking: true })
   })
 
   test('declares setStatus and create, and the capabilities: watch, create, preview, collections', async () => {

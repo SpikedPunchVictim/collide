@@ -3,11 +3,22 @@ import type { TaskInvalidOutput, TaskInput } from '@collide/pack-sdk'
 import { readCollections } from './collections.ts'
 import type { Collection, Listed } from './collections.ts'
 import { filesIn, foldersIn, inBatches } from './files.ts'
-import { proposalDir, taskFile } from './ids.ts'
+import { adrFile, proposalDir, questionFile, spikeDir, taskFile } from './ids.ts'
+import type { NameIds, TaskFile } from './ids.ts'
+import { ADR, QUESTION, SPIKE, toKindTask } from './kinds.ts'
+import type { KindName } from './kinds.ts'
+import { QUEUE_ID, readQueue } from './queue.ts'
+import type { Queue } from './queue.ts'
 import { readCorpusFile } from './read-file.ts'
+import type { ReadResult } from './read-file.ts'
 import { toTask } from './task.ts'
+import type { TaskResult } from './task.ts'
 
+const ARCH = 'arch'
 const PROPOSALS = 'arch/proposals'
+const SPIKES = 'arch/spikes'
+/** The file of a spike's folder that has its frontmatter. */
+const SPIKE_FILE = 'PLAN.md'
 
 export interface FoundTask {
   task: TaskInput
@@ -15,27 +26,51 @@ export interface FoundTask {
 }
 
 export interface Scan {
-  /** Every readable task, in short id order. */
+  /** Every readable task, ADR, spike and question, in short id order. */
   tasks: FoundTask[]
   collections: Collection[]
   invalid: TaskInvalidOutput[]
 }
 
 interface Candidate {
-  proposal: string
+  kind: 'task' | KindName
+  /** The two digits of the proposal whose folder holds the file, for a task and for a question. */
+  proposal: string | null
+  /** The file's path from the checkout, with `/` separators: a spike's is its PLAN.md. */
   path: string
-  name: string
+  /** What the file's (or the spike folder's) name says. A task's has the proposal that its id names, too. */
+  named: NameIds
 }
 
-/** Every file named like a task, in a `tasks` folder of a proposal's folder. Anything else is not a task. */
+/**
+ * Every file named like a task or a question, in the `tasks` or `questions` folder of a proposal's folder, every ADR
+ * at the top of `arch/`, and every spike folder that has a PLAN.md. Anything else is not an item. A link or a folder
+ * where a file belongs is not read.
+ */
 async function candidates(root: string): Promise<Candidate[]> {
   const found: Candidate[] = []
   for (const folder of await foldersIn(join(root, PROPOSALS))) {
     const proposal = proposalDir(folder)
     if (proposal === null) continue
     for (const name of await filesIn(join(root, PROPOSALS, folder, 'tasks'))) {
-      if (taskFile(name) !== null) found.push({ proposal, name, path: `${PROPOSALS}/${folder}/tasks/${name}` })
+      const named = taskFile(name)
+      if (named !== null) found.push({ kind: 'task', proposal, named, path: `${PROPOSALS}/${folder}/tasks/${name}` })
     }
+    for (const name of await filesIn(join(root, PROPOSALS, folder, 'questions'))) {
+      const named = questionFile(name)
+      if (named !== null) {
+        found.push({ kind: QUESTION, proposal, named, path: `${PROPOSALS}/${folder}/questions/${name}` })
+      }
+    }
+  }
+  for (const name of await filesIn(join(root, ARCH))) {
+    const named = adrFile(name)
+    if (named !== null) found.push({ kind: ADR, proposal: null, named, path: `${ARCH}/${name}` })
+  }
+  for (const folder of await foldersIn(join(root, SPIKES))) {
+    const named = spikeDir(folder)
+    if (named === null || !(await filesIn(join(root, SPIKES, folder))).includes(SPIKE_FILE)) continue
+    found.push({ kind: SPIKE, proposal: null, named, path: `${SPIKES}/${folder}/${SPIKE_FILE}` })
   }
   return found
 }
@@ -46,16 +81,29 @@ interface Parsed extends Listed {
   body: string
 }
 
+/** What a scan may be asked to add: the human queue, which is read by running the checkout's `./plan status`. */
+export interface QueueRun {
+  env: NodeJS.ProcessEnv
+  timeoutMs: number
+}
+
 /**
- * Reads one checkout's `arch/` tree: every task file under `arch/proposals/<proposal>/tasks`, and every epic under
- * `arch/work/epics`. A task file that cannot be read goes to `invalid`, with its path, and does not stop the others;
- * so do two files that have one short id. An epic that cannot be read is logged and left out: it is not a task.
+ * Reads one checkout's `arch/` tree: every task and question file under `arch/proposals/<proposal>`, every ADR at the
+ * top of `arch/`, every spike's PLAN.md under `arch/spikes`, and every epic under `arch/work/epics`. A file that cannot
+ * be read goes to `invalid`, with its path, and does not stop the others; so do two files that have one short id. An
+ * epic that cannot be read is logged and left out: it is not an item.
+ *
+ * With `queue`, and when a question is open, the plan CLI is asked for the human queue, which becomes the collection
+ * `plan:queue` and a place in the `collections` of each question in it. Without `queue` no CLI is run: a write, and the
+ * watcher, read the files and nothing else.
  */
-export async function scan(root: string, log: (message: string) => void): Promise<Scan> {
+export async function scan(root: string, log: (message: string) => void, queue?: QueueRun): Promise<Scan> {
   const invalid: TaskInvalidOutput[] = []
   const reject = (path: string, reason: string): void => void invalid.push({ path, checkout: root, reason })
 
-  const files = await inBatches(await candidates(root), async (candidate) => ({
+  const found = await candidates(root)
+  const spikes = new Set(found.filter(({ kind }) => kind === SPIKE).map(({ named }) => named.shortId))
+  const files = await inBatches(found, async (candidate) => ({
     candidate,
     file: await readCorpusFile(join(root, candidate.path)),
   }))
@@ -66,14 +114,16 @@ export async function scan(root: string, log: (message: string) => void): Promis
       reject(candidate.path, file.reason)
       continue
     }
-    const named = taskFile(candidate.name)
-    if (named === null) continue
-    const result = toTask({ file: named, path: candidate.path, checkout: root, ...file }, candidate.proposal)
+    const { kind, named, path, proposal } = candidate
+    const result =
+      kind === 'task'
+        ? toTask({ file: named as TaskFile, path, checkout: root, ...file }, proposal as string)
+        : toItem({ kind, named, path, root, proposal, file }, spikes)
     if (!result.ok) {
-      reject(candidate.path, result.reason)
+      reject(path, result.reason)
       continue
     }
-    const parsed: Parsed = { ...result.value, shortId: named.shortId, path: candidate.path, body: file.body }
+    const parsed: Parsed = { ...result.value, shortId: named.shortId, path, body: file.body }
     byShortId.set(named.shortId, [...(byShortId.get(named.shortId) ?? []), parsed])
   }
 
@@ -91,12 +141,57 @@ export async function scan(root: string, log: (message: string) => void): Promis
   listed.sort((a, b) => (a.shortId < b.shortId ? -1 : 1))
 
   const { collections, membership } = await readCollections(root, listed, log)
+  const asked = queue === undefined ? null : await readQueueOf(root, listed, log, queue)
+  if (asked !== null) {
+    collections.push(asked.collection)
+    for (const key of asked.keys) membership.set(key, [...(membership.get(key) ?? []), QUEUE_ID])
+  }
   invalid.sort((a, b) => (a.path < b.path ? -1 : 1))
   const tasks = listed.map(({ task, body }) => ({
     task: { ...task, collections: membership.get(task.key) ?? [] },
     body,
   }))
   return { tasks, collections, invalid }
+}
+
+/** An ADR, a spike or a question read from its file, as the `Listed` that a task is. */
+function toItem(
+  from: {
+    kind: KindName
+    named: NameIds
+    path: string
+    root: string
+    proposal: string | null
+    file: Extract<ReadResult, { ok: true }>
+  },
+  spikes: ReadonlySet<string>,
+): TaskResult {
+  const { kind, named, path, root, proposal, file } = from
+  const read = toKindTask(
+    {
+      kind,
+      file: named,
+      path,
+      checkout: root,
+      frontmatter: file.frontmatter,
+      version: file.version,
+      ...(kind === QUESTION && proposal !== null ? { proposal } : {}),
+    },
+    spikes,
+  )
+  return read.ok ? { ok: true, value: { task: read.task, epic: null } } : read
+}
+
+/** The queue of the checkout, when a question is open and the CLI can say; null otherwise. */
+async function readQueueOf(
+  root: string,
+  listed: Parsed[],
+  log: (message: string) => void,
+  queue: QueueRun,
+): Promise<Queue | null> {
+  const questions = listed.filter(({ task }) => task.kind === QUESTION)
+  if (!questions.some(({ task }) => task.state.status === 'open')) return null
+  return readQueue(root, new Set(questions.map(({ task }) => task.key)), { ...queue, log })
 }
 
 /** The task that an id names: its long id, its short id, or its key. */
