@@ -1,7 +1,7 @@
 ---
 id: ts-0134-ch
 kind: task
-status: ready
+status: done
 title: "Plan pack: spike records, claim blocks and the Pre-registration part"
 owners: []
 links:
