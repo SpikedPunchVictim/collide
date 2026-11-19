@@ -156,14 +156,15 @@ export interface Task {
   version: string
 }
 /**
- * One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.
+ * One entry `A<n>` of an Assumptions part (0.10). A missing or invalid `state` reads `unverified`.
  */
 export interface Assumption {
   evidence: Evidence[]
   id: string
   line: number
   spike?: string | null
-  state?: string | null
+  spikeStatus?: string | null
+  state: string
   text: string
   title: string
 }
@@ -224,15 +225,15 @@ export interface Feature {
   title: string
 }
 /**
- * One entry `R<n>` of a proposal's Findings part (0.10). `section` is `Red-team` or `Pre-mortem`. A finding with
- * neither `accepted` nor `dismissed` is open.
+ * One entry `R<n>` of a Findings part (0.10). `open`: neither `accepted` nor `dismissed`.
  */
 export interface Finding {
   accepted?: string | null
   dismissed?: string | null
   id: string
   line: number
-  section: string
+  open: boolean
+  section?: string | null
   severity: string
   target?: string | null
   text: string

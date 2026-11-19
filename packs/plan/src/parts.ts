@@ -3,12 +3,14 @@ import type { Fence } from './features.ts'
 
 /**
  * What one part of a proposal is, for `readPart`: the name in its `## ` heading, the letter of its entries (`D` for
- * `D1`, `D2`) and the labels its entries may have.
+ * `D1`, `D2`), the labels its entries may have and, for a part with `### ` headings, their names.
  */
 export interface PartSpec {
   part: string
   letter: string
   labels: readonly string[]
+  /** The `### ` headings the part has, when its entries are sorted under them (the Findings part). */
+  sections?: readonly string[]
 }
 
 /** A labelled line of an entry, as `Passed on: A daemon.` is. `name` is the label as `PartSpec` spells it. */
@@ -26,6 +28,8 @@ export interface PartEntry {
   /** The line of the entry in the item's file. */
   line: number
   labels: PartLabel[]
+  /** The part's `### ` heading the entry is under, as `PartSpec` spells it. Left out when it is under none. */
+  section?: string
 }
 
 /** A line of a part that is not right. `line` counts from 1 in the item's file. */
@@ -38,6 +42,7 @@ export interface PartProblem {
 /** A word, up to three, and a colon: the start of a labelled line. */
 const LABEL = /^([A-Za-z]+(?: [A-Za-z]+){0,2}):(?: +(.*))?$/
 const NAME = /^## +(.*?) *$/
+const SECTION = /^### +(.*?) *$/
 
 const joined = (text: string, more: string): string => (text === '' ? more : `${text} ${more}`)
 
@@ -52,11 +57,15 @@ const joined = (text: string, more: string): string => (text === '' ? more : `${
  * existed reads unchanged. A line that starts like an entry and is not one is a problem, and so are `<letter>0`, a
  * number that was used before and a label the part does not have. A refused entry is not listed, and what is indented
  * under it is not reported again. `firstLine` is the line of the file that the body's first line is.
+ *
+ * A part that names its `sections` also reads the `### ` headings in it: an entry is under the last one, matched in any
+ * case, and a heading that is none of them is a problem and leaves the entries below it under none. The reader does not
+ * say whether an entry may be under none; the part does.
  */
 export function readPart(
   body: string,
   firstLine: number,
-  { part, letter, labels }: PartSpec,
+  { part, letter, labels, sections }: PartSpec,
 ): { entries: PartEntry[]; problems: PartProblem[] } {
   const entries: PartEntry[] = []
   const problems: PartProblem[] = []
@@ -69,6 +78,7 @@ export function readPart(
   let inPart = false
   let fence: Fence | null = null
   let current: PartEntry | null = null
+  let section: string | undefined
   // Where the lines under the entry's first line go: its text, a label's value, or nowhere after an unknown label.
   let target: PartLabel | 'text' | 'nowhere' = 'text'
 
@@ -89,9 +99,22 @@ export function readPart(
     if (line.startsWith('## ')) {
       inPart = NAME.exec(line)?.[1]?.toLowerCase() === heading
       current = null
+      section = undefined
       return
     }
     if (!inPart || line.trim() === '') return
+
+    const named = sections === undefined ? null : SECTION.exec(line)
+    if (named !== null && sections !== undefined) {
+      const written = named[1] as string
+      section = sections.find((one) => one.toLowerCase() === written.toLowerCase())
+      current = null
+      if (section === undefined) {
+        const have = sections.map((one) => `"### ${one}"`).join(', ')
+        problem(`the heading "${written}" is not one of this part's headings: ${have}`)
+      }
+      return
+    }
 
     const entry = entryLine.exec(line)
     if (entry !== null) {
@@ -104,7 +127,8 @@ export function readPart(
       const first = firstOf.get(id)
       if (first !== undefined) return problem(`${id} is already used on line ${first}; each number appears once`)
       firstOf.set(id, number)
-      current = { id, title, text: text.trim(), line: number, labels: [] }
+      const under = section === undefined ? {} : { section }
+      current = { id, title, text: text.trim(), line: number, labels: [], ...under }
       entries.push(current)
       target = 'text'
       return

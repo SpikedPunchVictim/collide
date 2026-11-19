@@ -4415,10 +4415,11 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
     `renameSection` of `Pack` to `packs` over three proposals changes the three files, returns them in `items[]`,
     and leaves each part without problems;
   - quality parts (revision 18): a fixture proposal with a decision that names no alternative, an evidence id that
-    names no item, an assumption with no `State:` and an open high finding lists them in `decisions`,
-    `assumptions` and `findings`, with the bad id in `partProblems`, and still moves to `proposed`. With three
-    features and two included tasks, one implementing a feature and one implementing none, `coverage` names the two
-    features with no task and the second task. A Decision section of plain text reads unchanged, with no problem.
+    names no item, an assumption with no `State:` (read as `unverified`, not a problem) and an open high finding
+    lists them in `decisions`, `assumptions` and `findings`, with the bad id in `partProblems`, and still moves to
+    `proposed`. With three features and two included tasks, one implementing a feature and one implementing none,
+    `coverage` names the two features with no task and the second task. A Decision section of plain text reads
+    unchanged, with no problem.
 
 **Tests**:
 - Planning: parser fixtures, with strict plan CLI frontmatter left untouched, and S5's hazards (an unquoted

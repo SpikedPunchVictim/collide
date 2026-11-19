@@ -6,14 +6,15 @@
 export type EvidenceKind = 'item' | 'feature' | 'path'
 
 /**
- * One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.
+ * One entry `A<n>` of an Assumptions part (0.10). A missing or invalid `state` reads `unverified`.
  */
 export interface Assumption {
   evidence?: Evidence[]
   id: string
   line: number
   spike?: string | null
-  state?: string | null
+  spikeStatus?: string | null
+  state: string
   text: string
   title: string
 }

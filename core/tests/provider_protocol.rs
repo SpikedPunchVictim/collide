@@ -246,6 +246,7 @@ fn proposal_with_quality_parts() -> Value {
         "state": "unverified",
         "evidence": [{ "target": "ts-0001-aa", "kind": "item", "status": "ready" }],
         "spike": "sp-0001-aa",
+        "spikeStatus": "concluded",
         "line": 20
     }]);
     doc["findings"] = json!([{
@@ -256,6 +257,7 @@ fn proposal_with_quality_parts() -> Value {
         "text": "Two writers race.",
         "target": "D1",
         "dismissed": "The lock covers it.",
+        "open": false,
         "line": 30
     }]);
     doc["partProblems"] =
@@ -277,8 +279,40 @@ fn a_task_carries_the_quality_parts_and_their_problems_and_they_round_trip() {
     );
     assert_eq!(parsed.decisions[0].confidence.as_deref(), Some("medium"));
     assert_eq!(parsed.assumptions[0].spike.as_deref(), Some("sp-0001-aa"));
+    assert_eq!(
+        parsed.assumptions[0].spike_status.as_deref(),
+        Some("concluded")
+    );
+    assert!(!parsed.findings[0].open);
     assert_eq!(parsed.findings[0].severity, "high");
     assert_eq!(parsed.part_problems[0].part, "Decision");
+}
+
+#[test]
+fn an_assumption_and_a_finding_round_trip_with_every_optional_key_left_out() {
+    let mut doc = proposal();
+    doc["assumptions"] = json!([{
+        "id": "A1", "title": "T", "text": "", "state": "unverified", "evidence": [], "line": 20
+    }]);
+    doc["findings"] = json!([{
+        "id": "R1", "severity": "high", "title": "T", "text": "", "open": true, "line": 30
+    }]);
+    let parsed: Task = round_trip(doc);
+    assert_eq!(parsed.assumptions[0].state, "unverified");
+    assert!(parsed.assumptions[0].spike.is_none() && parsed.assumptions[0].spike_status.is_none());
+    assert!(parsed.findings[0].section.is_none() && parsed.findings[0].open);
+}
+
+#[test]
+fn an_assumption_with_no_state_and_a_finding_with_no_open_are_refused() {
+    let mut doc = proposal();
+    doc["assumptions"] =
+        json!([{ "id": "A1", "title": "T", "text": "", "evidence": [], "line": 20 }]);
+    assert!(serde_json::from_value::<Task>(doc).is_err());
+    let mut doc = proposal();
+    doc["findings"] =
+        json!([{ "id": "R1", "severity": "high", "title": "T", "text": "", "line": 30 }]);
+    assert!(serde_json::from_value::<Task>(doc).is_err());
 }
 
 #[test]

@@ -822,7 +822,16 @@ fn the_quality_part_keys_are_in_the_schema() {
     );
     assert_eq!(
         keys_of("Assumption", None),
-        set(&["evidence", "id", "line", "spike", "state", "text", "title"])
+        set(&[
+            "evidence",
+            "id",
+            "line",
+            "spike",
+            "spikeStatus",
+            "state",
+            "text",
+            "title"
+        ])
     );
     assert_eq!(
         keys_of("Finding", None),
@@ -831,6 +840,7 @@ fn the_quality_part_keys_are_in_the_schema() {
             "dismissed",
             "id",
             "line",
+            "open",
             "section",
             "severity",
             "target",

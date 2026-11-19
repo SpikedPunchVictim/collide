@@ -1,14 +1,19 @@
 import { lstat, readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import type { TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
+import { readAssumptions } from './assumptions.ts'
+import type { Assumption } from './assumptions.ts'
 import { readDecisions } from './decisions.ts'
-import type { ItemLookup } from './decisions.ts'
+import type { Decision, ItemLookup } from './decisions.ts'
 import { parseFeatures } from './features.ts'
+import { readFindings } from './findings.ts'
+import type { Finding } from './findings.ts'
 import { KNOWN_KINDS, PROPOSAL, readItem, stateOf } from './item.ts'
 import type { Item } from './item.ts'
 import { DEFAULT_LAYOUT, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { featuresOf, isBrokenLink } from './links.ts'
+import type { PartProblem } from './parts.ts'
 import { readItemFile } from './read-file.ts'
 
 const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
@@ -188,19 +193,46 @@ const lookupIn =
     const found = items.find((candidate) => candidate.item.id === id)
     if (found === undefined) return undefined
     const features = found.item.kind === PROPOSAL ? featuresOf(found).map((feature) => feature.id) : []
-    return { status: found.item.status, features }
+    return { status: found.item.status, features, kind: found.item.kind }
   }
+
+interface QualityParts {
+  decisions: Decision[]
+  assumptions: Assumption[]
+  findings: Finding[]
+  problems: PartProblem[]
+}
+
+/** A proposal's Decision log, Assumption ledger and Findings, with the problems of the three in line order. */
+function qualityPartsOf(found: FoundItem, featureIds: string[], items: readonly FoundItem[]): QualityParts {
+  if (found.item.kind !== PROPOSAL) return { decisions: [], assumptions: [], findings: [], problems: [] }
+  const lookup = lookupIn(items)
+  const { body, bodyLine } = found
+  const log = readDecisions(body, bodyLine, lookup)
+  const ledger = readAssumptions(body, bodyLine, lookup)
+  const own = new Set(featureIds)
+  for (const one of [...log.decisions, ...ledger.assumptions]) own.add(one.id)
+  const reviewed = readFindings(body, bodyLine, own)
+  const problems = [...log.problems, ...ledger.problems, ...reviewed.problems].sort((a, b) => a.line - b.line)
+  return { decisions: log.decisions, assumptions: ledger.assumptions, findings: reviewed.findings, problems }
+}
 
 /**
  * One item as the provider reports it. `body` is left out of `list`, which carries every item. A proposal also carries
- * its features and the problems of its Features part, and its Decision log with the problems of that part, which are
- * read from the body whether or not it is sent. `items` is the scan, which says what an evidence id names.
+ * its features and the problems of its Features part, and its Decision log, Assumption ledger and Findings with the
+ * problems of those parts, which are read from the body whether or not it is sent. `items` is the scan, which says what
+ * an evidence id or a spike names; a finding's `Target:` is read against the proposal's own features, decisions and
+ * assumptions.
  */
 export function toTask(found: FoundItem, withBody: boolean, items: readonly FoundItem[]): TaskInput {
   const { item } = found
   const isProposal = item.kind === PROPOSAL
   const { features, problems } = isProposal ? parseFeatures(found.body, found.bodyLine) : { features: [], problems: [] }
-  const log = isProposal ? readDecisions(found.body, found.bodyLine, lookupIn(items)) : { decisions: [], problems: [] }
+  const quality = qualityPartsOf(
+    found,
+    features.map((feature) => feature.id),
+    items,
+  )
   const partOf = found.epic === null ? [] : [{ type: 'part-of', to: found.epic }]
   // A private item says so in `fields.root`, over any `root` field the file has.
   const own = Object.keys(item.fields).length === 0 ? null : item.fields
@@ -220,7 +252,9 @@ export function toTask(found: FoundItem, withBody: boolean, items: readonly Foun
     ...(fields === null ? {} : { fields }),
     ...(features.length === 0 ? {} : { features }),
     ...(problems.length === 0 ? {} : { featureProblems: problems }),
-    ...(log.decisions.length === 0 ? {} : { decisions: log.decisions }),
-    ...(log.problems.length === 0 ? {} : { partProblems: log.problems }),
+    ...(quality.decisions.length === 0 ? {} : { decisions: quality.decisions }),
+    ...(quality.assumptions.length === 0 ? {} : { assumptions: quality.assumptions }),
+    ...(quality.findings.length === 0 ? {} : { findings: quality.findings }),
+    ...(quality.problems.length === 0 ? {} : { partProblems: quality.problems }),
   }
 }

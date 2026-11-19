@@ -3,8 +3,11 @@ import { ID_PATTERN } from './item.ts'
 import { readPart } from './parts.ts'
 import type { PartEntry, PartProblem, PartSpec } from './parts.ts'
 
-/** What the scan knows of an item: its status, and the features it has when it is a proposal (none otherwise). */
-export type ItemLookup = (id: string) => { status: string; features: string[] } | undefined
+/**
+ * What the scan knows of an item: its status, and the features it has when it is a proposal (none otherwise). `kind` is
+ * what a `Spike:` is checked against; a lookup that leaves it out names no spike.
+ */
+export type ItemLookup = (id: string) => { status: string; features: string[]; kind?: string } | undefined
 
 /** One piece of an `Evidence:` label. `status` is the cited item's, and `proposal` is the proposal of a feature. */
 export interface Evidence {
@@ -71,6 +74,12 @@ export function readEvidence(piece: string, lookup: ItemLookup): Cited {
   return { evidence }
 }
 
+/** The pieces of an `Evidence:` label's value, which are separated by commas, each read by `readEvidence`. */
+export function readEvidenceList(value: string, lookup: ItemLookup): Array<Cited & { piece: string }> {
+  const pieces = value.split(',').map((one) => one.trim()).filter((one) => one !== '')
+  return pieces.map((piece) => ({ piece, ...readEvidence(piece, lookup) }))
+}
+
 function decisionOf(entry: PartEntry, lookup: ItemLookup, problems: PartProblem[]): Decision {
   const { id } = entry
   const problem = (line: number, reason: string): void => void problems.push({ part: DECISION_PART.part, line, reason })
@@ -80,10 +89,9 @@ function decisionOf(entry: PartEntry, lookup: ItemLookup, problems: PartProblem[
     if (label.name === PASSED_ON) {
       if (label.value !== '') decision.passedOn.push(label.value)
     } else if (label.name === EVIDENCE) {
-      for (const piece of label.value.split(',').map((one) => one.trim()).filter((one) => one !== '')) {
-        const cited = readEvidence(piece, lookup)
+      for (const cited of readEvidenceList(label.value, lookup)) {
         decision.evidence.push(cited.evidence)
-        if (cited.problem !== undefined) problem(label.line, `${id} cites "${piece}": ${cited.problem}`)
+        if (cited.problem !== undefined) problem(label.line, `${id} cites "${cited.piece}": ${cited.problem}`)
       }
     } else if (seen.has(label.name)) {
       problem(label.line, `${id} has "${label.name}:" more than once; the first is kept`)

@@ -234,29 +234,34 @@ pub struct Decision {
     pub line: u32,
 }
 
-/// One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.
+/// One entry `A<n>` of an Assumptions part (0.10). A missing or invalid `state` reads `unverified`.
+// `state` is `unverified`, `verified`, `contradicted` or `accepted risk`. `spike` is the spike that would settle
+// the assumption, and `spike_status` is its status, when it names a spike.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Assumption {
     pub id: String,
     pub title: String,
     pub text: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
+    pub state: String,
     #[serde(default)]
     pub evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spike: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spike_status: Option<String>,
     pub line: u32,
 }
 
-/// One entry `R<n>` of a proposal's Findings part (0.10). `section` is `Red-team` or `Pre-mortem`. A finding with
-/// neither `accepted` nor `dismissed` is open.
+/// One entry `R<n>` of a Findings part (0.10). `open`: neither `accepted` nor `dismissed`.
+// `section` is `Red-team` or `Pre-mortem`, and is left out for an entry under neither heading. `severity` is as
+// written, so a bad one is still listed (and is a part problem).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Finding {
     pub id: String,
-    pub section: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
     pub severity: String,
     pub title: String,
     pub text: String,
@@ -266,6 +271,7 @@ pub struct Finding {
     pub accepted: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dismissed: Option<String>,
+    pub open: bool,
     pub line: u32,
 }
 

@@ -2,7 +2,7 @@
   "$defs": {
     "Assumption": {
       "additionalProperties": false,
-      "description": "One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.",
+      "description": "One entry `A<n>` of an Assumptions part (0.10). A missing or invalid `state` reads `unverified`.",
       "properties": {
         "evidence": {
           "default": [],
@@ -25,11 +25,14 @@
             "null"
           ]
         },
-        "state": {
+        "spikeStatus": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "state": {
+          "type": "string"
         },
         "text": {
           "type": "string"
@@ -42,6 +45,7 @@
         "id",
         "title",
         "text",
+        "state",
         "line"
       ],
       "type": "object"
@@ -265,7 +269,7 @@
     },
     "Finding": {
       "additionalProperties": false,
-      "description": "One entry `R<n>` of a proposal's Findings part (0.10). `section` is `Red-team` or `Pre-mortem`. A finding with\nneither `accepted` nor `dismissed` is open.",
+      "description": "One entry `R<n>` of a Findings part (0.10). `open`: neither `accepted` nor `dismissed`.",
       "properties": {
         "accepted": {
           "type": [
@@ -287,8 +291,14 @@
           "minimum": 0,
           "type": "integer"
         },
+        "open": {
+          "type": "boolean"
+        },
         "section": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "severity": {
           "type": "string"
@@ -308,10 +318,10 @@
       },
       "required": [
         "id",
-        "section",
         "severity",
         "title",
         "text",
+        "open",
         "line"
       ],
       "type": "object"

@@ -41,7 +41,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "One entry `A<n>` of a proposal's Assumptions part (0.10). `spike` is the spike that would settle it.",
+  "description": "One entry `A<n>` of an Assumptions part (0.10). A missing or invalid `state` reads `unverified`.",
   "properties": {
     "evidence": {
       "default": [],
@@ -64,11 +64,14 @@
         "null"
       ]
     },
-    "state": {
+    "spikeStatus": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "state": {
+      "type": "string"
     },
     "text": {
       "type": "string"
@@ -81,6 +84,7 @@
     "id",
     "title",
     "text",
+    "state",
     "line"
   ],
   "title": "Assumption",
