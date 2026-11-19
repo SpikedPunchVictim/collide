@@ -5,13 +5,16 @@
 
 use crate::item::Category;
 use crate::provider::Task;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The link type that blocks (the plan provider declares it `blocking: true`).
 const BLOCKED_BY: &str = "blocked-by";
 
 /// A `blocked-by` link whose target is no item.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UnknownTarget {
     pub from: String,
     pub to: String,

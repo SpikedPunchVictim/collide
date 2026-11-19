@@ -701,6 +701,69 @@ fn a_view_over_spikes_with_no_problem_says_nothing_and_json_carries_the_count() 
     assert!(err.contains("2 problem(s) in the parts"), "{err}");
 }
 
+/// A rig with two spikes and no view file of its own, so `spikes` is the plan pack's view.
+fn plain_spike_rig() -> Rig {
+    let record = |id: &str, folder: &str| {
+        (
+            format!(".collide/planning/spikes/{folder}/record.md"),
+            spike_text(id, "# Spike\n"),
+        )
+    };
+    let files = [
+        record("sp-0001-aa", "sp-0001-aa-one"),
+        record("sp-0002-bb", "sp-0002-bb-two"),
+    ];
+    let files: Vec<(&str, String)> = files
+        .iter()
+        .map(|(path, text)| (path.as_str(), text.clone()))
+        .collect();
+    Rig::with_files(&files)
+}
+
+#[test]
+fn a_bare_view_name_gives_the_same_list_as_the_full_name_and_the_same_json() {
+    let rig = plain_spike_rig();
+
+    let (code, bare, err) = rig.cli(&["tasks", "--view", "spikes"]);
+    let (full_code, full, full_err) = rig.cli(&["tasks", "--view", "collide/plan/spikes"]);
+
+    assert_eq!((code, full_code), (exit::OK, exit::OK), "{err}{full_err}");
+    assert_eq!(first_words(&bare), ["plan:sp-0001-aa", "plan:sp-0002-bb"]);
+    assert_eq!((&bare, &err), (&full, &full_err));
+    let (_, bare, _) = rig.cli(&["tasks", "--view", "spikes", "--json"]);
+    let (_, full, _) = rig.cli(&["tasks", "--view", "collide/plan/spikes", "--json"]);
+    assert_eq!(json(&bare)["view"], json(&full)["view"]);
+    assert_eq!(json(&bare)["view"]["name"], "collide/plan/spikes");
+}
+
+#[test]
+fn a_view_name_no_view_has_exits_3_and_lists_the_full_names() {
+    let rig = plain_spike_rig();
+
+    let (code, out, err) = rig.cli(&["tasks", "--view", "nope"]);
+
+    assert_eq!((code, out.as_str()), (exit::ID, ""));
+    for name in [
+        "ready",
+        "collide/plan/spikes",
+        "collide/plan/decisions-needed",
+    ] {
+        assert!(err.contains(name), "{err}");
+    }
+}
+
+#[test]
+fn the_built_in_ready_view_lists_what_the_ready_flag_lists() {
+    let rig = Rig::new();
+
+    let (code, by_view, err) = rig.cli(&["tasks", "--view", "ready"]);
+    let (_, by_flag, _) = rig.cli(&["tasks", "--ready"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(!by_view.is_empty(), "the fixture has ready tasks");
+    assert_eq!(by_view, by_flag);
+}
+
 #[test]
 fn json_of_a_spike_carries_its_claims_and_the_problems_of_its_claim_blocks() {
     let rig = spike_rig();

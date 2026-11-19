@@ -332,6 +332,18 @@ export interface ViewReport {
   part_problems?: number
   pass_budget_exhausted?: boolean
   steps?: string[][]
+  /**
+   * The `blocked-by` links of the built-in `ready` view that name no item: their tasks are not ready. Left out when
+   * there are none, and always for a view other than `ready`.
+   */
+  unknown_blockers?: UnknownTarget[]
   unmatched_exclude?: string[]
   unmatched_include?: string[]
+}
+/**
+ * A `blocked-by` link whose target is no item.
+ */
+export interface UnknownTarget {
+  from: string
+  to: string
 }

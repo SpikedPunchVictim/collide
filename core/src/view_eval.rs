@@ -22,7 +22,9 @@ use crate::corpus::{Corpus, Row};
 use crate::item::Category;
 use crate::owner::task::ViewReport;
 use crate::provider::Task;
+use crate::ready::UnknownTarget;
 use crate::view::{Closure, Follow, View, ViewError, check_view};
+use crate::view_builtin::{evaluate_ready, ready_view};
 use crate::view_expr::{
     Budgets, CompiledExpr, Estimate, ExprError, TaskVars, check_cost, compile_with_hook,
     dependencies, evaluate_pass,
@@ -64,9 +66,25 @@ impl From<ExprError> for ViewFailure {
 pub struct CompiledView {
     view: View,
     where_: Option<(CompiledExpr, Estimate)>,
+    /// A view core holds ([`crate::view_builtin`]): it has no `where`, and its members come from a rule.
+    builtin: bool,
 }
 
 impl CompiledView {
+    /// The built-in `ready` view ([`crate::view_builtin`]). It needs no check and no compile.
+    pub fn ready() -> CompiledView {
+        CompiledView {
+            view: ready_view(),
+            where_: None,
+            builtin: true,
+        }
+    }
+
+    /// Whether core holds this view's rule.
+    pub fn is_builtin(&self) -> bool {
+        self.builtin
+    }
+
     pub fn view(&self) -> &View {
         &self.view
     }
@@ -107,6 +125,7 @@ pub fn compile_view_with(
     Ok(CompiledView {
         view: view.clone(),
         where_,
+        builtin: false,
     })
 }
 
@@ -148,8 +167,11 @@ pub struct ViewResult {
     /// The closure's layers, in key order inside each. See the module comment.
     pub steps: Vec<Vec<String>>,
     /// The tasks of the closure that lie on a dependency cycle, in key order. When there are any, the last step is
-    /// the tasks the layering could not place: these, and the tasks that wait on them.
+    /// the tasks the layering could not place: these, and the tasks that wait on them. For the built-in `ready` view,
+    /// the tasks on a `blocked-by` cycle, none of which is ready.
     pub cycle: Vec<String>,
+    /// The `blocked-by` links of the built-in `ready` view that name no item. Empty for any other view.
+    pub unknown_blockers: Vec<UnknownTarget>,
     pub counts: ViewCounts,
 }
 
@@ -171,6 +193,7 @@ pub fn view_report(name: &str, result: &ViewResult) -> ViewReport {
         part_problems: wire_count(counts.part_problems),
         steps: result.steps.clone(),
         cycle: result.cycle.clone(),
+        unknown_blockers: result.unknown_blockers.clone(),
     }
 }
 
@@ -184,6 +207,9 @@ pub fn evaluate_view(
     corpus: &Corpus,
     budgets: &Budgets,
 ) -> Result<ViewResult, ViewFailure> {
+    if compiled.builtin {
+        return Ok(evaluate_ready(corpus));
+    }
     let view = &compiled.view;
     let rows = corpus.rows();
     let mut counts = ViewCounts {
@@ -235,6 +261,7 @@ pub fn evaluate_view(
         members,
         steps,
         cycle,
+        unknown_blockers: Vec::new(),
         counts,
     })
 }

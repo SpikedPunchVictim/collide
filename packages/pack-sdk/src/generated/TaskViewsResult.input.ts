@@ -14,6 +14,9 @@ export type ViewSource =
       pack: string
       type: 'pack'
     }
+  | {
+      type: 'builtin'
+    }
 /**
  * `closure:` follows one kind of edge, from a goal task: the prototype board's run order.
  */

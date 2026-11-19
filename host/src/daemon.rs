@@ -138,32 +138,33 @@ use crate::sampler::{Sampler, TICK};
 use crate::scratch;
 use crate::secret_store::{MemorySecretStore, SecretStore};
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
-use crate::sources::{Source, SourceError, Sources, SourcesConfig, changed_event};
+use crate::sources::{Source, SourceError, Sources, SourcesConfig, changed_event, plan};
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use crate::supervisor::SupervisorPolicy;
 use crate::views::{
-    BeforeParse, Loaded, SaveError, ViewCache, pack_candidates, personal_candidates, personal_dir,
-    repo_candidates, repo_dir, save_view,
+    BeforeParse, Loaded, Lookup, SaveError, ViewCache, builtin_candidates, find_view,
+    pack_candidates, personal_candidates, personal_dir, repo_candidates, repo_dir, save_view,
 };
 use crate::write_guard::{self, Applied, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig};
 use collide_core::change::{Actor, ActorKind};
 use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
 use collide_core::owner::{
-    BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardTrustParams,
-    BoardTrustReviewParams, ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams,
-    ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams,
-    ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
-    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice,
-    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult,
-    QueueItem, QueueListParams, QueueListResult, Request, Response, Routed, RpcError,
-    RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
-    RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams,
-    RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
-    TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams, TaskSaveViewParams,
-    TaskSaveViewResult, TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport,
-    ViewTarget, WriteQueued, code, encode_line, parse_request, route,
+    BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardSummary,
+    BoardTrustParams, BoardTrustReviewParams, ConfigGetParams, ConfigPackAddParams,
+    ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult,
+    ConfigPackUpdateParams, ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult,
+    DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture,
+    MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer,
+    QueueAnswerParams, QueueAnswerResult, QueueItem, QueueListParams, QueueListResult, Request,
+    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
+    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
+    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
+    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, TaskListParams,
+    TaskPreviewParams, TaskSaveViewParams, TaskSaveViewResult, TaskViewsParams, TaskViewsResult,
+    ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued, code, encode_line, parse_request,
+    route,
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
@@ -2827,11 +2828,12 @@ fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
             let root = checkout.root.display().to_string();
             let id = shared.store.open_board(&root).map_err(store_failed)?;
             BoardOpenResult {
-                board: Some(shared.config.lines().summary(
-                    &id,
-                    &root,
-                    Some(&checkout),
-                    &tools_path(shared),
+                board: Some(with_role_problems(
+                    shared,
+                    shared
+                        .config
+                        .lines()
+                        .summary(&id, &root, Some(&checkout), &tools_path(shared)),
                 )),
                 checks: vec![boards::git_repo_ok(&checkout)],
             }
@@ -2928,6 +2930,20 @@ fn board_trust_review(
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
+/// `summary` with the problems the board's `roles` setting has against the planning source's kinds (ts-0135-cx),
+/// added to its line. They are known once the source has started, which is at the first look at the board's tasks.
+fn with_role_problems(shared: &Shared, mut summary: BoardSummary) -> BoardSummary {
+    let problems = shared.sources.role_problems(&summary.id);
+    if let Some(line) = summary.lines.first_mut() {
+        for problem in problems {
+            if !line.problems.contains(&problem) {
+                line.problems.push(problem);
+            }
+        }
+    }
+    summary
+}
+
 /// `board.list`: the boards opened before, from the store. A board's line is the branch its checkout is on now, read
 /// from git; a board whose folder is gone or is no longer a checkout is listed with no line.
 fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
@@ -2940,7 +2956,10 @@ fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
         .into_iter()
         .map(|board| {
             let checkout = boards::checkout_of(Path::new(&board.root), &shared.git_env).ok();
-            lines.summary(&board.id, &board.root, checkout.as_ref(), &tools)
+            with_role_problems(
+                shared,
+                lines.summary(&board.id, &board.root, checkout.as_ref(), &tools),
+            )
         })
         .collect();
     Ok(serde_json::to_value(BoardListResult { boards }).expect("a result is JSON"))
@@ -2969,10 +2988,11 @@ fn source_failed(error: SourceError) -> RpcError {
 
 /// `task.list` (ts-0116-wh, ts-0119-tj): the board's corpus, through a view when the request names or gives one. It
 /// starts the board's corpus if it has not, and answers at once with the cached tasks (`refreshing`) while the first
-/// listing runs. A named view is one of [`task_views`]: an unknown name is `NOT_FOUND`, and a view that has an error
-/// lists no task and carries the error in `view`. An inline view is checked as a saved one is, and a bad one is
-/// `INVALID_PARAMS` with the reason. `ready`, `kind` and `checkout` narrow what the view gives, `limit` and `cursor`
-/// page it, and the board-wide lists come with the first page.
+/// listing runs. A named view is one of [`task_views`], by its full name or by its bare one ([`find_view`],
+/// ts-0135-cx): a name no view has is `NOT_FOUND`, a bare name several views have is `INVALID_PARAMS` that lists them,
+/// and a view that has an error lists no task and carries the error in `view`. An inline view is checked as a saved one
+/// is, and a bad one is `INVALID_PARAMS` with the reason. `ready`, `kind` and `checkout` narrow what the view gives,
+/// `limit` and `cursor` page it, and the board-wide lists come with the first page.
 fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
     let params: TaskListParams = read_params("task.list", params)?;
     let root = board_root(shared, &params.board)?;
@@ -2993,21 +3013,17 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
             ))
         }
         Some(ViewRef::Named { name }) => {
-            let loaded = loaded_views(shared, &params.board, &root, &service)?;
-            let found = loaded
-                .iter()
-                .find(|view| &view.view.name == name)
-                .ok_or_else(|| {
-                    let names: Vec<&str> =
-                        loaded.iter().map(|view| view.view.name.as_str()).collect();
-                    RpcError::new(
-                        code::NOT_FOUND,
-                        format!(
-                            "the board has no view {name:?}; its views are: {}",
-                            names.join(", ")
-                        ),
-                    )
-                })?;
+            let BoardViews { loaded, supplying } =
+                loaded_views(shared, &params.board, &root, &service)?;
+            let found = find_view(&loaded, name, &supplying).map_err(|lookup| {
+                let kind = match lookup {
+                    Lookup::Missing { .. } => code::NOT_FOUND,
+                    Lookup::Ambiguous { .. } => code::INVALID_PARAMS,
+                };
+                RpcError::new(kind, lookup.message())
+            })?;
+            // The report names the view found, so a bare name and the full one are answered alike.
+            let name = &found.view.name;
             Some(match viewed(shared, &params.board, &service, found) {
                 Ok(result) => (
                     view_report(name, &result),
@@ -3041,19 +3057,26 @@ fn task_views(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
     let root = board_root(shared, &params.board)?;
     let service = corpus_of(shared, &params.board, &root)?;
     let views = loaded_views(shared, &params.board, &root, &service)?
+        .loaded
         .iter()
         .map(|loaded| view_entry(shared, &params.board, &service, loaded))
         .collect();
     Ok(serde_json::to_value(TaskViewsResult { views }).expect("a result is JSON"))
 }
 
-/// The board's views in the order of precedence, compiled.
+/// The board's views in the order of precedence, compiled, and the packs that supply a source of its line.
+struct BoardViews {
+    loaded: Vec<Loaded>,
+    supplying: Vec<String>,
+}
+
+/// The board's views, `ready` first, then the person's, the repo's and the packs' ([`crate::views`]).
 fn loaded_views(
     shared: &Shared,
     board: &str,
     root: &str,
     service: &crate::corpus_service::BoardCorpus,
-) -> Result<Vec<Loaded>, RpcError> {
+) -> Result<BoardViews, RpcError> {
     let lines = shared.config.lines();
     let line = lines
         .for_sources(
@@ -3064,15 +3087,24 @@ fn loaded_views(
             &tools_path(shared),
         )
         .map_err(line_error)?;
-    let mut candidates = match lines.home() {
-        Some(home) => personal_candidates(home, board)
-            .map_err(|message| RpcError::new(code::CONFLICT, message))?,
-        None => Vec::new(),
-    };
+    let mut candidates = builtin_candidates();
+    if let Some(home) = lines.home() {
+        candidates.extend(
+            personal_candidates(home, board)
+                .map_err(|message| RpcError::new(code::CONFLICT, message))?,
+        );
+    }
     candidates.extend(repo_candidates(&line));
     candidates.extend(pack_candidates(&line));
     let tasks = service.read(|corpus| corpus.rows().len());
-    Ok(shared.views.assemble(candidates, tasks))
+    Ok(BoardViews {
+        loaded: shared.views.assemble(candidates, tasks),
+        supplying: plan(&line.line)
+            .sources
+            .into_iter()
+            .map(|planned| planned.pack)
+            .collect(),
+    })
 }
 
 fn evaluated(

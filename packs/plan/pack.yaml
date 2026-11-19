@@ -6,6 +6,20 @@ requires:
 providers:
   plan: { script: src/main.ts }
 
+# Views a board adopts by name (0.10, Views): `collide/plan/spikes` and `collide/plan/decisions-needed`, or just
+# `spikes` while no other pack has that name. `ready` is built into core and is not declared here: a view's expression
+# sees one task, and whether a task is ready depends on its blockers' states.
+views:
+  spikes:
+    name: spikes
+    where: "kind == 'spike'"
+  # What waits for a person to decide: an open question, or a proposal that is proposed. `queue: true` feeds a Queue
+  # lane (0.11, Queue).
+  decisions-needed:
+    name: decisions-needed
+    where: "(kind == 'question' && category == 'ready') || (kind == 'proposal' && status == 'proposed')"
+    queue: true
+
 # Where the shared planning folder is (0.10, Planning sources). The repo's `.collide/config.yaml` sets it, so the whole
 # team reads and writes one place; the user's files may not (`repoOnly`). The provider checks every path at start and
 # refuses one that is outside the repository, under `.git/` or over a protected Collide file (`src/layout.ts`).
@@ -33,3 +47,19 @@ config:
       code:
         type: string
         description: Where a spike's scripts go. Accepted now; it has no effect until Stage 9.
+  roles:
+    type: object
+    description: Which kinds of the planning source play each role. A kind the source lacks is reported on the line.
+    default:
+      proposal: [proposal]
+      question: [question]
+      spike: [spike]
+      decision: [proposal, question]
+      deferred: []
+    additionalProperties: false
+    properties:
+      proposal: { type: array, items: { type: string }, description: Kinds that hold a proposal. }
+      question: { type: array, items: { type: string }, description: Kinds that hold an open question. }
+      spike: { type: array, items: { type: string }, description: Kinds that hold a spike. }
+      decision: { type: array, items: { type: string }, description: Kinds that wait for a decision. }
+      deferred: { type: array, items: { type: string }, description: Kinds that can be put off. }

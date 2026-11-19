@@ -40,6 +40,7 @@ use collide_core::provider::{
     ApplyParams, ApplyResult, ChangeCause, GetParams, GetResult, InitializeParams,
     InitializeResult, ListParams, ListResult, PreviewResult, TaskChanged, WatchParams,
 };
+use collide_core::roles::{check_roles, read_roles};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -147,6 +148,30 @@ pub fn plan(line: &LoadedLine) -> Plan {
         });
     }
     plan
+}
+
+/// The name of the planning source: the provider `collide/plan` declares, which a board's own pack may replace.
+pub const PLANNING_SOURCE: &str = "plan";
+
+/// What `roles` gets wrong against the kinds `declared` by `planned`, when it is the planning source (ts-0135-cx; 0.10,
+/// Planning sources): a kind a role names that the source does not have, one line each. A value that is not a map of
+/// roles is a problem too. The source works either way.
+fn role_problems(
+    planned: &Planned,
+    roles: Option<&serde_json::Value>,
+    declared: &InitializeResult,
+) -> Vec<String> {
+    let Some(roles) = roles.filter(|_| planned.name == PLANNING_SOURCE) else {
+        return Vec::new();
+    };
+    match read_roles(roles) {
+        Ok(roles) => check_roles(&roles, &planned.name, &declared.kinds)
+            .problems
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        Err(message) => vec![message],
+    }
 }
 
 /// What a line reports about its sources, one line each: the names two packs declare.
@@ -355,6 +380,8 @@ struct Started {
     provider: Arc<SupervisedProvider>,
     init: InitializeResult,
     instance: u64,
+    /// What the source's `roles` setting gets wrong against the kinds it declared ([`role_problems`]).
+    problems: Vec<String>,
 }
 
 /// One source of one board, and its provider once it has started.
@@ -556,6 +583,7 @@ impl Sources {
             config,
             root: board.root.display().to_string(),
         };
+        let roles = init.config.get("roles").cloned();
         let declared = match provider.initialize(&init) {
             Ok(declared) => declared,
             Err(error) => {
@@ -574,11 +602,28 @@ impl Sources {
         }
         let running = Started {
             provider,
+            problems: role_problems(planned, roles.as_ref(), &declared),
             init: declared,
             instance: self.instances.fetch_add(1, Ordering::SeqCst) + 1,
         };
         *started = Some(running.clone());
         Ok(running)
+    }
+
+    /// What the board's `roles` setting gets wrong against the planning source's kinds, one line each. Read from the
+    /// providers that have started, so nothing is started to answer: a source that has not started has none yet.
+    pub fn role_problems(&self, board: &str) -> Vec<String> {
+        let slots: Vec<Arc<Slot>> = locked(&self.boards)
+            .get(board)
+            .map(|slots| slots.values().cloned().collect())
+            .unwrap_or_default();
+        let mut problems: Vec<String> = Vec::new();
+        for slot in slots {
+            if let Some(started) = locked(&slot.started).as_ref() {
+                problems.extend(started.problems.iter().cloned());
+            }
+        }
+        problems
     }
 
     /// What a board's line plans, with no provider started: the names of its sources besides `scratch`, and the

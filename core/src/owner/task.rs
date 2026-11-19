@@ -10,6 +10,7 @@ use crate::change::{ItemState, LatestRun};
 use crate::hook::HookLink;
 use crate::item::{LinkTypeDecl, OpDecl};
 use crate::provider::{ApplyParams, ApplyResult, Collection, Task, TaskCollision, TaskInvalid};
+use crate::ready::UnknownTarget;
 use crate::view::View;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -118,6 +119,10 @@ pub struct ViewReport {
     pub steps: Vec<Vec<String>>,
     #[serde(default)]
     pub cycle: Vec<String>,
+    /// The `blocked-by` links of the built-in `ready` view that name no item: their tasks are not ready. Left out when
+    /// there are none, and always for a view other than `ready`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unknown_blockers: Vec<UnknownTarget>,
 }
 
 impl ViewReport {
@@ -242,6 +247,8 @@ pub enum ViewSource {
     Pack {
         pack: String,
     },
+    /// A view core holds, which no expression can say (`ready`).
+    Builtin {},
 }
 
 /// One view of the board, with its counts. `error_count` is the items that failed to read on this view, and `error`

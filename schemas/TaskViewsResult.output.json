@@ -248,6 +248,20 @@
             "pack"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A view core holds, which no expression can say (`ready`).",
+          "properties": {
+            "type": {
+              "const": "builtin",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
         }
       ]
     }

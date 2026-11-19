@@ -38,6 +38,7 @@ use crate::provider::{
     ChangeCause, Collection, InitializeResult, ListResult, ProviderEvent, RemovedCause, Task,
     TaskChanged, TaskCollision, TaskInvalid, TaskRemoved,
 };
+use crate::ready::UnknownTarget;
 use crate::short_id;
 use crate::view_expr::check_task_caps;
 use serde_json::Value;
@@ -271,6 +272,16 @@ struct OutLink<'a> {
     target: Option<String>,
     shown: String,
     feature: Option<String>,
+}
+
+/// What the ready rule found over the whole corpus ([`Corpus::readiness`]), as keys.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CorpusReadiness {
+    pub ready: BTreeSet<String>,
+    /// Each `blocked-by` cycle, its keys in order, one source after another.
+    pub cycles: Vec<Vec<String>>,
+    /// Each `blocked-by` that names no item, in the order of the items.
+    pub unknown_blockers: Vec<UnknownTarget>,
 }
 
 /// What a board holds. See the module comment.
@@ -950,9 +961,10 @@ impl Corpus {
             .map_or_else(String::new, |state| state.kind_of(task))
     }
 
-    /// The keys the ready rule lists, each source on its own: a `blocked-by` target is a name in the holder's source.
-    fn ready_ids(&self) -> BTreeSet<String> {
-        let mut ready = BTreeSet::new();
+    /// The ready rule over the corpus, each source on its own: a `blocked-by` target is a name in the holder's source.
+    /// Keys are qualified (`plan:ts-0001-aa`). The `to` of an unknown blocker stays as it was written.
+    pub fn readiness(&self) -> CorpusReadiness {
+        let mut found = CorpusReadiness::default();
         for source in self.sources.keys() {
             let tasks: Vec<Task> = self
                 .entries
@@ -960,14 +972,34 @@ impl Corpus {
                 .filter(|entry| &entry.source == source)
                 .map(|entry| self.shown(entry).clone())
                 .collect();
-            ready.extend(
-                crate::ready::readiness(&tasks)
-                    .ready
-                    .into_iter()
-                    .map(|id| qualified(source, &id)),
+            let result = crate::ready::readiness(&tasks);
+            found
+                .ready
+                .extend(result.ready.iter().map(|id| qualified(source, id)));
+            found.cycles.extend(
+                result
+                    .cycles
+                    .iter()
+                    .map(|cycle| cycle.iter().map(|id| qualified(source, id)).collect()),
             );
+            found
+                .unknown_blockers
+                .extend(
+                    result
+                        .unknown_targets
+                        .into_iter()
+                        .map(|unknown| UnknownTarget {
+                            from: qualified(source, &unknown.from),
+                            to: unknown.to,
+                        }),
+                );
         }
-        ready
+        found
+    }
+
+    /// The keys the ready rule lists.
+    fn ready_ids(&self) -> BTreeSet<String> {
+        self.readiness().ready
     }
 
     fn divergent_keys(&self) -> Vec<String> {

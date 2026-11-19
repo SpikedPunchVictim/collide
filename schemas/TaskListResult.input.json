@@ -787,6 +787,23 @@
       ],
       "type": "object"
     },
+    "UnknownTarget": {
+      "additionalProperties": false,
+      "description": "A `blocked-by` link whose target is no item.",
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
     "ViewReport": {
       "additionalProperties": false,
       "description": "What a view reports for one evaluation (0.10, Views): why it has no members, and what went wrong on the way. A clean\nview has no `error`, no counts and no unmatched keys. `steps` and `cycle` are the closure's run order.",
@@ -867,6 +884,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "type": "array"
+        },
+        "unknown_blockers": {
+          "description": "The `blocked-by` links of the built-in `ready` view that name no item: their tasks are not ready. Left out when\nthere are none, and always for a view other than `ready`.",
+          "items": {
+            "$ref": "#/$defs/UnknownTarget"
           },
           "type": "array"
         },

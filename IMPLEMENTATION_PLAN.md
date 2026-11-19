@@ -2078,7 +2078,8 @@ Collide plays the lead, so it does all four, through the pack.
 - `views:`, `checklists:` and `points:` are pack keys. A board adopts a pack's views by name.
 - `collide/plan`'s settings live in `.collide/config.yaml`:
   - `layout` (`root`, `paths.<kind>`, `code`, `previous`), which is not `overridable`;
-  - `roles`, the kind-to-role mapping, which a provider's role tags fill by default.
+  - `roles`, the kind-to-role mapping, which a provider's role tags fill by default. It is not `overridable` (the repo's
+    value wins) and not repo-only, so a person may map roles for a repo with no `.collide/config.yaml` (`ts-0135-cx`).
 
 ### 0.8 Data model (core)
 
@@ -2472,6 +2473,14 @@ layout: { default: board, groupBy: category }
 - A view's `workflow:` resolves on the line it launches on. It is an error if that line lacks the workflow.
 - Launching from a view starts a group run of its `ready` tasks (Stage 11). A dependent starts only once its
   dependencies are done at the base ref, merged by `integrate`, not merely started earlier.
+- **Built-in and pack views** (`ts-0135-cx`). Core holds `ready`: the tasks the slice's `--ready` lists (the same
+  readiness rule), in the corpus's order, with a `blocked-by` cycle in the report's `cycle` and an unknown blocker in
+  its `unknown_blockers`. It has no `where`, its source is `builtin`, and it comes first, so a file or pack view named
+  `ready` is listed with an error. `collide/plan` declares `spikes` and `decisions-needed` (`queue: true`: an open
+  question, or a proposal that is `proposed`), listed as `collide/plan/spikes` and `collide/plan/decisions-needed`. A
+  view may be named by the part after its last `/` when one view has it, or when only one of those that do comes from a
+  pack that supplies a source of the board; otherwise the error names them all. The daemon resolves the name, so the app
+  and the CLI agree; a name no view has is `NOT_FOUND` (CLI exit 3) and a tie is `INVALID_PARAMS` (exit 1).
 
 **Planning sources** (owner, 2026-11-13; `docs/research/planning.md`):
 - **A built-in markdown provider** in `collide/plan`, for a repo with no planning system:
@@ -2657,8 +2666,12 @@ layout: { default: board, groupBy: category }
     path" chip, and Collide offers Move: a `git mv` committed with the config change. An entry leaves `previous`
     only when nothing remains there;
   - the shared root is data, outside the trust hash: a planning file cannot declare a hook, gate or observer.
-- **A board has one planning source.** A role that source lacks either maps onto a kind it has, or is off with a
-  reason. If the board opts in, that role is held in markdown, with a badge (owner, 2026-11-13).
+- **A board has one planning source.** A role that source lacks either maps onto a kind it has, or is off with a reason.
+  If the board opts in, that role is held in markdown, with a badge (owner, 2026-11-13). `roles` maps each role
+  (`proposal`, `question`, `spike`, `decision`, `deferred`) to kinds; the default is the markdown provider's own
+  (`decision` is `proposal` and `question`, `deferred` is none), and a person's map replaces it whole. When the source
+  starts, each kind a role names that the source lacks is a problem on the board's line, naming the role and the kind,
+  and a role with no kind, or with none the source has, is off with the reason. The source still works (`ts-0135-cx`).
 - **Share** is the move op. The markdown provider moves items from the private root to its configured path, under the
   same ids. A team system's provider writes through that system's CLI into that system's own paths, and a backend that
   is not branch-scoped publishes in its own way. `record` commits exactly the files written.

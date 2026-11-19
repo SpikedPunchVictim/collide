@@ -2,7 +2,8 @@
 //! members are worked out again. [`crate::daemon`] turns these into `task.views`, `task.list` with a view and
 //! `task.save_view`.
 //!
-//! **Three places, in this order.** The person's own files, `~/.config/collide/boards/<board-id>/views/*.yaml`: they
+//! **Four places, in this order.** The views core holds (`ready`, [`builtin_candidates`]), which no file can replace.
+//! The person's own files, `~/.config/collide/boards/<board-id>/views/*.yaml`: they
 //! are global to the board, read from the file system at each call, and not hashed. The repo's, `.collide/views/*.yaml`
 //! as the board's line has them: read from the blobs of the commit the line names, never from the working tree, and
 //! only while the line is trusted, because the trust hash covers each view's blob id. A pack's, from its manifest's
@@ -10,8 +11,10 @@
 //! built-in, added or linked pack's does not.
 //!
 //! **One name, one view.** The first view of a name in that order is the view; each later one is listed with an
-//! error that says so. A file that does not parse, is not trusted yet or is too big is listed too, under its file name
-//! without `.yaml`, with an empty view and the reason: one bad file never hides the others.
+//! error that says so. **A bare name** (`spikes` for `collide/plan/spikes`) is found by [`find_view`]: the whole name
+//! first, then the part after the last `/` when one view has it, or when only one of the views that do is a pack that
+//! supplies a source of the board. A file that does not parse, is not trusted yet or is too big is listed too, under
+//! its file name without `.yaml`, with an empty view and the reason: one bad file never hides the others.
 //!
 //! **Cost.** A view is compiled, and its cost estimated, each time the views are listed ([`compile_view_with`]), so a
 //! view that is too costly has its error before anything is evaluated. What a view's members are is worked out
@@ -28,6 +31,7 @@ use collide_core::corpus::Corpus;
 use collide_core::owner::{TrustState, ViewSource};
 use collide_core::resolve::is_safe_token;
 use collide_core::view::View;
+use collide_core::view_builtin::ready_view;
 use collide_core::view_eval::{
     CompiledView, ViewFailure, ViewResult, compile_view_with, evaluate_view,
 };
@@ -211,6 +215,12 @@ pub fn repo_candidates(line: &SourceLine) -> Vec<Candidate> {
         .collect()
 }
 
+/// The views core holds: `ready`, first in the order of precedence, so a file cannot make `ready` mean something other
+/// than what `--ready` lists.
+pub fn builtin_candidates() -> Vec<Candidate> {
+    vec![Candidate::found(ready_view(), ViewSource::Builtin {})]
+}
+
 /// The views of the line's packs, named `pack/name`, in pack order. A pack whose code the line's trust covers gives
 /// none to a line that is not trusted.
 pub fn pack_candidates(line: &SourceLine) -> Vec<Candidate> {
@@ -313,9 +323,13 @@ impl ViewCache {
                 .or_insert_with(|| source.clone());
             let mut compiled = None;
             if error.is_none() {
-                match self.compile(&view, tasks) {
-                    Ok(done) => compiled = Some(done),
-                    Err(failure) => error = Some(failure.to_string()),
+                if source == (ViewSource::Builtin {}) {
+                    compiled = Some(CompiledView::ready());
+                } else {
+                    match self.compile(&view, tasks) {
+                        Ok(done) => compiled = Some(done),
+                        Err(failure) => error = Some(failure.to_string()),
+                    }
                 }
             }
             loaded.push(Loaded {
@@ -338,7 +352,11 @@ impl ViewCache {
         stamp: u64,
         corpus: impl FnOnce() -> Corpus,
     ) -> Result<Arc<ViewResult>, ViewFailure> {
-        let key = serde_json::to_string(compiled.view()).expect("a view is JSON");
+        let key = if compiled.is_builtin() {
+            format!("builtin {}", compiled.view().name)
+        } else {
+            serde_json::to_string(compiled.view()).expect("a view is JSON")
+        };
         if let Some(found) = self.kept(board, stamp, &key) {
             return found;
         }
@@ -382,6 +400,11 @@ impl ViewCache {
 
 fn shadowed(name: &str, first: &ViewSource) -> String {
     let place = match first {
+        ViewSource::Builtin {} => {
+            return format!(
+                "`{name}` is a built-in view, and that one is used: no file replaces it"
+            );
+        }
         ViewSource::Personal {} => "personal".to_string(),
         ViewSource::Repo {} => "repo".to_string(),
         ViewSource::Pack { pack } => format!("`{pack}` pack"),
@@ -389,6 +412,77 @@ fn shadowed(name: &str, first: &ViewSource) -> String {
     format!(
         "`{name}` is also a {place} view, and that one is used: personal views come first, then the repo's"
     )
+}
+
+// ---- finding a view by its name -------------------------------------------------------------------------------------
+
+/// Why no view was found for a name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lookup {
+    /// No view has the name, whole or as the part after a `/`. `names` are the views there are.
+    Missing { name: String, names: Vec<String> },
+    /// Several views have the bare name, and no one pack of them supplies a source of the board. `names` are theirs.
+    Ambiguous { name: String, names: Vec<String> },
+}
+
+impl Lookup {
+    /// The words the person reads.
+    pub fn message(&self) -> String {
+        match self {
+            Lookup::Missing { name, names } => format!(
+                "the board has no view {name:?}; its views are: {}",
+                names.join(", ")
+            ),
+            Lookup::Ambiguous { name, names } => format!(
+                "more than one view is called {name:?}: say which with its full name: {}",
+                names.join(", ")
+            ),
+        }
+    }
+}
+
+/// The view `name` names. The whole name first. Then the part after the last `/` of a pack view's name: one view with
+/// it is the view, and of several the one whose pack is in `supplying` (the packs that give a source of the board, so
+/// the board's own pack over the built-in one) when exactly one is.
+pub fn find_view<'a>(
+    loaded: &'a [Loaded],
+    name: &str,
+    supplying: &[String],
+) -> Result<&'a Loaded, Lookup> {
+    if let Some(found) = loaded.iter().find(|view| view.view.name == name) {
+        return Ok(found);
+    }
+    let mut named: Vec<&Loaded> = Vec::new();
+    for view in loaded {
+        let bare = view.view.name.rsplit_once('/').map(|(_, bare)| bare);
+        if bare == Some(name) && named.iter().all(|held| held.view.name != view.view.name) {
+            named.push(view);
+        }
+    }
+    let names = |views: &[&Loaded]| views.iter().map(|view| view.view.name.clone()).collect();
+    match named.as_slice() {
+        [] => Err(Lookup::Missing {
+            name: name.to_string(),
+            names: loaded.iter().map(|view| view.view.name.clone()).collect(),
+        }),
+        [only] => Ok(only),
+        several => {
+            let own: Vec<&Loaded> = several
+                .iter()
+                .copied()
+                .filter(|view| {
+                    matches!(&view.source, ViewSource::Pack { pack } if supplying.contains(pack))
+                })
+                .collect();
+            match own.as_slice() {
+                [only] => Ok(only),
+                _ => Err(Lookup::Ambiguous {
+                    name: name.to_string(),
+                    names: names(several),
+                }),
+            }
+        }
+    }
 }
 
 // ---- writing ----------------------------------------------------------------------------------------------------

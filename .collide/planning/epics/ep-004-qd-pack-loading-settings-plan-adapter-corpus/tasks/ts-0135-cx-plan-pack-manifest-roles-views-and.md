@@ -91,4 +91,74 @@ Write these first.
 - Stage 4c item (revision 23 scope, split 2026-11-18). Items of Stage 4c run one at a time, in id order, because they
   share `core`, `host`, `packs/plan` and the generated files.
 - Nothing here runs a real `claude`. No dependency is added.
-- Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+- Owner decisions (2026-11-18, at the build): the item's choices as it recommends, and the builder's decisions 1 to 7 as
+  built, on the owner's delegation. At review: decision 6 as written says a role whose kinds are all missing is not a
+  problem, but the code and the `adr` test make each missing kind a problem and the role off as well, which is what the
+  item's criterion asks; the plan text says so. The views are `collide/plan/spikes` and `collide/plan/decisions-needed`
+  (the pack's name is `collide/plan`), not `collide/spikes` as the item's criterion wrote; `pack.yaml`'s comment is
+  fixed. The builder's plan text (decision 8) is applied to 0.7 and 0.10. Mutations caught at review: `decisions-needed`
+  taking every proposal, the all-missing role left on, and a miss listing no names.
+
+### Built
+
+- `core/src/view_builtin.rs` (new): `READY`, `ready_view`, `evaluate_ready`. `core/src/corpus.rs`: `CorpusReadiness`
+  and `Corpus::readiness` (ready keys, cycles, unknown blockers, per source); `ready_ids` now reads it, so `--ready` and
+  the view agree by construction. `core/src/ready.rs`: `UnknownTarget` is a wire type. `core/src/view_eval.rs`:
+  `CompiledView::ready`, `is_builtin`; `evaluate_view` hands a built-in to `evaluate_ready`; `ViewResult` and
+  `view_report` carry `unknown_blockers`. `core/src/owner/task.rs`: `ViewSource::Builtin {}` and
+  `ViewReport.unknown_blockers` (left out when empty). The cycle uses `ViewReport.cycle`.
+- `core/src/roles.rs` (new): `Roles`, `read_roles`, `check_roles`, `RoleProblem`, `RoleCheck`.
+- `packs/plan/pack.yaml`: views `spikes` and `decisions-needed` (`queue: true`), and the `roles` setting (object of
+  five lists, `additionalProperties: false`, default the plan pack's own mapping, `overridable: false`, not
+  `repoOnly`). `decisions-needed` is `(kind == 'question' && category == 'ready') || (kind == 'proposal' && status ==
+  'proposed')`. `packs/plan/src/item.ts` maps the question status `open` to category `ready`, so the item's
+  expression is what the code says.
+- `host/src/views.rs`: `builtin_candidates`, the built-in first in precedence (a file or pack view named `ready` is
+  listed with an error), a cache key for it, `Lookup` and `find_view` (whole name, then the part after the last `/`;
+  a tie goes to the one pack that supplies a source of the board). `host/src/daemon.rs`: `task_list` uses `find_view`
+  (a miss is `NOT_FOUND`, a tie is `INVALID_PARAMS`, both list names); `BoardViews` carries the supplying packs from
+  `sources::plan`; `with_role_problems` adds the roles problem to `board.list` and `board.open`.
+  `host/src/sources.rs`: `role_problems`, run at the planning source's start, where kinds are known.
+- `pnpm gen` rewrote `schemas/Task{List,Views}Result.*.json` and the matching `pack-sdk` generated files. The app test
+  doubles under `app/test/support/` need no change: the new keys are optional on the wire.
+- Tests. `core/tests/view_builtin.rs` (10), `core/tests/plan_roles_and_views.rs` (17), `host/tests/views_find.rs` (9),
+  `host/tests/daemon_plan_views.rs` (10, through the built plan pack), `host/tests/task_daemon_cli.rs` (3:
+  `a_bare_view_name_gives_the_same_list_as_the_full_name_and_the_same_json`,
+  `a_view_name_no_view_has_exits_3_and_lists_the_full_names`,
+  `the_built_in_ready_view_lists_what_the_ready_flag_lists`). The CLI tests run the daemon over a temp root as the
+  file's other tests do.
+- Seen red at runtime, by stubbing and then restoring: `evaluate_ready` returning an empty result failed 8 of 10 in
+  `view_builtin` and `ready_is_what_the_ready_filter_lists_...` and
+  `a_view_file_named_ready_cannot_replace_the_built_in_one`. Breaking the bare-name step of `find_view` failed 4 in
+  `views_find`, and 2 in `daemon_plan_views` and 1 CLI test. Breaking the tie-break failed 1 in `views_find` and 1 in
+  `daemon_plan_views`. Breaking the missing-kind check in `check_roles` failed 2 in `plan_roles_and_views` and 1 in
+  `daemon_plan_views`. `pack.yaml` at its old text failed 10 in `plan_roles_and_views` and 7 in `daemon_plan_views`.
+  The CLI test for a miss and the default-roles test pass against the old code by nature (a miss was already an
+  error; the default has no problem).
+
+### Decisions for the owner
+
+1. **The built-in `ready` is first in precedence and cannot be shadowed.** A file or pack view of that name is listed
+   with an error. Alternative: let a personal view replace it. Recommend as built: `--ready` and the view must agree.
+2. **A bare-name tie goes to the pack that supplies a source of the board** (`sources::plan` pack names), else it is an
+   error naming both views. Alternative: the CLI alone breaks ties. Recommend as built: the app then agrees.
+3. **A tie is `INVALID_PARAMS` (CLI exit 1); a miss is `NOT_FOUND` (exit 3).** Alternative: exit 10 for both, as a
+   view error. Recommend as built: the request is wrong, not the view.
+4. **The report is named by the full name found**, so a bare name and a full name give one report.
+5. **The roles check runs when the planning source starts** and shows in the `board.list` and `board.open` line
+   problems, not in `trust_review`. The tasks still list. Alternative: refuse the line. Recommend as built.
+6. **A role with no kind, or whose kinds are all missing, is off with a reason in `RoleCheck.off`, and is not a
+   problem.** A kind missing from a role that has others is a problem. `roles` replaces the default as a whole, so a
+   role left out of a user's map is off.
+7. **`save_view` does not refuse the name `ready`;** the saved file is listed with the shadow error. Alternative:
+   refuse at save. Recommend a later item if wanted.
+8. **Plan text to propose.** 0.10 Views: the built-in `ready` view, `ViewSource` `builtin`, `unknown_blockers` in the
+   report, bare-name resolution and its tie-break. 0.10 Planning sources: the roles check and where it shows.
+   0.7: `roles` is `overridable: false`, not `repoOnly`.
+
+### Not done, by design
+
+- CLI stderr lines for the `ready` cycle and unknown blockers: `ts-0136-rr`. Their display in the app: Stage 6.
+- Queue lanes that read `queue: true`: Stage 6.
+- Provider role tags as defaults: Stage 12.
+- A `Follow` variant: none needed, as the item decided.
