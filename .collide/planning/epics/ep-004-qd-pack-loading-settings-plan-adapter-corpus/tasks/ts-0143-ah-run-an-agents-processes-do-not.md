@@ -1,7 +1,7 @@
 ---
 id: ts-0143-ah
 kind: task
-status: ready
+status: done
 title: "Run: an agent's processes do not carry the runtime mark, so a stop signals them"
 owners: []
 links: []
