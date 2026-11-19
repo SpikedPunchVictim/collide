@@ -20,6 +20,7 @@ import type {
 import {
   ACCEPTED_WORDS,
   DISCARDED_WORDS,
+  DISMISSED_WORDS,
   INTEGRATING_WORDS,
   NO_BOARD_WORDS,
   QUEUED_WORDS,
@@ -59,6 +60,8 @@ export interface Loop {
   allowOnce(item: string): Promise<void>
   deny(item: string): Promise<void>
   accept(item: string): Promise<void>
+  /** Drops a confirmation the CLI asked for, which writes nothing. */
+  dismiss(item: string): Promise<void>
   reprompt(item: string, words: string): Promise<void>
   /** The first press asks again; the second sends the discard. */
   discard(item: string): Promise<void>
@@ -94,6 +97,7 @@ class LoopController implements Loop {
     this.allowOnce = this.allowOnce.bind(this)
     this.deny = this.deny.bind(this)
     this.accept = this.accept.bind(this)
+    this.dismiss = this.dismiss.bind(this)
     this.reprompt = this.reprompt.bind(this)
     this.discard = this.discard.bind(this)
     this.keep = this.keep.bind(this)
@@ -338,6 +342,10 @@ class LoopController implements Loop {
     return this.answer(item, { type: 'accept' })
   }
 
+  dismiss(item: string): Promise<void> {
+    return this.answer(item, { type: 'dismiss' })
+  }
+
   async reprompt(item: string, words: string): Promise<void> {
     if (words.trim() === '') return
     await this.answer(item, { type: 'reprompt', prompt: words })
@@ -417,7 +425,9 @@ function noticeFor(answer: ItemAnswer, outcome: 'done' | 'merged' | 'integrating
           ? SENT_BACK_WORDS
           : answer.type === 'discard'
             ? DISCARDED_WORDS
-            : null
+            : answer.type === 'dismiss'
+              ? DISMISSED_WORDS
+              : null
   }
 }
 

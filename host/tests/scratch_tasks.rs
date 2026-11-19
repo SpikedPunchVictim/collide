@@ -170,6 +170,7 @@ fn apply(
         board: board.to_string(),
         source: Some("scratch".to_string()),
         apply: ApplyParams {
+            actor: None,
             op: op.to_string(),
             id: id.map(str::to_string),
             args,
@@ -480,6 +481,7 @@ fn a_task_of_a_source_the_line_does_not_have_is_not_found_and_a_write_to_it_is_r
         board: board.clone(),
         source: None,
         apply: ApplyParams {
+            actor: None,
             op: "setStatus".to_string(),
             id: Some("github:1".to_string()),
             args: BTreeMap::from([("status".to_string(), json!("done"))]),
@@ -506,6 +508,7 @@ fn a_write_names_its_source_one_way_or_another() {
         board: board.clone(),
         source: None,
         apply: ApplyParams {
+            actor: None,
             op: "create".to_string(),
             id: None,
             args: BTreeMap::from([("prompt".to_string(), json!("No source named"))]),
@@ -544,6 +547,7 @@ fn a_write_with_a_stale_version_is_a_conflict_that_carries_the_current_task() {
         board: board.clone(),
         source: Some("scratch".to_string()),
         apply: ApplyParams {
+            actor: None,
             op: "setStatus".to_string(),
             id: Some("1".to_string()),
             args: BTreeMap::from([("status".to_string(), json!("done"))]),
@@ -579,6 +583,7 @@ fn a_scratch_task_is_never_committed_so_commit_is_refused() {
         board,
         source: Some("scratch".to_string()),
         apply: ApplyParams {
+            actor: None,
             op: "create".to_string(),
             id: None,
             args: BTreeMap::from([("prompt".to_string(), json!("Commit me"))]),
@@ -612,6 +617,7 @@ fn a_request_for_a_board_the_daemon_has_not_opened_is_not_found() {
         board: "nonsense".to_string(),
         source: Some("scratch".to_string()),
         apply: ApplyParams {
+            actor: None,
             op: "create".to_string(),
             id: None,
             args: BTreeMap::from([("prompt".to_string(), json!("Nowhere"))]),
@@ -913,6 +919,7 @@ fn the_scratch_source_lists_one_board_and_declines_watch_and_preview() {
     let create = |source: &ScratchSource, prompt: &str| {
         source
             .apply(&ApplyParams {
+                actor: None,
                 op: "create".to_string(),
                 id: None,
                 args: BTreeMap::from([("prompt".to_string(), json!(prompt))]),
@@ -950,6 +957,7 @@ fn the_scratch_source_lists_one_board_and_declines_watch_and_preview() {
         Err(ProviderError::Unsupported { .. })
     ));
     let preview = ApplyParams {
+        actor: None,
         op: "create".to_string(),
         id: None,
         args: BTreeMap::new(),

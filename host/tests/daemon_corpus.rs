@@ -302,6 +302,7 @@ impl Rig {
                 board: board.to_string(),
                 source: Some(source.to_string()),
                 apply: ApplyParams {
+                    actor: None,
                     op: "setStatus".to_string(),
                     id: Some(id.to_string()),
                     args,
@@ -1106,6 +1107,7 @@ impl Rig {
                 board: board.to_string(),
                 source: Some("scratch".to_string()),
                 apply: ApplyParams {
+                    actor: None,
                     op: "create".to_string(),
                     id: None,
                     args,

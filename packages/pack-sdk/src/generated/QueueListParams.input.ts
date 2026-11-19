@@ -19,6 +19,7 @@ export type QueueKind =
   | 'disk_full'
   | 'question'
   | 'agent_setup'
+  | 'confirmation'
 
 /**
  * `queue.list` params. With no `board` the items of every board, because a decision waits on the person and not on

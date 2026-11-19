@@ -256,6 +256,36 @@ pub struct ApplyParams {
     pub version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkout: Option<String>,
+    /// Who asked. The daemon sets it from the connection. None is read as a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<ApplyActor>,
+}
+
+impl ApplyParams {
+    /// The kind of who asked: the actor's, or a person when the call has none.
+    pub fn actor_kind(&self) -> ApplyActorKind {
+        self.actor
+            .as_ref()
+            .map_or(ApplyActorKind::Person, |actor| actor.kind)
+    }
+}
+
+/// A person, or the agent of a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ApplyActorKind {
+    Person,
+    Agent,
+}
+
+/// Who asked for an `apply`. `at` is the daemon's local date, `YYYY-MM-DD`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyActor {
+    pub kind: ApplyActorKind,
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
 }
 
 /// `apply` result. `ok` carries the new task and its version, the `files` the write touched (what `record`

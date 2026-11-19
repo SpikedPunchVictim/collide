@@ -35,6 +35,7 @@ export type QueueKind =
   | 'disk_full'
   | 'question'
   | 'agent_setup'
+  | 'confirmation'
 /**
  * What a tool call does, as the agent classifies it. Adapters classify by `kind` and input, never by a call's title
  * (S7, O12).

@@ -106,14 +106,14 @@
 //! | `daemon: adopt shims` | [`adopt_shims`], [`Phases::adopt`] | scan `runs_dir`, classify each shim by `exit.json` and by pid plus start time, reattach, settle |
 
 use crate::auth::{
-    self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer,
+    self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer, Verdict,
 };
 use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
 use crate::board_lines::LineError;
 use crate::boards;
 use crate::checkout::root_busy;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
-use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks};
+use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks, civil_date, local_utc_offset};
 use crate::config_get::{
     BoardRef, ConfigService, GetError, LoadContextFactory, SetError, system_load_context,
 };
@@ -147,7 +147,7 @@ use crate::views::{
     repo_candidates, repo_dir, save_view,
 };
 use crate::write_guard::{self, Applied, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig};
-use collide_core::change::Actor;
+use collide_core::change::{Actor, ActorKind};
 use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
 use collide_core::owner::{
@@ -165,7 +165,7 @@ use collide_core::owner::{
     TaskSaveViewResult, TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport,
     ViewTarget, WriteQueued, code, encode_line, parse_request, route,
 };
-use collide_core::provider::{ApplyParams, ApplyResult, GetParams};
+use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::shim::ExitRecord;
 use collide_core::view_eval::view_report;
 use std::collections::{BTreeMap, BTreeSet};
@@ -503,6 +503,9 @@ pub struct DaemonOptions {
     /// the environment it was started with, which no test can change (ts-0074-cu).
     pub process_tree: Option<Arc<dyn ProcessTree + Send + Sync>>,
     pub clocks: Arc<dyn Clocks + Send + Sync>,
+    /// The zone, in seconds east of UTC, that dates the `at` of an actor ([`ApplyActor`]). `None`, the default, is the
+    /// machine's own zone. A test gives one so its date does not depend on where it runs.
+    pub utc_offset_secs: Option<i64>,
     /// Where the log goes.
     pub log: Box<dyn Write + Send>,
     pub handshake_wait: Duration,
@@ -608,6 +611,7 @@ impl DaemonOptions {
             app_executable: None,
             process_tree: None,
             clocks: Arc::new(SystemClocks),
+            utc_offset_secs: None,
             log,
             handshake_wait: HANDSHAKE_WAIT,
             min_open_files: MIN_OPEN_FILES,
@@ -662,6 +666,8 @@ struct Shared {
     tree: Arc<dyn ProcessTree + Send + Sync>,
     uid: u32,
     clocks: Arc<dyn Clocks + Send + Sync>,
+    /// [`DaemonOptions::utc_offset_secs`].
+    utc_offset_secs: Option<i64>,
     log: Arc<DaemonLog>,
     phases: Phases,
     launchctl: Option<Arc<dyn Launchctl>>,
@@ -749,6 +755,7 @@ impl Daemon {
             app_executable,
             process_tree,
             clocks,
+            utc_offset_secs,
             log,
             handshake_wait,
             min_open_files,
@@ -1056,6 +1063,7 @@ impl Daemon {
             started_wall_ms: clocks.read(Clock::Wall).nanos / 1_000_000,
             started_uptime: clocks.read(Clock::Uptime),
             clocks,
+            utc_offset_secs,
             log,
             phases,
             launchctl,
@@ -1341,13 +1349,20 @@ fn apply_queued(shared: &Shared, write: QueuedWrite) -> Applied {
         &source,
         &write.apply,
     ) {
-        Ok(ApplyResult::Ok { .. }) => Applied::Done,
-        Ok(ApplyResult::Conflict { current }) => Applied::Problem(format!(
+        Ok(result) => settled(&result),
+        Err(error) => Applied::Problem(source_failed(error).message),
+    }
+}
+
+/// How a stored write ended, from the source's answer to it, in Collide's words.
+fn settled(result: &ApplyResult) -> Applied {
+    match result {
+        ApplyResult::Ok { .. } => Applied::Done,
+        ApplyResult::Conflict { current } => Applied::Problem(format!(
             "{} changed since this write was asked for; it is now {}. Read it and ask again",
             current.key, current.state.status
         )),
-        Ok(ApplyResult::Refused { message }) => Applied::Problem(message),
-        Err(error) => Applied::Problem(source_failed(error).message),
+        ApplyResult::Refused { message } => Applied::Problem(message.clone()),
     }
 }
 
@@ -2092,7 +2107,7 @@ fn call(
         Method::TaskList => task_list(shared, params),
         Method::TaskGet => task_get(shared, params),
         Method::TaskApply => task_apply(shared, session, params),
-        Method::TaskPreview => task_preview(shared, params),
+        Method::TaskPreview => task_preview(shared, session, params),
         Method::TaskViews => task_views(shared, params),
         Method::TaskSaveView => task_save_view(shared, session, params),
         other => Err(RpcError::new(
@@ -2396,6 +2411,9 @@ fn queue_answer(
             "the daemon is shutting down",
         ));
     }
+    if shared.guard.is_confirmation(&params.item) {
+        return confirmation_answer(shared, session, &params);
+    }
     if shared.guard.is_queued_write(&params.item) {
         return queued_write_answer(shared, &params);
     }
@@ -2442,6 +2460,74 @@ fn queued_write_answer(
         }
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// The answer to the Queue item of a confirmation (ts-0128-bb; 0.10, Planning sources): a person-only write the CLI
+/// asked for. Accept writes it as a person, once, and only the app may say it: the CLI that asked is not the person.
+/// If the checkout is busy the write is queued like any other and the answer says so. A write the source then refuses,
+/// or finds changed, is not written and a `Conflict` item says why. Dismiss drops the write.
+fn confirmation_answer(
+    shared: &Shared,
+    session: &Session,
+    params: &QueueAnswerParams,
+) -> Result<serde_json::Value, RpcError> {
+    let result = match &params.answer {
+        QueueAnswer::Dismiss {} => {
+            shared.guard.dismiss(&params.item);
+            QueueAnswerResult::Done {}
+        }
+        QueueAnswer::Accept {} => {
+            if !matches!(session.caller(), Caller::App) {
+                return Err(RpcError::new(
+                    code::NOT_PERMITTED,
+                    "only a person in the app accepts a confirmation",
+                ));
+            }
+            let Some(write) = shared.guard.take_confirmation(&params.item) else {
+                return Err(RpcError::new(
+                    code::NOT_FOUND,
+                    format!("the daemon has no confirmation {:?}", params.item),
+                ));
+            };
+            accept_confirmed(shared, &write)
+        }
+        _ => {
+            return Err(RpcError::new(
+                code::INVALID_PARAMS,
+                "a confirmation takes Accept or Dismiss",
+            ));
+        }
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// Writes a confirmed write as a person, through the one path every write takes ([`write`]).
+fn accept_confirmed(shared: &Shared, confirmed: &QueuedWrite) -> QueueAnswerResult {
+    let done = board_root(shared, &confirmed.board).and_then(|root| {
+        let source =
+            source_of(shared, &confirmed.board, &root, &confirmed.source).map_err(source_failed)?;
+        write(
+            shared,
+            Caller::App.actor(),
+            &confirmed.board,
+            &root,
+            &source,
+            &confirmed.apply,
+        )
+    });
+    match done {
+        Ok(Written::Applied(result)) => {
+            if let Applied::Problem(message) = settled(&result) {
+                shared.guard.give_up(confirmed, &message);
+            }
+            QueueAnswerResult::Done {}
+        }
+        Ok(Written::Queued(queued)) => QueueAnswerResult::Queued { item: queued.item },
+        Err(error) => {
+            shared.guard.give_up(confirmed, &error.message);
+            QueueAnswerResult::Done {}
+        }
+    }
 }
 
 /// Reads a request's params as `T`, or says which method they were not readable for.
@@ -3334,6 +3420,8 @@ fn task_apply(
     }
     let root = board_root(shared, &params.board)?;
     let mut apply = params.apply;
+    // Who asked is the connection's, never the request's (0.10): whatever a client sent is dropped.
+    apply.actor = None;
     let name = named_source(params.source.as_deref(), &mut apply)?;
     if params.commit {
         return Err(RpcError::new(
@@ -3347,16 +3435,98 @@ fn task_apply(
         ));
     }
     let source = source_of(shared, &params.board, &root, &name).map_err(source_failed)?;
-    let (result, queued) = match write(shared, session, &params.board, &root, &source, &apply)? {
-        Written::Applied(result) => (Some(*result), None),
-        Written::Queued(queued) => (None, Some(queued)),
-    };
+    let (mut result, mut queued, mut confirmation) = (None, None, None);
+    match judge_write(shared, session, &params.board, &root, &source, &apply) {
+        Verdict::Allow => match write(
+            shared,
+            session.actor(),
+            &params.board,
+            &root,
+            &source,
+            &apply,
+        )? {
+            Written::Applied(done) => result = Some(*done),
+            Written::Queued(waiting) => queued = Some(waiting),
+        },
+        Verdict::Refuse(error) => return Err(error),
+        Verdict::Confirm(asked) => {
+            let write = QueuedWrite {
+                board: params.board.clone(),
+                source: source.name().to_string(),
+                apply: apply.clone(),
+                checkout: write_guard::canonical(Path::new(
+                    apply.checkout.as_deref().unwrap_or(&root),
+                )),
+                actor: Caller::App.actor(),
+            };
+            confirmation = Some(
+                shared
+                    .guard
+                    .confirm(&write, &asked)
+                    .map_err(|message| RpcError::new(code::INTERNAL_ERROR, message))?,
+            );
+        }
+    }
     Ok(serde_json::to_value(TaskApplyResult {
         result,
         queued,
+        confirmation,
         commit: None,
     })
     .expect("a result is JSON"))
+}
+
+/// Whether the write is one only a person makes (0.10, Planning sources), and what the connection may do about it.
+/// The item's kind and status are the corpus's; an item it does not know yet is asked of the source, so a write is not
+/// let through for the corpus being late. The kind is judged by its name (`proposal`, `question`). A write that names
+/// no item (a create), a scratch task and every other kind are allowed to anyone.
+fn judge_write(
+    shared: &Shared,
+    session: &Session,
+    board: &str,
+    root: &str,
+    source: &Source,
+    apply: &ApplyParams,
+) -> Verdict {
+    let Some(id) = apply.id.as_deref() else {
+        return Verdict::Allow;
+    };
+    if source.name() == scratch::SOURCE {
+        return Verdict::Allow;
+    }
+    // The app may do all of it, and most ops are never person-only: neither asks the corpus or the provider anything.
+    let to_status = apply.args.get("status").and_then(serde_json::Value::as_str);
+    let could_be =
+        auth::person_only_request(&apply.op, "proposal", "", Some("deferred"), to_status);
+    if matches!(session.caller(), Caller::App) || could_be.is_none() {
+        return Verdict::Allow;
+    }
+    let key = format!("{}:{id}", source.name());
+    let known = corpus_of(shared, board, root)
+        .ok()
+        .and_then(|corpus| {
+            corpus.read(|corpus| {
+                let task = corpus.get(&key).task?;
+                Some((corpus.kind_of(source.name(), &task), task.state.status))
+            })
+        })
+        .or_else(|| {
+            let got = source
+                .get(&GetParams {
+                    id: id.to_string(),
+                    checkout: apply.checkout.clone(),
+                })
+                .ok()?;
+            let task = got.task?;
+            Some((task.kind.unwrap_or_default(), task.state.status))
+        });
+    let Some((kind, status)) = known else {
+        return Verdict::Allow;
+    };
+    match auth::person_only_request(&apply.op, &kind, &key, Some(&status), to_status) {
+        Some(request) => session.judge(&request),
+        None => Verdict::Allow,
+    }
 }
 
 /// What [`write`] did with a write.
@@ -3373,13 +3543,12 @@ enum Written {
 /// is left to the provider to refuse in its own words.
 fn write(
     shared: &Shared,
-    session: &Session,
+    actor: Actor,
     board: &str,
     root: &str,
     source: &Source,
     apply: &ApplyParams,
 ) -> Result<Written, RpcError> {
-    let actor = session.actor();
     if !source.writes_checkout() {
         let result =
             apply_and_record(shared, board, actor, source, apply).map_err(source_failed)?;
@@ -3416,6 +3585,25 @@ fn write(
     })
 }
 
+/// `apply` with the actor the provider is told of (0.10, Planning sources): the connection's, and today's date in the
+/// daemon's zone. A workflow is not a person, so it is told as an agent.
+fn told_who_asked(shared: &Shared, actor: &Actor, apply: &ApplyParams) -> ApplyParams {
+    let wall = shared.clocks.read(Clock::Wall).nanos;
+    let offset = shared
+        .utc_offset_secs
+        .unwrap_or_else(|| local_utc_offset(wall));
+    let mut told = apply.clone();
+    told.actor = Some(ApplyActor {
+        kind: match actor.kind {
+            ActorKind::Person => ApplyActorKind::Person,
+            ActorKind::Workflow | ActorKind::Agent => ApplyActorKind::Agent,
+        },
+        at: civil_date(wall, offset),
+        run: actor.run.clone(),
+    });
+    told
+}
+
 /// The source's `apply`, then one `task.changed` event for each item the write changed, with `actor`. The board's
 /// corpus is told of the write under its gate, so the watcher's notice of the same write is dropped and the write is
 /// one event ([`crate::corpus_service`]).
@@ -3428,7 +3616,7 @@ fn apply_and_record(
 ) -> Result<ApplyResult, SourceError> {
     let corpus = shared.corpora.get().and_then(|corpora| corpora.get(board));
     let _gate = corpus.as_ref().map(|corpus| corpus.gate());
-    let result = source.apply(apply)?;
+    let result = source.apply(&told_who_asked(shared, &actor, apply))?;
     if let ApplyResult::Ok { task, items, .. } = &result {
         for effect in items {
             let event = changed_event(
@@ -3452,9 +3640,11 @@ fn apply_and_record(
 }
 
 /// `task.preview` (ts-0113-ck): what `task.apply` would do with the same params, with nothing written and no event. A
-/// source that does not declare `preview` is refused, naming it.
+/// source that does not declare `preview` is refused, naming it. The provider is told the connection's actor, as for
+/// `apply`, never the one the request carries.
 fn task_preview(
     shared: &Shared,
+    session: &Session,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     let params: TaskPreviewParams = read_params("task.preview", params)?;
@@ -3468,7 +3658,9 @@ fn task_preview(
     let mut apply = params.apply;
     let name = named_source(params.source.as_deref(), &mut apply)?;
     let source = source_of(shared, &params.board, &root, &name).map_err(source_failed)?;
-    let result = source.preview(&apply).map_err(source_failed)?;
+    let result = source
+        .preview(&told_who_asked(shared, &session.actor(), &apply))
+        .map_err(source_failed)?;
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 

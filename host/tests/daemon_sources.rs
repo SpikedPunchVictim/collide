@@ -199,6 +199,7 @@ impl Rig {
 
     fn apply_params(id: Option<&str>, op: &str, checkout: Option<&str>) -> ApplyParams {
         ApplyParams {
+            actor: None,
             op: op.to_string(),
             id: id.map(str::to_string),
             args: BTreeMap::new(),
@@ -728,6 +729,7 @@ fn gate_write(
         board: board.to_string(),
         source: Some(source.to_string()),
         apply: ApplyParams {
+            actor: None,
             op: "gate".to_string(),
             id: Some("1".to_string()),
             args: BTreeMap::from([

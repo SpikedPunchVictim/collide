@@ -308,6 +308,11 @@
           "const": "agent_setup",
           "description": "A phase the agent tool's setup stopped: a version outside the tested range whose smoke check failed, or settings\nthe tool ignored (0.3). The title says which, in Collide's words.",
           "type": "string"
+        },
+        {
+          "const": "confirmation",
+          "description": "A person-only write the CLI asked for: a person answers Accept or Dismiss.",
+          "type": "string"
         }
       ]
     },

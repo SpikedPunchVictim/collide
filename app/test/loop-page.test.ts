@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { type Loop, createLoop } from '../src/loop/index.ts'
 import { OwnerError } from '../src/owner/index.ts'
-import { World, board, claude, diff, permissionItem, reviewItem, run } from './support/loop-world.ts'
+import { World, board, claude, confirmationItem, diff, permissionItem, reviewItem, run } from './support/loop-world.ts'
 
 // The thin-loop page's state and its calls, over a scripted `FakeOwner` (ts-0081-wm; 0.15: a reducer for the page's
 // state, so its tests need no browser). A test says what the daemon holds, pushes the event that tells the page, and
@@ -307,6 +307,35 @@ describe('a permission request', () => {
     const { world, loop } = await asked()
     await Promise.all([loop.allowOnce('q-1'), loop.allowOnce('q-1')])
     expect(world.callsTo('queue.answer')).toHaveLength(1)
+  })
+})
+
+describe('a confirmation the CLI asked for', () => {
+  test('is in the Queue with no run, accepting it answers accept, and dismissing it answers dismiss', async () => {
+    const world = oneBoard()
+    world.items = [confirmationItem('confirm-1', 'plan:pr-0003-km')]
+    const loop = await pageOf(world)
+    expect(loop.getState().items.map((item) => item.kind)).toEqual(['confirmation'])
+
+    await loop.accept('confirm-1')
+    await loop.dismiss('confirm-1')
+
+    expect(world.callsTo('queue.answer')).toEqual([
+      { item: 'confirm-1', answer: { type: 'accept' } },
+      { item: 'confirm-1', answer: { type: 'dismiss' } },
+    ])
+  })
+
+  test('says it was dismissed, and that accepting it wrote it', async () => {
+    const world = oneBoard()
+    world.items = [confirmationItem('confirm-1', 'plan:pr-0003-km')]
+    const loop = await pageOf(world)
+
+    await loop.dismiss('confirm-1')
+    expect(loop.getState().notice).toBe('Dismissed. Nothing was written.')
+
+    await loop.accept('confirm-1')
+    expect(loop.getState().notice).toBe('Accepted.')
   })
 })
 

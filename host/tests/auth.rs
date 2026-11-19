@@ -285,11 +285,12 @@ fn request(op: PersonOnlyOp, kind: PersonOnlyItem) -> PersonOnlyRequest {
     }
 }
 
-const ALL_OPS: [PersonOnlyOp; 4] = [
+const ALL_OPS: [PersonOnlyOp; 5] = [
     PersonOnlyOp::Accept,
     PersonOnlyOp::Defer,
     PersonOnlyOp::Reject,
     PersonOnlyOp::Resolve,
+    PersonOnlyOp::Reopen,
 ];
 const ALL_KINDS: [PersonOnlyItem; 2] = [PersonOnlyItem::Proposal, PersonOnlyItem::Question];
 
@@ -342,6 +343,7 @@ fn which_requests_are_person_only() {
         Option<&'static str>,
         Option<(PersonOnlyOp, PersonOnlyItem)>,
     );
+    // A status write's current status is not in the table: it is `None` except in the rows of `reopen` below.
     let table: Vec<Row> = vec![
         ("accept", "proposal", None, Some((Accept, Proposal))),
         ("defer", "proposal", None, Some((Defer, Proposal))),
@@ -376,9 +378,32 @@ fn which_requests_are_person_only() {
         ("Accept", "proposal", None, None),
     ];
     for (op, kind, status, expected) in table {
-        let got = auth::person_only_request(op, kind, "pr-1", status).map(|r| (r.op, r.item_kind));
+        let got =
+            auth::person_only_request(op, kind, "pr-1", None, status).map(|r| (r.op, r.item_kind));
         assert_eq!(got, expected, "{op} on a {kind} with status {status:?}");
     }
+}
+
+#[test]
+fn returning_a_deferred_proposal_to_proposed_is_a_reopen_and_person_only() {
+    let reopen = |kind, from, to| {
+        auth::person_only_request("setStatus", kind, "pr-1", from, to)
+            .map(|request| (request.op, request.item_kind))
+    };
+    assert_eq!(
+        reopen("proposal", Some("deferred"), Some("proposed")),
+        Some((PersonOnlyOp::Reopen, PersonOnlyItem::Proposal))
+    );
+    assert_eq!(reopen("proposal", Some("proposed"), Some("proposed")), None);
+    assert_eq!(reopen("proposal", Some("rejected"), Some("proposed")), None);
+    assert_eq!(reopen("proposal", None, Some("proposed")), None);
+    assert_eq!(reopen("task", Some("deferred"), Some("proposed")), None);
+    assert_eq!(reopen("question", Some("deferred"), Some("proposed")), None);
+    // A deferred proposal that is accepted is an accept, as before.
+    assert_eq!(
+        reopen("proposal", Some("deferred"), Some("accepted")),
+        Some((PersonOnlyOp::Accept, PersonOnlyItem::Proposal))
+    );
 }
 
 // ---- the socket directory and path ----------------------------------------------------------------------------

@@ -16,9 +16,14 @@
 //! for it, so a registration says whether its phase started at the root ([`LivePhases::started`]). The git states still
 //! hold the write at such a root.
 //!
+//! A person-only write the CLI asked for (0.10) is stored the same way, with a `Confirmation` Queue item that takes
+//! Accept and Dismiss ([`WriteGuard::confirm`]). It is never applied by [`WriteGuard::drain`]: only a person's Accept
+//! takes it out ([`WriteGuard::take_confirmation`]), and the daemon then writes it as a person.
+//!
 //! The daemon owns what a write *is* (the source's `apply`, the events). This module owns when it may run: the caller
 //! gives [`WriteGuard::drain`] the function that applies a stored write.
 
+use crate::auth::QueueConfirmation;
 use crate::checkout::root_busy;
 use crate::queue::Queue;
 use collide_core::change::Actor;
@@ -179,7 +184,8 @@ impl WriteGuard {
             .iter()
             .filter_map(|item| {
                 item.id
-                    .strip_prefix("write-")?
+                    .strip_prefix("write-")
+                    .or_else(|| item.id.strip_prefix("confirm-"))?
                     .split('-')
                     .nth(1)?
                     .parse::<u64>()
@@ -256,9 +262,76 @@ impl WriteGuard {
         })
     }
 
-    /// Whether `item` is a stored write.
+    /// Stores `write` with a `Confirmation` Queue item, and returns the item. Nothing is written until a person
+    /// answers Accept. The title is the confirmation's own, in Collide's words. The caller holds no lock: the write is
+    /// only kept here.
+    pub fn confirm(
+        &self,
+        write: &QueuedWrite,
+        confirmation: &QueueConfirmation,
+    ) -> Result<WriteQueued, String> {
+        let n = self.counter.fetch_add(1, Ordering::SeqCst);
+        let since_ms = (self.config.now_ms)();
+        let id = format!("confirm-{since_ms}-{n}");
+        let payload = serde_json::to_string(write)
+            .map_err(|error| format!("the write could not be kept: {error}"))?;
+        let item = QueueItem {
+            id: id.clone(),
+            kind: QueueKind::Confirmation,
+            run: None,
+            phase: None,
+            task: task_of(write),
+            since_ms,
+            title: confirmation.title.clone(),
+            permission: None,
+            untrusted_input: false,
+            cache: None,
+            reset_ms: None,
+            show: Vec::new(),
+            answers: vec![AnswerKind::Accept, AnswerKind::Dismiss],
+        };
+        self.config
+            .queue
+            .push_with_payload(item, &payload)
+            .map_err(|error| format!("the confirmation was not kept: {error}"))?;
+        Ok(WriteQueued {
+            item: id,
+            reason: confirmation.title.clone(),
+        })
+    }
+
+    /// Whether `item` is a stored write that waits for its checkout.
     pub fn is_queued_write(&self, item: &str) -> bool {
-        self.config.queue.payload(item).is_some()
+        !self.is_confirmation(item) && self.config.queue.payload(item).is_some()
+    }
+
+    /// Whether `item` is a stored write that waits for a person's confirmation.
+    pub fn is_confirmation(&self, item: &str) -> bool {
+        self.config
+            .queue
+            .get(item)
+            .is_some_and(|held| held.kind == QueueKind::Confirmation)
+            && self.config.queue.payload(item).is_some()
+    }
+
+    /// Takes the confirmed write out of the Queue, with its item, for a person's Accept. `None` when it was gone
+    /// already (another answer took it first), so two answers never both write. A payload that cannot be read is
+    /// logged and dropped with its item, as in [`WriteGuard::waiting`].
+    pub fn take_confirmation(&self, item: &str) -> Option<QueuedWrite> {
+        if !self.is_confirmation(item) {
+            return None;
+        }
+        let payload = self.config.queue.payload(item)?;
+        self.config.queue.take(item)?;
+        match serde_json::from_str::<QueuedWrite>(&payload) {
+            Ok(write) => Some(write),
+            Err(error) => {
+                (self.config.log)(&format!(
+                    "queue item {item}: its stored write is not readable, so it was dropped: {error}"
+                ));
+                None
+            }
+        }
     }
 
     /// The checkout the stored write behind `item` goes to.
@@ -291,6 +364,14 @@ impl WriteGuard {
     fn waiting(&self) -> Vec<(String, QueuedWrite)> {
         let mut writes = Vec::new();
         for (id, payload) in self.config.queue.payloads() {
+            if self
+                .config
+                .queue
+                .get(&id)
+                .is_some_and(|held| held.kind == QueueKind::Confirmation)
+            {
+                continue;
+            }
             match serde_json::from_str::<QueuedWrite>(&payload) {
                 Ok(write) => writes.push((id, write)),
                 Err(error) => {
@@ -351,7 +432,7 @@ impl WriteGuard {
     }
 
     /// A stored write that could not be applied: the person is told in a `Conflict` item, and the write is gone.
-    fn give_up(&self, write: &QueuedWrite, message: &str) {
+    pub fn give_up(&self, write: &QueuedWrite, message: &str) {
         let n = self.counter.fetch_add(1, Ordering::SeqCst);
         let since_ms = (self.config.now_ms)();
         self.config.queue.push(QueueItem {

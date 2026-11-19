@@ -31,7 +31,7 @@ use common::git_repo::{GitRepo, git_command};
 use common::{Bundle, repo_root, wait_until};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -1080,6 +1080,68 @@ fn a_queued_write_with_json_prints_one_document_that_says_where_it_stands() {
             .unwrap()
             .contains("a rebase")
     );
+}
+
+// ---- a person-only write (ts-0128-bb) ------------------------------------------------------------------------------
+
+fn proposal_status(rig: &Rig) -> String {
+    let text = fs::read_to_string(rig.repo.work().join(PROPOSAL)).unwrap();
+    text.lines()
+        .find_map(|line| line.strip_prefix("status: "))
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a_person_only_write_says_a_confirmation_waits_in_the_app_and_exits_12() {
+    let rig = Rig::with_files(&[(PROPOSAL, proposal_text(None))]);
+
+    let (code, out, err) = rig.cli(&["task", "plan:pr-0003-km", "setStatus", "rejected"]);
+
+    assert_eq!(code, exit::CONFIRMATION, "{err}");
+    assert_eq!(exit::CONFIRMATION, 12);
+    assert_eq!(out, "");
+    assert!(err.contains("a confirmation waits in the app"), "{err}");
+    let queue = rig.queue();
+    assert_eq!(queue.len(), 1, "{queue:?}");
+    assert_eq!(queue[0].kind, collide_core::owner::QueueKind::Confirmation);
+    assert!(
+        err.contains(&format!("queue item {}", queue[0].id)),
+        "{err}"
+    );
+    assert!(err.contains("nothing was written"), "{err}");
+    assert_eq!(proposal_status(&rig), "draft", "nothing was written");
+}
+
+#[test]
+fn json_of_a_person_only_write_carries_the_confirmation_and_exits_12() {
+    let rig = Rig::with_files(&[(PROPOSAL, proposal_text(None))]);
+
+    let (code, out, _) = rig.cli(&["task", "plan:pr-0003-km", "setStatus", "accepted", "--json"]);
+
+    assert_eq!(code, exit::CONFIRMATION);
+    let document = json(&out);
+    let queue = rig.queue();
+    assert_eq!(document["confirmation"]["item"], json!(queue[0].id));
+    assert!(
+        document["confirmation"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("accept"),
+        "{document}"
+    );
+    assert_eq!(proposal_status(&rig), "draft");
+}
+
+#[test]
+fn a_write_to_a_proposal_that_is_not_a_persons_is_made_as_before() {
+    let rig = Rig::with_files(&[(PROPOSAL, proposal_text(None))]);
+
+    let (code, _, err) = rig.cli(&["task", "plan:pr-0003-km", "setStatus", "proposed"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(proposal_status(&rig), "proposed");
+    assert!(rig.queue().is_empty());
 }
 
 // ---- the item JSON that the direct path used to print (ts-0020, ts-0047) ------------------------------------------

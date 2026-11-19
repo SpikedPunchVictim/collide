@@ -21,6 +21,7 @@ export type LoopActions = Pick<
   | 'allowOnce'
   | 'deny'
   | 'accept'
+  | 'dismiss'
   | 'reprompt'
   | 'discard'
   | 'keep'

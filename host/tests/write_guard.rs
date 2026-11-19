@@ -465,6 +465,7 @@ impl Rig {
                 board: self.board.clone(),
                 source: Some("plan".to_string()),
                 apply: ApplyParams {
+                    actor: None,
                     op: "setStatus".to_string(),
                     id: Some(id.to_string()),
                     args: BTreeMap::from([("status".to_string(), json!(status))]),
@@ -954,6 +955,7 @@ fn a_scratch_write_is_never_queued_even_where_a_rebase_and_a_phase_hold_the_chec
             board: rig.board.clone(),
             source: Some("scratch".to_string()),
             apply: ApplyParams {
+                actor: None,
                 op: "create".to_string(),
                 id: None,
                 args: BTreeMap::from([("prompt".to_string(), json!("Write a haiku"))]),

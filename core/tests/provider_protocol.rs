@@ -244,6 +244,43 @@ fn apply_params_round_trip_for_a_write_and_for_a_create() {
 }
 
 #[test]
+fn apply_params_carry_the_actor_the_daemon_read() {
+    let person: ApplyParams = round_trip(json!({
+        "op": "setStatus",
+        "id": "pr-0003-km",
+        "args": { "status": "accepted" },
+        "actor": { "kind": "person", "at": "2026-11-18" }
+    }));
+    assert_eq!(person.actor_kind(), provider::ApplyActorKind::Person);
+    let agent: ApplyParams = round_trip(json!({
+        "op": "setStatus",
+        "id": "ts-0010-yb",
+        "args": { "status": "review" },
+        "actor": { "kind": "agent", "at": "2026-11-18", "run": "r-0007" }
+    }));
+    assert_eq!(agent.actor_kind(), provider::ApplyActorKind::Agent);
+    assert_eq!(agent.actor.unwrap().run.as_deref(), Some("r-0007"));
+}
+
+#[test]
+fn a_call_with_no_actor_is_read_as_a_person_and_written_back_with_none() {
+    let older: ApplyParams =
+        round_trip(json!({ "op": "setStatus", "id": "ts-0010-yb", "args": {} }));
+    assert_eq!(older.actor, None);
+    assert_eq!(older.actor_kind(), provider::ApplyActorKind::Person);
+}
+
+#[test]
+fn an_actor_of_another_kind_or_with_another_key_or_no_date_is_refused() {
+    let with = |actor: Value| json!({ "op": "setStatus", "id": "a", "args": {}, "actor": actor });
+    refused::<ApplyParams>(with(json!({ "kind": "robot", "at": "2026-11-18" })));
+    refused::<ApplyParams>(with(
+        json!({ "kind": "person", "at": "2026-11-18", "extra": 1 }),
+    ));
+    refused::<ApplyParams>(with(json!({ "kind": "person" })));
+}
+
+#[test]
 fn apply_ok_round_trips() {
     round_trip::<ApplyResult>(json!({
         "outcome": "ok",

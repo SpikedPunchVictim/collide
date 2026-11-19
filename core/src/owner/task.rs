@@ -207,6 +207,9 @@ pub struct TaskApplyResult {
     pub result: Option<ApplyResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued: Option<WriteQueued>,
+    /// A person-only write: nothing was written, and a person answers in the app. No `result`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation: Option<WriteQueued>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
 }

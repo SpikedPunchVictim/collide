@@ -77,6 +77,22 @@ export function reviewItem(
   }
 }
 
+/** A person-only write the CLI asked for (ts-0128-bb): no run, and the title is Collide's own words. */
+export function confirmationItem(id: string, task: string, title = 'Confirm: accept proposal plan:pr-0003-km'): Item {
+  return {
+    id,
+    kind: 'confirmation',
+    run: null,
+    phase: null,
+    task,
+    since_ms: 2_000,
+    title,
+    untrusted_input: false,
+    show: [],
+    answers: ['accept', 'dismiss'],
+  }
+}
+
 export function permissionItem(id: string, runId: string, task: string, input?: unknown): Item {
   return {
     id,

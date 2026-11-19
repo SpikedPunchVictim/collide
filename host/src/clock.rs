@@ -277,6 +277,42 @@ pub fn sleep_gap(earlier: &ClockPair, later: &ClockPair) -> Duration {
     Duration::from_nanos(continuous.saturating_sub(uptime))
 }
 
+/// The calendar date, as `YYYY-MM-DD`, of a wall reading (`wall_nanos`, since the Unix epoch) in a zone
+/// `utc_offset_secs` seconds east of UTC. The daemon dates an actor's `at` with it (0.10, Planning sources).
+pub fn civil_date(wall_nanos: u64, utc_offset_secs: i64) -> String {
+    let secs = i64::try_from(wall_nanos / 1_000_000_000).unwrap_or(i64::MAX) + utc_offset_secs;
+    // Days since 1970-01-01 to a date in the proleptic Gregorian calendar: the era is 400 years, March is month 0.
+    let z = secs.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_from_march = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+    let month = if month_from_march < 10 {
+        month_from_march + 3
+    } else {
+        month_from_march - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// How many seconds east of UTC the machine's own time zone is at `wall_nanos`. A zone that cannot be read is UTC.
+pub fn local_utc_offset(wall_nanos: u64) -> i64 {
+    let secs = libc::time_t::try_from(wall_nanos / 1_000_000_000).unwrap_or(libc::time_t::MAX);
+    // SAFETY: `localtime_r` writes only to the `tm` it is given, and reads `secs` by reference.
+    unsafe {
+        let mut parts: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&secs, &mut parts).is_null() {
+            return 0;
+        }
+        // `tm_gmtoff` is a `long`, which is 64 bits on the targets Collide builds for.
+        parts.tm_gmtoff
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

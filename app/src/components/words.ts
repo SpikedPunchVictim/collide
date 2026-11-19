@@ -54,6 +54,7 @@ export const QUEUE_KIND_WORDS: Record<QueueKind, string> = {
   disk_full: 'The disk is full',
   question: 'Has a question',
   agent_setup: 'The agent tool was not ready',
+  confirmation: 'Needs your confirmation',
 }
 
 export const ANSWER_WORDS: Record<AnswerKind, string> = {

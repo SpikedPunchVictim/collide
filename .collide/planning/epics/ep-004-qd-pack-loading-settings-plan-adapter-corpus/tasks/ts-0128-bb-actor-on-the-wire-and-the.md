@@ -90,3 +90,59 @@ Write these first.
   share `core`, `host`, `packs/plan` and the generated files.
 - Nothing here runs a real `claude`. No dependency is added.
 - Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+
+### Built
+
+- Wire: `ApplyParams.actor` (`ApplyActor { kind: person|agent, at, run? }`) in `core/src/provider.rs`, with
+  `ApplyParams::actor_kind()` (no actor reads as a person). The daemon sets it on every write and clears a client's.
+  `TaskApplyResult.confirmation` (`WriteQueued`) and `QueueKind::Confirmation` in `core/src/owner/`. Schemas and
+  TypeScript regenerated with `pnpm gen`.
+- Rule: `PersonOnlyOp::Reopen` and the `from_status` argument of `auth::person_only_request` in `host/src/auth.rs`.
+  `judge_write` in `host/src/daemon.rs` runs before the provider. The app is allowed, the CLI gets a confirmation, a run
+  agent is refused with `NOT_PERMITTED`. It asks the corpus (then `source.get`) for kind and status only when the op
+  could be person-only, so other writes cost no extra provider call and no corpus load.
+- Stored write: `write_guard::confirm`, `take_confirmation`, `is_confirmation`. A confirmation is a Queue item
+  (`confirm-<ms>-<n>`, answers accept and dismiss) holding the `QueuedWrite` as payload. `drain` and `waiting()` skip
+  it, so a later write or a restart does not apply it. Accept is App-only, goes through `write()` as a person, and
+  applies once. Dismiss drops it.
+- Date: `clock::civil_date` and `clock::local_utc_offset`; `DaemonOptions.utc_offset_secs` fixes the zone in tests.
+- CLI: exit 12 (`exit::CONFIRMATION`), text "a confirmation waits in the app", `--json`
+  `{"confirmation":{"item","reason"}}`, a note for `--commit`.
+- App: the loop page lists a confirmation with its title and Accept and Dismiss (`ConfirmationRow` in `Queue.tsx`,
+  `Loop.dismiss`, `DISMISSED_WORDS`, the kind's words in `components/words.ts`).
+- Tests: `host/tests/person_only.rs` (18, fake provider `fixtures/fake_person_only_provider.mjs`), `host/tests/clock.rs`
+  (7), `host/tests/auth.rs` (reopen), `host/tests/task_daemon_cli.rs` (3), `core/tests/provider_protocol.rs` (3),
+  `packages/pack-sdk/test/provider-types.test.ts`, `app/test/loop-view.test.tsx` (4), `app/test/loop-page.test.ts` (2).
+- Seen red at runtime, by mutation of the built code: `waiting()` not skipping confirmations and the App-only check
+  removed (4 `person_only` tests); `Reopen` removed (the reopen auth test); the zone offset ignored in `civil_date`
+  (the east and west zone tests); judging every op through the corpus and provider (2 `daemon_sources` tests, found by
+  the full run, then fixed). The app tests were red before `Queue.tsx` and `Loop.dismiss` existed (5, runtime).
+  Clearing `apply.actor` in `task_apply` is not caught: `told_who_asked` overwrites the actor anyway, so it is a
+  second guard. The forged-actor test covers the outcome.
+
+### Decisions for the owner
+
+- Accept of a confirmation is App-only. Alternative: any non-agent caller, which lets the CLI accept its own
+  confirmation and defeats the rule. Recommend App-only.
+- Accept goes through `write()`, so a busy checkout queues it like any write. A conflict or a refusal on accept gives
+  a Conflict item through `give_up`. Alternative: fail the accept. Recommend as built.
+- Kind and status come from the corpus, with `source.get` as the fallback. Alternative: corpus only, which can miss
+  an item the corpus has not read yet.
+- `at` uses the machine's zone. Alternative: UTC, one date for every machine. Recommend the machine's zone, as a
+  person reads the date of their own day.
+- A workflow actor is told to the provider as an agent.
+- `reopen` is the `setStatus` move from `deferred` to `proposed` on a proposal. No `reopen` op exists in the plan pack.
+- `task.preview` is unchanged and passes a client's `actor` through to the provider. It writes nothing. Recommend
+  clearing it there as well, in `ts-0129-uv`.
+- Plan text to add under 0.10: exit code 12 means a confirmation waits in the app, and `reopen` is person-only.
+
+- Owner decisions (2026-11-18, at the build): the CLI's person-only op is a Queue confirmation, as the item recommends,
+  on the owner's delegation; the rest as built. At review, `task.preview` was made to tell the provider the connection's
+  actor as `apply` does, with a test (`person_only.rs`), instead of leaving it to `ts-0129-uv`. The plan text was
+  applied to 0.10 and to Stage 4b's CLI exit codes.
+
+### Not done, by design
+
+- The plan pack's `resolve` and `accept` ops, and the phase-end check for `status:` and `by:` edits: `ts-0129-uv`.
+- The full Queue page and the drawer: Stage 6 and Stage 9d. The loop page only lists and answers a confirmation.
+- Judging kinds by role tags: `ts-0135-cx` and Stage 12.

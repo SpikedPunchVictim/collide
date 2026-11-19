@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import type {
+  ApplyParamsOutput,
   ApplyResultOutput,
   InitializeResultInput,
   ObserverAckOutput,
@@ -52,4 +53,19 @@ test('a preview answers ok, conflict or refused, like apply', () => {
   // @ts-expect-error `ok` carries items and files.
   const bare: PreviewResultOutput = { outcome: 'ok' }
   expect([ok.outcome, bare]).toHaveLength(2)
+})
+
+test('an apply may carry the actor the daemon read, and an older call carries none', () => {
+  const older: ApplyParamsOutput = { op: 'setStatus', id: 'pr-0003-km', args: {} }
+  const person: ApplyParamsOutput = { op: 'setStatus', args: {}, actor: { kind: 'person', at: '2026-11-18' } }
+  const agent: ApplyParamsOutput = {
+    op: 'setStatus',
+    args: {},
+    actor: { kind: 'agent', at: '2026-11-18', run: 'r-0007' },
+  }
+  // @ts-expect-error a kind outside person and agent.
+  const robot: ApplyParamsOutput = { op: 'setStatus', args: {}, actor: { kind: 'robot', at: '2026-11-18' } }
+  // @ts-expect-error an actor has the date it asked on.
+  const noDate: ApplyParamsOutput = { op: 'setStatus', args: {}, actor: { kind: 'person' } }
+  expect([older.actor, person.actor?.kind, agent.actor?.run, robot, noDate]).toHaveLength(5)
 })

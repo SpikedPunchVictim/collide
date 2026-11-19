@@ -140,6 +140,7 @@ fn get(id: &str) -> GetParams {
 
 fn op(name: &str) -> ApplyParams {
     ApplyParams {
+        actor: None,
         op: name.to_string(),
         id: Some("fake-1".to_string()),
         args: BTreeMap::new(),

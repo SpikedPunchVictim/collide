@@ -2,7 +2,8 @@
 //! reads the machine's own clocks a few times.
 
 use collide_host::clock::{
-    Clock, ClockMismatch, ClockPair, Clocks, Reading, SystemClocks, Timer, sleep_gap,
+    Clock, ClockMismatch, ClockPair, Clocks, Reading, SystemClocks, Timer, civil_date,
+    local_utc_offset, sleep_gap,
 };
 use std::cell::Cell;
 use std::thread;
@@ -332,4 +333,50 @@ fn the_real_wall_clock_is_the_unix_time_in_nanoseconds() {
     let wall = SystemClocks.read(Clock::Wall).nanos;
     assert!(wall > 1_735_689_600_000_000_000, "{wall}");
     assert!(wall < 4_000_000_000_000_000_000, "{wall}");
+}
+
+// The calendar date of a wall reading (0.10, the actor's `at`).
+
+const SECOND_NANOS: u64 = 1_000_000_000;
+
+#[test]
+fn the_date_of_the_epoch_in_utc_is_the_first_of_january_1970() {
+    assert_eq!(civil_date(0, 0), "1970-01-01");
+}
+
+#[test]
+fn the_date_of_a_midday_reading_is_that_day() {
+    assert_eq!(civil_date(1_781_524_800 * SECOND_NANOS, 0), "2026-06-15");
+}
+
+#[test]
+fn the_last_second_of_a_leap_day_is_still_that_day() {
+    assert_eq!(civil_date(1_709_251_199 * SECOND_NANOS, 0), "2024-02-29");
+}
+
+#[test]
+fn the_year_2100_has_no_leap_day() {
+    assert_eq!(civil_date(4_107_542_399 * SECOND_NANOS, 0), "2100-02-28");
+    assert_eq!(civil_date(4_107_542_400 * SECOND_NANOS, 0), "2100-03-01");
+}
+
+#[test]
+fn a_zone_west_of_utc_dates_the_early_hours_as_the_day_before() {
+    let half_past_midnight = 1_794_961_800 * SECOND_NANOS;
+    assert_eq!(civil_date(half_past_midnight, 0), "2026-11-18");
+    assert_eq!(civil_date(half_past_midnight, -5 * 3600), "2026-11-17");
+}
+
+#[test]
+fn a_zone_east_of_utc_dates_the_late_hours_as_the_day_after() {
+    let late = 1_794_961_800 * SECOND_NANOS - 3600 * SECOND_NANOS;
+    assert_eq!(civil_date(late, 0), "2026-11-17");
+    assert_eq!(civil_date(late, 14 * 3600), "2026-11-18");
+}
+
+#[test]
+fn the_machines_own_offset_is_a_whole_number_of_minutes_inside_a_day() {
+    let offset = local_utc_offset(1_781_524_800 * SECOND_NANOS);
+    assert_eq!(offset % 60, 0, "{offset}");
+    assert!(offset.abs() <= 14 * 3600, "{offset}");
 }

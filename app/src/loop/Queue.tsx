@@ -1,5 +1,6 @@
 // The one-item Queue of the thin loop (Stage 3c; 0.11, Queue): a permission request, with what the agent asks to do,
-// and a run that is ready to review. An item of another kind is listed and not answered here (Stage 9a).
+// and a run that is ready to review, and a confirmation the CLI asked for (a person-only write, 0.10). An item of
+// another kind is listed and not answered here (Stage 9a).
 import { type FormEvent, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +14,7 @@ export interface QueueActions {
   readonly allowOnce: (item: string) => Promise<void>
   readonly deny: (item: string) => Promise<void>
   readonly accept: (item: string) => Promise<void>
+  readonly dismiss: (item: string) => Promise<void>
   readonly reprompt: (item: string, words: string) => Promise<void>
   readonly discard: (item: string) => Promise<void>
   readonly keep: () => void
@@ -34,6 +36,39 @@ export interface QueueProps {
 
 const plural = (count: number, word: string) => (count === 1 ? word : `${word}s`)
 
+/** A confirmation has no run to open: a person answers it where it is listed. */
+function ConfirmationRow({
+  item,
+  sending,
+  actions,
+}: {
+  readonly item: QueueItem
+  readonly sending: boolean
+  readonly actions: QueueActions
+}) {
+  const takes = (kind: QueueItem['answers'][number]) => item.answers.includes(kind)
+  return (
+    <>
+      <span>
+        <span className="block font-medium">{item.title}</span>
+        <span className="block text-muted-foreground">{QUEUE_KIND_WORDS[item.kind]}</span>
+      </span>
+      <span className="flex gap-2">
+        {takes('accept') ? (
+          <Button size="sm" disabled={sending} onClick={() => void actions.accept(item.id)}>
+            Accept
+          </Button>
+        ) : null}
+        {takes('dismiss') ? (
+          <Button variant="outline" size="sm" disabled={sending} onClick={() => void actions.dismiss(item.id)}>
+            Dismiss
+          </Button>
+        ) : null}
+      </span>
+    </>
+  )
+}
+
 export function Queue(props: QueueProps) {
   const { open, others } = props
   return (
@@ -51,14 +86,20 @@ export function Queue(props: QueueProps) {
           <ul className="flex flex-col gap-2">
             {others.map((item) => (
               <li key={item.id} className="flex items-center justify-between gap-2 rounded-lg border p-3 text-sm">
-                <span>
-                  <span className="block font-medium">{item.title}</span>
-                  <span className="block text-muted-foreground">{QUEUE_KIND_WORDS[item.kind]}</span>
-                </span>
-                {item.run == null ? null : (
-                  <Button variant="outline" size="sm" onClick={() => void props.actions.openItem(item.id)}>
-                    Open
-                  </Button>
+                {item.kind === 'confirmation' ? (
+                  <ConfirmationRow item={item} sending={props.sending} actions={props.actions} />
+                ) : (
+                  <>
+                    <span>
+                      <span className="block font-medium">{item.title}</span>
+                      <span className="block text-muted-foreground">{QUEUE_KIND_WORDS[item.kind]}</span>
+                    </span>
+                    {item.run == null ? null : (
+                      <Button variant="outline" size="sm" onClick={() => void props.actions.openItem(item.id)}>
+                        Open
+                      </Button>
+                    )}
+                  </>
                 )}
               </li>
             ))}

@@ -47,6 +47,8 @@ pub enum QueueKind {
     /// A phase the agent tool's setup stopped: a version outside the tested range whose smoke check failed, or settings
     /// the tool ignored (0.3). The title says which, in Collide's words.
     AgentSetup,
+    /// A person-only write the CLI asked for: a person answers Accept or Dismiss.
+    Confirmation,
 }
 
 /// What an answer is, as a tag. A Queue item lists the kinds it takes in `answers`.

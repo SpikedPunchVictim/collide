@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { LoopPage, type LoopActions } from '../src/loop/LoopPage.tsx'
 import { type LoopState, initialLoopState } from '../src/loop/index.ts'
 import { versionChips } from '../src/loop/words.ts'
-import { board, claude, diff, permissionItem, reviewItem, run } from './support/loop-world.ts'
+import { board, claude, confirmationItem, diff, permissionItem, reviewItem, run } from './support/loop-world.ts'
 
 // What the page says in words, drawn with no browser (`renderToString`, as `app-shell.test.tsx` does). Clicks need a
 // browser: `ts-0082-fp` drives them. The state is built here and the page is a function of it.
@@ -17,6 +17,7 @@ const actions: LoopActions = {
   allowOnce: none,
   deny: none,
   accept: none,
+  dismiss: none,
   reprompt: none,
   discard: none,
   keep: () => {},
@@ -252,6 +253,38 @@ describe('the review item', () => {
     const html = show(reviewing({ items: [conflict] }))
     expect(html).toContain('A conflict')
     expect(html).toContain('This page cannot answer this one yet')
+    expect(html).not.toMatch(/<button[^>]*>Accept<\/button>/)
+  })
+})
+
+describe('a confirmation the CLI asked for', () => {
+  const asked = confirmationItem('confirm-1', 'plan:pr-0003-km')
+
+  test('is listed with its own title, the words for its kind, and an Accept and a Dismiss', () => {
+    const html = show(stateOf({ ...withBoard, items: [asked] }))
+    expect(html).toContain('Also waiting')
+    expect(html).toContain('Confirm: accept proposal plan:pr-0003-km')
+    expect(html).toContain('Needs your confirmation')
+    expect(html).toMatch(/<button[^>]*>Accept<\/button>/)
+    expect(html).toMatch(/<button[^>]*>Dismiss<\/button>/)
+    expect(html).not.toContain('This page cannot answer this one yet')
+  })
+
+  test('offers no Open, because it has no run', () => {
+    const html = show(stateOf({ ...withBoard, items: [asked] }))
+    expect(html).not.toMatch(/<button[^>]*>Open<\/button>/)
+  })
+
+  test('has its buttons off while an answer is on its way', () => {
+    const html = show(stateOf({ ...withBoard, items: [asked], sending: true }))
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Accept<\/button>/)
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Dismiss<\/button>/)
+  })
+
+  test('offers only the answers its item takes', () => {
+    const dismissOnly = { ...asked, answers: ['dismiss' as const] }
+    const html = show(stateOf({ ...withBoard, items: [dismissOnly] }))
+    expect(html).toMatch(/<button[^>]*>Dismiss<\/button>/)
     expect(html).not.toMatch(/<button[^>]*>Accept<\/button>/)
   })
 })

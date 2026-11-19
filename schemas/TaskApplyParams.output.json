@@ -1,9 +1,51 @@
 {
   "$defs": {
+    "ApplyActor": {
+      "additionalProperties": false,
+      "description": "Who asked for an `apply`. `at` is the daemon's local date, `YYYY-MM-DD`.",
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApplyActorKind"
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "at"
+      ],
+      "type": "object"
+    },
+    "ApplyActorKind": {
+      "description": "A person, or the agent of a run.",
+      "enum": [
+        "person",
+        "agent"
+      ],
+      "type": "string"
+    },
     "ApplyParams": {
       "additionalProperties": false,
       "description": "`apply` params, and `preview`'s. `id` is left out for an op that makes a task, and `version` is the version the\ncaller last read: the source answers `conflict` when it has moved on. Only `args` is op-specific; its schema is\nthe op's `args` in `initialize`.",
       "properties": {
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApplyActor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who asked. The daemon sets it from the connection. None is read as a person."
+        },
         "args": {
           "additionalProperties": true,
           "default": {},

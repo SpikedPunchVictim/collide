@@ -2554,7 +2554,9 @@ layout: { default: board, groupBy: category }
       that writes a planning file's `status` or `by:` line itself fails at phase end, as an edit to checklist state
       does. **The actor is read from the connection** (R5), never from an argument: the daemon takes it from the
       peer's process tree (0.2). Only the app is a person; a call from the CLI in a terminal that asks for one of
-      these ops becomes a Queue confirmation that the person answers in the app. Under the same-user rule (0.1) this
+      these ops becomes a Queue confirmation that the person answers in the app; only the app answers it, and the
+      CLI exits 12. Returning a `deferred` proposal to `proposed` is a fifth such op, `reopen`. The provider is told
+      the actor and the daemon's date on every `apply` and `preview` (`ts-0128-bb`). Under the same-user rule (0.1) this
       stops a mistake, not an agent that means to get around it. The phase-end check hashes the planning files that
       hold a `status:` or `by:` line before and after the phase and compares the lines that changed, so an edit that
       bypasses the CLI is caught as well.
@@ -4326,6 +4328,7 @@ combined into a corpus, and filtered by views.
   `ts-0120-wm`). A write by key (`task <source>:<id> <op>`) goes through the daemon; a bare id's write stays direct. A
   daemon that is not running is started on use and says so once; one that cannot start makes the command exit 1, and the
   direct commands go on. Exit 10: a view with an error of its own. Exit 11: a write still queued behind a busy checkout.
+  Exit 12: a person-only op waiting as a confirmation in the app (`ts-0128-bb`).
   A queued write is reported applied only once the task's version has changed (`ts-0120-wm`). `collide init`, `collide
   config get|set` and `collide pack …` were built in 4a.
 

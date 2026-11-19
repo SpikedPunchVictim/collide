@@ -73,6 +73,7 @@ fn create_private(
         rig,
         board,
         ApplyParams {
+            actor: None,
             op: "create".to_string(),
             id: None,
             args: args(json!({
@@ -93,6 +94,7 @@ fn write(rig: &Rig, board: &str, id: &str, version: &str, op: &str, with: Value)
         rig,
         board,
         ApplyParams {
+            actor: None,
             op: op.to_string(),
             id: Some(id.to_string()),
             args: args(with),

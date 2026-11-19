@@ -28,10 +28,10 @@
 //!
 //! ## Person-only operations
 //!
-//! Accept, defer, reject and resolve, of proposals and of questions, and a status write to `accepted`, `deferred`
-//! or `rejected` on a proposal ([`person_only_request`]). [`judge`] allows the app, turns the CLI's into a
-//! [`QueueConfirmation`] that a person answers in the app, and refuses a run agent with
-//! [`collide_core::owner::code::NOT_PERMITTED`].
+//! Accept, defer, reject and resolve, of proposals and of questions, a status write to `accepted`, `deferred` or
+//! `rejected` on a proposal, and the return of a deferred proposal to `proposed` ([`person_only_request`]).
+//! [`judge`] allows the app, turns the CLI's into a [`QueueConfirmation`] that a person answers in the app, and
+//! refuses a run agent with [`collide_core::owner::code::NOT_PERMITTED`].
 //!
 //! ## The socket's files
 //!
@@ -246,6 +246,8 @@ pub enum PersonOnlyOp {
     Defer,
     Reject,
     Resolve,
+    /// Returning a deferred proposal to `proposed`: deferred holds "until a person returns it" (0.10).
+    Reopen,
 }
 
 impl PersonOnlyOp {
@@ -255,6 +257,7 @@ impl PersonOnlyOp {
             PersonOnlyOp::Defer => "defer",
             PersonOnlyOp::Reject => "reject",
             PersonOnlyOp::Resolve => "resolve",
+            PersonOnlyOp::Reopen => "reopen",
         }
     }
 }
@@ -308,12 +311,13 @@ pub enum Verdict {
     Refuse(RpcError),
 }
 
-/// Reads whether `op` on an item of `item_kind` is person-only. `to_status` is the status a status write asks for.
-/// `None` for everything else, which any actor may do.
+/// Reads whether `op` on an item of `item_kind` is person-only. `from_status` is the item's status now and
+/// `to_status` the status a status write asks for. `None` for everything else, which any actor may do.
 pub fn person_only_request(
     op: &str,
     item_kind: &str,
     item: &str,
+    from_status: Option<&str>,
     to_status: Option<&str>,
 ) -> Option<PersonOnlyRequest> {
     let item_kind = match item_kind {
@@ -321,14 +325,17 @@ pub fn person_only_request(
         "question" => PersonOnlyItem::Question,
         _ => return None,
     };
-    let op = match (op, item_kind, to_status) {
-        ("accept", _, _) => PersonOnlyOp::Accept,
-        ("defer", _, _) => PersonOnlyOp::Defer,
-        ("reject", _, _) => PersonOnlyOp::Reject,
-        ("resolve", _, _) => PersonOnlyOp::Resolve,
-        ("setStatus", PersonOnlyItem::Proposal, Some("accepted")) => PersonOnlyOp::Accept,
-        ("setStatus", PersonOnlyItem::Proposal, Some("deferred")) => PersonOnlyOp::Defer,
-        ("setStatus", PersonOnlyItem::Proposal, Some("rejected")) => PersonOnlyOp::Reject,
+    let op = match (op, item_kind, from_status, to_status) {
+        ("accept", ..) => PersonOnlyOp::Accept,
+        ("defer", ..) => PersonOnlyOp::Defer,
+        ("reject", ..) => PersonOnlyOp::Reject,
+        ("resolve", ..) => PersonOnlyOp::Resolve,
+        ("setStatus", PersonOnlyItem::Proposal, _, Some("accepted")) => PersonOnlyOp::Accept,
+        ("setStatus", PersonOnlyItem::Proposal, _, Some("deferred")) => PersonOnlyOp::Defer,
+        ("setStatus", PersonOnlyItem::Proposal, _, Some("rejected")) => PersonOnlyOp::Reject,
+        ("setStatus", PersonOnlyItem::Proposal, Some("deferred"), Some("proposed")) => {
+            PersonOnlyOp::Reopen
+        }
         _ => return None,
     };
     Some(PersonOnlyRequest {

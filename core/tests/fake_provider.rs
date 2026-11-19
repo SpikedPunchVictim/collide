@@ -27,6 +27,7 @@ fn get(id: &str) -> GetParams {
 
 fn op(name: &str, id: Option<&str>, args: &[(&str, Value)]) -> ApplyParams {
     ApplyParams {
+        actor: None,
         op: name.into(),
         id: id.map(str::to_string),
         args: args

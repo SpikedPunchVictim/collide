@@ -345,6 +345,7 @@ impl FileRuns {
         let (_, id) = scratch::split_id(&quick.task);
         let applied = ScratchSource::new(self.config.store.clone(), &quick.board)
             .apply(&ApplyParams {
+                actor: None,
                 op: "setStatus".to_string(),
                 id: Some(id.to_string()),
                 args: BTreeMap::from([("category".to_string(), json!(category))]),

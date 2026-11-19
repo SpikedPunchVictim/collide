@@ -106,6 +106,7 @@ pub(super) fn apply(
         board: board.to_string(),
         source: Some("scratch".to_string()),
         apply: ApplyParams {
+            actor: None,
             op: op.to_string(),
             id: id.map(str::to_string),
             args: serde_json::from_value::<BTreeMap<String, Value>>(args).unwrap(),

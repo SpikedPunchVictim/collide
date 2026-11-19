@@ -7,7 +7,9 @@
 //! - `collide task <id> --json`: `task.get`, which has the item, its links one hop out, its copies and its latest run.
 //! - `collide task <source>:<id> <op> ...`: the write by `task.apply`. A write to a busy checkout is queued by the
 //!   daemon (0.4, Root busy); the command says why, prints the Queue item's id, and waits for it with `Retry` until
-//!   the write has applied, or the wait has run out ([`wait_for_queued`]).
+//!   the write has applied, or the wait has run out ([`wait_for_queued`]). A person-only op (0.10) is not written: the
+//!   daemon keeps it with a Queue confirmation that a person answers in the app, and the command exits 12
+//!   ([`confirmation_waits`]).
 //!
 //! The daemon is started when none answers, and the command says so once ([`start_daemon`]). A command line that is
 //! wrong, and a `--checkout` that is not an entry of `git worktree list`, are refused before that. What stays direct
@@ -247,6 +249,7 @@ fn new_task(
         board: session.board.clone(),
         source: Some(scratch::SOURCE.to_string()),
         apply: ApplyParams {
+            actor: None,
             op: "create".to_string(),
             id: None,
             args: BTreeMap::from([("prompt".to_string(), json!(options.prompt))]),
@@ -559,6 +562,7 @@ fn write_op(
         board: session.board.clone(),
         source: None,
         apply: ApplyParams {
+            actor: None,
             op: op.name.clone(),
             id: Some(current.key.clone()),
             args,
@@ -571,9 +575,12 @@ fn write_op(
     if let Some(queued) = &answer.queued {
         return wait_for_queued(session, queued, current, options, out, err);
     }
+    if let Some(asked) = &answer.confirmation {
+        return confirmation_waits(asked, options, out, err);
+    }
     let Some(result) = answer.result else {
         return Err(CliError::failed(
-            "the daemon answered with neither a result nor a queued write",
+            "the daemon answered with neither a result, a queued write nor a confirmation",
         ));
     };
     if options.json {
@@ -613,6 +620,35 @@ fn write_op(
             Ok(exit::REFUSED)
         }
     }
+}
+
+// ---- a write that waits for a person -----------------------------------------------------------------------------
+
+/// A person-only op (0.10): the daemon wrote nothing and put a confirmation in the Queue, which a person answers in
+/// the app. Says so, names the Queue item, and exits `CONFIRMATION`. The command does not wait: the person may be away.
+fn confirmation_waits(
+    asked: &WriteQueued,
+    options: &TaskOptions,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<u8, CliError> {
+    if options.json {
+        let document = json!({ "confirmation": { "item": asked.item, "reason": asked.reason } });
+        emit(out, &format!("{document}\n"))?;
+    } else {
+        let _ = writeln!(
+            err,
+            "collide: a confirmation waits in the app: {}; queue item {}; nothing was written",
+            asked.reason, asked.item
+        );
+    }
+    if options.write.commit {
+        let _ = writeln!(
+            err,
+            "collide: --commit does not apply: nothing was written, so there is nothing to commit"
+        );
+    }
+    Ok(exit::CONFIRMATION)
 }
 
 // ---- a write that is queued ----------------------------------------------------------------------------------------

@@ -53,6 +53,9 @@ pub mod exit {
     /// `collide task <id> <op>` through the daemon: the write is in the daemon's Queue and was not applied yet, because
     /// its checkout is busy (`--no-wait`, or the wait ran out).
     pub const QUEUED: u8 = 11;
+    /// `collide task <id> <op>` through the daemon: the op is a person's alone (accept, defer, reject, resolve), so
+    /// nothing was written and a confirmation waits in the app (`crate::task_daemon`).
+    pub const CONFIRMATION: u8 = 12;
 }
 
 pub const USAGE: &str = "\
@@ -109,6 +112,9 @@ collide task <source>:<id> <op> ...: the write goes through the daemon (<source>
   the command says why, prints the Queue item's id, and waits for the write to apply (10 minutes; --wait <seconds>
   sets that). --no-wait, and a wait that ran out, leave it queued and exit 11. --commit does not apply to a write
   that was queued: commit it when it has landed.
+  Accepting, deferring, rejecting or resolving a proposal or a question (and returning a deferred proposal to
+  proposed) is a person's: the command writes nothing, says a confirmation waits in the app, prints the Queue item's
+  id and exits 12. The person answers Accept or Dismiss in the app.
 
 Where a write goes: the main checkout's .collide/planning/, also when you run collide inside a linked worktree (which
 is left untouched). --checkout <path> names another checkout instead: <path> must be an entry of `git worktree list`
@@ -143,7 +149,7 @@ a blocked-by target that is no item, keep their items from being ready and are r
 exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line (also: a
 --checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was written),
 5 refused by the provider (also: the checkout stayed busy for the wait), 10 the view has an error of its own,
-11 the write is queued in the daemon and not applied yet
+11 the write is queued in the daemon and not applied yet, 12 a person-only op: a confirmation waits in the app
 
 The provider is found through COLLIDE_BUILTIN_PACKS, else the staged bundle above the executable (pnpm build:packs),
 else the bundle beside it. `node` is taken from PATH.";
@@ -873,6 +879,7 @@ fn run_task(
     let result = session
         .client
         .apply(&ApplyParams {
+            actor: None,
             op: op.name.clone(),
             id: Some(current.id.clone()),
             args,
@@ -1122,6 +1129,7 @@ fn run_create(
     let result = session
         .client
         .apply(&ApplyParams {
+            actor: None,
             op: op.name.clone(),
             id: None,
             args,
@@ -1170,6 +1178,7 @@ fn run_reid(
     let result = session
         .client
         .apply(&ApplyParams {
+            actor: None,
             op: op.name.clone(),
             id: Some(old_id.clone()),
             args,

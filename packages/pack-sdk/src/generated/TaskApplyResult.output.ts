@@ -36,6 +36,10 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
  */
 export interface TaskApplyResult {
   commit?: string | null
+  /**
+   * A person-only write: nothing was written, and a person answers in the app. No `result`.
+   */
+  confirmation?: WriteQueued | null
   queued?: WriteQueued | null
   result?: ApplyResult | null
 }

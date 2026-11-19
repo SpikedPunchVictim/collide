@@ -430,6 +430,17 @@
         "null"
       ]
     },
+    "confirmation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WriteQueued"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A person-only write: nothing was written, and a person answers in the app. No `result`."
+    },
     "queued": {
       "anyOf": [
         {
