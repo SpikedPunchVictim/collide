@@ -115,10 +115,10 @@ describe('initialize declares the spike kind', () => {
     expect((init?.links as Row[]).filter((link) => link.blocking).map((link) => link.name)).toEqual(['blocked-by'])
     const ops = init?.ops as Row[]
     expect(ops.find((op) => op.name === 'link')?.args.properties.type).toEqual({
-      enum: ['blocked-by', 'implements', 'informs'],
+      enum: ['blocked-by', 'implements', 'informs', 'includes', 'supersedes'],
     })
     expect(ops.find((op) => op.name === 'create')?.args.properties.kind).toEqual({
-      enum: ['task', 'epic', 'proposal', 'spike'],
+      enum: ['task', 'epic', 'proposal', 'spike', 'question'],
     })
   })
 })
@@ -356,7 +356,7 @@ describe('create of a spike', () => {
     expect(git(root, 'status', '--porcelain')).toBe(`?? ${SPIKES}/\n`)
   })
 
-  test('refuses an epic, because a spike is part of no epic, and a kind that is none of the four', async () => {
+  test('refuses an epic, because a spike is part of no epic, and a kind that is none of the five', async () => {
     const root = repoOf(EPIC_FILES)
     const replies = await withClient(root, async (client) => [
       await create(client, { kind: 'spike', epic: EPIC, title: 'In an epic' }),
@@ -368,7 +368,7 @@ describe('create of a spike', () => {
     })
     expect(replies[1]).toMatchObject({
       outcome: 'refused',
-      message: expect.stringContaining('kind must be "task", "epic", "proposal" or "spike"'),
+      message: expect.stringContaining('kind must be "task", "epic", "proposal", "question" or "spike"'),
     })
     expect(git(root, 'status', '--porcelain')).toBe('')
   })

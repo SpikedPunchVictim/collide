@@ -95,7 +95,7 @@ describe('create', () => {
     const op = (result?.ops as Array<Record<string, any>>).find((candidate) => candidate.name === 'create')
     expect(op?.args).toMatchObject({
       required: ['title'],
-      properties: { kind: { enum: ['task', 'epic', 'proposal', 'spike'] }, seed: { type: 'integer' } },
+      properties: { kind: { enum: ['task', 'epic', 'proposal', 'spike', 'question'] }, seed: { type: 'integer' } },
       additionalProperties: false,
     })
   })
@@ -155,7 +155,10 @@ describe('create', () => {
     [{ epic: 'ep-009-zz', title: 'Unknown epic' }, 'there is no epic ep-009-zz'],
     [{ epic: 'nonsense', title: 'Bad epic id' }, 'a task needs epic'],
     [{ kind: 'epic', epic: EPIC, title: 'An epic in an epic' }, 'an epic is part of no epic'],
-    [{ kind: 'widget', epic: EPIC, title: 'Unknown kind' }, 'kind must be "task", "epic", "proposal" or "spike"'],
+    [
+      { kind: 'widget', epic: EPIC, title: 'Unknown kind' },
+      'kind must be "task", "epic", "proposal", "question" or "spike"',
+    ],
     [{ kind: 'spike', epic: EPIC, title: 'A spike in an epic' }, 'a spike is part of no epic'],
     [{ epic: EPIC }, 'title must be text'],
     [{ epic: EPIC, title: ' padded ' }, 'title must be text'],

@@ -30,37 +30,61 @@ export const SPIKE_STATUSES: ReadonlyArray<{ name: string; category: Category }>
   { name: 'dropped', category: 'dropped' },
 ]
 
+/**
+ * A question's three statuses, each with its category (0.10, kinds). They are the plan CLI's: `open`, `resolved` and
+ * `dropped`, so a question from either source looks the same in a view.
+ */
+export const QUESTION_STATUSES: ReadonlyArray<{ name: string; category: Category }> = [
+  { name: 'open', category: 'ready' },
+  { name: 'resolved', category: 'done' },
+  { name: 'dropped', category: 'dropped' },
+]
+
 export const PROPOSAL = 'proposal'
 export const SPIKE = 'spike'
+export const QUESTION = 'question'
+
+/** What a question's `needs` may be: who or what can close it. */
+export const NEEDS = ['human', 'evidence', 'either'] as const
 
 export const BLOCKED_BY = 'blocked-by'
 export const IMPLEMENTS = 'implements'
 export const INFORMS = 'informs'
+export const INCLUDES = 'includes'
+export const SUPERSEDES = 'supersedes'
 
 /**
- * The link types the provider holds. `blocked-by` is the one that blocks. `implements` is a task's link to the feature it
- * builds, so its target is `feature` (revision 14); the others name an item, which is what a declaration with no `target`
- * means. `informs` is a link to what a spike informs, and blocks nothing.
+ * The link types the provider holds. `blocked-by` is the one that blocks. `implements` is a task's link to the feature
+ * it builds, so its target is `feature` (revision 14); the others name an item, which is what a declaration with no
+ * `target` means. `informs` is a link to what a spike informs, `includes` is a proposal's link to the tasks, spikes and
+ * questions it holds, and `supersedes` is a proposal's link to the proposal it replaces, or a spike's to a spike. None
+ * of the three blocks anything.
  */
 export const LINK_TYPES: ReadonlyArray<LinkTypeDeclInput> = [
   { name: BLOCKED_BY, dir: 'out', blocking: true },
   { name: 'part-of', dir: 'out', blocking: false },
   { name: IMPLEMENTS, dir: 'out', blocking: false, target: 'feature' },
   { name: INFORMS, dir: 'out', blocking: false },
+  { name: INCLUDES, dir: 'out', blocking: false },
+  { name: SUPERSEDES, dir: 'out', blocking: false },
 ]
 
 /** What a link of `type` points at: a feature when the type is declared so, otherwise an item. */
 export const targetOf = (type: string): 'item' | 'feature' => LINK_TYPES.find((declared) => declared.name === type)?.target ?? 'item'
 
-export const KNOWN_KINDS = ['task', 'epic', PROPOSAL, SPIKE] as const
+export const KNOWN_KINDS = ['task', 'epic', PROPOSAL, SPIKE, QUESTION] as const
 
 /** Whether `kind` has statuses of its own, so that a category does not name one of them. */
-export const hasOwnStatuses = (kind: string): boolean => kind === PROPOSAL || kind === SPIKE
+export const hasOwnStatuses = (kind: string): boolean => kind === PROPOSAL || kind === SPIKE || kind === QUESTION
 
-/** The statuses an item of `kind` may have: a proposal's six, a spike's five, and the categories for any other kind. */
+/**
+ * The statuses an item of `kind` may have: a proposal's six, a spike's five, a question's three, and the categories for
+ * any other kind.
+ */
 export const statusesOf = (kind: string): ReadonlyArray<{ name: string; category: Category }> => {
   if (kind === PROPOSAL) return PROPOSAL_STATUSES
   if (kind === SPIKE) return SPIKE_STATUSES
+  if (kind === QUESTION) return QUESTION_STATUSES
   return CATEGORIES.map((name) => ({ name, category: name }))
 }
 
@@ -130,6 +154,28 @@ const checkLinks = (value: unknown): ItemLink[] | string => {
   return links
 }
 
+/** `resolved_by` is a person and a day, `human:2026-11-18`, or the id of the item that settled the question. */
+const RESOLVED_BY = new RegExp(`^(human:[0-9]{4}-[0-9]{2}-[0-9]{2}|${ID_PATTERN.slice(1, -1)})$`)
+
+/** The rules of a question's own fields (0.10, kinds), or the first one it breaks. */
+const checkQuestion = (status: string, fields: Record<string, FieldValue>): string | null => {
+  const { needs, resolved_by: resolvedBy } = fields
+  if (needs !== undefined && !(NEEDS as readonly unknown[]).includes(needs)) {
+    return `field "needs" must be one of ${NEEDS.join(', ')}, not ${JSON.stringify(needs)}`
+  }
+  if (status === 'resolved' && resolvedBy === undefined) {
+    return 'a resolved question needs the field "resolved_by", as human:<date> or the id of the item that settled it'
+  }
+  if (status !== 'resolved' && resolvedBy !== undefined) {
+    return `field "resolved_by" is for a resolved question, and this one is ${status}; remove it`
+  }
+  if (resolvedBy !== undefined && !(typeof resolvedBy === 'string' && RESOLVED_BY.test(resolvedBy))) {
+    const got = JSON.stringify(resolvedBy)
+    return `field "resolved_by" must be human:<date>, such as human:2026-11-18, or an item id, not ${got}`
+  }
+  return null
+}
+
 /** Checks a parsed frontmatter mapping field by field. Nothing is coerced: a number where a string belongs is refused. */
 export function readItem(frontmatter: Record<string, unknown>): ItemResult {
   const bad = (reason: string): ItemResult => ({ ok: false, reason })
@@ -160,6 +206,8 @@ export function readItem(frontmatter: Record<string, unknown>): ItemResult {
     if (problem !== null) return bad(problem)
     fields[key] = frontmatter[key] as FieldValue
   }
+  const questionProblem = kind === QUESTION ? checkQuestion(status, fields) : null
+  if (questionProblem !== null) return bad(questionProblem)
 
   return {
     ok: true,

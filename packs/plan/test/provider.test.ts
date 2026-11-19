@@ -12,7 +12,7 @@ const taskOf = (result: Record<string, any> | undefined, id: string): Record<str
 const linksOf = (result: Record<string, any> | undefined, id: string) => taskOf(result, id).links
 
 describe('initialize', () => {
-  test('declares the kinds task, epic, proposal and spike, the five categories, and one blocking link', async () => {
+  test('declares the five kinds, the five categories, and one blocking link', async () => {
     const { result } = await call(fixture('basic'), 'initialize', { config: {} })
     const categories = ['ready', 'active', 'review', 'done', 'dropped'].map((name) => ({ name, category: name }))
     expect(result?.kinds).toEqual([
@@ -49,6 +49,23 @@ describe('initialize', () => {
           },
         ],
       },
+      {
+        name: 'question',
+        statuses: [
+          { name: 'open', category: 'ready' },
+          { name: 'resolved', category: 'done' },
+          { name: 'dropped', category: 'dropped' },
+        ],
+        ops: [
+          {
+            name: 'setStatus',
+            args: expect.objectContaining({
+              properties: { status: { enum: ['open', 'dropped'] } },
+              required: ['status'],
+            }),
+          },
+        ],
+      },
     ])
     expect(result?.statuses).toEqual(categories)
     expect(result?.links.filter((link: any) => link.blocking)).toEqual([{ name: 'blocked-by', dir: 'out', blocking: true }])
@@ -61,7 +78,8 @@ describe('list over a tree of items', () => {
   test('lists the epic files, the files in tasks/ and proposals/ and each spike record, and nothing else', async () => {
     const { result, invalid } = await call(fixture('basic'), 'list')
     expect(idsOf(result)).toEqual([
-      'ep-001-aa', 'ep-002-bb', 'pr-0001-aa', 'sp-0001-aa', 'ts-0001-aa', 'ts-0002-bb', 'ts-0003-cc', 'ts-0004-dd',
+      'ep-001-aa', 'ep-002-bb', 'pr-0001-aa', 'qu-0001-aa', 'sp-0001-aa', 'ts-0001-aa', 'ts-0002-bb', 'ts-0003-cc',
+      'ts-0004-dd',
     ])
     expect(invalid).toEqual([])
   })
@@ -104,7 +122,7 @@ describe('list over a tree of items', () => {
     expect(taskOf(result, 'ts-0004-dd')).toMatchObject({ kind: 'widget' })
     expect(linksOf(result, 'ts-0004-dd')).toContainEqual({ type: 'blocked-by', to: 'ts-0999-zz' })
     expect(invalid).toEqual([])
-    expect(logs).toEqual(['plan: 8 items, 0 invalid, 1 with an unknown kind, 1 with a broken link'])
+    expect(logs).toEqual(['plan: 9 items, 0 invalid, 1 with an unknown kind, 1 with a broken link'])
   })
 
   test('is empty when the repository has no planning folder', async () => {
@@ -146,12 +164,16 @@ describe('the epic comes from the folder', () => {
 })
 
 describe('only the named paths are read', () => {
-  test('questions/, a nested folder, the READMEs and the rest of a spike folder are present and ignored', async () => {
+  test('a nested folder, the READMEs and the rest of a spike folder are present and ignored', async () => {
     const { result, invalid } = await call(fixture('basic'), 'list')
     expect(idsOf(result)).not.toContain('ts-0091-aa')
     expect(idsOf(result)).not.toContain('ts-0090-aa')
+    expect(idsOf(result)).not.toContain('qu-0091-aa')
     const paths = (result?.tasks as Array<{ path: string }>).map((task) => task.path)
-    expect(paths.filter((path) => /questions|README|sub\/|\/work\//.test(path))).toEqual([])
+    expect(paths.filter((path) => /README|sub\/|\/work\//.test(path))).toEqual([])
+    expect(paths.filter((path) => path.includes('/questions/'))).toEqual([
+      `${EPICS}/ep-001-aa-alpha/questions/qu-0001-aa-why.md`,
+    ])
     expect(paths.filter((path) => path.includes('/spikes/'))).toEqual([`${SPIKES}/sp-0001-aa-demo/record.md`])
     expect(invalid).toEqual([])
   })
@@ -250,13 +272,13 @@ describe('the root', () => {
   test('the shared root is read from root, not from the working directory', async () => {
     const { result } = await call(fixture('basic'), 'list')
     expect(process.cwd()).not.toBe(fixture('basic'))
-    expect(result?.tasks).toHaveLength(8)
+    expect(result?.tasks).toHaveLength(9)
   })
 
   test('a second initialize moves the provider to the new root', async () => {
     const client = connect()
     await client.request('initialize', { config: {}, root: fixture('basic') })
-    expect((await client.request('list')).result?.tasks).toHaveLength(8)
+    expect((await client.request('list')).result?.tasks).toHaveLength(9)
     await client.request('initialize', { config: {}, root: makeRepo({}) })
     expect((await client.request('list')).result?.tasks).toEqual([])
     await client.close()

@@ -44,8 +44,8 @@ setting in `.collide/config.yaml`, and a private root in the pack's data directo
     ep-002-va-skeleton-and-planning-slice/
       epic.md
       tasks/ts-0012-ua-<slug>.md
-      proposals/pr-0003-km-<slug>.md      (planned, Stage 4c and 9d)
-      questions/qu-0007-bx-<slug>.md      (planned, Stage 4c and 9d)
+      proposals/pr-0003-km-<slug>.md
+      questions/qu-0007-bx-<slug>.md
   spikes/
     sp-0005-fv-schema-expressions/
       record.md, scripts, out/, work/
@@ -148,7 +148,7 @@ decision once resolved. Only a person accepts, defers, rejects or resolves one. 
 | Stage | What the provider reads |
 |---|---|
 | Stage 2 (planning slice) | `epics/` only: kinds `task` and `epic`. |
-| Stage 4c | Adds the `spike` kind: records in `spikes/` become items. The private root and layout setting arrive. |
+| Stage 4c | Adds the kinds `spike` (records in `spikes/`) and `question`. The private root and layout setting arrive. |
 
 The slice's criterion is narrowed on purpose: a spike record's statuses and shape are not a task's, so the slice does
 not read `spikes/` (0.10; Stage 2 criteria).

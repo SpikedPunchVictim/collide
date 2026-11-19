@@ -19,6 +19,7 @@ export const KIND_IDS = {
   epic: { prefix: 'ep', width: 3 },
   proposal: { prefix: 'pr', width: 4 },
   spike: { prefix: 'sp', width: 4 },
+  question: { prefix: 'qu', width: 4 },
 } as const
 export type CreatableKind = keyof typeof KIND_IDS
 
@@ -44,12 +45,15 @@ export interface IdHooks {
 /** A problem reading the ids that other refs hold. The op that asked refuses with the message. */
 export class IdSourceError extends Error {}
 
+/** The folders of an epic folder that hold item files, one level deep. */
+const ITEM_FOLDERS = ['tasks', 'proposals', 'questions']
+
 /**
  * The ids that the item paths name. A path is relative to the repository root, with `/`, and only a path under one of
  * `epicsDirs` (the epics folders of the layout's roots) or `spikesDirs` (the folders that hold spike folders)
- * counts. An epic folder names its epic (whatever is inside it), and a file directly in a `tasks/` or `proposals/`
- * folder names its item. A spike folder names its spike, whatever is inside it. Nothing is opened: the id is the
- * start of the name (0.10, ids: names on disk are `<id>-<slug>`).
+ * counts. An epic folder names its epic (whatever is inside it), and a file directly in a `tasks/`, `proposals/` or
+ * `questions/` folder names its item. A spike folder names its spike, whatever is inside it. Nothing is opened: the id
+ * is the start of the name (0.10, ids: names on disk are `<id>-<slug>`).
  */
 export function idsInPaths(
   paths: string[],
@@ -70,7 +74,7 @@ export function idsInPaths(
     const epic = FOLDER_ID.exec(folder ?? '')?.[1]
     if (epic === undefined) continue
     ids.add(epic)
-    if ((subfolder === 'tasks' || subfolder === 'proposals') && file !== undefined && rest.length === 0) {
+    if (subfolder !== undefined && ITEM_FOLDERS.includes(subfolder) && file !== undefined && rest.length === 0) {
       const id = FILE_ID.exec(file)?.[1]
       if (id !== undefined) ids.add(id)
     }
@@ -106,8 +110,8 @@ async function idsInRefs(root: string, epicsDirs: string[], spikesDirs: string[]
 }
 
 /**
- * The ids in the working tree: the epic folders and the files in their `tasks/` and `proposals/` folders, and the
- * spike folders, as `scan.ts` finds them. A spike folder is named and never opened.
+ * The ids in the working tree: the epic folders and the files in their `tasks/`, `proposals/` and `questions/` folders,
+ * and the spike folders, as `scan.ts` finds them. A spike folder is named and never opened.
  */
 async function idsInWorkingTree(root: string, epicsDirs: string[], spikesDirs: string[]): Promise<Set<string>> {
   const names = async (dir: string): Promise<string[]> => {
@@ -122,7 +126,7 @@ async function idsInWorkingTree(root: string, epicsDirs: string[], spikesDirs: s
   for (const epics of epicsDirs) {
     for (const folder of await names(join(root, epics))) {
       paths.push(`${epics}/${folder}/`)
-      for (const subfolder of ['tasks', 'proposals']) {
+      for (const subfolder of ITEM_FOLDERS) {
         for (const file of await names(join(root, epics, folder, subfolder))) {
           paths.push(`${epics}/${folder}/${subfolder}/${file}`)
         }

@@ -228,8 +228,9 @@ fn an_unknown_kind_fails_listing_the_declared_kinds() {
     let run = collide(&repo, &bundle, &["tasks", "--kind", "widget"]);
     assert_eq!(run.code, 2);
     assert!(
-        run.stderr
-            .contains("unknown kind `widget`; the provider declares: task, epic, proposal, spike"),
+        run.stderr.contains(
+            "unknown kind `widget`; the provider declares: task, epic, proposal, spike, question"
+        ),
         "{}",
         run.stderr
     );

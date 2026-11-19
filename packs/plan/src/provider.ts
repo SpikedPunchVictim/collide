@@ -17,13 +17,17 @@ import {
   CATEGORIES,
   ID_PATTERN,
   IMPLEMENTS,
+  INCLUDES,
   INFORMS,
   LINK_TO_PATTERN,
   LINK_TYPES,
   PROPOSAL,
   PROPOSAL_STATUSES,
+  QUESTION,
+  QUESTION_STATUSES,
   SPIKE,
   SPIKE_STATUSES,
+  SUPERSEDES,
 } from './item.ts'
 import type { Category } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
@@ -36,9 +40,14 @@ const kind = (name: string): KindDeclInput => ({ name, statuses })
 /**
  * A kind with statuses of its own declares its own `setStatus`, which takes only those words, because a category does
  * not name one status: a proposal's `rejected` and `superseded` are both `dropped`. A spike's five words each have a
- * category to themselves, but it declares its own too, as a proposal does, so the one rule holds for both.
+ * category to themselves, but it declares its own too, as a proposal does, so the one rule holds for all of them.
+ * `settable` is the words the op takes, all of them unless a kind says fewer.
  */
-const ownStatusKind = (name: string, own: ReadonlyArray<{ name: string; category: Category }>): KindDeclInput => ({
+const ownStatusKind = (
+  name: string,
+  own: ReadonlyArray<{ name: string; category: Category }>,
+  settable: readonly string[] = own.map((status) => status.name),
+): KindDeclInput => ({
   name,
   statuses: [...own],
   ops: [
@@ -46,7 +55,7 @@ const ownStatusKind = (name: string, own: ReadonlyArray<{ name: string; category
       name: 'setStatus',
       args: {
         type: 'object',
-        properties: { status: { enum: own.map((status) => status.name) } },
+        properties: { status: { enum: [...settable] } },
         required: ['status'],
         additionalProperties: false,
       },
@@ -56,14 +65,17 @@ const ownStatusKind = (name: string, own: ReadonlyArray<{ name: string; category
 
 const proposalKind = ownStatusKind(PROPOSAL, PROPOSAL_STATUSES)
 const spikeKind = ownStatusKind(SPIKE, SPIKE_STATUSES)
+/** A question is resolved by the `resolve` op, which records who and what, so `setStatus` takes the other two. */
+const questionKind = ownStatusKind(QUESTION, QUESTION_STATUSES, ['open', 'dropped'])
 
 const noExtraArgs = { additionalProperties: false }
 
 /**
- * The write ops, for both kinds. `create` makes an item, so it is sent with no `id` and no `version`; `reid` is sent with
- * an `id` and no `version`; the others change one item and need both. None has `movesTo`: a status write moves the item to the category its argument names,
- * which one fixed category cannot say, and `claim` records an owner without changing the status. `checkouts` is left
- * out (any): `apply` writes in the main checkout, or in the one that `checkout` names.
+ * The write ops, for every kind. `create` makes an item, so it is sent with no `id` and no `version`; `reid` is sent
+ * with an `id` and no `version`; the others change one item and need both. None has `movesTo`: a status write moves
+ * the item to the category its argument names, which one fixed category cannot say, and `claim` records an owner
+ * without changing the status. `checkouts` is left out (any): `apply` writes in the main checkout, or in the one that
+ * `checkout` names.
  */
 const OPS: NonNullable<InitializeResultInput['ops']> = [
   {
@@ -81,7 +93,7 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
       type: 'object',
       properties: {
         to: { type: 'string', pattern: LINK_TO_PATTERN },
-        type: { enum: [BLOCKED_BY, IMPLEMENTS, INFORMS] },
+        type: { enum: [BLOCKED_BY, IMPLEMENTS, INFORMS, INCLUDES, SUPERSEDES] },
       },
       required: ['to'],
       ...noExtraArgs,
@@ -97,7 +109,7 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
     args: {
       type: 'object',
       properties: {
-        kind: { enum: ['task', 'epic', PROPOSAL, SPIKE] },
+        kind: { enum: ['task', 'epic', PROPOSAL, SPIKE, QUESTION] },
         epic: { type: 'string', pattern: '^ep-[0-9]{3,}-[a-z]{2}$' },
         title: { type: 'string', minLength: 1, maxLength: TITLE_MAX },
         seed: { type: 'integer' },
@@ -111,8 +123,9 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
 ]
 
 /**
- * `initialize`'s answer: kinds `task`, `epic`, `proposal` and `spike`, the five categories as a task's statuses,
- * `blocked-by` as the one blocking link, `implements`, whose target is a feature, and `informs`.
+ * `initialize`'s answer: kinds `task`, `epic`, `proposal`, `spike` and `question`, the five categories as a task's
+ * statuses, `blocked-by` as the one blocking link, `implements`, whose target is a feature, and `informs`, `includes`
+ * and `supersedes`.
  */
 export const INITIALIZE_RESULT: InitializeResultInput = {
   scope: 'ref',
@@ -120,7 +133,7 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
   shortIdPattern: '^[0-9]+(-[a-z]{2})?$',
   statuses,
   categoryStatus: Object.fromEntries(CATEGORIES.map((name) => [name, name])),
-  kinds: [kind('task'), kind('epic'), proposalKind, spikeKind],
+  kinds: [kind('task'), kind('epic'), proposalKind, spikeKind, questionKind],
   ops: OPS,
   links: [...LINK_TYPES],
   capabilities: { watch: false, create: true, collections: false, preview: false },

@@ -63,7 +63,7 @@ export function checkCreate(args: Record<string, unknown>): string | null {
     return 'root must be "shared" or "private"'
   }
   if (kind !== undefined && !Object.hasOwn(KIND_IDS, kind as string)) {
-    return 'kind must be "task", "epic", "proposal" or "spike"'
+    return 'kind must be "task", "epic", "proposal", "question" or "spike"'
   }
   if (typeof title !== 'string' || title.trim() !== title || title === '' || title.length > TITLE_MAX || CONTROL.test(title)) {
     return `title must be text of 1 to ${TITLE_MAX} characters, with no line break or other control character and no space at either end`
@@ -71,24 +71,26 @@ export function checkCreate(args: Record<string, unknown>): string | null {
   if (kind === 'epic' || kind === 'spike') {
     if (epic !== undefined) return `${kind === 'epic' ? 'an epic' : 'a spike'} is part of no epic: leave epic out`
   } else if (typeof epic !== 'string' || !EPIC_ID.test(epic)) {
-    return `a ${kind === 'proposal' ? 'proposal' : 'task'} needs epic, the id of its epic, such as ep-002-va`
+    return `a ${(kind as string | undefined) ?? 'task'} needs epic, the id of its epic, such as ep-002-va`
   }
   return checkSeed(args) ?? onlyKeys(args, ['kind', 'epic', 'title', 'seed', 'root'])
 }
 
 const DRAFT_BODY = '## Features\n\n## Decision\n'
 const TASK_BODY = '## Goal\n\n## Success criteria\n\n## Tests\n\n## Notes\n'
+const QUESTION_BODY = '## Question\n\n## Decision\n'
 
 /**
  * A new item: a task or an epic starts `ready`, with the parts a task has; a proposal starts as a `draft`, with the two
- * parts 0.10 names; a spike starts `planned`, with its title as the one heading.
+ * parts 0.10 names; a spike starts `planned`, with its title as the one heading; a question starts `open`, with the
+ * question and, for later, its decision.
  */
 const fileOf = (id: string, kind: CreatableKind, title: string): string => {
-  const status = { task: 'ready', epic: 'ready', proposal: 'draft', spike: 'planned' }[kind]
+  const status = { task: 'ready', epic: 'ready', proposal: 'draft', spike: 'planned', question: 'open' }[kind]
   const fields = `id: ${id}\nkind: ${kind}\nstatus: ${status}\ntitle: ${JSON.stringify(title)}\nowners: []\nlinks: []`
   const head = `---\n${fields}\n---\n\n`
   if (kind === 'spike') return `${head}# ${title}\n`
-  return head + (kind === 'proposal' ? DRAFT_BODY : TASK_BODY)
+  return head + { task: TASK_BODY, epic: TASK_BODY, proposal: DRAFT_BODY, question: QUESTION_BODY }[kind]
 }
 
 const exists = async (path: string): Promise<boolean> => {
@@ -139,14 +141,14 @@ async function makeDirectory(dir: string): Promise<void> {
 
 /**
  * Writes a new item: the number is the next free one for the kind across every ref and the working tree, the suffix is
- * drawn until the id is free, and the file goes in the epic's `tasks/` folder, or its `proposals/` folder for a proposal
- * (an epic gets its own folder with an `epic.md`, and a spike its own folder, `<id>-<slug>/record.md`, in the layout's
- * spikes folder, with no epic). The item goes under the layout's root, never under a `previous`
- * one, and the number is free across the roots of all of them. With `root: private` it goes under `privateDir`
- * instead, in a folder named by its epic's id alone (the epic may be a shared one, whose folder has a longer name), and
- * the reply names no file, because nothing in the private root is committed. The number is free across the private
- * root too, and a private id is never looked for in a ref. The caller holds the lock of the root written to. The reply
- * carries the item as read back from disk and the file it wrote.
+ * drawn until the id is free, and the file goes in the epic's `tasks/` folder, or its `proposals/` folder for a
+ * proposal and its `questions/` folder for a question (an epic gets its own folder with an `epic.md`, and a spike its
+ * own folder, `<id>-<slug>/record.md`, in the layout's spikes folder, with no epic). The item goes under the layout's
+ * root, never under a `previous` one, and the number is free across the roots of all of them. With `root: private`
+ * it goes under `privateDir` instead, in a folder named by its epic's id alone (the epic may be a shared one, whose
+ * folder has a longer name), and the reply names no file, because nothing in the private root is committed. The number
+ * is free across the private root too, and a private id is never looked for in a ref. The caller holds the lock of the
+ * root written to. The reply carries the item as read back from disk and the file it wrote.
  */
 export async function createLocked(
   root: string,
@@ -183,7 +185,7 @@ export async function createLocked(
   }
 
   const name = `${id}-${slugOf(title)}`
-  const subfolder = kind === 'proposal' ? 'proposals' : 'tasks'
+  const subfolder = kind === 'proposal' ? 'proposals' : kind === 'question' ? 'questions' : 'tasks'
   const epicName = into === 'private' ? id : name
   const spikesDir = into === 'private' ? join(privateDir as string, 'spikes') : join(root, spikeDirOf(layout))
   const absolute =

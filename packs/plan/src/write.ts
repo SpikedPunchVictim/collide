@@ -16,11 +16,16 @@ import {
   hasOwnStatuses,
   ID_PATTERN,
   IMPLEMENTS,
+  INCLUDES,
   INFORMS,
   PROPOSAL,
   PROPOSAL_STATUSES,
+  QUESTION,
+  QUESTION_STATUSES,
   readItem,
+  SPIKE,
   SPIKE_STATUSES,
+  SUPERSEDES,
   stateOf,
   statusesOf,
 } from './item.ts'
@@ -59,14 +64,18 @@ interface OpSpec {
 const idRegex = new RegExp(ID_PATTERN)
 
 /** The link types `link` writes. */
-const STORED_LINKS: readonly string[] = [BLOCKED_BY, IMPLEMENTS, INFORMS]
+const STORED_LINKS: readonly string[] = [BLOCKED_BY, IMPLEMENTS, INFORMS, INCLUDES, SUPERSEDES]
 
-/** The status values `setStatus` takes for any kind: the five categories, a proposal's own six words and a spike's. */
+/**
+ * The status values `setStatus` takes for any kind: the five categories, and the own words of a proposal, a spike and a
+ * question. A question's `resolved` is one of them so that `prepare` can refuse it in its own words.
+ */
 const SET_STATUS_VALUES: readonly string[] = [
   ...new Set([
     ...CATEGORIES,
     ...PROPOSAL_STATUSES.map((status) => status.name),
     ...SPIKE_STATUSES.map((status) => status.name),
+    ...QUESTION_STATUSES.map((status) => status.name),
   ]),
 ]
 
@@ -75,7 +84,39 @@ const STATUS_WORDS = [
   `${CATEGORIES.join(', ')} for a task or an epic`,
   `${PROPOSAL_STATUSES.map((status) => status.name).join(', ')} for a proposal`,
   `${SPIKE_STATUSES.map((status) => status.name).join(', ')} for a spike`,
+  `${QUESTION_STATUSES.map((status) => status.name).join(', ')} for a question`,
 ].join('; ')
+
+const article = (kind: string): string => `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`
+
+/** The kinds that a proposal's `includes` may hold. */
+const INCLUDED_KINDS: readonly string[] = ['task', SPIKE, QUESTION]
+
+const SUPERSEDES_RULE = 'supersedes links a proposal to a proposal, or a spike to a spike'
+
+/**
+ * What stops an `includes` or `supersedes` link from `source` to `to`, or null. Both name an item, and each starts from
+ * the kind its rule names. An `includes` is a proposal's, to a task, a spike or a question. A `supersedes` joins two
+ * proposals or two spikes.
+ */
+function planningLinkRefusal(type: string, source: FoundItem, scan: Scan, to: string): string | null {
+  const { id, kind } = source.item
+  if (to.includes('#')) return `${type} names an item, not a feature, so ${to} cannot be its target`
+  if (type === INCLUDES && kind !== PROPOSAL) {
+    return `${id} is ${article(kind)}; ${INCLUDES} links from a proposal to the tasks, spikes and questions it holds`
+  }
+  const target = scan.items.find((other) => other.item.id === to)
+  if (target === undefined) return `there is no item ${to} to ${type === INCLUDES ? 'include' : 'supersede'}`
+  const targetKind = target.item.kind
+  if (type === INCLUDES) {
+    if (INCLUDED_KINDS.includes(targetKind)) return null
+    return `${to} is ${article(targetKind)}; ${INCLUDES} holds a task, a spike or a question`
+  }
+  if ((kind !== PROPOSAL && kind !== SPIKE) || targetKind !== kind) {
+    return `${id} is ${article(kind)} and ${to} is ${article(targetKind)}; ${SUPERSEDES_RULE}`
+  }
+  return to === id ? `${id} cannot supersede itself` : null
+}
 
 /** The refusal for a move to `proposed` while the Features part has problems: every problem, with its line. */
 function proposedRefusal(found: FoundItem): string | null {
@@ -118,6 +159,14 @@ const OPS: Record<string, OpSpec> = {
         const message = `${id} is ${what}; its status is one of ${allowed.join(', ')}, not ${status}`
         return { kind: 'refuse', message }
       }
+      if (kind === QUESTION && status === 'resolved') {
+        const message = `${id} cannot be set to resolved: a question is resolved by the resolve op, which records who`
+        return { kind: 'refuse', message }
+      }
+      if (kind === QUESTION && found.item.status === 'resolved') {
+        const message = `${id} is resolved, and moving it would leave its resolved_by behind; reopen it by hand`
+        return { kind: 'refuse', message }
+      }
       if (found.item.status === status) return { kind: 'nothing' }
       if (kind === PROPOSAL && status === 'proposed') {
         const message = proposedRefusal(found)
@@ -157,7 +206,8 @@ const OPS: Record<string, OpSpec> = {
         if (!target.ok) return `to ${to}: ${target.reason}`
       }
       if (args.type !== undefined && !STORED_LINKS.includes(args.type as string)) {
-        return `type must be "${BLOCKED_BY}", "${IMPLEMENTS}" or "${INFORMS}", the link types that are stored`
+        const types = `"${BLOCKED_BY}", "${IMPLEMENTS}", "${INFORMS}", "${INCLUDES}" or "${SUPERSEDES}"`
+        return `type must be ${types}, the link types that are stored`
       }
       return onlyKeys(args, ['to', 'type'])
     },
@@ -185,6 +235,13 @@ const OPS: Record<string, OpSpec> = {
           return { kind: 'refuse', message: `there is no item ${to} to inform` }
         }
         return links.some((link) => link.type === INFORMS && link.to === to) ? { kind: 'nothing' } : add()
+      }
+
+      // includes and supersedes: the target is an item, the source is of the kind the rule names, and nothing blocks.
+      if (type === INCLUDES || type === SUPERSEDES) {
+        const message = planningLinkRefusal(type, found, scan, to)
+        if (message !== null) return { kind: 'refuse', message }
+        return links.some((link) => link.type === type && link.to === to) ? { kind: 'nothing' } : add()
       }
 
       // implements: the target is a feature of a proposal that has it.

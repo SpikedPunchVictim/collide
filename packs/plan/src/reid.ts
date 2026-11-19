@@ -35,6 +35,18 @@ async function filesUnder(dir: string): Promise<string[]> {
   return found
 }
 
+/** The folders of a private root's `epics/` folder that are named for epic `id`. */
+async function privateEpicFolders(epicsDir: string, id: string): Promise<string[]> {
+  try {
+    const names = (await readdir(epicsDir, { withFileTypes: true })).filter((entry) => entry.isDirectory())
+    const named = names.filter((entry) => entry.name === id || entry.name.startsWith(`${id}-`))
+    return named.map((entry) => join(epicsDir, entry.name))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
+
 /** One file with its new content, worked out and checked before anything is written. */
 interface Planned {
   found: FoundItem
@@ -141,7 +153,21 @@ export async function reidLocked(
     await rename(renamedFrom, renamedTo)
     await syncDirectory(dirname(renamedTo))
   }
-  const afterRename = (absolute: string): string => (renamedTo === null || (absolute !== renamedFrom && !absolute.startsWith(`${renamedFrom}${sep}`)) ? absolute : join(renamedTo, relative(renamedFrom, absolute)))
+  const renames: Array<{ from: string; to: string }> = renamedTo === null ? [] : [{ from: renamedFrom, to: renamedTo }]
+  // A shared epic's private items are in `<private root>/epics/<epic id>/`, which is not the epic's own folder, so it
+  // is renamed too, and the items in it keep the epic they belong to.
+  if (target.item.kind === 'epic' && target.root === 'shared' && privateDir !== null) {
+    for (const folder of await privateEpicFolders(join(privateDir, 'epics'), id)) {
+      const to = join(dirname(folder), `${newId}${basename(folder).slice(id.length)}`)
+      await rename(folder, to)
+      await syncDirectory(dirname(to))
+      renames.push({ from: folder, to })
+    }
+  }
+  const afterRename = (absolute: string): string => {
+    const inside = renames.find(({ from }) => absolute === from || absolute.startsWith(`${from}${sep}`))
+    return inside === undefined ? absolute : join(inside.to, relative(inside.from, absolute))
+  }
 
   const shown = (absolute: string): string => pathOf(root, privateDir, absolute)
   const written = planned.map(({ absolute }) => shown(afterRename(absolute)))

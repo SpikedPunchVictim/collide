@@ -26,11 +26,12 @@ const initialize = (root: string) => request(1, 'initialize', { config: {}, root
 test('the provider answers initialize, list and get over real stdio, in the repository that initialize names', async () => {
   const { messages, stderr } = await run([initialize(fixture('basic')), request(2, 'list'), request(3, 'get', { id: 'ts-0001-aa' }), request(4, 'get', { id: 'ts-9999-zz' })])
   expect(messages).toHaveLength(4)
-  const kinds = ['task', 'epic', 'proposal', 'spike'].map((name) => ({ name }))
+  const kinds = ['task', 'epic', 'proposal', 'spike', 'question'].map((name) => ({ name }))
   expect(messages[0]).toMatchObject({ id: 1, result: { scope: 'ref', kinds } })
   const ids = messages[1]?.result.tasks.map((task: { id: string }) => task.id).sort()
   expect(ids).toEqual([
-    'ep-001-aa', 'ep-002-bb', 'pr-0001-aa', 'sp-0001-aa', 'ts-0001-aa', 'ts-0002-bb', 'ts-0003-cc', 'ts-0004-dd',
+    'ep-001-aa', 'ep-002-bb', 'pr-0001-aa', 'qu-0001-aa', 'sp-0001-aa', 'ts-0001-aa', 'ts-0002-bb', 'ts-0003-cc',
+    'ts-0004-dd',
   ])
   expect(messages[2]).toMatchObject({ id: 3, result: { task: { id: 'ts-0001-aa', body: expect.stringContaining('Made-up content') } } })
   expect(messages[3]).toEqual({ jsonrpc: '2.0', id: 4, result: {} })
@@ -48,5 +49,5 @@ test('invalid items come back in the list reply, and the provider writes no othe
 test('list before initialize is an error reply, and the provider keeps serving', async () => {
   const { messages } = await run([request(1, 'list'), { ...initialize(fixture('basic')), id: 2 }, request(3, 'list')])
   expect(messages[0]).toMatchObject({ id: 1, error: { code: -32603 } })
-  expect(messages[2]?.result.tasks).toHaveLength(8)
+  expect(messages[2]?.result.tasks).toHaveLength(9)
 })

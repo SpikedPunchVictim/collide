@@ -48,7 +48,7 @@ describe('initialize declares the write ops', () => {
     })
     expect(ops[1]?.args).toMatchObject({
       required: ['to'],
-      properties: { type: { enum: ['blocked-by', 'implements', 'informs'] } },
+      properties: { type: { enum: ['blocked-by', 'implements', 'informs', 'includes', 'supersedes'] } },
     })
     expect(ops[2]?.args).toMatchObject({ required: ['claimant'] })
   })

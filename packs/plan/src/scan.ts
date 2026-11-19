@@ -68,12 +68,13 @@ async function entries(dir: string) {
 /**
  * Reads the items under `<cwd>/<root>/epics/` for the layout's root and then for each of its `previous` roots (the
  * default root, `.collide/planning`, when no layout is given), and then under `<privateDir>/epics/` when there is a
- * private root: each epic folder's `epic.md` and the `.md` files directly in its `tasks/` and `proposals/` folders.
- * Then the spikes: each folder of the layout's spikes folders (`spikesDirsOf`), and of `<privateDir>/spikes/`, that is
- * named for a spike id has its `record.md` read. Nothing else is read. A spike folder is never listed, so what is
- * inside it (`out/`, `work/`, `node_modules/`, another `record.md`) costs nothing and is never an item. Symbolic links
- * are not followed. `questions/` is never opened. The epic is the folder, so it is reported from the path and never
- * from frontmatter, and a spike has none.
+ * private root: each epic folder's `epic.md` and the `.md` files directly in its `tasks/`, `proposals/` and
+ * `questions/` folders. Then the spikes: each folder of the layout's spikes folders (`spikesDirsOf`), and of
+ * `<privateDir>/spikes/`, that is named for a spike id has its `record.md` read. Nothing else is read. A spike folder
+ * is never listed, so what is inside it (`out/`, `work/`, `node_modules/`, another `record.md`) costs nothing and is
+ * never an item. Symbolic links are not followed. A `questions/` folder anywhere but directly in an epic folder is
+ * never opened. The epic is the folder, so it is reported from the path and never from frontmatter, and a spike has
+ * none.
  * Every file that reads is returned, in scan order, including a second file with an id another file has (`scanEpics`
  * sets that one aside); `invalid` holds the files that did not read.
  */
@@ -115,7 +116,7 @@ export async function readEpicFiles(
       for (const file of (await entries(epicDir)).filter((entry) => entry.isFile() && entry.name === 'epic.md')) {
         await readOne(join(epicDir, file.name), null, name)
       }
-      for (const subfolder of ['tasks', 'proposals']) {
+      for (const subfolder of ['tasks', 'proposals', 'questions']) {
         const inside = await entries(join(epicDir, subfolder))
         const files = inside.filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
         for (const file of files) await readOne(join(epicDir, subfolder, file.name), epic, name)

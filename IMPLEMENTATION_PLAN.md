@@ -2543,7 +2543,12 @@ layout: { default: board, groupBy: category }
       - **coverage** is derived, never written: the proposal's features that no task implements, and the tasks the
         proposal includes that implement no feature. Both break the link a feature's derived state needs, so a
         feature with no task never shows progress.
-    - A question holds its own decision once it is resolved (`resolved_by: human:<date>`).
+    - A question holds its own decision once it is resolved (`resolved_by: human:<date>`). Its statuses are `open`
+      (`ready`), `resolved` (`done`) and `dropped` (`dropped`). `resolved_by` is `human:<date>` or the id of the item
+      that settled it, required when `resolved` and refused otherwise; `needs` is `human`, `evidence` or `either`.
+      `includes` (a proposal to the tasks, spikes and questions it holds) and `supersedes` (a proposal to a
+      proposal, a spike to a spike) block nothing. A `reid` of a shared epic renames its folder in the private root
+      too (`ts-0127-js`).
     - Only a person accepts, defers, rejects or resolves. `collide/plan` refuses those ops from a run
       (`actor.kind: agent`), and refuses `accepted` while a question the proposal includes is open. An agent phase
       that writes a planning file's `status` or `by:` line itself fails at phase end, as an edit to checklist state

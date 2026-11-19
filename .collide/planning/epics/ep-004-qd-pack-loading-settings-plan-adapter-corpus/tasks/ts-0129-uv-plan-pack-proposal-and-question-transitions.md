@@ -58,6 +58,9 @@ Write these first.
 
 ## Notes
 
+- Carried from `ts-0127-js`: a question's `resolved_by` may name an item id. `reid` does not rewrite it, so a question
+  resolved by an item that is then re-ided names an id that no longer exists. `resolve` writes the field, so this item
+  makes `reid` rewrite it too.
 - IMPLEMENTATION_PLAN.md:
   - Stage 4c: Feature ops bullet ("The `proposal` kind gets its transitions, the person-only rule and `by:` (0.10),
     with the actor"). Stage 2's slice text: "The transitions, the person-only rule and `by:` wait for Stage 4c".
