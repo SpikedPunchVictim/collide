@@ -330,3 +330,64 @@ fn a_child_phase_keeps_the_environment_it_copied_when_a_newer_capture_is_made() 
     assert_eq!(second.vars.get("GEN").map(String::as_str), Some("two"));
     assert!(second.captured_at.nanos >= first.captured_at.nanos);
 }
+
+#[test]
+fn a_child_never_gets_the_runtime_marker_the_capture_inherited_from_the_daemon() {
+    let dir = TempRoot::new();
+    // The daemon carries `COLLIDE_RUNTIME=1` and its login shell inherits it, so the capture holds it.
+    let shell = dir.script(
+        "fake-shell",
+        "#!/bin/sh\nexport COLLIDE_RUNTIME=1 COLLIDE_DAEMON_ROOT=/the/daemon/root KEEP=yes\neval \"$4\"\n",
+    );
+    let env = capture(&shell, &options(Duration::from_secs(10)));
+    assert_eq!(
+        env.vars.get("COLLIDE_RUNTIME").map(String::as_str),
+        Some("1"),
+        "the capture holds the daemon's mark"
+    );
+    let child = env.for_child(&EnvStrip::default(), &BTreeMap::new());
+    assert!(
+        !child.contains_key("COLLIDE_RUNTIME"),
+        "the mark reached the child"
+    );
+    assert_eq!(
+        child.get("COLLIDE_DAEMON_ROOT").map(String::as_str),
+        Some("/the/daemon/root"),
+        "the daemon's root is how an agent's `collide` finds the daemon"
+    );
+    assert_eq!(child.get("KEEP").map(String::as_str), Some("yes"));
+}
+
+#[test]
+fn a_child_never_gets_the_runtime_marker_the_minimal_environment_holds_either() {
+    let dir = TempRoot::new();
+    let shell = dir.script("fake-shell", "#!/bin/sh\nexit 1\n");
+    let mut options = options(Duration::from_secs(10));
+    options
+        .fallback
+        .insert("COLLIDE_RUNTIME".to_string(), "1".to_string());
+    let env = capture(&shell, &options);
+    assert!(matches!(env.source, EnvSource::Minimal { .. }));
+    assert!(env.vars.contains_key("COLLIDE_RUNTIME"));
+    let child = env.for_child(&EnvStrip::default(), &BTreeMap::new());
+    assert!(!child.contains_key("COLLIDE_RUNTIME"));
+}
+
+#[test]
+fn a_layer_over_the_base_never_gives_a_child_the_runtime_marker() {
+    let dir = TempRoot::new();
+    let shell = dir.script("fake-shell", "#!/bin/sh\nexport KEEP=yes\neval \"$4\"\n");
+    let env = capture(&shell, &options(Duration::from_secs(10)));
+    // A role's `env` reaches `for_child` as `extra`, after the strip.
+    let role = BTreeMap::from([
+        ("COLLIDE_RUNTIME".to_string(), "1".to_string()),
+        ("ROLE_VAR".to_string(), "set".to_string()),
+    ]);
+    let child = env.for_child(&EnvStrip::default(), &role);
+    assert!(
+        !child.contains_key("COLLIDE_RUNTIME"),
+        "a role gave the mark back"
+    );
+    assert_eq!(child.get("ROLE_VAR").map(String::as_str), Some("set"));
+    assert_eq!(child.get("KEEP").map(String::as_str), Some("yes"));
+}

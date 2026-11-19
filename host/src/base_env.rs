@@ -16,6 +16,7 @@
 //! | `daemon: base environment` | [`BaseEnvironment::capture`], [`BaseEnvironment::for_child`] | the capture, and the environment of one child |
 
 use crate::clock::{Clock, Clocks, Reading, Timer};
+use crate::stop::RUNTIME_MARKER;
 use collide_core::adapter::EnvStrip;
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -32,12 +33,15 @@ pub const CAPTURE_CAP_BYTES: usize = 1024 * 1024;
 pub const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The variables removed from every child whatever the adapter says (0.2): terminal session ids, which name a
-/// terminal the child is not in, and launchd's service markers.
-pub const ALWAYS_STRIPPED: [&str; 4] = [
+/// terminal the child is not in, launchd's service markers, and the runtime mark. The daemon carries the mark, so its
+/// login shell hands it to the capture; a child that kept it would be taken for a runtime process, and a stop would
+/// never signal it. Only a shim carries the mark, set on its own command.
+pub const ALWAYS_STRIPPED: [&str; 5] = [
     "TERM_SESSION_ID",
     "ITERM_SESSION_ID",
     "XPC_SERVICE_NAME",
     "XPC_FLAGS",
+    RUNTIME_MARKER,
 ];
 
 /// The `LANG` set when the captured environment has none. The plan does not name a value.
@@ -129,7 +133,7 @@ impl BaseEnvironment {
     }
 
     /// The environment of one child: this capture, minus `strip` and [`ALWAYS_STRIPPED`], plus `extra` (the adapter's
-    /// own variables, and the run's `COLLIDE_RUN` and `COLLIDE_RUN_START`).
+    /// own variables, and the run's `COLLIDE_RUN` and `COLLIDE_RUN_START`), never with the runtime mark.
     pub fn for_child(
         &self,
         strip: &EnvStrip,
@@ -147,6 +151,8 @@ impl BaseEnvironment {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         env.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // A layer over the base (a role's `env`) never gives the mark back: a child with it would never be stopped.
+        env.remove(RUNTIME_MARKER);
         env
     }
 }
@@ -363,6 +369,11 @@ mod tests {
         ] {
             assert!(ALWAYS_STRIPPED.contains(&name), "{name}");
         }
+    }
+
+    #[test]
+    fn the_runtime_marker_is_always_stripped() {
+        assert!(ALWAYS_STRIPPED.contains(&"COLLIDE_RUNTIME"));
     }
 
     #[test]

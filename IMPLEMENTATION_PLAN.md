@@ -397,7 +397,9 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     capture made once at daemon start would hold a `PATH` or `ANTHROPIC_*` value for as long as the daemon lives,
     and the daemon outlives the app. A phase already running keeps the environment it started with.
   - Everything Collide starts gets this environment minus the adapter's stripped variables (0.3), terminal session
-    ids (`TERM_SESSION_ID`, `ITERM_SESSION_ID`) and `XPC_SERVICE_NAME`/`XPC_FLAGS`.
+    ids (`TERM_SESSION_ID`, `ITERM_SESSION_ID`), `XPC_SERVICE_NAME`/`XPC_FLAGS` and `COLLIDE_RUNTIME`. The daemon
+    carries `COLLIDE_RUNTIME`, its login shell hands it on, and a child with it would never be stopped; no layer over
+    the base (a role's `env`) gives it back. Only a shim sets it, on its own command (`ts-0143-ah`).
 - **The socket** is at a short fixed path. AF_UNIX paths are limited to 103 bytes on macOS (measured S3); a longer
   path fails fast with a message naming the path and the limit.
 - **Where Collide's files live on macOS** (owner, 2026-11-15; revision 20). Everything Collide writes for itself is

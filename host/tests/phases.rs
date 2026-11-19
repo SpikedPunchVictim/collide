@@ -14,13 +14,14 @@ mod common;
 use collide_core::events::EventBody;
 use collide_core::shim::ExitEnd;
 use collide_core::state::PhaseState;
-use collide_host::base_env::CaptureOptions;
+use collide_host::adapters::claude::env_strip;
+use collide_host::base_env::{CaptureOptions, EnvSource};
 use collide_host::daemon::{Daemon, DaemonOptions, DaemonPaths};
 use collide_host::phases::{
     Health, LinkError, PhaseEnd, PhaseKey, PhaseOptions, PhaseSpec, Phases,
 };
 use collide_host::shim::{ChildStdio, files};
-use collide_host::stop::SurvivorKind;
+use collide_host::stop::{RUN_MARKER, RUNTIME_MARKER, SurvivorKind};
 use common::procs::{Guarded, Owned};
 use common::{PYTHON, TempRoot, kill_child_of, signal_if_same, wait_until};
 use std::collections::BTreeMap;
@@ -1009,4 +1010,129 @@ fn a_shim_the_daemon_starts_carries_the_runtime_marker_so_a_stop_never_sweeps_it
     );
     phases.close_stdin(&k).unwrap();
     wait_state(&phases, &k, "the phase ends", ended);
+}
+
+/// A login shell as the live daemon's: it inherits the daemon's environment, which holds the runtime mark (the CLI's
+/// start and the launchd job both set it), the daemon's root and a `PATH`. `env -i` keeps the test's own out of it.
+fn daemon_shell(root: &TempRoot) -> String {
+    let at = root.path().display();
+    let body = format!(
+        "#!/bin/sh\nexec /usr/bin/env -i PATH=/usr/bin:/bin HOME={at} COLLIDE_DAEMON_ROOT={at} {RUNTIME_MARKER}=1 \
+         /bin/sh -c \"$4\"\n"
+    );
+    root.script("daemon-shell", &body)
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+/// An agent that ignores the interrupt, hangup and terminate, never reads its stdin, and records the variables it was
+/// given before it writes its pid.
+const DEAF_AGENT: &str = r#"
+import json, os, signal, sys, time
+for s in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
+    signal.signal(s, signal.SIG_IGN)
+names = ['COLLIDE_RUNTIME', 'COLLIDE_RUN', 'COLLIDE_DAEMON_ROOT', 'HOME']
+with open(sys.argv[2], 'w') as f:
+    json.dump({n: os.environ.get(n) for n in names}, f)
+with open(sys.argv[1], 'a') as f:
+    f.write('root %d\n' % os.getpid())
+time.sleep(120)
+"#;
+
+#[test]
+fn a_stop_signals_an_agent_started_with_the_environment_a_marked_daemon_captured() {
+    let root = TempRoot::new();
+    let owned = Arc::new(Owned::default());
+    let _kill = KillOnDrop(owned.clone());
+    let guard = guard_of(&root, vec![owned.clone()]);
+    let log = LogBuf::default();
+    let mut daemon_options = options(&root, &log);
+    daemon_options.shell = daemon_shell(&root);
+    daemon_options.processes = guard.clone();
+    daemon_options.phases.lost_grace = Duration::from_millis(300);
+    let daemon = Daemon::start(daemon_options).expect("the daemon starts");
+    let phases = daemon.phases();
+
+    let mut captured = None;
+    wait_until(
+        "the base environment is captured",
+        Duration::from_secs(20),
+        || {
+            captured = daemon.base_environment();
+            captured.is_some()
+        },
+    );
+    let base = captured.unwrap();
+    assert!(
+        matches!(base.source, EnvSource::LoginShell { .. }),
+        "{:?}",
+        base.source
+    );
+    assert_eq!(
+        base.vars.get(RUNTIME_MARKER).map(String::as_str),
+        Some("1"),
+        "the capture holds the daemon's mark, as a login shell under the live daemon does"
+    );
+
+    // The environment of a run's agent, made as `FileRuns` makes it: the capture minus the adapter's strip, plus the
+    // run's marker.
+    let k = key("deaf", "p1");
+    let env = base.for_child(
+        &env_strip(),
+        &BTreeMap::from([(RUN_MARKER.to_string(), k.run.clone())]),
+    );
+    let script = root.join("deaf-agent.py");
+    fs::write(&script, DEAF_AGENT).unwrap();
+    let pidfile = root.join("deaf-agent.pids");
+    fs::write(&pidfile, "").unwrap();
+    let seen = root.join("deaf-agent.env");
+    let spec = PhaseSpec {
+        program: PYTHON.into(),
+        args: vec![
+            script.to_str().unwrap().into(),
+            pidfile.to_str().unwrap().into(),
+            seen.to_str().unwrap().into(),
+        ],
+        env,
+        cwd: root.path().to_path_buf(),
+        stdio: ChildStdio::Pipes,
+    };
+    let mut cleanup = Cleanup::new();
+    phases.start_phase(&k, &spec).unwrap();
+    cleanup.track(&phases, daemon.paths(), &k);
+    wait_until("the agent writes its pid", Duration::from_secs(20), || {
+        common::procs::read_pids(&pidfile, &["root"]).is_some()
+    });
+    let agent = pids_root(&pidfile);
+    owned.add(agent);
+    wait_state(&phases, &k, "running", running);
+
+    let report = phases
+        .stop_run(&k.run, Some(Duration::from_millis(300)))
+        .expect("the run is known");
+    guard.assert_nothing_refused();
+    assert_eq!(
+        report.signalled,
+        vec![agent],
+        "the stop signalled the agent"
+    );
+    gone_by_ps(&[agent]);
+    assert!(
+        phases
+            .state(&k)
+            .as_ref()
+            .is_some_and(|s| matches!(s, PhaseState::Stopped {})),
+        "{:?}",
+        phases.state(&k)
+    );
+
+    // What the agent was given: no mark, and what it needs to reach the same daemon.
+    let given: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&seen).unwrap()).unwrap();
+    let root_dir = root.path().display().to_string();
+    assert_eq!(given["COLLIDE_RUNTIME"], serde_json::Value::Null, "{given}");
+    assert_eq!(given["COLLIDE_RUN"], k.run.as_str(), "{given}");
+    assert_eq!(given["COLLIDE_DAEMON_ROOT"], root_dir.as_str(), "{given}");
+    assert_eq!(given["HOME"], root_dir.as_str(), "{given}");
 }
