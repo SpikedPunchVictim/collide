@@ -1,29 +1,46 @@
   collide tasks [--ready] [--kind <kind>] [--view <name>] [--checkout <path>] [--json]
   collide task <id> [--json]
   collide task new <prompt> [--json]
+  collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
+  collide task create <title> [epic=<epic>] [kind=task|epic|proposal|spike|question] [seed=<number>]
+    [root=shared|private] [--checkout <path>] [--commit] [--json]
+  collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]
   a write (an op, create, reid) also takes [--wait <seconds> | --no-wait]
+  collide task renameSection <from> <to> [--checkout <path>] [--commit] [--json]
+  collide sections [--json]
 
-Through the daemon, which is started when none runs (and says so, once). If it cannot start, these exit 1; the
-commands above go on working without it:
+Every one of these goes through the daemon, which is started when none runs (and says so, once). If it cannot start,
+the command exits 1 and reads nothing itself.
+
 collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a
-  pack's), one line each: key, status, kind, title, in the order the daemon lists them. --ready and --kind apply on
-  top. A view with an error of its own lists no task, prints the error and exits 10. Tasks a view could not check are
+  pack's), in the order the daemon lists them. --ready and --kind apply on top. A view with an error of its own lists
+  no task, prints the error and exits 10. Tasks a view could not check, and problems in the parts of its items, are
   counted on stderr, and the rest are listed. An unknown view exits 3 and names the board's views.
+
 collide tasks --checkout <path>: only the tasks that have a copy in that checkout, which must be an entry of `git
   worktree list` (anything else exits 2). It takes --view too.
+
+collide task <id> --json: the daemon's answer for one item: its fields, state (status and category), links one hop out
+  in both directions (each with the other end's kind, status and category), version, latest run, runs and copies.
+
 collide task new <prompt>: a scratch task for this repository's board (in Collide's store, in no file) and its key,
   such as scratch:3. Give the prompt as one argument.
-collide task <id> --json: the daemon's answer for one item: its fields, state (status and category), links one hop out
-  in both directions (each with the other end's kind, status and category), version, latest run, runs and copies. A
-  short id that fits several items, or an id at different paths in different checkouts, is ambiguous: the answer lists
-  the keys, and each location, and the exit code is 3.
-collide task <source>:<id> <op> ...: the write goes through the daemon (<source>:<id> is the key, such as scratch:3).
-  If its checkout is busy (a rebase, a merge, a cherry-pick, a revert, a bisect or a live phase) the daemon queues it:
-  the command says why, prints the Queue item's id, and waits for the write to apply (10 minutes; --wait <seconds>
-  sets that). --no-wait, and a wait that ran out, leave it queued and exit 11. --commit does not apply to a write
-  that was queued: commit it when it has landed.
 
-exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line (also: a
---checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was written),
-5 refused by the provider (also: the checkout stayed busy for the wait), 10 the view has an error of its own,
-11 the write is queued in the daemon and not applied yet
+collide task <id> <op> ...: change one item with an op its source declares (an unknown op lists them). The write goes
+  through the daemon. If its checkout is busy (a rebase, a merge, a cherry-pick, a revert, a bisect or a live phase)
+  the daemon queues it: the command says why, prints the Queue item's id, and waits for the write to apply
+  (10 minutes; --wait <seconds> sets that). --no-wait, and a wait that ran out, leave it queued and exit 11. --commit
+  does not apply to a write that was queued: commit it when it has landed.
+  Accepting, deferring, rejecting, resolving or reopening a proposal or a question (and returning a deferred proposal
+  to proposed) is a person's: the command writes nothing, says a confirmation waits in the app, prints the Queue
+  item's id and exits 12. The person answers Accept or Dismiss in the app.
+
+collide task renameSection <from> <to>: rename a section in every proposal that uses it (a name already in use merges).
+  It names no item and is written like any op. addFeature and moveFeature are ops of a proposal: collide task
+  <proposal> addFeature section=<name> title=<text> summary=<text>, and collide task <proposal> moveFeature
+  feature=F2 section=<name>.
+
+exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed; no daemon), 2 wrong command line
+(also: a --checkout that is not a checkout of this repository), 3 id not found or ambiguous, 4 conflict (nothing was
+written), 5 refused by the provider, 10 the view has an error of its own, 11 the write is queued in the daemon and not
+applied yet, 12 a person-only op: a confirmation waits in the app

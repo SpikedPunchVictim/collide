@@ -43,7 +43,7 @@
 //! |---|---|---|
 //! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions`, `daemon.subscribe` |
 //! | board | [`board`] | `board.list`, `board.open`, `board.init`, `board.trust` |
-//! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.preview`, `task.views`, `task.save_view`, `task.sections` |
+//! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.create`, `task.reid`, `task.preview`, `task.views`, `task.save_view`, `task.sections` |
 //! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.record`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
 //! | queue | [`queue`] | `queue.list`, `queue.context`, `queue.answer` |
 //! | workspace | [`workspace`] | `workspace.list`, `workspace.remove`, `workspace.resume` |
@@ -564,6 +564,12 @@ methods! {
     TaskApply, "task.apply", Task,
         "collide task, changing an item with an op",
         TaskApplyParams, TaskApplyResult;
+    TaskCreate, "task.create", Task,
+        "collide task create, making an item in the planning source",
+        TaskCreateParams, TaskApplyResult;
+    TaskReid, "task.reid", Task,
+        "collide task reid, giving an item a new id and rewriting the links that name it",
+        TaskReidParams, TaskReidResult;
     TaskPreview, "task.preview", Task,
         "collide task, the files an op would change before it is applied",
         TaskPreviewParams, PreviewResult;

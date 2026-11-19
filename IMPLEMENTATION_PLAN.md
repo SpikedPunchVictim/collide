@@ -4476,13 +4476,17 @@ combined into a corpus, and filtered by views.
   it loads.
 - **CLI:** `collide task new <prompt>`, `collide tasks [--view <name>] [--checkout <path>]`, `collide task <id>
   [--json]` (one item: fields, status, links one hop out, version and latest run; part K), `collide task <id> <op> …`.
-  The new forms go through the daemon; `tasks`, `task <id>` and `task create` stay direct until 4c (owner, 2026-11-17;
-  `ts-0120-wm`). A write by key (`task <source>:<id> <op>`) goes through the daemon; a bare id's write stays direct. A
-  daemon that is not running is started on use and says so once; one that cannot start makes the command exit 1, and the
-  direct commands go on. Exit 10: a view with an error of its own. Exit 11: a write still queued behind a busy checkout.
-  Exit 12: a person-only op waiting as a confirmation in the app (`ts-0128-bb`).
-  A queued write is reported applied only once the task's version has changed (`ts-0120-wm`). `collide init`, `collide
-  config get|set` and `collide pack …` were built in 4a.
+  The new forms went through the daemon first (`ts-0120-wm`); from 4c every task command does, with no direct path and
+  no `--no-daemon` (owner, 2026-11-18; `ts-0136-rr`): `tasks`, `tasks --ready` (the built-in `ready` view, with its
+  cycle and unknown blockers on stderr), `task <id>`, `task create`, `task reid`, `task renameSection`, `sections`, and
+  a write by key or by bare id. A short id resolves in the daemon, and `epic=` names an epic before any other item. A
+  `--kind` that no source of the board declares is refused, naming the kinds they declare (exit 2). A daemon that is not
+  running is started on use and says so once; one that cannot start makes the command exit 1. Exit 10: a view with an
+  error of its own. Exit 11: a write still queued behind a busy checkout. Exit 12: a person-only op, by key or by bare
+  id, waiting as a confirmation in the app (`ts-0128-bb`). A queued write is reported applied only once the task's
+  version has changed (`ts-0120-wm`); a queued create or reid, which has no version to watch, once it leaves the Queue
+  with no `-undone` item. `task reid` commits nothing itself; its `--commit` commits the files it reports. `collide
+  init`, `collide config get|set` and `collide pack …` were built in 4a.
 
 **Success Criteria**: On the Orchard repo:
 - A task shows `doing` in one worktree and `ready` at the board root, with the divergence reported.
@@ -4526,7 +4530,8 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
 - **Planning** (owner, 2026-11-13): the rest of the markdown provider, after the skeleton's slice: the private
   root and the layout setting; kinds, op effects and links in the corpus; `collide/plan`'s record parser (claim
   blocks) and `roles` mapping; pack views, with the slice's `--ready` as a built-in view. The slice's CLI moves
-  behind the provider supervisor. The Orchard pack's plan provider reads ADRs, spikes and questions.
+  behind the provider supervisor; every task command goes through the daemon (`ts-0136-rr`). The Orchard pack's
+  plan provider reads ADRs, spikes and questions.
 - **Feature ops** (revision 14): `addFeature {section, title, summary}` on a proposal, whose `section` is required
   and may be empty (owner, 2026-11-14), takes the next `F<n>` and writes under that section's heading, or under
   `### Unsorted`, made at the end of the part when it is missing; `moveFeature {feature, section}`; and

@@ -954,6 +954,20 @@ impl Corpus {
         result
     }
 
+    /// The names of the kinds the sources declare, in each source's order, a name once. A source that declares none
+    /// (the scratch source) adds none.
+    pub fn declared_kinds(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for state in self.sources.values() {
+            for kind in &state.kinds {
+                if !names.contains(&kind.name) {
+                    names.push(kind.name.clone());
+                }
+            }
+        }
+        names
+    }
+
     /// The kind of a task: its own, else its source's one kind, else empty (a view's `kind` variable).
     pub fn kind_of(&self, source: &str, task: &Task) -> String {
         self.sources

@@ -81,16 +81,6 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// `PATH` for a command that reads the plan directly: the system's, and the folder of the `node` that is on the
-/// test's own `PATH` (the plan provider is a Node program).
-fn with_node() -> String {
-    let own = std::env::var_os("PATH").unwrap_or_default();
-    let node = std::env::split_paths(&own)
-        .find(|dir| dir.join("node").is_file())
-        .expect("node is on PATH");
-    format!("/usr/bin:/bin:{}", node.display())
-}
-
 const STARTED: &str = "the daemon was not running; started it";
 
 #[test]
@@ -141,8 +131,18 @@ fn a_task_new_with_json_prints_one_document_and_the_note_goes_to_standard_error(
 }
 
 #[test]
-fn when_the_daemon_cannot_start_the_new_forms_exit_1_and_the_old_ones_still_work() {
+fn when_the_daemon_cannot_start_every_command_exits_1_with_the_one_message_and_reads_nothing() {
     let env = Env::new();
+    // An item the plan source would list: a command that read the files itself would print it.
+    env.repo.write(
+        ".collide/planning/epics/ep-001-aa-alpha/epic.md",
+        b"---\nid: ep-001-aa\nkind: epic\nstatus: active\ntitle: \"Alpha\"\nowners: []\nlinks: []\n---\n",
+    );
+    env.repo.write(
+        ".collide/planning/epics/ep-001-aa-alpha/tasks/ts-0001-aa-one.md",
+        b"---\nid: ts-0001-aa\nkind: task\nstatus: ready\ntitle: \"One\"\nowners: []\nlinks: []\n---\n",
+    );
+    env.repo.commit_all("an item");
     // A copy of `collide` with no `collide-daemon` beside it: the start has nothing to run.
     let lonely = env.repo.root().path().join("lonely-bin");
     fs::create_dir_all(&lonely).unwrap();
@@ -150,25 +150,45 @@ fn when_the_daemon_cannot_start_the_new_forms_exit_1_and_the_old_ones_still_work
     fs::copy(COLLIDE, &copy).unwrap();
     let copy = copy.to_str().unwrap();
 
-    let new = env.run_with(copy, &["task", "new", "try the cache"]);
-    let view = env.run_with(copy, &["tasks", "--view", "mine"]);
-    let direct = env.run_on(copy, &with_node(), &["tasks"]);
-
-    for run in [&new, &view] {
-        assert_eq!(run.status.code(), Some(1), "{}", text(&run.stderr));
-        assert!(text(&run.stdout).is_empty());
+    for args in [
+        vec!["tasks"],
+        vec!["tasks", "--ready"],
+        vec!["tasks", "--view", "mine"],
+        vec!["tasks", "--checkout", "."],
+        vec!["task", "1"],
+        vec!["task", "1", "--json"],
+        vec!["task", "new", "try the cache"],
+        vec!["task", "1", "setStatus", "active"],
+        vec!["task", "plan:ts-0001-aa", "setStatus", "active", "--commit"],
+        vec!["task", "create", "A title", "epic=ep-1"],
+        vec!["task", "reid", "1"],
+        vec!["task", "renameSection", "Pack", "packs"],
+        vec!["sections"],
+        vec!["sections", "--json"],
+    ] {
+        let run = env.run_with(copy, &args);
+        assert_eq!(
+            run.status.code(),
+            Some(1),
+            "{args:?}: {}",
+            text(&run.stderr)
+        );
+        assert!(
+            text(&run.stdout).is_empty(),
+            "{args:?}: {}",
+            text(&run.stdout)
+        );
         assert!(
             text(&run.stderr).contains("the daemon is not running and did not start"),
-            "{}",
+            "{args:?}: {}",
             text(&run.stderr)
         );
     }
     assert!(daemon_status(&env.paths()).is_none());
-    assert_ne!(direct.status.code(), Some(1), "{}", text(&direct.stderr));
-    assert!(
-        !text(&direct.stderr).contains("daemon"),
-        "{}",
-        text(&direct.stderr)
+    assert_eq!(
+        env.repo.git(&["status", "--porcelain"]),
+        "",
+        "nothing was written"
     );
 }
 

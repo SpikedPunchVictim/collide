@@ -8,6 +8,7 @@ links:
   - { type: blocked-by, to: ts-0137-pg }
   - { type: blocked-by, to: ts-0139-wq }
   - { type: blocked-by, to: ts-0140-gk }
+  - { type: blocked-by, to: ts-0141-sn }
 ---
 
 ## Goal

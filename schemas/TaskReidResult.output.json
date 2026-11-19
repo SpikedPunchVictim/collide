@@ -1,0 +1,851 @@
+{
+  "$defs": {
+    "ApplyResult": {
+      "description": "`apply` result. `ok` carries the new task and its version, the `files` the write touched (what `record`\ncommits) and `items[]`: every item the op changed, with its version, from and to. `conflict` carries the\ncurrent task. `refused` carries the source's own message, such as plan's \"illegal transition\".",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "files": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/Effect"
+              },
+              "type": "array"
+            },
+            "outcome": {
+              "const": "ok",
+              "type": "string"
+            },
+            "task": {
+              "$ref": "#/$defs/Task"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "task",
+            "version",
+            "files",
+            "items"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "current": {
+              "$ref": "#/$defs/Task"
+            },
+            "outcome": {
+              "const": "conflict",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "current"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "outcome": {
+              "const": "refused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Assumption": {
+      "additionalProperties": false,
+      "description": "One entry `A<n>` of an Assumptions part (0.10). A missing or invalid `state` reads `unverified`.",
+      "properties": {
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "spike": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spikeStatus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "text",
+        "state",
+        "evidence",
+        "line"
+      ],
+      "type": "object"
+    },
+    "Category": {
+      "description": "The category every source status maps to, so views and columns work across sources (0.10).",
+      "enum": [
+        "backlog",
+        "ready",
+        "active",
+        "review",
+        "done",
+        "dropped"
+      ],
+      "type": "string"
+    },
+    "Checklist": {
+      "additionalProperties": false,
+      "description": "The checklist field type: the state of one template's items, pinned as `name@n`.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ChecklistItem"
+          },
+          "type": "array"
+        },
+        "template": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "template",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ChecklistItem": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ChecklistState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ChecklistState": {
+      "description": "The state of one checklist item. Only a person marks `done` or `n/a`; the gate is a pack's (ts-0012).",
+      "enum": [
+        "open",
+        "suggested",
+        "done",
+        "n/a"
+      ],
+      "type": "string"
+    },
+    "Claim": {
+      "additionalProperties": false,
+      "description": "One claim of a spike's record, read from a fenced `claim` block (0.10, \"A `spike`\"). `label` is `measured`,\n`inferred` or `unmeasured`. `verifiable` is the block's `yes` or `no`, and is left out when the block has none. Only\na block with no problem is a claim; the prose is never compared.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "loadBearing": {
+          "type": "boolean"
+        },
+        "verifiable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "loadBearing"
+      ],
+      "type": "object"
+    },
+    "Coverage": {
+      "additionalProperties": false,
+      "description": "What a proposal's features and tasks cover, derived and never written (0.10, \"A proposal's quality parts\").\n`featuresWithoutTask` are the `F<n>` that no task implements. `tasksWithoutFeature` are the ids of the tasks the\nproposal includes, not dropped, that implement no feature.",
+      "properties": {
+        "featuresWithoutTask": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tasksWithoutFeature": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "featuresWithoutTask",
+        "tasksWithoutFeature"
+      ],
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "description": "One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is\n`low`, `medium` or `high`. `line` is the entry's first line in the item's file.",
+      "properties": {
+        "confidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "passedOn": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "revisitIf": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "text",
+        "passedOn",
+        "evidence",
+        "line"
+      ],
+      "type": "object"
+    },
+    "Effect": {
+      "additionalProperties": false,
+      "description": "One item that an op changed: an entry of `apply`'s and `preview`'s `items[]`.",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "version",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`\nis the proposal of a feature.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "proposal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "description": "What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.",
+      "enum": [
+        "item",
+        "feature",
+        "path"
+      ],
+      "type": "string"
+    },
+    "Feature": {
+      "additionalProperties": false,
+      "description": "One feature of a proposal, read from the `## Features` part of its body (0.8, 0.10, \"A proposal's features\").\n`id` is `F<n>`, `section` is empty for an entry that is unsorted, and `summary` joins an entry's continuation lines.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "section": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "section",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "FeatureProblem": {
+      "additionalProperties": false,
+      "description": "A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.",
+      "properties": {
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "Finding": {
+      "additionalProperties": false,
+      "description": "One entry `R<n>` of a Findings part (0.10). `open`: neither `accepted` nor `dismissed`.",
+      "properties": {
+        "accepted": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dismissed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "section": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "type": "string"
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "severity",
+        "title",
+        "text",
+        "open",
+        "line"
+      ],
+      "type": "object"
+    },
+    "ItemState": {
+      "additionalProperties": false,
+      "description": "An item's status and its category.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
+    "Link": {
+      "additionalProperties": false,
+      "description": "A typed link on an item (0.8).",
+      "properties": {
+        "blocking": {
+          "description": "Absent means the link type's `blocking` applies.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "to"
+      ],
+      "type": "object"
+    },
+    "PartProblem": {
+      "additionalProperties": false,
+      "description": "A line of a proposal's quality part (the Decision log, the Assumptions or the Findings) that is not right, with why\n(0.8, 0.10). `part` is the part's name, as `Decision`. `line` counts from 1 in the item's file.",
+      "properties": {
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "part": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "part",
+        "line",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "Preregistration": {
+      "additionalProperties": false,
+      "description": "A spike's Pre-registration part (0.10, \"A `spike`\"): the text of each of its four labels, as written, and left out\nwhen the label is missing. `amendments` counts the `### Amendment` sections below the original text. `hashMatches`\nis present only when the frontmatter has `preregistered`: whether it is the hash of the original text.",
+      "properties": {
+        "amendments": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "budget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cheapestTest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hashMatches": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hypothesis": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "killCriterion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "amendments"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "description": "One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`\ntake. `checkout` and `path` are set by a ref-scoped source. `kind` may be left out when the provider has one.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "assumptions": {
+          "description": "A proposal's Assumptions part. Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Assumption"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checklist": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checklist"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "claims": {
+          "description": "A spike's claims, read from the fenced `claim` blocks of its record (0.10). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "collections": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coverage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What a proposal's features and included tasks cover, derived (0.10). Left out when it has neither."
+        },
+        "decisions": {
+          "description": "A proposal's Decision log (0.10). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Decision"
+          },
+          "type": "array"
+        },
+        "featureProblems": {
+          "description": "The lines of that part that did not parse. Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/FeatureProblem"
+          },
+          "type": "array"
+        },
+        "features": {
+          "description": "A proposal's features, read from its Features part (0.8). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Feature"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "findings": {
+          "description": "A proposal's Findings part. Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "type": "array"
+        },
+        "owners": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "partProblems": {
+          "description": "The lines of those parts that are not right. Left out when there are none. They never refuse a move.",
+          "items": {
+            "$ref": "#/$defs/PartProblem"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preregistration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Preregistration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A spike's Pre-registration part (0.10). Left out when its record has none."
+        },
+        "state": {
+          "$ref": "#/$defs/ItemState"
+        },
+        "templateFields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "id",
+        "aliases",
+        "title",
+        "state",
+        "version",
+        "links",
+        "owners",
+        "labels",
+        "collections",
+        "templateFields",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "WriteQueued": {
+      "additionalProperties": false,
+      "description": "A write the daemon stored because its checkout is busy (0.4, Root busy). `item` is the Queue item that says\nwhy.",
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "reason"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.reid` result. `from` is the key the item had. `result` is the provider's answer, with the renamed item as its\n`task`; it is absent when the write was queued (`queued` says why). `rewritten` are the keys of the other items\nwhose links, or whose `resolved_by`, were rewritten to the new id.",
+  "properties": {
+    "from": {
+      "type": "string"
+    },
+    "queued": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WriteQueued"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApplyResult"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rewritten": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "from",
+    "rewritten"
+  ],
+  "title": "TaskReidResult",
+  "type": "object"
+}

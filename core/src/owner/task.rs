@@ -312,6 +312,55 @@ pub struct TaskSaveViewResult {
     pub path: String,
 }
 
+/// `task.create` params (`collide task create`): the planning source's `create`, with the new item's title and the
+/// epic and kind it is made in. `epic` is a full epic id. `seed` makes the id's suffix repeatable, `root` names the
+/// private root, and `checkout` names the checkout to write in (the board's main one when left out). The answer is a
+/// [`TaskApplyResult`]: the write is queued when its checkout is busy, as any write is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskCreateParams {
+    pub board: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
+}
+
+/// `task.reid` params (`collide task reid`): gives the item `id` a new suffix, in the planning source, and rewrites the
+/// links that name the old id. `id` is a key, or an id of the planning source. Nothing is committed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskReidParams {
+    pub board: String,
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
+}
+
+/// `task.reid` result. `from` is the key the item had. `result` is the provider's answer, with the renamed item as its
+/// `task`; it is absent when the write was queued (`queued` says why). `rewritten` are the keys of the other items
+/// whose links, or whose `resolved_by`, were rewritten to the new id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskReidResult {
+    pub from: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ApplyResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<WriteQueued>,
+    #[serde(default)]
+    pub rewritten: Vec<String>,
+}
+
 /// `task.sections` params (`collide sections`). The result is [`crate::section::Sections`], as the CLI prints it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

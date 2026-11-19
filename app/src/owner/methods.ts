@@ -30,6 +30,8 @@ export const OWNER_METHODS = {
   'task.list': call<G.TaskListParamsInput, G.TaskListResultOutput>(),
   'task.get': call<G.TaskGetParamsInput, G.TaskGetResultOutput>(),
   'task.apply': call<G.TaskApplyParamsInput, G.TaskApplyResultOutput>(),
+  'task.create': call<G.TaskCreateParamsInput, G.TaskApplyResultOutput>(),
+  'task.reid': call<G.TaskReidParamsInput, G.TaskReidResultOutput>(),
   'task.preview': call<G.TaskPreviewParamsInput, G.PreviewResultOutput>(),
   'task.views': call<G.TaskViewsParamsInput, G.TaskViewsResultOutput>(),
   'task.save_view': call<G.TaskSaveViewParamsInput, G.TaskSaveViewResultOutput>(),

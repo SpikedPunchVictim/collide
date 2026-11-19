@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.reid` params (`collide task reid`): gives the item `id` a new suffix, in the planning source, and rewrites the\nlinks that name the old id. `id` is a key, or an id of the planning source. Nothing is committed.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "seed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "board",
+    "id"
+  ],
+  "title": "TaskReidParams",
+  "type": "object"
+}

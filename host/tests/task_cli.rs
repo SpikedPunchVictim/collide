@@ -6,10 +6,15 @@
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 mod common;
-use common::{Bundle, TempRoot, repo_root, scratch};
+use collide_host::daemon::DaemonPaths;
+use common::detached::Detached;
+use common::{Bundle, DaemonStop, TempRoot, repo_root, scratch};
+
+// Cargo builds the daemon for these tests only when a test names it.
+const _DAEMON: &str = env!("CARGO_BIN_EXE_collide-daemon");
 
 const BUNDLE: &str = "task-cli-packs";
 
@@ -82,27 +87,36 @@ struct Run {
     stderr: String,
 }
 
-/// Runs `collide` in `cwd` with the packs bundle at `packs`, and `env` added. The environment is the test's own:
-/// `PATH` is kept (the plan provider runs on `node`), and `HOME` and the daemon root are a temp root.
+/// Runs `collide` in `cwd` with the packs bundle at `packs`, and `env` added. Every command goes through a daemon, so
+/// each call starts its own, under a temp root that is also the `HOME`, and stops it when the call has its answer: no
+/// call sees what an earlier one left in a daemon's cache. The environment is the test's own: `PATH` is kept (the
+/// plan provider runs on `node`), and `HOME` and the daemon root are the temp root.
 fn collide_with(cwd: &Path, packs: &Path, env: &[(&str, &str)], args: &[&str]) -> Run {
     let root = TempRoot::new();
+    // Dropped after the output is read: it ends the daemon this call started, by the pid on this call's own socket.
+    let _stop = DaemonStop(DaemonPaths::under(root.path()));
+    let shell = root.script("fake-shell", "#!/bin/sh\neval \"$4\"\n");
     let Output {
         status,
         stdout,
         stderr,
-    } = Command::new(env!("CARGO_BIN_EXE_collide"))
-        .args(args)
-        .current_dir(cwd)
-        .env_clear()
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-        .env("HOME", root.path())
-        .env("COLLIDE_DAEMON_ROOT", root.path())
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("COLLIDE_BUILTIN_PACKS", packs)
-        .envs(env.iter().copied())
-        .output()
-        .expect("collide should run");
+    } = Detached::start(
+        &root,
+        Command::new(env!("CARGO_BIN_EXE_collide"))
+            .args(args)
+            .current_dir(cwd)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("HOME", root.path())
+            .env("SHELL", shell)
+            .env("COLLIDE_DAEMON_ROOT", root.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("COLLIDE_BUILTIN_PACKS", packs)
+            .envs(env.iter().copied())
+            .stdin(Stdio::null()),
+    )
+    .wait();
     Run {
         code: status.code().expect("collide exits normally"),
         stdout: String::from_utf8(stdout).unwrap(),
@@ -130,42 +144,43 @@ fn ids(document: &Value) -> Vec<String> {
 // Listing.
 
 #[test]
-fn tasks_prints_each_items_epic_beside_its_id_with_the_ready_rules_verdict() {
+fn tasks_lists_each_item_by_key_with_its_status_kind_and_title() {
     let (bundle, repo) = (bundle(), Repo::new("list"));
     let run = collide(&repo, &bundle, &["tasks"]);
     assert_eq!(run.code, 0, "{}", run.stderr);
     assert_eq!(
         run.stdout,
         "\
-ep-001-aa               active           epic  Alpha epic
-ep-001-aa / ts-0001-aa  done             task  First task
-ep-001-aa / ts-0002-bb  ready            task  Second task, free to start
-ep-001-aa / ts-0003-cc  ready (blocked)  task  Third task, waits for the second
-ep-001-aa / ts-0006-hh  ready (blocked)  task  Loop, first half
-ep-001-aa / ts-0007-ii  ready (blocked)  task  Loop, second half
-ep-001-aa / ts-0008-jj  ready (blocked)  task  Blocked by an id that is no item
-ep-001-aa / ts-0012-dd  ready            task  Twelve, in alpha
-ep-002-bb               active           epic  Beta epic
-ep-002-bb / ts-0004-ff  dropped          task  Dropped task
-ep-002-bb / ts-0005-gg  ready            task  Free, since its blocker is dropped
-ep-002-bb / ts-0012-ee  review           task  Twelve, in beta
+plan:ep-001-aa   active   epic  Alpha epic
+plan:ep-002-bb   active   epic  Beta epic
+plan:ts-0001-aa  done     task  First task
+plan:ts-0002-bb  ready    task  Second task, free to start
+plan:ts-0003-cc  ready    task  Third task, waits for the second
+plan:ts-0004-ff  dropped  task  Dropped task
+plan:ts-0005-gg  ready    task  Free, since its blocker is dropped
+plan:ts-0006-hh  ready    task  Loop, first half
+plan:ts-0007-ii  ready    task  Loop, second half
+plan:ts-0008-jj  ready    task  Blocked by an id that is no item
+plan:ts-0012-dd  ready    task  Twelve, in alpha
+plan:ts-0012-ee  review   task  Twelve, in beta
 "
     );
 }
 
 #[test]
-fn a_cycle_and_an_unknown_blocker_are_reported_on_stderr() {
+fn a_cycle_and_an_unknown_blocker_are_reported_on_stderr_by_the_ready_view() {
     let (bundle, repo) = (bundle(), Repo::new("warnings"));
-    let run = collide(&repo, &bundle, &["tasks"]);
+    let run = collide(&repo, &bundle, &["tasks", "--ready"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
     assert!(
         run.stderr
-            .contains("collide: blocked-by cycle, none is ready: ts-0006-hh, ts-0007-ii"),
+            .contains("collide: blocked-by cycle, none is ready: plan:ts-0006-hh, plan:ts-0007-ii"),
         "{}",
         run.stderr
     );
     assert!(
         run.stderr.contains(
-            "collide: ts-0008-jj is blocked by ts-9999-zz, which is not an item; it is not ready"
+            "collide: plan:ts-0008-jj is blocked by ts-9999-zz, which is not an item; it is not ready"
         ),
         "{}",
         run.stderr
@@ -177,30 +192,22 @@ fn ready_lists_what_the_rule_allows_and_nothing_else() {
     let (bundle, repo) = (bundle(), Repo::new("ready"));
     let run = collide(&repo, &bundle, &["tasks", "--ready", "--json"]);
     assert_eq!(run.code, 0, "{}", run.stderr);
-    // In the provider's order (epic folder, then file name). Done and dropped blockers free an item; a ready
-    // blocker, a cycle and an unknown blocker do not.
-    assert_eq!(ids(&json(&run)), ["ts-0002-bb", "ts-0012-dd", "ts-0005-gg"]);
+    // In the daemon's order (by key). Done and dropped blockers free an item; a ready blocker, a cycle and an
+    // unknown blocker do not.
+    assert_eq!(ids(&json(&run)), ["ts-0002-bb", "ts-0005-gg", "ts-0012-dd"]);
 }
 
 #[test]
-fn json_carries_the_epic_ready_flag_and_no_invalid_items() {
+fn json_is_the_daemons_list_with_the_epic_and_the_state_of_each_item() {
     let (bundle, repo) = (bundle(), Repo::new("json"));
     let document = json(&collide(&repo, &bundle, &["tasks", "--json"]));
     assert_eq!(document["invalid"], serde_json::json!([]));
-    assert_eq!(
-        document["cycles"],
-        serde_json::json!([["ts-0006-hh", "ts-0007-ii"]])
-    );
-    assert_eq!(
-        document["unknownTargets"],
-        serde_json::json!([{ "from": "ts-0008-jj", "to": "ts-9999-zz" }])
-    );
     let tasks = document["tasks"].as_array().unwrap();
     let by_id = |id: &str| tasks.iter().find(|task| task["id"] == id).unwrap();
-    assert_eq!(by_id("ts-0005-gg")["epic"], "ep-002-bb");
-    assert_eq!(by_id("ts-0005-gg")["ready"], true);
-    assert_eq!(by_id("ts-0003-cc")["ready"], false);
-    assert_eq!(by_id("ep-001-aa")["epic"], Value::Null);
+    assert_eq!(by_id("ts-0005-gg")["links"][0]["type"], "part-of");
+    assert_eq!(by_id("ts-0005-gg")["state"]["category"], "ready");
+    assert_eq!(by_id("ts-0004-ff")["state"]["category"], "dropped");
+    assert_eq!(by_id("ep-001-aa")["kind"], "epic");
 }
 
 #[test]
@@ -223,13 +230,14 @@ fn kind_keeps_only_items_of_that_kind() {
 }
 
 #[test]
-fn an_unknown_kind_fails_listing_the_declared_kinds() {
+fn an_unknown_kind_fails_listing_the_kinds_the_boards_sources_declare() {
     let (bundle, repo) = (bundle(), Repo::new("kind-unknown"));
     let run = collide(&repo, &bundle, &["tasks", "--kind", "widget"]);
-    assert_eq!(run.code, 2);
+    assert_eq!(run.code, 2, "{}", run.stderr);
+    assert_eq!(run.stdout, "");
     assert!(
         run.stderr.contains(
-            "unknown kind `widget`; the provider declares: task, epic, proposal, spike, question"
+            "unknown kind `widget`; the board's sources declare: task, epic, proposal, spike, question"
         ),
         "{}",
         run.stderr
@@ -252,7 +260,7 @@ fn the_ready_rule_is_applied_before_the_kind_filter() {
 // Showing one item.
 
 #[test]
-fn task_shows_the_epic_beside_the_id_and_each_link_target_with_its_epic() {
+fn task_shows_the_epic_beside_the_id_and_each_link_target_with_its_state() {
     let (bundle, repo) = (bundle(), Repo::new("show"));
     let run = collide(&repo, &bundle, &["task", "5"]);
     assert_eq!(run.code, 0, "{}", run.stderr);
@@ -266,8 +274,8 @@ ep-002-bb / ts-0005-gg
   ready   yes
   path    .collide/planning/epics/ep-002-bb-beta/tasks/ts-0005-gg-after-dropped.md
   links
-    blocked-by ts-0004-ff (ep-002)
-    blocked-by ts-0001-aa (ep-001)
+    blocked-by plan:ts-0004-ff (dropped)
+    blocked-by plan:ts-0001-aa (done)
 
 ## Goal
 
@@ -285,10 +293,13 @@ fn task_says_why_an_item_is_not_ready() {
         "{blocked}"
     );
     let typo = collide(&repo, &bundle, &["task", "8"]).stdout;
-    assert!(typo.contains("blocked-by ts-9999-zz (not found)"), "{typo}");
+    assert!(
+        typo.contains("blocked-by plan:ts-9999-zz (not found)"),
+        "{typo}"
+    );
     let looped = collide(&repo, &bundle, &["task", "6"]).stdout;
     assert!(
-        looped.contains("no (in a blocked-by cycle: ts-0006-hh, ts-0007-ii)"),
+        looped.contains("  ready   no (waiting on ts-0007-ii (ready))"),
         "{looped}"
     );
     let done = collide(&repo, &bundle, &["task", "ts-1"]).stdout;
@@ -304,8 +315,8 @@ fn a_number_shared_by_two_items_lists_both_and_asks_for_the_suffix() {
     assert!(
         run.stderr.contains(
             "collide: `12` matches 2 items:\n  \
-             ep-001-aa / ts-0012-dd  task  Twelve, in alpha\n  \
-             ep-002-bb / ts-0012-ee  task  Twelve, in beta\n\
+             ep-001-aa / plan:ts-0012-dd  task  Twelve, in alpha\n  \
+             ep-002-bb / plan:ts-0012-ee  task  Twelve, in beta\n\
              add the suffix or the prefix, such as 0012-dd or ts-0012, or use the full id"
         ),
         "{}",
@@ -485,7 +496,7 @@ fn an_unknown_op_fails_listing_the_ops_the_provider_declares() {
     assert_eq!(run.code, 2);
     assert!(
         run.stderr
-            .contains("unknown op `explode` for ts-0003-cc (task); the provider declares:"),
+            .contains("unknown op `explode` for plan:ts-0003-cc (task); its source declares:"),
         "{}",
         run.stderr
     );
@@ -537,23 +548,27 @@ fn a_wrong_command_line_prints_usage_and_exits_2() {
 }
 
 #[test]
-fn help_prints_the_usage_the_exit_codes_and_where_the_provider_is_found() {
+fn help_prints_the_usage_the_exit_codes_and_the_forms_that_go_through_the_daemon() {
     let run = collide_with(&std::env::temp_dir(), Path::new("/nowhere"), &[], &["help"]);
     assert_eq!(run.code, 0);
     assert!(run.stdout.contains(
         "collide tasks [--ready] [--kind <kind>] [--view <name>] [--checkout <path>] [--json]"
     ));
     for line in [
-        "exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed), 2 wrong command line",
-        "3 id not found or ambiguous, 4 conflict (nothing was written),",
+        "exit codes: 0 ok, 1 failed (also: the write was made but --commit's commit failed; no daemon), 2 wrong",
+        "4 conflict (nothing was
+written), 5 refused by the provider,",
+        "12 a person-only op: a confirmation waits in the app",
     ] {
         assert!(run.stdout.contains(line), "{line} in {}", run.stdout);
     }
-    assert!(run.stdout.contains("COLLIDE_BUILTIN_PACKS"));
+    assert!(!run.stdout.contains("COLLIDE_BUILTIN_PACKS"));
     for line in [
-        "collide task create <title> [epic=<epic>] [kind=task|epic|proposal] [seed=<number>] [--checkout <path>] [--commit] [--json]",
+        "collide task create <title> [epic=<epic>] [kind=task|epic|proposal|spike|question] [seed=<number>]",
         "collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]",
-        "Without --commit nothing is committed: review with\n  git diff.",
+        "collide task renameSection <from> <to> [--checkout <path>] [--commit] [--json]",
+        "The new file is written; without --commit nothing is
+  committed.",
         "--commit",
         "--checkout <path>",
     ] {
@@ -578,111 +593,6 @@ fn outside_a_repository_the_error_says_where_it_looked_from() {
     assert!(
         run.stderr
             .contains(outside.file_name().unwrap().to_str().unwrap()),
-        "{}",
-        run.stderr
-    );
-}
-
-#[test]
-fn a_missing_bundle_says_what_was_looked_for_and_where() {
-    let repo = Repo::new("no-bundle");
-    let missing = scratch("task-cli-no-such-bundle");
-    let run = collide_with(&repo.dir, &missing, &[], &["tasks"]);
-    assert_eq!(run.code, 1);
-    assert!(
-        run.stderr.contains("COLLIDE_BUILTIN_PACKS is set to"),
-        "{}",
-        run.stderr
-    );
-    assert!(run.stderr.contains("no-such-bundle"), "{}", run.stderr);
-    assert!(run.stderr.contains("plan/pack.yaml"), "{}", run.stderr);
-}
-
-// A stand-in provider.
-
-struct Fake(PathBuf);
-
-impl Fake {
-    fn new() -> Self {
-        Self(repo_root().join("host/tests/fixtures/fake-provider"))
-    }
-
-    fn run(&self, mode: &str, args: &[&str]) -> Run {
-        let repo = Repo::new(&format!("fake-{mode}-{}", args.join("-")));
-        collide_with(&repo.dir, &self.0, &[("FAKE_MODE", mode)], args)
-    }
-}
-
-#[test]
-fn a_conflict_prints_the_current_state_says_nothing_was_written_and_exits_4() {
-    let run = Fake::new().run("conflict", &["task", "1", "setStatus", "active"]);
-    assert_eq!(run.code, 4);
-    assert!(run.stdout.is_empty());
-    assert!(
-        run.stderr.contains(
-            "conflict: ep-001-aa / ts-0001-aa changed after it was read; nothing was written."
-        ),
-        "{}",
-        run.stderr
-    );
-    assert!(run.stderr.contains("  status  active"), "{}", run.stderr);
-}
-
-#[test]
-fn a_conflict_with_json_prints_the_result() {
-    let run = Fake::new().run("conflict", &["task", "1", "setStatus", "active", "--json"]);
-    assert_eq!(run.code, 4);
-    assert_eq!(json(&run)["outcome"], "conflict");
-    assert_eq!(json(&run)["current"]["version"], "v2");
-}
-
-#[test]
-fn notifications_from_the_provider_are_skipped() {
-    let run = Fake::new().run("notify", &["tasks"]);
-    assert_eq!(run.code, 0, "{}", run.stderr);
-    assert!(
-        run.stdout.contains("ep-001-aa / ts-0001-aa"),
-        "{}",
-        run.stdout
-    );
-}
-
-#[test]
-fn an_error_reply_is_surfaced_with_its_message() {
-    let run = Fake::new().run("rpc-error", &["tasks"]);
-    assert_eq!(run.code, 1);
-    assert!(
-        run.stderr
-            .contains("the provider refused `list` (error -32000): the fake source is on fire"),
-        "{}",
-        run.stderr
-    );
-}
-
-#[test]
-fn a_provider_that_exits_is_reported_and_its_stderr_passes_through() {
-    let run = Fake::new().run("exit", &["tasks"]);
-    assert_eq!(run.code, 1);
-    assert!(
-        run.stderr.contains("fake provider: giving up"),
-        "{}",
-        run.stderr
-    );
-    assert!(
-        run.stderr
-            .contains("the provider exited (exit status: 3) before it answered `list`"),
-        "{}",
-        run.stderr
-    );
-}
-
-#[test]
-fn an_answer_that_is_not_a_list_result_is_reported() {
-    let run = Fake::new().run("garbage", &["tasks"]);
-    assert_eq!(run.code, 1);
-    assert!(
-        run.stderr
-            .contains("the provider's answer to `list` is not valid"),
         "{}",
         run.stderr
     );
@@ -800,13 +710,9 @@ fn a_bad_create_is_refused_or_a_usage_error_and_writes_nothing() {
         (
             &["task", "create", "T", "epic=ts-1"],
             2,
-            "is ts-0001-aa, which is not an epic",
+            "names plan:ts-0001-aa, which is a task, not an epic",
         ),
-        (
-            &["task", "create", "T", "epic=9"],
-            3,
-            "no item matches `ep-9`",
-        ),
+        (&["task", "create", "T", "epic=9"], 3, "no item matches `9`"),
         (
             &["task", "create", "T", "epic=ep-1", "speed=3"],
             2,
@@ -884,8 +790,8 @@ fn two_branches_that_make_the_same_number_both_load_after_the_merge() {
     assert_eq!(twelve.code, 3);
     assert!(
         twelve.stderr.contains("`13` matches 2 items:")
-            && twelve.stderr.contains(&format!("ep-001-aa / {id_a}"))
-            && twelve.stderr.contains(&format!("ep-001-aa / {id_b}")),
+            && twelve.stderr.contains(&format!("ep-001-aa / plan:{id_a}"))
+            && twelve.stderr.contains(&format!("ep-001-aa / plan:{id_b}")),
         "{}",
         twelve.stderr
     );
@@ -927,8 +833,8 @@ fn reid_on_a_shared_id_renames_the_second_file_rewrites_links_and_commits_nothin
     assert_eq!(
         run.stdout,
         format!(
-            "ok  ep-001-aa / ts-0002-ra\n  id      ts-0002-bb -> ts-0002-ra\n  \
-             file    {third}\n  file    {renamed}\n  removed {copy}\n\
+            "ok  ep-001-aa / ts-0002-ra\n  id      plan:ts-0002-bb -> plan:ts-0002-ra\n  \
+             links   rewritten in plan:ts-0003-cc\n  file    {third}\n  file    {renamed}\n  removed {copy}\n\
              nothing is committed; review the changes with git diff and git status\n"
         )
     );
@@ -984,8 +890,10 @@ fn reid_is_the_same_as_the_id_followed_by_reid() {
     );
     assert_eq!(run.code, 0, "{}", run.stderr);
     let result = json(&run);
-    assert_eq!(result["outcome"], "ok");
-    assert_eq!(result["task"]["id"], "ts-0002-ra");
+    assert_eq!(result["from"], "plan:ts-0002-bb");
+    assert_eq!(result["result"]["outcome"], "ok");
+    assert_eq!(result["result"]["task"]["id"], "ts-0002-ra");
+    assert_eq!(result["rewritten"], serde_json::json!(["plan:ts-0003-cc"]));
 }
 
 #[test]
@@ -1131,7 +1039,14 @@ fn checkout_reads_the_item_in_that_worktree_so_one_that_exists_only_there_is_fou
         &bundle,
         &["task", "ts-0013-ra", "setStatus", "active"],
     );
-    assert_eq!(from_main.code, 3, "{}", from_main.stderr);
+    // The board lists the copy in the worktree, so the id is found; the main checkout has no such file, and the
+    // provider refuses the write there.
+    assert_eq!(from_main.code, 5, "{}", from_main.stderr);
+    assert!(
+        from_main.stderr.contains("there is no item ts-0013-ra"),
+        "{}",
+        from_main.stderr
+    );
 }
 
 #[test]
@@ -1572,7 +1487,7 @@ fn a_proposal_lists_as_kind_proposal_with_its_status_and_category() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     assert_eq!(
         run.stdout,
-        "ep-001-aa / pr-0003-km  deferred  proposal  Features in proposals\n"
+        "plan:pr-0003-km  deferred  proposal  Features in proposals\n"
     );
     let document = json(&collide(
         &repo,
@@ -1596,11 +1511,12 @@ fn task_prints_a_proposals_features_by_section_with_unsorted_last() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     let head = "\
 ep-001-aa / pr-0003-km
-  title   Features in proposals
-  kind    proposal
-  status  draft
-  ready   no (status is draft)
-  path    .collide/planning/epics/ep-001-aa-alpha/proposals/pr-0003-km-features-in-proposals.md
+  title    Features in proposals
+  kind     proposal
+  status   draft
+  ready    no (status is draft)
+  path     .collide/planning/epics/ep-001-aa-alpha/proposals/pr-0003-km-features-in-proposals.md
+  coverage 3 feature(s) with no task (F1, F2, F3)
   features
     Packs
       F1 Trust prompt for repo packs: a repo pack asks before its first run. A continuation line is indented by two spaces.
@@ -1810,13 +1726,63 @@ fn a_proposals_set_status_takes_the_six_words_and_lists_them_when_it_is_wrong() 
     let moved = collide(
         &repo,
         &bundle,
-        &["task", "pr-0003", "setStatus", "rejected"],
+        &["task", "pr-0003", "setStatus", "proposed"],
     );
     assert_eq!(moved.code, 0, "{}", moved.stderr);
     assert!(
-        moved.stdout.contains("status  draft -> rejected"),
+        moved.stdout.contains("status  draft -> proposed"),
         "{}",
         moved.stdout
+    );
+}
+
+#[test]
+fn a_bare_id_accept_waits_as_a_confirmation_writes_nothing_and_exits_12() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-accept", "proposed", FEATURES_EXAMPLE),
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003", "accept"]);
+    assert_eq!(run.code, 12, "{}", run.stderr);
+    assert!(run.stdout.is_empty(), "{}", run.stdout);
+    assert!(
+        run.stderr.contains("a confirmation waits in the app"),
+        "{}",
+        run.stderr
+    );
+    assert!(run.stderr.contains("queue item confirm-"), "{}", run.stderr);
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn a_person_only_status_through_set_status_waits_the_same_way() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-reject", "draft", FEATURES_EXAMPLE),
+    );
+    let run = collide(
+        &repo,
+        &bundle,
+        &["task", "pr-0003", "setStatus", "rejected"],
+    );
+    assert_eq!(run.code, 12, "{}", run.stderr);
+    assert!(git(&repo.dir, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn a_person_only_op_with_json_prints_the_confirmation_and_exits_12() {
+    let (bundle, repo) = (
+        bundle(),
+        repo_with_proposal("proposal-accept-json", "proposed", FEATURES_EXAMPLE),
+    );
+    let run = collide(&repo, &bundle, &["task", "pr-0003", "accept", "--json"]);
+    assert_eq!(run.code, 12, "{}", run.stderr);
+    let document = json(&run);
+    assert!(
+        document["confirmation"]["item"]
+            .as_str()
+            .is_some_and(|item| item.starts_with("confirm-")),
+        "{document}"
     );
 }
 
@@ -1877,7 +1843,7 @@ fn task_prints_a_feature_link_with_its_epic() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     assert!(
         run.stdout
-            .contains("  links\n    implements pr-0003-km#F2 (ep-001)\n"),
+            .contains("  links\n    implements plan:pr-0003-km#F2 (accepted)\n"),
         "{}",
         run.stdout
     );
@@ -1907,19 +1873,14 @@ fn task_says_when_a_feature_link_names_no_feature_or_no_item() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     assert!(
         run.stdout.contains(
-            "    implements pr-0003-km#F9 (feature not found)\n    implements pr-0099-zz#F1 (not found)\n"
+            "    implements plan:pr-0003-km#F9 (proposal or feature not found)\n    \
+             implements plan:pr-0099-zz#F1 (proposal or feature not found)\n"
         ),
         "{}",
         run.stdout
     );
     let listed = collide(&repo, &bundle, &["tasks", "--json"]);
     assert!(ids(&json(&listed)).contains(&"ts-0020-xa".to_string()));
-    assert!(
-        // The fixture's own ts-0008-jj is the other one.
-        listed.stderr.contains("2 with a broken link"),
-        "{}",
-        listed.stderr
-    );
 }
 
 #[test]
@@ -1990,15 +1951,15 @@ fn task_prints_each_features_state_and_the_tasks_that_implement_it() {
             "    Packs",
             "      F1 Trust prompt for repo packs: a repo pack asks before its first run. A continuation line is indented by two spaces.",
             "        state  1 of 3 done",
-            "        ts-0020-xa (ep-002)  done  Work on ts-0020-xa",
-            "        ts-0021-xb (ep-002)  active  Work on ts-0021-xb",
-            "        ts-0022-xc (ep-002)  ready  Work on ts-0022-xc",
+            "        plan:ts-0020-xa  done",
+            "        plan:ts-0021-xb  active",
+            "        plan:ts-0022-xc  ready",
             "      F2 Pack lock: `packs.lock` pins each pack to a tree.",
             "        state  accepted",
             "    Unsorted",
             "      F3 Menu bar badge: the Queue count in the menu bar.",
             "        state  accepted",
-            "        ts-0023-xd (ep-002)  dropped  Work on ts-0023-xd",
+            "        plan:ts-0023-xd  dropped",
         ]
     );
 }
@@ -2096,7 +2057,7 @@ fn link_implements_writes_the_link_and_task_prints_it() {
     assert!(
         shown
             .stdout
-            .contains("    implements pr-0003-km#F2 (ep-001)\n"),
+            .contains("    implements plan:pr-0003-km#F2 (accepted)\n"),
         "{}",
         shown.stdout
     );
@@ -2104,7 +2065,7 @@ fn link_implements_writes_the_link_and_task_prints_it() {
     assert!(
         proposal
             .stdout
-            .contains("        state  0 of 1 done\n        ts-0002-bb (ep-001)  ready  "),
+            .contains("        state  0 of 1 done\n        plan:ts-0002-bb  ready\n"),
         "{}",
         proposal.stdout
     );
@@ -2180,7 +2141,7 @@ fn reid_of_a_proposal_keeps_the_feature_in_the_links_it_rewrites() {
     assert!(
         shown
             .stdout
-            .contains("    implements pr-0003-ra#F2 (ep-001)\n"),
+            .contains("    implements plan:pr-0003-ra#F2 (accepted)\n"),
         "{}",
         shown.stdout
     );

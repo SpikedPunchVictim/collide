@@ -246,11 +246,14 @@ pub fn registry() -> Registry {
     registry.add::<owner::RunTerminalResizeParams>();
     registry.add::<owner::TaskApplyParams>();
     registry.add::<owner::TaskApplyResult>();
+    registry.add::<owner::TaskCreateParams>();
     registry.add::<owner::TaskGetParams>();
     registry.add::<owner::TaskGetResult>();
     registry.add::<owner::TaskListParams>();
     registry.add::<owner::TaskListResult>();
     registry.add::<owner::TaskPreviewParams>();
+    registry.add::<owner::TaskReidParams>();
+    registry.add::<owner::TaskReidResult>();
     registry.add::<owner::TaskSaveViewParams>();
     registry.add::<owner::TaskSaveViewResult>();
     registry.add::<owner::TaskSectionsParams>();

@@ -25,8 +25,8 @@ use collide_host::owner_client::OwnerClient;
 use collide_host::pack_cache::ensure_sdk;
 use collide_host::pack_location::bundle_sdk;
 use collide_host::run_store::RunLaunch;
-use collide_host::task_cli::{Command, exit, parse_task, parse_tasks};
-use collide_host::task_daemon::{run_with, wants_daemon};
+use collide_host::task_cli::{Command, exit, parse_sections, parse_task, parse_tasks};
+use collide_host::task_daemon::run_with;
 use common::git_repo::{GitRepo, git_command};
 use common::{Bundle, repo_root, wait_until};
 use serde::Serialize;
@@ -61,6 +61,7 @@ fn parsed(words: &[&str]) -> Command {
     let command = match words[0] {
         "tasks" => parse_tasks(&rest),
         "task" => parse_task(&rest),
+        "sections" => parse_sections(&rest),
         other => panic!("no parser for {other}"),
     };
     command.unwrap_or_else(|error| panic!("{words:?}: {}", error.message))
@@ -162,29 +163,77 @@ fn task_new_refuses_the_options_of_a_write_to_a_checkout_and_names_each() {
 }
 
 #[test]
-fn only_the_forms_that_need_the_corpus_go_through_the_daemon() {
-    for (words, through) in [
-        (vec!["tasks"], false),
-        (vec!["tasks", "--ready", "--kind", "task", "--json"], false),
-        (vec!["tasks", "--view", "mine"], true),
-        (vec!["tasks", "--checkout", "wt"], true),
-        (vec!["task", "12"], false),
-        (vec!["task", "12", "--json"], true),
-        (vec!["task", "scratch:3", "--json"], true),
-        (vec!["task", "12", "setStatus", "active"], false),
-        (vec!["task", "scratch:3", "setStatus", "done"], true),
-        (vec!["task", "plan:ts-0002-bb", "setStatus", "done"], true),
-        (vec!["task", "new", "try it"], true),
-        (vec!["task", "create", "a title"], false),
-        (vec!["task", "reid", "12"], false),
-        (vec!["sections"], false),
+fn task_create_takes_a_title_and_its_named_words() {
+    let Command::Create(options) = parsed(&[
+        "task",
+        "create",
+        "A title",
+        "epic=ep-1",
+        "kind=spike",
+        "seed=7",
+        "root=private",
+        "--json",
+    ]) else {
+        panic!("a task create command")
+    };
+    assert_eq!(options.title, "A title");
+    assert_eq!(options.epic.as_deref(), Some("ep-1"));
+    assert_eq!(options.kind.as_deref(), Some("spike"));
+    assert_eq!(options.seed, Some(7));
+    assert_eq!(options.root.as_deref(), Some("private"));
+    assert!(options.json);
+}
+
+#[test]
+fn task_create_refuses_a_missing_title_a_second_value_and_a_seed_that_is_no_number() {
+    for (words, named) in [
+        (vec!["task", "create"], "needs title"),
+        (vec!["task", "create", "a", "b"], "second bare value"),
+        (vec!["task", "create", "a", "seed=x"], "seed"),
+        (vec!["task", "create", "a", "speed=3"], "speed"),
+        (vec!["task", "create", "a", "epic=1", "epic=2"], "twice"),
     ] {
-        let command = if words[0] == "sections" {
-            collide_host::task_cli::parse_sections(&[]).unwrap()
-        } else {
-            parsed(&words)
+        let message = error_of(&words);
+        assert!(message.contains(named), "{words:?}: {message}");
+    }
+}
+
+#[test]
+fn task_reid_takes_an_id_either_side_of_the_word_and_a_seed() {
+    for words in [
+        vec!["task", "reid", "12", "seed=3"],
+        vec!["task", "12", "reid", "seed=3"],
+    ] {
+        let Command::Reid(options) = parsed(&words) else {
+            panic!("{words:?} is a task reid command")
         };
-        assert_eq!(wants_daemon(&command), through, "{words:?}");
+        assert_eq!((options.id.as_str(), options.seed), ("12", Some(3)));
+    }
+    let message = error_of(&["task", "reid", "12", "speed=3"]);
+    assert!(message.contains("speed=3"), "{message}");
+}
+
+#[test]
+fn task_rename_section_takes_two_names_bare_or_named() {
+    for words in [
+        vec!["task", "renameSection", "Pack", "packs"],
+        vec!["task", "renameSection", "to=packs", "from=Pack"],
+    ] {
+        let Command::RenameSection(options) = parsed(&words) else {
+            panic!("{words:?} is a renameSection command")
+        };
+        assert_eq!(
+            (options.from.as_str(), options.to.as_str()),
+            ("Pack", "packs"),
+            "{words:?}"
+        );
+    }
+    for words in [
+        vec!["task", "renameSection"],
+        vec!["task", "renameSection", "Pack"],
+        vec!["task", "renameSection", "a", "b", "c"],
+    ] {
+        error_of(&words);
     }
 }
 
@@ -1047,6 +1096,38 @@ fn a_write_in_a_rebase_says_why_names_the_queue_item_and_exits_11_with_no_wait()
 }
 
 #[test]
+fn reads_in_a_rebase_never_wait_and_print_what_they_always_print() {
+    let rig = Rig::new();
+    let (_, before, _) = rig.cli(&["tasks"]);
+    stop_in_a_rebase(&rig.repo);
+
+    let (code, out, err) = rig.cli(&["tasks"]);
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+    assert_eq!(out, before);
+    let (code, shown, err) = rig.cli(&["task", "plan:ts-0002-bb"]);
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+    assert!(shown.starts_with("ep-001-aa / ts-0002-bb\n"), "{shown}");
+    assert!(rig.queue().is_empty());
+}
+
+#[test]
+fn a_write_in_a_rebase_waits_and_is_applied_when_the_rebase_is_aborted() {
+    let rig = Rig::new();
+    stop_in_a_rebase(&rig.repo);
+    let cli = cli_on_a_thread(&rig, &["task", "plan:ts-0002-bb", "setStatus", "active"]);
+    wait_until("the write is queued", DEADLINE, || !rig.queue().is_empty());
+    assert_eq!(rig.status_of(SECOND_FILE), "ready");
+
+    rig.repo.git(&["rebase", "--abort"]);
+    let (code, out, err) = cli.join().unwrap();
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(err.contains("is queued: a rebase is in progress"), "{err}");
+    assert!(out.contains("the queued write was applied"), "{out}");
+    assert_eq!(rig.status_of(SECOND_FILE), "active");
+}
+
+#[test]
 fn a_wait_that_runs_out_leaves_the_write_queued_and_exits_11() {
     let rig = Rig::new();
     stop_in_a_rebase(&rig.repo);
@@ -1400,4 +1481,314 @@ fn json_of_a_proposal_with_no_features_part_has_neither_features_nor_problems() 
     let task = &document["task"];
     assert!(task.get("features").is_none(), "{task}");
     assert!(task.get("featureProblems").is_none(), "{task}");
+}
+
+// ---- create, reid, sections and the feature words through the daemon (ts-0136-rr) ----------------------------------
+
+const PLANNING: &str = ".collide/planning/epics/ep-001-aa-alpha";
+
+/// A draft proposal `id` in the alpha epic, with `features` as its Features part.
+fn proposal_in_alpha(id: &str, features: &str) -> (String, String) {
+    let text = format!(
+        "---\nid: {id}\nkind: proposal\nstatus: draft\ntitle: \"Proposal {id}\"\nowners: []\nlinks: []\n---\n\n\
+         ## Features\n\n{features}"
+    );
+    (format!("{PLANNING}/proposals/{id}-p.md"), text)
+}
+
+fn rig_with_two_proposals() -> Rig {
+    let (path_a, text_a) = proposal_in_alpha(
+        "pr-0003-km",
+        "### Pack\n- **F1 Trust prompt**: asks first.\n",
+    );
+    let (path_b, text_b) = proposal_in_alpha(
+        "pr-0004-lm",
+        "### Pack\n- **F1 Lock**: pins a tree.\n### Other\n- **F2 Badge**: a count.\n",
+    );
+    Rig::with_files(&[(path_a.as_str(), text_a), (path_b.as_str(), text_b)])
+}
+
+fn read_in(rig: &Rig, path: &str) -> String {
+    fs::read_to_string(rig.repo.work().join(path)).unwrap()
+}
+
+/// Runs `words` on a thread, so a test can end the live phase that queued it.
+fn cli_on_a_thread(rig: &Rig, words: &[&str]) -> std::thread::JoinHandle<(u8, String, String)> {
+    let (paths, cwd, command) = (rig.paths(), rig.work(), parsed(words));
+    std::thread::spawn(move || {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run_with(&paths, &command, &cwd, &mut out, &mut err);
+        (
+            code,
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
+    })
+}
+
+#[test]
+fn a_create_in_a_busy_checkout_is_queued_and_waited_for_and_makes_its_file_when_the_phase_ends() {
+    let rig = Rig::new();
+    let live = rig.daemon.live_phases();
+    live.started("R-7", &rig.work(), false);
+    let new_file = format!("{EPIC}/ts-0013-ra-made-while-busy.md");
+    let cli = cli_on_a_thread(
+        &rig,
+        &[
+            "task",
+            "create",
+            "Made while busy",
+            "epic=ep-001-aa",
+            "seed=1",
+        ],
+    );
+    wait_until("the create is queued", DEADLINE, || !rig.queue().is_empty());
+    assert!(
+        !rig.repo.work().join(&new_file).exists(),
+        "nothing is written yet"
+    );
+
+    live.ended("R-7");
+    let (code, out, err) = cli.join().unwrap();
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(
+        err.contains("is queued: a phase of run R-7 is running in"),
+        "{err}"
+    );
+    assert!(out.contains("the queued write was applied"), "{out}");
+    assert!(rig.repo.work().join(&new_file).exists());
+    assert!(rig.queue().is_empty());
+}
+
+#[test]
+fn a_create_with_no_wait_in_a_busy_checkout_leaves_the_write_queued_and_exits_11() {
+    let rig = Rig::new();
+    rig.daemon.live_phases().started("R-8", &rig.work(), false);
+
+    let (code, out, err) = rig.cli(&["task", "create", "Not yet", "epic=ep-001-aa", "--no-wait"]);
+
+    assert_eq!((code, out.as_str()), (exit::QUEUED, ""), "{err}");
+    assert_eq!(rig.queue().len(), 1);
+    assert!(
+        !rig.repo
+            .work()
+            .join(EPIC)
+            .join("ts-0013-ra-not-yet.md")
+            .exists()
+    );
+}
+
+#[test]
+fn a_reid_in_a_busy_checkout_is_queued_and_waited_for_and_renames_the_file_when_the_phase_ends() {
+    let rig = Rig::new();
+    let live = rig.daemon.live_phases();
+    live.started("R-9", &rig.work(), false);
+    let cli = cli_on_a_thread(&rig, &["task", "reid", "plan:ts-0002-bb", "seed=1"]);
+    wait_until("the reid is queued", DEADLINE, || !rig.queue().is_empty());
+    assert!(rig.repo.work().join(EPIC).join(SECOND_FILE).exists());
+
+    live.ended("R-9");
+    let (code, out, err) = cli.join().unwrap();
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(out.contains("the queued write was applied"), "{out}");
+    assert!(!rig.repo.work().join(EPIC).join(SECOND_FILE).exists());
+    assert!(
+        rig.repo
+            .work()
+            .join(EPIC)
+            .join("ts-0002-ra-second.md")
+            .exists()
+    );
+}
+
+#[test]
+fn a_reid_prints_the_old_and_the_new_key_each_item_whose_links_changed_and_commits_nothing() {
+    let rig = Rig::new();
+    let head = rig.repo.git(&["rev-parse", "HEAD"]);
+
+    let (code, out, err) = rig.cli(&["task", "reid", "plan:ts-0002-bb", "seed=1"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(
+        out.contains("  id      plan:ts-0002-bb -> plan:ts-0002-ra\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  links   rewritten in plan:ts-0003-cc\n"),
+        "{out}"
+    );
+    assert!(out.contains("nothing is committed"), "{out}");
+    assert_eq!(rig.repo.git(&["rev-parse", "HEAD"]), head);
+}
+
+#[test]
+fn rename_section_goes_through_the_daemon_and_changes_every_proposal_that_uses_the_section() {
+    let rig = rig_with_two_proposals();
+
+    let (code, out, err) = rig.cli(&["task", "renameSection", "Pack", "packs"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(
+        out.starts_with("ok  renamed section `Pack` to `packs`\n"),
+        "{out}"
+    );
+    for id in ["pr-0003-km", "pr-0004-lm"] {
+        let text = read_in(&rig, &format!("{PLANNING}/proposals/{id}-p.md"));
+        assert!(
+            text.contains("### packs\n") && !text.contains("### Pack\n"),
+            "{text}"
+        );
+        assert!(out.contains(&format!("plan:{id}")), "{out}");
+    }
+    let (_, sections, _) = rig.cli(&["sections"]);
+    assert!(sections.starts_with("packs"), "{sections}");
+}
+
+#[test]
+fn rename_section_with_json_prints_the_providers_result() {
+    let rig = rig_with_two_proposals();
+    let (code, out, err) = rig.cli(&["task", "renameSection", "from=Pack", "to=packs", "--json"]);
+    assert_eq!(code, exit::OK, "{err}");
+    let result = json(&out);
+    assert_eq!(result["outcome"], "ok");
+    assert_eq!(result["items"].as_array().unwrap().len(), 2, "{out}");
+}
+
+#[test]
+fn rename_section_of_a_name_no_proposal_uses_is_refused_with_the_providers_message() {
+    let rig = rig_with_two_proposals();
+    let (code, _, err) = rig.cli(&["task", "renameSection", "Nowhere", "packs"]);
+    assert_eq!(code, exit::REFUSED, "{err}");
+    assert!(err.contains("refused:"), "{err}");
+}
+
+#[test]
+fn add_feature_and_move_feature_go_through_the_daemon_by_a_short_id() {
+    let rig = rig_with_two_proposals();
+    let path = format!("{PLANNING}/proposals/pr-0003-km-p.md");
+
+    let (code, out, err) = rig.cli(&[
+        "task",
+        "pr-3",
+        "addFeature",
+        "section=Pack",
+        "title=Second feature",
+        "summary=It is second.",
+    ]);
+    assert_eq!(code, exit::OK, "{err}");
+    assert!(
+        read_in(&rig, &path).contains("- **F2 Second feature**: It is second."),
+        "{out}"
+    );
+
+    let (code, _, err) = rig.cli(&["task", "pr-3", "moveFeature", "feature=F2", "section=Moved"]);
+    assert_eq!(code, exit::OK, "{err}");
+    let text = read_in(&rig, &path);
+    assert!(
+        text.contains("### Moved\n- **F2 Second feature**"),
+        "{text}"
+    );
+}
+
+#[test]
+fn sections_prints_what_task_sections_answers_and_json_is_that_answer() {
+    let rig = rig_with_two_proposals();
+
+    let (code, text, err) = rig.cli(&["sections"]);
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(
+        text,
+        "Pack   2 features  2 proposals\nOther  1 feature   1 proposal\n"
+    );
+    let (code, out, _) = rig.cli(&["sections", "--json"]);
+    assert_eq!(code, exit::OK);
+    let answer: Value = rig.call("task.sections", &json!({ "board": rig.board }));
+    assert_eq!(json(&out), answer);
+}
+
+#[test]
+fn sections_leave_out_a_rejected_proposal_and_a_task() {
+    let (path_a, text_a) = proposal_in_alpha("pr-0003-km", "### Pack\n- **F1 One**: a\n");
+    let (path_b, text_b) = proposal_in_alpha("pr-0004-lm", "### Gone\n- **F1 Two**: b\n");
+    let text_b = text_b.replace("status: draft", "status: rejected");
+    let rig = Rig::with_files(&[(path_a.as_str(), text_a), (path_b.as_str(), text_b)]);
+
+    let (code, text, err) = rig.cli(&["sections"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(text, "Pack  1 feature  1 proposal\n");
+}
+
+#[test]
+fn a_short_id_in_a_write_resolves_by_the_boards_corpus_and_an_ambiguous_one_exits_3() {
+    let rig = Rig::new();
+
+    let (code, _, err) = rig.cli(&["task", "ts-2", "setStatus", "active"]);
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(rig.status_of(SECOND_FILE), "active");
+
+    let (code, out, err) = rig.cli(&["task", "12", "setStatus", "active"]);
+    assert_eq!((code, out.as_str()), (exit::ID, ""), "{err}");
+    assert!(err.contains("`12` matches 2 items:"), "{err}");
+    assert!(
+        err.contains("plan:ts-0012-dd") && err.contains("plan:ts-0012-ee"),
+        "{err}"
+    );
+}
+
+/// The spike records of Collide's own planning folder, and the README of each spike folder, which is not an item.
+fn spike_files() -> Vec<(String, String)> {
+    let spikes = repo_root().join(".collide/planning/spikes");
+    let mut files = Vec::new();
+    let mut folders: Vec<PathBuf> = fs::read_dir(&spikes)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_dir())
+        .collect();
+    folders.sort();
+    for folder in folders {
+        let name = folder.file_name().unwrap().to_str().unwrap().to_string();
+        for file in ["record.md", "README.md"] {
+            if let Ok(text) = fs::read_to_string(folder.join(file)) {
+                files.push((format!(".collide/planning/spikes/{name}/{file}"), text));
+            }
+        }
+    }
+    files
+}
+
+#[test]
+fn the_spikes_view_over_a_copy_of_collides_own_planning_lists_its_ten_spikes_and_nothing_inside_a_folder()
+ {
+    let files = spike_files();
+    let borrowed: Vec<(&str, String)> = files
+        .iter()
+        .map(|(path, text)| (path.as_str(), text.clone()))
+        .collect();
+    let rig = Rig::with_files(&borrowed);
+
+    let (code, out, err) = rig.cli(&["tasks", "--view", "spikes", "--json"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    let document = json(&out);
+    let mut keys: Vec<String> = document["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["key"].as_str().unwrap().to_string())
+        .collect();
+    keys.sort();
+    assert_eq!(keys.len(), 10, "{keys:?}");
+    assert!(
+        keys.iter().all(|key| key.starts_with("plan:sp-00")),
+        "{keys:?}"
+    );
+    for task in document["tasks"].as_array().unwrap() {
+        assert_eq!(task["kind"], "spike");
+        assert!(task["state"]["status"].is_string(), "{task}");
+        let path = task["path"].as_str().unwrap();
+        assert!(path.ends_with("/record.md"), "{path}");
+    }
 }

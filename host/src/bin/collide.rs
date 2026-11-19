@@ -1,5 +1,6 @@
 use collide_host::commands;
 use collide_host::task_cli::{self, HELP, USAGE, exit};
+use collide_host::task_daemon;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -118,7 +119,7 @@ fn main() -> ExitCode {
             return ExitCode::from(exit::FAILED);
         }
     };
-    let code = task_cli::run(
+    let code = task_daemon::run(
         &command,
         &cwd,
         &mut std::io::stdout().lock(),

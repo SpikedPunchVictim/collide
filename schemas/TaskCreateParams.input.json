@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.create` params (`collide task create`): the planning source's `create`, with the new item's title and the\nepic and kind it is made in. `epic` is a full epic id. `seed` makes the id's suffix repeatable, `root` names the\nprivate root, and `checkout` names the checkout to write in (the board's main one when left out). The answer is a\n[`TaskApplyResult`]: the write is queued when its checkout is busy, as any write is.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "epic": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "root": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "seed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board",
+    "title"
+  ],
+  "title": "TaskCreateParams",
+  "type": "object"
+}

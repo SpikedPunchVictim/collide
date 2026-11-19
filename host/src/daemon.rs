@@ -138,7 +138,9 @@ use crate::sampler::{Sampler, TICK};
 use crate::scratch;
 use crate::secret_store::{MemorySecretStore, SecretStore};
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
-use crate::sources::{Source, SourceError, Sources, SourcesConfig, changed_event, plan};
+use crate::sources::{
+    PLANNING_SOURCE, Source, SourceError, Sources, SourcesConfig, changed_event, plan,
+};
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use crate::supervisor::SupervisorPolicy;
@@ -150,6 +152,7 @@ use crate::write_guard::{self, Applied, LivePhases, QueuedWrite, WriteGuard, Wri
 use collide_core::change::{Actor, ActorKind};
 use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
+use collide_core::item::Category;
 use collide_core::owner::{
     BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardSummary,
     BoardTrustParams, BoardTrustReviewParams, ConfigGetParams, ConfigPackAddParams,
@@ -161,12 +164,13 @@ use collide_core::owner::{
     Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
     RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
     RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
-    TaskApplyParams, TaskApplyResult, TaskGetParams, TaskGetResult, TaskListParams,
-    TaskPreviewParams, TaskSaveViewParams, TaskSaveViewResult, TaskViewsParams, TaskViewsResult,
-    ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued, code, encode_line, parse_request,
-    route,
+    TaskApplyParams, TaskApplyResult, TaskCreateParams, TaskGetParams, TaskGetResult,
+    TaskListParams, TaskPreviewParams, TaskReidParams, TaskReidResult, TaskSaveViewParams,
+    TaskSaveViewResult, TaskSectionsParams, TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef,
+    ViewReport, ViewTarget, WriteQueued, code, encode_line, parse_request, route,
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
+use collide_core::section::{ProposalFeatures, section_uses};
 use collide_core::shim::ExitRecord;
 use collide_core::view_eval::view_report;
 use std::collections::{BTreeMap, BTreeSet};
@@ -2108,6 +2112,9 @@ fn call(
         Method::TaskList => task_list(shared, params),
         Method::TaskGet => task_get(shared, params),
         Method::TaskApply => task_apply(shared, session, params),
+        Method::TaskCreate => task_create(shared, session, params),
+        Method::TaskReid => task_reid(shared, session, params),
+        Method::TaskSections => task_sections(shared, params),
         Method::TaskPreview => task_preview(shared, session, params),
         Method::TaskViews => task_views(shared, params),
         Method::TaskSaveView => task_save_view(shared, session, params),
@@ -2997,6 +3004,19 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
     let params: TaskListParams = read_params("task.list", params)?;
     let root = board_root(shared, &params.board)?;
     let service = corpus_of(shared, &params.board, &root)?;
+    if let Some(kind) = &params.kind {
+        let declared = service.read(|corpus| corpus.declared_kinds());
+        if !declared.is_empty() && !declared.contains(kind) {
+            return Err(RpcError::new(
+                code::INVALID_PARAMS,
+                format!(
+                    "unknown kind `{kind}`; the board's sources declare: {}",
+                    declared.join(", ")
+                ),
+            )
+            .with_data(serde_json::json!({ "unknown_kind": kind, "declared": declared })));
+        }
+    }
     let through = match &params.view {
         None => None,
         Some(ViewRef::Inline { view }) => {
@@ -3470,27 +3490,34 @@ fn task_apply(
         ));
     }
     let source = source_of(shared, &params.board, &root, &name).map_err(source_failed)?;
+    let answer = judged_write(shared, session, &params.board, &root, &source, apply)?;
+    Ok(serde_json::to_value(answer).expect("a result is JSON"))
+}
+
+/// The write `apply` asks of `source`, as the connection may make it: applied, queued while its checkout is busy, or
+/// kept as a confirmation for a person ([`judge_write`]). Every method that writes an item goes through here.
+fn judged_write(
+    shared: &Shared,
+    session: &Session,
+    board: &str,
+    root: &str,
+    source: &Source,
+    apply: ApplyParams,
+) -> Result<TaskApplyResult, RpcError> {
     let (mut result, mut queued, mut confirmation) = (None, None, None);
-    match judge_write(shared, session, &params.board, &root, &source, &apply) {
-        Verdict::Allow => match write(
-            shared,
-            session.actor(),
-            &params.board,
-            &root,
-            &source,
-            &apply,
-        )? {
+    match judge_write(shared, session, board, root, source, &apply) {
+        Verdict::Allow => match write(shared, session.actor(), board, root, source, &apply)? {
             Written::Applied(done) => result = Some(*done),
             Written::Queued(waiting) => queued = Some(waiting),
         },
         Verdict::Refuse(error) => return Err(error),
         Verdict::Confirm(asked) => {
             let write = QueuedWrite {
-                board: params.board.clone(),
+                board: board.to_string(),
                 source: source.name().to_string(),
                 apply: apply.clone(),
                 checkout: write_guard::canonical(Path::new(
-                    apply.checkout.as_deref().unwrap_or(&root),
+                    apply.checkout.as_deref().unwrap_or(root),
                 )),
                 actor: Caller::App.actor(),
             };
@@ -3502,13 +3529,135 @@ fn task_apply(
             );
         }
     }
-    Ok(serde_json::to_value(TaskApplyResult {
+    Ok(TaskApplyResult {
         result,
         queued,
         confirmation,
         commit: None,
     })
+}
+
+/// `task.create` (ts-0136-rr): the planning source's `create`, with the title, kind and epic the request names. It is a
+/// write like `task.apply`'s: queued while the checkout is busy, and refused or answered by the provider in its own
+/// words.
+fn task_create(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: TaskCreateParams = read_params("task.create", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let root = board_root(shared, &params.board)?;
+    let mut args = BTreeMap::from([("title".to_string(), serde_json::json!(params.title))]);
+    for (name, value) in [
+        ("kind", params.kind.map(serde_json::Value::from)),
+        ("epic", params.epic.map(serde_json::Value::from)),
+        ("seed", params.seed.map(serde_json::Value::from)),
+        ("root", params.root.map(serde_json::Value::from)),
+    ] {
+        if let Some(value) = value {
+            args.insert(name.to_string(), value);
+        }
+    }
+    let apply = ApplyParams {
+        actor: None,
+        op: "create".to_string(),
+        id: None,
+        args,
+        version: None,
+        checkout: params.checkout,
+    };
+    let source = source_of(shared, &params.board, &root, PLANNING_SOURCE).map_err(source_failed)?;
+    let answer = judged_write(shared, session, &params.board, &root, &source, apply)?;
+    Ok(serde_json::to_value(answer).expect("a result is JSON"))
+}
+
+/// `task.reid` (ts-0136-rr): the planning source's `reid` of the item `id` names (a key, or an id of the planning
+/// source), with no version: the provider reads every file it rewrites under its lock. The renamed item is the
+/// answer's `task`; `rewritten` names the other items it changed. Nothing is committed.
+fn task_reid(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: TaskReidParams = read_params("task.reid", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let root = board_root(shared, &params.board)?;
+    let (named, bare) = scratch::split_id(&params.id);
+    let name = named.unwrap_or(PLANNING_SOURCE);
+    let from = format!("{name}:{bare}");
+    let args = params
+        .seed
+        .map(|seed| BTreeMap::from([("seed".to_string(), serde_json::json!(seed))]))
+        .unwrap_or_default();
+    let apply = ApplyParams {
+        actor: None,
+        op: "reid".to_string(),
+        id: Some(bare.to_string()),
+        args,
+        version: None,
+        checkout: params.checkout,
+    };
+    let source = source_of(shared, &params.board, &root, name).map_err(source_failed)?;
+    let answer = judged_write(shared, session, &params.board, &root, &source, apply)?;
+    let rewritten = match &answer.result {
+        Some(ApplyResult::Ok { task, items, .. }) => items
+            .iter()
+            .map(|effect| effect.key.clone())
+            .filter(|key| *key != task.key)
+            .collect(),
+        _ => Vec::new(),
+    };
+    Ok(serde_json::to_value(TaskReidResult {
+        from,
+        result: answer.result,
+        queued: answer.queued,
+        rewritten,
+    })
     .expect("a result is JSON"))
+}
+
+/// `task.sections` (ts-0136-rr): the sections in use over the features of the proposals the board's corpus holds that
+/// are not dropped (not rejected or superseded), and the near-duplicate groups among them ([`section_uses`]). A
+/// proposal is the corpus's shown copy of its key, so a proposal that exists in several checkouts counts once.
+fn task_sections(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: TaskSectionsParams = read_params("task.sections", params)?;
+    let root = board_root(shared, &params.board)?;
+    let service = corpus_of(shared, &params.board, &root)?;
+    let sections = service.read(|corpus| {
+        let rows = corpus.rows();
+        let proposals: Vec<ProposalFeatures<'_>> = rows
+            .iter()
+            .filter(|row| {
+                let source = row
+                    .task
+                    .key
+                    .split_once(':')
+                    .map_or("", |(source, _)| source);
+                corpus.kind_of(source, row.task) == "proposal"
+                    && row.task.state.category != Category::Dropped
+            })
+            .map(|row| ProposalFeatures {
+                proposal: &row.task.id,
+                features: &row.task.features,
+            })
+            .collect();
+        section_uses(&proposals)
+    });
+    Ok(serde_json::to_value(sections).expect("a result is JSON"))
 }
 
 /// Whether the write is one only a person makes (0.10, Planning sources), and what the connection may do about it.

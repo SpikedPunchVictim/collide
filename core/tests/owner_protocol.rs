@@ -282,6 +282,19 @@ fn samples() -> Vec<(Method, Value, Value)> {
             json!({ "result": { "outcome": "refused", "message": "illegal transition" } }),
         ),
         (
+            Method::TaskCreate,
+            json!({ "board": "bd-1", "title": "A title", "epic": "ep-001-aa", "seed": 1 }),
+            json!({ "result": { "outcome": "refused", "message": "a task needs epic=<id>" } }),
+        ),
+        (
+            Method::TaskReid,
+            json!({ "board": "bd-1", "id": "plan:ts-0001-aa", "seed": 1 }),
+            json!({
+                "from": "plan:ts-0001-aa", "rewritten": ["plan:ts-0002-bb"],
+                "result": { "outcome": "refused", "message": "no such item" }
+            }),
+        ),
+        (
             Method::TaskPreview,
             json!({ "board": "bd-1", "apply": apply_params() }),
             json!({ "outcome": "ok", "items": [], "files": [] }),
