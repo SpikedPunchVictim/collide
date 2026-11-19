@@ -1,7 +1,7 @@
 ---
 id: ts-0133-kg
 kind: task
-status: ready
+status: done
 title: "Corpus: feature links, inverse link labels and a proposal's coverage"
 owners: []
 links:
