@@ -282,13 +282,7 @@ describe('new task', () => {
     expect(json(run).command).toBe('new-task')
     expect(json(run).data).toEqual({
       relPath: 'proposals/03-harbor-index/tasks/T-03-006-chart-the-tides.md',
-      id: {
-        kind: 'task',
-        num: '006',
-        suffix: '',
-        scope: '03',
-        slug: 'chart-the-tides',
-      },
+      id: 'T-03-006-chart-the-tides',
       kind: 'task',
       frontmatter: {
         title: 'Chart the tides',
@@ -324,7 +318,7 @@ describe('new task', () => {
     const repo = makeRepo()
     repo.write('arch/ID-MAP.md', `${repo.read('arch/ID-MAP.md')}| T-05-004 | T-05-006 | made up | none |\n`)
     const run = plan(repo, ['new', 'task', 'P05', 'Skip the numbers', '--epic', 'E-08', '--format', 'json', ...ARCH])
-    expect(json(run).data.id).toMatchObject({ scope: '05', num: '005' })
+    expect(json(run).data.id).toBe('T-05-005-skip-the-numbers')
   })
 
   test('with --dry-run reports the file and writes nothing', () => {
@@ -437,7 +431,7 @@ describe('renumber', () => {
     const repo = makeRepo()
     expect(renumber(repo, 'T-03-005', 'T-03-006').code).toBe(0)
     const made = plan(repo, ['new', 'task', 'P03', 'Chart the tides', '--epic', 'E-07', '--format', 'json', ...ARCH])
-    expect(json(made).data.id).toMatchObject({ scope: '03', num: '007' })
+    expect(json(made).data.id).toBe('T-03-007-chart-the-tides')
   })
 
   test('says what it did in JSON, in the shape of the plan CLI: a versioned envelope and a report', () => {

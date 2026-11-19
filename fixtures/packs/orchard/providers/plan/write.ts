@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import type { ApplyParamsOutput, ApplyResultInput, PreviewResultInput, TaskInput } from '@collide/pack-sdk'
 import { CATEGORY_STATUS, STATUSES, TITLE_MAX } from './declaration.ts'
-import { EPIC_ARG, PROPOSAL_ARG, SHORT_ID_PATTERN } from './ids.ts'
+import { EPIC_ARG, ID_PATTERN, PROPOSAL_ARG, SHORT_ID_PATTERN } from './ids.ts'
 import { runPlan } from './run-plan.ts'
 import type { PlanRun } from './run-plan.ts'
 import { findTask, scan } from './scan.ts'
@@ -286,10 +286,12 @@ async function create(ctx: WriteContext, call: CreateCall, dryRun: boolean): Pro
   const run = await execute(ctx, args, 'new-task', dryRun)
   if (run.kind === 'refused') return refused(run.message)
 
-  // The CLI allocated the id: its envelope names it by proposal and number.
-  const { id, frontmatter } = run.data as { id?: Json; frontmatter?: Json }
-  const shortId = `T-${String(id?.scope)}-${String(id?.num)}`
-  if (!new RegExp(SHORT_ID_PATTERN).test(shortId)) badCall(`./plan allocated the id ${JSON.stringify(id)}`)
+  // The CLI allocated the id: its envelope holds the full id, with the slug. The short id is its head.
+  const { id, frontmatter } = run.data as { id?: unknown; frontmatter?: Json }
+  if (typeof id !== 'string' || !new RegExp(ID_PATTERN).test(id)) {
+    badCall(`./plan gave data.id as ${id === undefined ? 'nothing' : JSON.stringify(id)}, not a task id with its slug`)
+  }
+  const shortId = (id as string).slice(0, 'T-00-000'.length)
   const key = `plan:${shortId}`
   if (dryRun) {
     // The task has no file yet, so it has no version.

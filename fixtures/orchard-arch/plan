@@ -346,7 +346,7 @@ function commandNewTask(context, flags, positionals) {
     command: 'new-task',
     data: {
       relPath,
-      id: { kind: 'task', num, suffix: '', scope, slug },
+      id: `T-${scope}-${num}-${slug}`,
       kind: 'task',
       frontmatter,
       written: done.written,

@@ -416,6 +416,39 @@ describe('create', () => {
     })
   })
 
+  describe('the id in the CLI envelope', () => {
+    const script = (id: unknown) =>
+      `#!/bin/sh\necho '${JSON.stringify({
+        schema_version: 1,
+        command: 'new-task',
+        corpus: 'arch',
+        data: { relPath: 'x.md', id, kind: 'task', frontmatter: { status: 'specified' }, errors: [] },
+      })}'\n`
+
+    test('the short id is the head of the full id the CLI printed', async () => {
+      const repo = makeRepo('basic', script('T-03-009-made-up-slug'))
+      const reply = await using(repo, (client) => client.request('preview', CHART))
+      expect(reply.error).toBeUndefined()
+      expect(reply.result).toMatchObject({ outcome: 'ok', items: [{ key: 'plan:T-03-009' }] })
+    })
+
+    test.each([
+      ['an object', { kind: 'task', num: '006', suffix: '', scope: '03', slug: 'chart-the-tides' }],
+      ['a short id with no slug', 'T-03-009'],
+      ['a number', 9],
+      ['an empty string', ''],
+      ['a slug in capitals', 'T-03-009-Made-Up'],
+      ['another kind of id', 'ADR-004-made-up-slug'],
+      ['nothing', undefined],
+    ])('%s is an error reply that names data.id and what it held', async (_name, id) => {
+      const repo = makeRepo('basic', script(id))
+      const reply = await using(repo, (client) => client.request('preview', CHART))
+      expect(reply.result).toBeUndefined()
+      expect(reply.error?.message).toContain('data.id')
+      expect(reply.error?.message).toContain(id === undefined ? 'nothing' : JSON.stringify(id))
+    })
+  })
+
   test('a refusal of the write gate is a refusal with its message, and nothing is written', async () => {
     const repo = makeRepo()
     const before = repo.snapshot()
