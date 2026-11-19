@@ -10,6 +10,15 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some("shim") {
         return ExitCode::from(u8::try_from(collide_host::shim::run(rest)).unwrap_or(1));
     }
+    // The guide is text that is compiled in: it reads nothing, starts no daemon and writes nothing.
+    if args.first().map(String::as_str) == Some("guide") {
+        if let Some(extra) = rest.first() {
+            eprintln!("collide guide takes no argument; got `{extra}`");
+            return ExitCode::from(exit::USAGE);
+        }
+        print!("{}", collide_host::guide::text());
+        return ExitCode::SUCCESS;
+    }
     if args.first().map(String::as_str) == Some("pack") {
         return match std::env::current_dir() {
             Ok(cwd) => ExitCode::from(collide_host::pack_cli::run(

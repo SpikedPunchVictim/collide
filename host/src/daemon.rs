@@ -970,6 +970,7 @@ impl Daemon {
             limit_min_pause,
             metrics: metrics.clone(),
             claude: claude.clone(),
+            collide_exe: shim_exe.clone(),
         }));
         let on_phase_pause: Option<PhasePauseHook> = {
             let runs = file_runs.clone();

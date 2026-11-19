@@ -666,6 +666,49 @@ fn neither_the_phase_nor_its_grandchild_sees_the_claude_variables_the_daemon_sta
 }
 
 #[test]
+fn a_run_has_the_collide_folder_first_on_its_path_and_the_allow_rule_on_its_line() {
+    let root = TempRoot::new();
+    let launched = root.join("launch.json");
+    let path = recording_with(
+        root.path(),
+        "launch.jsonl",
+        &[json!({"dump_launch": launched})],
+    );
+    let mut fx = Fixture::new(&path, Setup::default());
+    let run = fx.started();
+    assert_eq!(fx.wait_final(&run), PhaseState::Ended {});
+    let seen: Value = serde_json::from_str(&fs::read_to_string(&launched).unwrap()).unwrap();
+
+    let path_var = seen["env"]["PATH"].as_str().expect("the agent has a PATH");
+    let folders: Vec<PathBuf> = std::env::split_paths(path_var).collect();
+    let own = fx.paths().runs_dir.join(&run).join("bin");
+    assert_eq!(folders[0], own, "{path_var}");
+    let names: Vec<_> = fs::read_dir(&own)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect();
+    assert_eq!(names, ["collide"]);
+    assert_eq!(
+        fs::canonicalize(own.join("collide")).unwrap(),
+        fs::canonicalize(env!("CARGO_BIN_EXE_collide")).unwrap()
+    );
+    assert!(
+        folders.contains(&fx.root.join("bin")),
+        "the rest of the PATH is the base environment's: {path_var}"
+    );
+
+    let argv: Vec<&str> = seen["argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    let at = argv.iter().position(|w| *w == "--allowed-tools").unwrap();
+    assert_eq!(argv[at + 1], "Bash(collide:*)");
+}
+
+#[test]
 fn a_context_variable_is_set_after_the_roles_env_so_the_role_cannot_override_it() {
     use collide_host::adapters::claude::launch::COMPACT_AT_VAR;
     let role_env = BTreeMap::from([

@@ -10,6 +10,7 @@
 //!   --setting-sources user --settings <snapshot>/settings.json
 //!   --mcp-config <snapshot>/mcp.json --strict-mcp-config
 //!   --disallowed-tools <scheduling, worktree and messaging tools, but the ones the role allows>
+//!   --allowed-tools Bash(collide:*)           # a `collide` command in Bash needs no answer from the host
 //!   [--add-dir <the folder the phase starts in> [--plugin-dir <snapshot>/plugins/repo-skills]]   # worktree
 //!   [--permission-mode <mode>]
 //! ```
@@ -66,6 +67,11 @@ pub const DISALLOWED_TOOLS: [&str; 8] = [
     "Workflow",
     "SendMessage",
 ];
+
+/// The rule of `--allowed-tools` (ts-0140-gk): a `collide` command in an agent's Bash is allowed by Claude Code's own
+/// rule matching, which splits a compound command, so a headless run can file a follow-up. Any other command is a
+/// permission prompt to the host, as before.
+pub const ALLOWED_TOOLS: [&str; 1] = ["Bash(collide:*)"];
 
 /// The files of the line's snapshot that the line names.
 pub const AGENTS_FILE: &str = "agents.json";
@@ -141,6 +147,8 @@ pub fn launch_spec(request: &LaunchRequest) -> Result<LaunchSpec, LaunchError> {
         argv.push("--disallowed-tools".into());
         argv.extend(disallowed.into_iter().map(String::from));
     }
+    argv.push("--allowed-tools".into());
+    argv.extend(ALLOWED_TOOLS.map(String::from));
     if role.repo_instructions.unwrap_or(RepoInstructions::Worktree) == RepoInstructions::Worktree {
         let Some(start) = request.cwd.to_str() else {
             return invalid(format!(

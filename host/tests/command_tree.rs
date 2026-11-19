@@ -9,9 +9,9 @@ use std::process::{Command, Output};
 mod common;
 use common::{TempRoot, repo_root};
 
-const TREE: [&str; 11] = [
+const TREE: [&str; 12] = [
     "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "init", "trust",
-    "sections",
+    "sections", "guide",
 ];
 
 /// The commands whose handler is a tagged stub (`stop` is built: `tests/stop_command.rs`; `run` is built:
@@ -192,9 +192,9 @@ fn the_tags_and_stages_the_binary_prints_are_the_ones_the_registry_holds() {
     }
 }
 
-/// The commands the owner's JSON-RPC does not carry: `schema` reads the compiled contract and `report` is the
-/// hook's own channel to its run.
-const NOT_OWNER_METHODS: [&str; 2] = ["schema", "report"];
+/// The commands the owner's JSON-RPC does not carry: `schema` reads the compiled contract, `report` is the
+/// hook's own channel to its run and `guide` prints a text that is compiled in.
+const NOT_OWNER_METHODS: [&str; 3] = ["schema", "report", "guide"];
 
 #[test]
 fn every_command_the_daemon_does_work_for_is_served_by_an_owner_method() {

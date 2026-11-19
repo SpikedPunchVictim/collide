@@ -491,13 +491,14 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     9e), so the daemon is never taken for the Desk.
 - The socket requires a per-client token. The token is never put in an agent's or hook's environment. Nothing hands a
   run's agent a token (0.3). From revision 24 it may call the CLI on purpose, to file follow-ups (0.10): every run has
-  `collide` first on its `PATH`, as Plan… does (0.11), and the CLI reads its token file as it does in a terminal. A call
-  from a run's tree is recognised by its peer process and gets the `run agent` actor, so it may read, create and link
-  items (its creates go to the private root), and the person-only operations and `move` are refused (0.10, above). A
-  headless run's Bash call would otherwise be a permission prompt to the host (0.3), so Claude's launch line allows
-  `Bash(collide:*)`: Claude Code's own rule matching passes a `collide` command, and any other command still asks
-  (`ts-0140-gk`; unmeasured until `ts-0138-pn`). Under the same-user rule (0.1) this is a guardrail. The one other way
-  in is the UI-tools endpoint below, which gives an agent five view-only tools and nothing else.
+  `collide` first on its `PATH` (a `bin/` in its run folder, holding a link to the daemon's own `collide`; Plan… does
+  the same, 0.11), and the CLI reads its token file as it does in a terminal. A call from a run's tree is recognised by
+  its peer process and gets the `run agent` actor, so it may read, create and link items (its creates go to the private
+  root), and starting a run, the person-only operations and `move` are refused (0.10, above). A headless run's Bash call
+  would otherwise be a permission prompt to the host (0.3), so Claude's launch line allows `Bash(collide:*)`: Claude
+  Code's own rule matching passes a `collide` command, and any other command still asks (`ts-0140-gk`; unmeasured until
+  `ts-0138-pn`). Under the same-user rule (0.1) this is a guardrail. The one other way in is the UI-tools endpoint
+  below, which gives an agent five view-only tools and nothing else.
 - **A step with a side effect writes an intent before it and an outcome after it** (R5). The side-effect steps are an
   integrate (a merge or a PR), a source op, an `after_integrate` hook, a remote write, and a discard (the deletion of
   a run's worktree and branch, with the branch's last commit in its events; ts-0080-tq). The intent names the step
@@ -4554,12 +4555,12 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   one private item; and the built-in `follow-ups` view (`ts-0139-wq`).
 - **Your own terminal** (revision 24): `collide guide` prints a short guide for an agent: what Collide is, the commands
   it may use (`run`, `tasks` and `task`, with the forms `task create` for an item of the plan, `task new` for a scratch
-  task, `task <id>` and `task <id> link`), exit codes 10, 11
-  and 12, and that the person-only ops (accept, defer, reject, resolve, reopen) wait for the person in the app. Its
-  command list is built from the CLI's own, so it cannot drift, and it needs no daemon. A docs page covers using Collide
-  from the user's own Claude Code session: `collide` on `PATH`, and one line in the repository's or the user's CLAUDE.md
-  ("This repo is planned in Collide; run `collide guide`."). Collide writes nothing into the user's Claude config. Every
-  write goes through the daemon, so the app shows it as it lands, and a run started this way appears on the loop page.
+  task, `task <id>` and `task <id> link`), exit codes 10, 11 and 12 (pointing at `--help` for the rest), and that the
+  person-only ops (accept, defer, reject, resolve, reopen) wait for the person in the app. Its command list is built
+  from the CLI's own, so it cannot drift, and it needs no daemon. A docs page covers using Collide from the user's own
+  Claude Code session: `collide` on `PATH`, and one line in the repository's or the user's CLAUDE.md ("This repo is
+  planned in Collide; run `collide guide`."). Collide writes nothing into the user's Claude config. Every write goes
+  through the daemon, so the app shows it as it lands, and a run started this way appears on the loop page.
   Every run gets `collide` first on its `PATH` and `Bash(collide:*)` on Claude's launch line (0.2), and the quick run's
   builder definition tells the agent to file follow-ups with `collide task create`; the planning workflow's prompt gets
   the same paragraph in Stage 9d (`ts-0140-gk`).

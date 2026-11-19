@@ -190,7 +190,7 @@ fn with_a_skills_plugin_in_the_snapshot_the_line_names_it_after_the_added_folder
 }
 
 #[test]
-fn none_is_the_line_before_this_item_word_for_word() {
+fn none_is_the_line_of_ts_0104_gx_and_the_collide_rule_word_for_word() {
     let (start, snapshot) = (PathBuf::from("/work"), PathBuf::from("/snap"));
     let line = line_of(plain_role(), &start, &snapshot);
     let expected: Vec<String> = [
@@ -229,6 +229,8 @@ fn none_is_the_line_before_this_item_word_for_word() {
         "ExitWorktree",
         "Workflow",
         "SendMessage",
+        "--allowed-tools",
+        "Bash(collide:*)",
     ]
     .map(String::from)
     .to_vec();

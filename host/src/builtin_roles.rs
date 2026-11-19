@@ -26,6 +26,11 @@ Work in small steps. Read the code around a change before you make it, follow th
 project's own tests and checks before you say you are done. Commit your work to this branch in commits that each build
 and pass. Do not push, do not touch another branch, and do not change anything outside this worktree.
 
+If you find something outside this task, or leave part of it undone, file it as a follow-up with `collide task create`
+and a short title, one item for each, and do not leave it only in your last reply. The item is private: the person
+decides whether to keep it. `collide task new` makes a scratch task, which is not a follow-up. `collide guide` lists
+the commands.
+
 When you are done, end with a short report: what you changed, what you ran and what it said, and anything you left
 undone and why.
 ";
@@ -49,6 +54,34 @@ mod tests {
         assert_eq!(role.agent, "claude");
         assert_eq!(role.model.as_deref(), Some(BUILDER_MODEL_ALIAS));
         assert!(role.env.is_empty() && role.budget.is_none() && role.compact_at.is_none());
+    }
+
+    #[test]
+    fn the_definition_tells_the_builder_to_file_follow_ups_with_collide_task_create() {
+        assert!(BUILDER_DEFINITION.contains("`collide task create`"));
+    }
+
+    #[test]
+    fn the_definition_says_a_scratch_task_is_no_follow_up() {
+        assert!(BUILDER_DEFINITION.contains("`collide task new`"));
+    }
+
+    #[test]
+    fn the_definition_keeps_the_final_report_as_the_place_for_what_was_left_undone() {
+        let flat = BUILDER_DEFINITION
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(flat.contains("anything you left undone and why"));
+    }
+
+    #[test]
+    fn the_definition_is_wrapped_at_120_columns() {
+        assert!(
+            BUILDER_DEFINITION
+                .lines()
+                .all(|line| line.chars().count() <= 120)
+        );
     }
 
     #[test]

@@ -5,8 +5,8 @@ use collide_core::adapter::{AgentAdapter, LaunchError};
 use collide_core::agent::SessionStart;
 use collide_host::adapters::claude::ClaudeAdapter;
 use collide_host::adapters::claude::launch::{
-    BASH_OUTPUT_MAX_VAR, COMPACT_AT_FLOOR, COMPACT_AT_VAR, DISALLOWED_TOOLS, MCP_OUTPUT_MAX_VAR,
-    disallowed_tools_without,
+    ALLOWED_TOOLS, BASH_OUTPUT_MAX_VAR, COMPACT_AT_FLOOR, COMPACT_AT_VAR, DISALLOWED_TOOLS,
+    MCP_OUTPUT_MAX_VAR, disallowed_tools_without,
 };
 use collide_host::base_env::BaseEnvironment;
 use collide_host::base_env::EnvSource;
@@ -206,6 +206,35 @@ fn disallowed_in(argv: &[String]) -> Vec<&str> {
         .take_while(|word| !word.starts_with("--"))
         .map(String::as_str)
         .collect()
+}
+
+/// The words that follow `--allowed-tools` up to the next flag.
+fn allowed_in(argv: &[String]) -> Vec<&str> {
+    let at = argv.iter().position(|w| w == "--allowed-tools").unwrap();
+    argv[at + 1..]
+        .iter()
+        .take_while(|word| !word.starts_with("--"))
+        .map(String::as_str)
+        .collect()
+}
+
+#[test]
+fn the_line_allows_collide_commands_and_nothing_else_beside_the_disallowed_tools() {
+    let argv = ClaudeAdapter.launch(&request(plain_role())).unwrap().argv;
+    assert_eq!(ALLOWED_TOOLS, ["Bash(collide:*)"]);
+    assert_eq!(allowed_in(&argv), ALLOWED_TOOLS);
+    assert_eq!(argv.iter().filter(|w| *w == "--allowed-tools").count(), 1);
+    let position = |flag: &str| argv.iter().position(|w| w == flag).unwrap();
+    assert!(position("--disallowed-tools") < position("--allowed-tools"));
+}
+
+#[test]
+fn the_collide_rule_is_on_the_line_of_a_role_that_allows_every_disallowed_tool() {
+    let role =
+        json!({ "agent": "claude", "repo_instructions": "none", "allow_tools": DISALLOWED_TOOLS });
+    let argv = ClaudeAdapter.launch(&request(role)).unwrap().argv;
+    assert!(!argv.iter().any(|word| word == "--disallowed-tools"));
+    assert_eq!(allowed_in(&argv), ALLOWED_TOOLS);
 }
 
 #[test]

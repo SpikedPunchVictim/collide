@@ -51,6 +51,7 @@
 //!   the Queue, and resumes a limit that reset while no daemon ran.
 
 mod accept;
+pub mod collide_path;
 mod discard;
 pub mod quick_run;
 mod reprompt;
@@ -165,6 +166,9 @@ pub struct FileRunConfig {
     pub metrics: Arc<Metrics>,
     /// The version of `claude` and its smoke check: a phase starts only on a binary that passes it.
     pub claude: Arc<ClaudeVersions>,
+    /// The `collide` binary the daemon runs from, which every run's agent finds first on its `PATH`
+    /// ([`collide_path`]). `None` where the daemon cannot say, and then the agent has no `collide`.
+    pub collide_exe: Option<PathBuf>,
 }
 
 /// The text of the turn that goes first to a session that was resumed: the stream ended mid-work, and the tool waits for
@@ -795,6 +799,22 @@ impl FileRuns {
         Ok(())
     }
 
+    /// Puts the run's folder with `collide` first on the agent's `PATH` (ts-0140-gk).
+    fn put_collide_first(
+        &self,
+        run_dir: &Path,
+        env: &mut BTreeMap<String, String>,
+    ) -> Result<(), Halt> {
+        let Some(exe) = &self.config.collide_exe else {
+            return Ok(());
+        };
+        let dir = collide_path::link_dir(run_dir, exe).map_err(problem)?;
+        let path = collide_path::path_with_first(&dir, env.get("PATH").map(String::as_str))
+            .map_err(problem)?;
+        env.insert("PATH".to_string(), path);
+        Ok(())
+    }
+
     /// Starts the phase's agent: the first attempt (`resume` false) or a later one, which resumes the session.
     /// `first_turn` is what the session is told first.
     #[allow(clippy::too_many_arguments)]
@@ -852,7 +872,8 @@ impl FileRuns {
         // the run's markers, each layer over the one before.
         let start_us = phases.run_start_us(run).unwrap_or_default();
         let extra = layered_env(&request.role.env, &launch.env, run, start_us);
-        let env = base.for_child(&launch.env_strip, &extra);
+        let mut env = base.for_child(&launch.env_strip, &extra);
+        self.put_collide_first(&run_dir, &mut env)?;
 
         let program = find_on_path(PROGRAM, env.get("PATH").map(String::as_str)).ok_or_else(|| {
             problem(format!(

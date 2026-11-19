@@ -55,7 +55,7 @@ pub struct Command {
 }
 
 /// The tree, in the order `collide --help` lists it.
-pub const COMMANDS: [Command; 11] = [
+pub const COMMANDS: [Command; 12] = [
     Command {
         name: "run",
         summary: "start one agent phase on a task, in a new worktree, and record it",
@@ -113,6 +113,11 @@ pub const COMMANDS: [Command; 11] = [
     Command {
         name: "sections",
         summary: "list the sections in use in the proposals' features",
+        build: Build::Built,
+    },
+    Command {
+        name: "guide",
+        summary: "print a short guide for an agent that drives collide (starts no daemon)",
         build: Build::Built,
     },
 ];
@@ -262,7 +267,7 @@ mod tests {
             names,
             [
                 "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "init",
-                "trust", "sections"
+                "trust", "sections", "guide"
             ]
         );
     }
@@ -271,7 +276,7 @@ mod tests {
     fn the_built_commands_are_not_run_as_stubs() {
         for name in [
             "run", "stop", "tasks", "task", "schema", "sections", "config", "pack", "init",
-            "trust", "nonsense",
+            "trust", "guide", "nonsense",
         ] {
             assert_eq!(execute_stub(name, &[]), None, "{name}");
         }

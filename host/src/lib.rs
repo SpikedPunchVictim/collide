@@ -30,6 +30,7 @@ pub mod file_run;
 pub mod follow_ups;
 pub mod git_fetch;
 pub mod git_objects;
+pub mod guide;
 pub mod hooks;
 pub mod hosts;
 pub mod http_get;
