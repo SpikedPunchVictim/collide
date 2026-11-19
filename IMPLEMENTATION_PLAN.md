@@ -7,7 +7,11 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 23.** Revision 23 makes task statuses data: each source declares its own, any names and any
+**Status: revision 24.** Revision 24 files what a run finds as private items linked to the task that raised them and
+reviewed beside its diff, teaches the user's own Claude Code session the CLI with `collide guide`, plans the Desk (one
+docked Claude Code session per board that coordinates work and edits no code), adds Spike… beside Plan…, and lets a
+person continue a session as a spike, a planning session or a task without losing its conversation (owner, 2026-11-18).
+Revision 23 makes task statuses data: each source declares its own, any names and any
 number, the six categories under them stay fixed, and board columns follow a source's own statuses (owner,
 2026-11-15). Revision 22 lets a pack say where its agents start (the repository root by default for agents that make
 their own worktrees), notices those worktrees and tracks them under their run until their work lands, lets each
@@ -90,8 +94,9 @@ ready after fixes), and the owner's decisions on it:
   named protected files, caps on CEL-bound fields only, repo budget and timeout defaults, id collision tests and
   `collide task reid`, walkthrough records, the contradictions fixed, and a daemon start that survives SSH.
 - Stages are split into lettered sub-stages, with no renumbering: Stage 3 (3a–3d, with the thin loop as 3c), Stage 4
-  (4a–4c), Stage 6 (6a–6b, then Projects v2 as 6c) and Stage 9 (9a–9d). Each has its own goal, criteria and Status,
-  and Status names the plan revision its items came from. Only the next stage is split into items.
+  (4a–4c), Stage 6 (6a–6b, then Projects v2 as 6c) and Stage 9 (9a–9e, with the Desk as 9e from revision 24). Each has
+  its own goal, criteria and Status, and Status names the plan revision its items came from. Only the next stage is
+  split into items.
 - Owner decisions on R5's challenges (2026-11-14):
   - a thin loop (prompt → `collide/quick` run → review → accept, in the app, against scratch tasks) follows the Claude
     adapter as Stage 3c, before the ACP engine (3d), the plan adapter, GitHub and the board (Milestone A, Stage 3c);
@@ -410,12 +415,14 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
     (0.10, below).
   - **A shim's socket follows the same rules:** a directory of mode `0700` under the run directory, the same uid
     check, and no token, because only the daemon talks to it.
-- **Who is asking** (R5). A connection's peer pid is read with `LOCAL_PEERPID`. The daemon walks that process's
-  parents and looks for the markers below. A process with `COLLIDE_RUN` in its tree is a **run's agent**; one whose
-  tree holds the app's process is the **app**; anything else is the **CLI from a terminal**. The result is the
-  `actor` the daemon records on every event. Only the app may do the person-only operations (0.10); the CLI asks for
-  them as a Queue confirmation instead. Processes whose environment macOS hides are found through their parents, as
-  in the sweep (below). This is a guardrail (0.1).
+- **Who is asking** (R5). A connection's peer pid is read with `LOCAL_PEERPID`. The daemon walks that process's parents
+  and looks for the markers below. A process with `COLLIDE_RUN` in its tree is a **run's agent**; from Stage 9e, one
+  with `COLLIDE_DESK` in its tree is the **Desk** (0.11; revision 24); one whose tree holds the app's process is the
+  **app**; anything else is the **CLI from a terminal**. A process with both markers is a run's agent. The result is the
+  `actor` the daemon records on every event: `app`, `cli`, `run agent` or, from Stage 9e, `desk`. Only the app may do
+  the person-only operations (0.10); the CLI and the Desk ask for them as a Queue confirmation instead, and the Desk
+  never counts as a person. Processes whose environment macOS hides are found through their parents, as in the sweep
+  (below). This is a guardrail (0.1).
   The app names itself: before it connects, it writes its executable path to `app-executable` in the daemon's run
   folder (mode 0600), and the daemon reads that file at each check, so a daemon the CLI started first still knows
   the app. The run marker is checked first, so the file never makes a run's agent the app (ts-0077-ws).
@@ -477,14 +484,18 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   (0.5).
   - The daemon and the shims carry `COLLIDE_RUNTIME=1` and are never swept. A shim must outlive the stop to reap its
     child and write `exit.json`.
-  - When the CLI starts a daemon from inside a run (an agent's Bash), it strips `COLLIDE_RUN`, `COLLIDE_RUN_START`
-    and `COLLIDE_SPAN` first, so that run's stop cannot kill the daemon.
-- The socket requires a per-client token. The token is never put in an agent's or hook's environment. Run agents
-  are given no access to Collide in v0 (0.3): nothing hands them a token or a way in. Under the same-user rule (0.1)
-  an agent with Bash can still read the CLI token file, so this is a guardrail, and a call from a run's tree is
-  recognised by its peer process and gets the `run agent` actor, which cannot do the person-only operations (0.10,
-  above). The one other way in is the UI-tools endpoint below, which gives an agent five view-only tools and nothing
-  else.
+  - When the CLI starts a daemon from inside a run (an agent's Bash), it strips `COLLIDE_RUN`, `COLLIDE_RUN_START` and
+    `COLLIDE_SPAN` first, so that run's stop cannot kill the daemon. From the Desk it strips `COLLIDE_DESK` too (Stage
+    9e), so the daemon is never taken for the Desk.
+- The socket requires a per-client token. The token is never put in an agent's or hook's environment. Nothing hands a
+  run's agent a token (0.3). From revision 24 it may call the CLI on purpose, to file follow-ups (0.10): every run has
+  `collide` first on its `PATH`, as Plan… does (0.11), and the CLI reads its token file as it does in a terminal. A call
+  from a run's tree is recognised by its peer process and gets the `run agent` actor, so it may read, create and link
+  items (its creates go to the private root), and the person-only operations and `move` are refused (0.10, above). A
+  headless run's Bash call would otherwise be a permission prompt to the host (0.3), so Claude's launch line allows
+  `Bash(collide:*)`: Claude Code's own rule matching passes a `collide` command, and any other command still asks
+  (`ts-0140-gk`; unmeasured until `ts-0138-pn`). Under the same-user rule (0.1) this is a guardrail. The one other way
+  in is the UI-tools endpoint below, which gives an agent five view-only tools and nothing else.
 - **A step with a side effect writes an intent before it and an outcome after it** (R5). The side-effect steps are an
   integrate (a merge or a PR), a source op, an `after_integrate` hook, a remote write, and a discard (the deletion of
   a run's worktree and branch, with the branch's last commit in its events; ts-0080-tq). The intent names the step
@@ -978,8 +989,8 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     A phase whose sessions reported this way has its `usage` lines shown but not added, so nothing counts twice.
     Passing the settings into a container is the pack's job (unmeasured).
 - **The ask agent is a separate role from run agents** (owner, 2026-11-14; S6's in-app agent section). It answers a
-  request typed in the ask box (0.11) by reading, then calling the UI tools (0.2). Run agents still have no access to
-  Collide in v0: they get no UI-tools endpoint and no token for one.
+  request typed in the ask box (0.11) by reading, then calling the UI tools (0.2). Run agents get no UI-tools endpoint
+  and no token for one; their one way in is the CLI, as a run's agent (0.2).
   - **It is not a run.** It has no task, workspace, phase or Tracks entry, and it is never resumed. Its adapter builds
     the launch spec from an `ask` profile (a model, a folder, tool kinds, an MCP config path, a timeout and an
     optional budget) instead of a role and phase. The daemon starts it under a shim, so stop (0.5), the sweep and a
@@ -1881,8 +1892,10 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       token maps to a phase, an end or `ask_human`. An undeclared token makes the decision `error`.
   - **`round`** starts at 1 and goes up by one each time the run re-enters a phase it has already run. Orchard's
     fix → brief edge makes the second review `r2`, after `fix1`.
-  - **Outcomes and terminal states.** A run ends `ended(<outcome>)`, `failed` or `stopped`. `outcome` is the `end`
-    token it reached, and `on_end`'s `when:` reads it.
+  - **Outcomes and terminal states.** A run ends `ended(<outcome>)`, `failed` or `stopped`. `outcome` is the `end` token
+    it reached, and `on_end`'s `when:` reads it. From Stage 9d a run can also end `continued` (Continue as…, 0.11;
+    revision 24): it makes no Review item, runs no gates and no `integrate`, and skips its `on_end` ops; `run.after_end`
+    still fires, and the run records `continued_as: <run id>`.
   - **`ask_human`** pauses the run in the Queue with its cause. The person picks one of the decision's tokens or
     stops the run, so a human answer follows the same table.
   - **`show:`** (owner, 2026-11-13), on a `human` phase or on a decision that can reach `ask_human`, lists what the
@@ -2093,8 +2106,8 @@ Collide plays the lead, so it does all four, through the pack.
   - line and snapshot commit, workflow, `launch` values, workspace and the implementations it resolved (0.4);
   - `chain.base`, rounds;
   - run state (0.5);
-  - its terminal state (`ended(<outcome>)`, `failed`, `stopped`) and any pause with its cause (`ask_human`, usage
-    limit);
+  - its terminal state (`ended(<outcome>)`, `failed`, `stopped`, and from Stage 9d `continued`, 0.7) and any pause with
+    its cause (`ask_human`, usage limit);
   - fingerprint (0.13), annotations, and its experiment arm, if any (0.14).
 
   There is one live run per task key, except inside an experiment.
@@ -2121,7 +2134,8 @@ Collide plays the lead, so it does all four, through the pack.
   - States: `provisioning → ready → in_use → idle → removable → removed`, plus `failed`, and `prunable` for an
     adopted workspace whose folder is gone. `failed` resumes through the `resume` hook.
   - A reaper removes `task` workspaces once their tasks are done at the base ref (committed by `record`, merged by
-    `integrate`), and reports disk use.
+    `integrate`), and reports disk use. A workspace changes owner only through Continue as… (0.11): it passes to the new
+    item with its kind and branch, and the reaper judges it by the new item from then on.
   - `sandbox` workspaces are discarded when their phase ends. An arm's task workspaces and sandboxes are discarded
     once that arm's metrics are captured; experiment roots go when the experiment ends (0.14).
 - **Event log:** append-only, the source for timeline, timings, recovery and observers. Its event types come from
@@ -2310,7 +2324,8 @@ Why the plan adapter parses files itself:
 - Optional capability `preview` takes `apply`'s arguments, writes nothing, and returns `apply`'s three outcomes
   (owner, 2026-11-14): `ok` with `items[]` and `files`, `conflict` with the current task, or `refused` with the
   source's message.
-- The op name `move` is reserved for Share. plan's `move --epic` is declared as `rehome`.
+- The op name `move` is reserved for Share; Keep uses it for one item from Stage 4c (0.10, Follow-ups). plan's `move
+  --epic` is declared as `rehome`.
 
 **Versions.**
 - Every task has a `version`. For plan, it is a hash of the task file's content.
@@ -2555,20 +2570,22 @@ layout: { default: board, groupBy: category }
     - A question holds its own decision once it is resolved (`resolved_by: human:<date>`). Its statuses are `open`
       (`ready`), `resolved` (`done`) and `dropped` (`dropped`). `resolved_by` is `human:<date>` or the id of the item
       that settled it, required when `resolved` and refused otherwise; `needs` is `human`, `evidence` or `either`.
-      `includes` (a proposal to the tasks, spikes and questions it holds) and `supersedes` (a proposal to a
-      proposal, a spike to a spike) block nothing. A `reid` of a shared epic renames its folder in the private root
-      too (`ts-0127-js`).
-    - Only a person accepts, defers, rejects or resolves. `collide/plan` refuses those ops from a run
-      (`actor.kind: agent`), and refuses `accepted` while a question the proposal includes is open. An agent phase
-      that writes a planning file's `status` or `by:` line itself fails at phase end, as an edit to checklist state
-      does. **The actor is read from the connection** (R5), never from an argument: the daemon takes it from the
-      peer's process tree (0.2). Only the app is a person; a call from the CLI in a terminal that asks for one of
-      these ops becomes a Queue confirmation that the person answers in the app; only the app answers it, and the
-      CLI exits 12. Returning a `deferred` proposal to `proposed` is a fifth such op, `reopen`. The provider is told
-      the actor and the daemon's date on every `apply` and `preview` (`ts-0128-bb`). Under the same-user rule (0.1) this
-      stops a mistake, not an agent that means to get around it. The phase-end check hashes the planning files that
-      hold a `status:` or `by:` line before and after the phase and compares the lines that changed, so an edit that
-      bypasses the CLI is caught as well.
+      `includes` (a proposal to the tasks, spikes and questions it holds), `supersedes` (a proposal to a proposal, a
+      spike to a spike) and `raised-by` (a follow-up to the item whose run raised it, below; revision 24) block nothing.
+      A `reid` of a shared epic renames its folder in the private root too (`ts-0127-js`).
+    - Only a person accepts, defers, rejects or resolves. `collide/plan` refuses those ops from a run (`actor.kind:
+      agent`), and refuses `accepted` while a question the proposal includes is open. An agent phase that writes a
+      planning file's `status` or `by:` line itself fails at phase end, as an edit to checklist state does. **The actor
+      is read from the connection** (R5), never from an argument: the daemon takes it from the peer's process tree
+      (0.2). Only the app is a person; a call from the CLI in a terminal, or from the Desk (0.2), that asks for one of
+      these ops becomes a Queue confirmation that the person answers in the app; only the app answers it, and the CLI
+      exits 12. Returning a `deferred` proposal to `proposed` is a fifth such op, `reopen`, and moving a spike to
+      `concluded` a sixth, `conclude` (revision 24; Stage 9d). In the scripted spike workflow (`collide/plan/spike`) the
+      `human` decide phase is the person's `conclude`; an agent phase never writes it. The provider is told the actor
+      and the daemon's date on every `apply` and `preview` (`ts-0128-bb`). Under the same-user rule (0.1) this stops a
+      mistake, not an agent that means to get around it. The phase-end check hashes the planning files that hold a
+      `status:` or `by:` line before and after the phase and compares the lines that changed, so an edit that bypasses
+      the CLI is caught as well.
     - **A `spike`** (R5) is a folder with a `record.md` at the top level of the shared root. Its statuses, as
       the records in `.collide/planning/spikes/` use them: `planned` (`ready`); `running` (`active`) while its scripts
       run; `results` (`review`), when the results are in and the conclusions are not yet written down; `concluded`
@@ -2625,9 +2642,31 @@ layout: { default: board, groupBy: category }
   - the shared root is data, outside the trust hash: a planning file cannot declare a hook, gate or observer.
 - **A board has one planning source.** A role that source lacks either maps onto a kind it has, or is off with a
   reason. If the board opts in, that role is held in markdown, with a badge (owner, 2026-11-13).
-- **Share** is the move op. The markdown provider copies items to its configured path. A team system's provider
-  writes through that system's CLI into that system's own paths, and a backend that is not branch-scoped publishes
-  in its own way. `record` commits exactly the files written.
+- **Share** is the move op. The markdown provider moves items from the private root to its configured path, under the
+  same ids. A team system's provider writes through that system's CLI into that system's own paths, and a backend that
+  is not branch-scoped publishes in its own way. `record` commits exactly the files written.
+- **Follow-ups** (owner, 2026-11-18; revision 24). What a run finds that is not its task's work is an item, never only a
+  line in its last reply. Suggested work is a task; something it needs from a person, such as a sample file, is a
+  question with `needs: human`. The agent files them with `collide task new`, as the built-in workflows' prompts tell it
+  to:
+  - an item a run's agent creates goes to the board's private root, in the folder of the run's item's epic, whatever
+    root it names, so nothing reaches the shared plan or a commit until it is kept from the app, the CLI or the Desk;
+  - the daemon links it `raised-by` to the run's item (a task; from Stage 9d also a proposal or a spike) and writes
+    `fields.run` from the connection's actor (0.2; `ts-0128-bb` puts the run id on the wire), so the agent can neither
+    forget nor forge the link. A run whose item is not in the board's planning source, such as New session's scratch
+    task, gets `fields.run` only. An item a Plan… run's proposal includes is that plan's own work, not a follow-up, and
+    the `follow-ups` view leaves it out (0.11);
+  - **Keep is Share of one item:** the markdown provider's `move` op, brought forward from the second-pack stage for one
+    private item, moves it to the shared root under the same id (ids are drawn free across both roots), and `record`
+    commits exactly those files. The app and the CLI may Keep, the Desk included; a run's agent is refused. It lands in
+    the shared root's folder for the same epic. Keep is refused for a proposal, which is shared whole (Stage 12), and
+    for an item whose links name a private item, naming that item. The Share preview, the move points and the handoff
+    note built at Share stay in the second-pack stage;
+  - Dismiss sets the item `dropped` and leaves it private. Discuss hands it to the Desk (0.11);
+  - review shows a run's follow-ups beside its diff (Stage 9a). Until then the built-in view `follow-ups` lists open
+    private items with a `raised-by` link;
+  - when the agent files nothing, review still shows its last reply, from the handoff note (0.3). Collide never parses
+    follow-ups out of prose.
 - Items that exist only on a non-default checkout show a "branch only" chip.
 - Collide's own records are spikes in the shared root, `.collide/planning/spikes/` (owner, 2026-11-13: "we eat our
   own dogfood"). Each folder holds the record, with frontmatter, beside its reproduction scripts. Open questions and
@@ -2658,6 +2697,9 @@ layout: { default: board, groupBy: category }
 
 Collide is not a chat app. Its objects are tasks, runs, phases, gates, workspaces and decisions; conversation is a
 detail inside a phase. No chat bubbles, no centred conversation column, no sidebar of chats.
+
+The sessions a person talks to (New session, Plan…, Spike… and the Desk) are Claude Code's own terminal, docked beside
+Collide's objects, not a chat surface Collide draws, so the stance holds (revision 24).
 
 **Who it is for** (owner, 2026-11-15; revision 17). Collide is a higher-level development environment, used by
 product managers as well as engineers. It must not read as an IDE:
@@ -2865,8 +2907,8 @@ Details:
     the CLI ops the agent writes with: `create` into the private root, then `link` from the proposal
     (`includes`), for tasks, spikes and questions. `collide` is on the session's `PATH` (R5): Collide puts a
     directory with the `collide` binary first on `PATH` for this session, because the agent's Bash would otherwise
-    not find it. The agent's calls reach the daemon as a run agent (0.2), so the person-only ops (0.10) fail for it
-    and become Queue confirmations;
+    not find it. The agent's calls reach the daemon as a run agent (0.2), so the person-only ops (0.10) are
+    refused for it, and the person does them in the app;
   - a choice the owner makes in the terminal goes into the proposal's Decision section as text. It is a decision
     only once a person accepts the proposal;
   - a choice to make away from the terminal, or one of several at once, becomes a question item. It appears in
@@ -2906,6 +2948,72 @@ Details:
     pre-mortem pass (its calls nest under its Agent call) and the spike runs started from the proposal. The meter
     warns at 85% and the Queue at the budget, as for a take-over, and nothing stops the session, because the
     person is at the keyboard.
+- **Spike…** (owner, 2026-11-18; revision 24; Stage 9d): the sibling of Plan…, for working a hard question through with
+  an agent (research, prototypes, weighing options). The scripted spike workflow has no conversation, and Plan… opens
+  only on a proposal:
+  - Spike… on a task, an epic, a question, a proposal or the Planning view makes a `planned` spike linked `informs` to
+    where it started, or opens one that exists. It is interactive Claude in a fresh worktree, as Plan… is, so its
+    scripts go to review like code. The spike folder is made on the session's branch, the panel's writes go to that
+    checkout, and the spike shows "branch only" (0.10) until accept;
+  - the first step is the Pre-registration (0.10): the agent drafts the hypothesis, the cheapest test, the kill
+    criterion and the budget, and the person approves it, which writes `preregistered:`. A later edit shows as an
+    amendment;
+  - the record is the memory: the agent keeps `record.md` current with findings, results, decisions with their
+    alternatives, and assumptions with their evidence. Spike… again on the same spike starts a new session that reads
+    the record, not the old conversation;
+  - a decision the person makes in the terminal goes into the record, and one to make away from it becomes a question in
+    "Decisions needed". Follow-ups are filed as for any run (0.10), linked to the spike;
+  - a long measurement can go to a headless spike run (`collide/plan/spike`), shown on the meter and in Tracks while the
+    conversation goes on;
+  - a panel beside the terminal shows the Pre-registration and whether it is still locked, the results against the kill
+    criterion, the findings, the decisions, the open questions, and the spend against the spike's budget;
+  - concluding is the person's: `conclude` is person-only (0.10), so the agent's call is refused and the panel's
+    Conclude does it. Accepting the session's run lands its scripts and record. The spike's `out/` folder is
+    git-ignored, so at accept Collide moves it into the main checkout's spike folder, where it stays uncommitted;
+  - small thinking with no record stays in the Desk or the user's own terminal. If it grows, the agent makes it a spike
+    with `collide task new`.
+- **Continue as…** (owner, 2026-11-18; revision 24; Stage 9d): a menu on a session's bar, Spike, Planning or Task, that
+  carries the session on as another kind without losing its conversation. It is not a mode switch:
+  - it makes the new item, linked `informs` to the old one, and first runs a handoff turn: the old session writes what
+    it knows into the new item (a spike's draft Pre-registration and findings, or a proposal's draft), so the item
+    stands on its own;
+  - the new item's session then resumes the same conversation (`claude --resume`) as a new run, shown as "continued
+    from" the old one. The old run's workspace passes to the new item (0.8): it keeps its kind and its branch, and the
+    reaper judges it by the new item from then on. It is not an adopted worktree (0.4), which is one an agent made.
+    Claude keeps sessions by folder, so the resume works there, and the code in progress stays put. An agent that cannot
+    resume (an ACP agent without session load) starts fresh from the handoff;
+  - the old run ends `continued` (0.7), shown as "continued as `<id>`": neither accepted nor discarded, with no review,
+    gates or `on_end` ops. The old task keeps its status and is linked to the new item; blocking it on the new item is
+    one click in the same dialog;
+  - the window moves to the new item's screen: the Spike… or Plan… panel, or the task's run on the loop page and in
+    Tracks. History shows the chain, and going back is another Continue as…;
+  - only a person does it, from the app. An agent may suggest it as a follow-up but cannot switch its own run. It works
+    among task runs, Spike… and Plan…, either way. The Desk and the user's own terminal start runs and do not switch;
+  - a resumed session carries all its tokens, sent again each turn. When it is large, the dialog shows its size and
+    offers Start fresh from the handoff. The new run has its own budget cap;
+  - until Stage 9d, an agent can make the item with `collide task new`, but the conversation does not come along.
+- **The Desk** (owner, 2026-11-18; revision 24; Stage 9e): one long-lived interactive Claude Code session per board,
+  docked at the bottom of every page, in the main checkout. It coordinates work and edits no code; code work is still a
+  run, with a worktree and review:
+  - it runs through the shim's terminal, as take-over does (S2), in 9b's terminal view, and survives closing the app and
+    a daemon restart. It is not a run: it has its own shim folder under the board, no task, worktree or gates, and no
+    stop sweeps it. It uses the board's Claude entry under `config: user`, as New session does, so the user's skills and
+    CLAUDE.md load;
+  - its launch line disallows `Edit`, `Write` and `NotebookEdit`. `collide` commands run without a prompt
+    (`Bash(collide:*)`), and any other command asks in the pane. At each turn end Collide flags the files that changed
+    in the main checkout during the turn, with the diff, less Collide's own writes (`record`, `integrate`, provider
+    writes). It cannot tell the user's own edits apart, and says so. It reverts nothing;
+  - its calls reach the daemon as the Desk (0.2), judged like the CLI: a person-only op becomes a one-click confirmation
+    in the Queue, and the Desk never counts as a person;
+  - every daemon event carries its caller, so the app labels a run or an item "from the Desk", and Tracks highlights a
+    run the Desk just started;
+  - **Discuss**, on a finished run, a follow-up or a Queue item, puts a line in the Desk's input without sending it. The
+    line holds the ids and the path to the run's handoff note, never task text (0.9), and nothing is spent until the
+    person sends it. An accepted run's own session is not resumed until S12 shows that a resume works from another
+    folder;
+  - the pane shows spend from telemetry (0.13) and follows the session id across `/clear`, as take-over does. Nothing
+    stops it, because the person is at the keyboard; the Queue warns past a daily figure, whose default is set at the
+    split.
 - **Menu bar** (owner, 2026-11-13). Closing the window leaves Collide in the menu bar, so the Queue stays in sight
   while runs go on:
   - the icon shows the live runs and a badge with the Queue count, and the menu shows the cache closest to going
@@ -3618,6 +3726,10 @@ reproduction script and a record, together in one spike folder under `.collide/p
   - Q1: a fresh agent working from a handoff note built at Share, on a second clone, against the resumed session;
   - Q2: whether fan-out instances stay independent (files, `phase.dir`, auto memory);
   - Q3: how often two spike records merge mechanically.
+- **S12 resume from another folder** (owner, 2026-11-18; revision 24; $0.10 cap, haiku). It runs before Stage 9e, and
+  only with the owner's OK at the time. Claude stores sessions by folder, and an accepted run's worktree is gone: does
+  `claude --resume <id>` continue that session from the main checkout? If it does, Discuss on an accepted run (0.11)
+  resumes the run's own session; until then it hands the Desk the handoff note.
 - **S11 derived-point coverage** (done: `.collide/planning/spikes/sp-0008-bk-derived-point-coverage/record.md`;
   owner, 2026-11-13). A paper spike: nothing was installed or run.
   - Do the point catalogue and the `change` payload cover every real touchpoint of the plan CLI, beads, GitHub issues,
@@ -3723,8 +3835,9 @@ reproduction script and a record, together in one spike folder under `.collide/p
   what it cannot attribute.
 
 **Tests**: Each reproduction script runs from a clean checkout and prints its measurement.
-**Status**: Complete except S10, which runs when the group-runs stage starts (S1–S9 and S11 done; revision 11 applies
-S5–S8; revision 13 applies R5). Items: epic `ep-001-ef` in `.collide/planning/epics/`; records in
+**Status**: Complete except S10, which runs when the group-runs stage starts, and S12, which runs before Stage 9e
+(S1–S9 and S11 done; revision 11 applies S5–S8; revision 13 applies R5). Items: epic `ep-001-ef` in
+`.collide/planning/epics/`; records in
 `.collide/planning/spikes/` (part L).
 
 ## Stage 2: Skeleton
@@ -4396,6 +4509,19 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
 - **Quality parts** (owner, 2026-11-15; revision 18): the provider reads the Decision log, the Assumptions and
   Findings parts and a spike's Pre-registration part (0.10), reports their problems in `partProblems`, and derives
   a proposal's `coverage`. The Decision log comes first, then the Assumption ledger.
+- **Follow-ups** (owner, 2026-11-18; revision 24; 0.10): the `raised-by` link; the create rule for a run's agent (the
+  private root, with `raised-by` and `fields.run` written by the daemon); Keep, the markdown provider's `move` op for
+  one private item; and the built-in `follow-ups` view (`ts-0139-wq`).
+- **Your own terminal** (revision 24): `collide guide` prints a short guide for an agent: what Collide is, the commands
+  it may use (`run`, `tasks` and `task`, with the forms `task new`, `task <id>` and `task <id> link`), exit codes 10, 11
+  and 12, and that the person-only ops (accept, defer, reject, resolve, reopen) wait for the person in the app. Its
+  command list is built from the CLI's own, so it cannot drift, and it needs no daemon. A docs page covers using Collide
+  from the user's own Claude Code session: `collide` on `PATH`, and one line in the repository's or the user's CLAUDE.md
+  ("This repo is planned in Collide; run `collide guide`."). Collide writes nothing into the user's Claude config. Every
+  write goes through the daemon, so the app shows it as it lands, and a run started this way appears on the loop page.
+  Every run gets `collide` first on its `PATH` and `Bash(collide:*)` on Claude's launch line (0.2), and the quick run's
+  builder definition tells the agent to file follow-ups with `collide task new`; the planning workflow's prompt gets the
+  same paragraph in Stage 9d (`ts-0140-gk`).
 
 **Success Criteria**:
 - Planning:
@@ -4420,15 +4546,25 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
     `proposed`. With three features and two included tasks, one implementing a feature and one implementing none,
     `coverage` names the two features with no task and the second task. A Decision section of plain text reads
     unchanged, with no problem.
+  - follow-ups (revision 24): a `task new` from a run's agent lands in the private root with `raised-by` to the run's
+    task and `fields.run` set, whatever root or link it asked for; `move` from the CLI moves a private item to the
+    shared root under the same id and commits exactly its files, and from a run's agent it is refused; the `follow-ups`
+    view lists open private items with a `raised-by` link;
+  - `collide guide` prints its three commands, their forms and the three exit codes with no daemon running, and a test
+    fails when a command it lists leaves the CLI; a fake-adapter run's launch has `collide` first on `PATH` and the
+    `Bash(collide:*)` rule.
 
 **Tests**:
 - Planning: parser fixtures, with strict plan CLI frontmatter left untouched, and S5's hazards (an unquoted
   `no`, a hash like `1e10`, a duplicate key, an alias bomb, a file over the cap); provider contract tests against
   markdown and plan fixtures; id generation; view counts; layout checks. Quality parts (revision 18): parser
-  fixtures for each part and the Pre-registration part, and coverage cases.
+  fixtures for each part and the Pre-registration part, and coverage cases. Follow-ups (revision 24): the create
+  rule for each actor; `move` for each kind; the view. The guide's drift test.
 **Status**: Not Started. Split into `ts-0124-xm` to `ts-0138-pn` (revision 23 scope, 2026-11-18), in epic `ep-004-qd`,
 built one at a time in id order (part L). It runs after 4b. Nothing in it runs a real `claude`. The criteria over the
-Orchard repo, and the checks on a real clone, are the owner's, in `ts-0138-pn`.
+Orchard repo, and the checks on a real clone, are the owner's, in `ts-0138-pn`. Revision 24 adds `ts-0139-wq` and
+`ts-0140-gk`, built after `ts-0137-pg`; `ts-0138-pn` waits for both and gains a step: start a run from the owner's
+own terminal and see it on the loop page.
 
 ## Stage 5: GitHub adapter
 
@@ -4935,6 +5071,9 @@ is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path
   `run.after_integrate`, the source's operations, then `record`. An integrate that carries an edit to the agent
   tool's config waits for an acknowledgement (0.3). So does the next run that would load a working-copy pack the
   integrate changed (0.7).
+- **Follow-ups on review** (revision 24; 0.10): "Follow-ups (n)" beside the diff, each with Keep, Dismiss or Discuss
+  (Discuss from Stage 9e). A question that needs a person is answered there or in "Decisions needed", and while the run
+  is still in review, **Re-prompt with the answer** sends the answer on.
 - **Reattach after the app restarts.** The app finds the daemon's runs and shows them as they were.
 - **Queue:**
   - permission requests, `ask_human` with its cause, `human` phases, each with its `show:` list; `unverified`
@@ -4965,6 +5104,9 @@ is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path
   unchanged (`git log`), and the Queue says why. A `task.before_status: done` gate refuses before anything merges.
 - One of Collide's own build tasks runs from the Field through `collide/quick` to accept, and one of its spikes runs
   through `collide/plan`'s spike workflow (part L).
+- A fake-adapter run that files a task and a question shows both under Follow-ups. Keep moves the task to the shared
+  root under its id; answering the question and Re-prompt with the answer starts the next run with the answer in its
+  prompt.
 - A Queue item's context view opens with `i` and makes no model request.
 - A usage limit from the fake adapter appears in the Queue with its reset time, and the run resumes after it
   without a click. The Queue shows the resume's cache-write cost.
@@ -5097,6 +5239,11 @@ surfaces together.
   - the quality checks (owner, 2026-11-15; revision 18; 0.11): the Plan… panel with its Readiness checklist,
     coverage map, Decision log and Assumption ledger; the red-team pass and its pre-mortem mode, with
     `collide-plan-red-team` in the planning pack; and the budget meter.
+  - Spike… (0.11; revision 24): its entry points, the Pre-registration as the first step, the record as memory, the
+    panel, the hand-off to a headless spike run, `conclude` as a person-only op (0.10), and `out/` moved into the main
+    checkout at accept;
+  - Continue as… (0.11; revision 24): the handoff turn, the resume in the old run's worktree, passed to the new item
+    (0.8), the `continued` end of a run (0.7), and the size warning.
 
 **Success Criteria**:
 - **The in-app agent on Tracks** (owner, 2026-11-14):
@@ -5132,6 +5279,15 @@ surfaces together.
   reducer and tool tests (no model) show a Sort answer's groups and chips. Applying a move chip writes through
   `moveFeature`, and Undo restores the file byte for byte. Merging the pair leaves one section in
   `collide sections`. Plan…'s prompt names `collide sections` and the naming rule.
+- Spike… (revision 24), with the fake adapter: Spike… on a question makes a `planned` spike linked `informs` to it; the
+  drafted Pre-registration, once approved in the panel, is locked, and a later edit shows as an amendment; the agent's
+  `conclude` is refused and the panel's Conclude writes it; after accept the spike's `out/` files are in the main
+  checkout's spike folder and not committed.
+- Continue as… (revision 24), with the fake adapter: Continue as Spike on a task run writes the spike's record in the
+  handoff turn, and the new run resumes the same session id in the same worktree. The old run ends `continued` with no
+  Review item and no `on_end` ops, the reaper keeps the worktree while the spike is open, the old task's status is
+  unchanged, and the two are linked `informs`. An adapter without resume starts fresh with the handoff as its first
+  prompt, and a session over the size threshold shows the warning.
 - Quality checks (revision 18), with the fake adapter:
   - a red-team pass on a fixture draft adds entries under `### Red-team`, the red-team agent's spans hold no write
     call, and no other part of the proposal changes. Accepting a finding leaves an `Accepted:` line, and
@@ -5150,6 +5306,32 @@ on a planning file's `status` and `by:` lines; point timeouts and failures outsi
 cases, chips and Undo over the twelve-feature fixture; the merge. Quality checks: the red-team pass and its
 pre-mortem mode with the fake adapter; the Readiness lines; the meter's warning.
 **Status**: Not Started. Items from revision 13, not yet split into items.
+
+### Stage 9e: The Desk
+
+**Goal**: One docked Claude Code session per board that coordinates work from the main checkout and edits no code (0.11;
+owner, 2026-11-18; revision 24).
+
+- **The Desk** (0.11): the pane on every page, through the shim's terminal; its launch line (no `Edit`, `Write` or
+  `NotebookEdit`; `Bash(collide:*)` allowed); the turn-end check of the main checkout; the Desk caller (0.2); "from the
+  Desk" labels and the Tracks highlight; Discuss; the spend display, and the Queue's daily warning, whose default is set
+  at the split. One Desk per board.
+
+**Success Criteria**:
+- With the fake adapter scripting a Desk session: `collide run` from the Desk starts a run labelled "from the Desk" and
+  highlighted in Tracks; `accept` from the Desk waits as a one-click Queue confirmation and applies only on the click; a
+  file the session changes in the main checkout is flagged at turn end with its diff and left as it is, and a `record`
+  commit made during the turn is not flagged.
+- The Desk survives closing the app and a daemon restart, and reattaches to its session. Stopping every run leaves it
+  running.
+- Discuss on a finished run puts a line with the ids and the handoff note's path in the Desk's input, sends nothing, and
+  holds no task text.
+- The daemon tells the Desk from the CLI and from a run's agent by process tree (0.2); a process with both markers is a
+  run's agent.
+
+**Tests**: Caller classification over fake process trees; the launch line; the turn-end check; Discuss's line builder;
+the Queue confirmation for a Desk actor; reattach after a restart with the fake adapter.
+**Status**: Not Started. Revision 24; not yet split into items. S12 (Stage 1) runs before it.
 
 ## Stage 10: Orchard loop end-to-end
 
@@ -5309,9 +5491,9 @@ Planning: the merge cases, one per row of the merge table; verify verdicts; `wai
   in different rounds and the leavers share a closing fix. Orchard's version is its stop rules §5, with
   `g-<name>-rN` labels built from `group.name`.
 - **Planning** (owner, 2026-11-13):
-  - Share: the preview; the move op and its points; the handoff note built at Share; `record` of exactly the
-    written files; a teammate continuing by `adopt`; claims, which are advisory without a server; conflicts to the
-    Queue;
+  - Share: the preview; the move op for many items (Keep's one-item `move` exists from Stage 4c) and its points, which
+    Keep then fires too; the handoff note built at Share; `record` of exactly the written files; a teammate continuing
+    by `adopt`; claims, which are advisory without a server; conflicts to the Queue;
   - checklist template versions; Move for a changed planning path; provider role tags as defaults for `roles`;
   - a beads example provider as a fixture pack, not shipped. It covers a source that is not branch-scoped, a
     category taken from a close reason, and writes that Collide did not make. The pack sets `events-journal: true`
@@ -6647,3 +6829,33 @@ selector.
   categories. Changed: 0.10, 0.11, Stage 4b, Stage 6a and Stage 6c.
 - **Choices made:** an unmapped status counts as `backlog` and is flagged with its fix; a status a source did not
   declare is an invalid item; scratch tasks declare their statuses like any source (applied in `ts-0075-hj`).
+
+**Revision 24, 2026-11-18 (owner).** The Desk and follow-ups.
+- **The ask:** "Sometimes a task comes back finished, and carries additional information … It's almost like we need a
+  view where the developer can have a persistent window open, and spawning tasks, or making decisions, updates the rest
+  of the Collide UI." Later the same day: a selector on an agent window that turns it into a spike or a planning session
+  and keeps its context.
+- **What was there:** a run ended in review (accept, re-prompt or discard); New session and Plan… opened interactive
+  Claude in a worktree; the ask box was read-only; 0.11 said Collide is not a chat app. What a run suggested lived only
+  in its last reply, and after accept there was no place to keep talking about it.
+- **Owner's choices:** the Desk coordinates only, and code changes go through runs and review; the user's own terminal
+  first (`collide guide`, Stage 4c) and the Desk as a planned stage (9e); follow-ups are private items with a review
+  section; the Desk is judged like the CLI and never counts as a person; Spike… beside Plan…, with `conclude`
+  person-only, in a worktree, and `out/` moved into the main checkout at accept, never committed; Continue as… runs a
+  handoff turn each time, then resumes, in the old run's worktree, and leaves the old task as it is, linked. Changed:
+  0.2, 0.10, 0.11, Stage 1 (S12), Stage 4c (`ts-0139-wq`, `ts-0140-gk`), Stage 9a, Stage 9d and Stage 9e (new).
+- **Choices made:** the daemon writes `raised-by`, not the agent; a run's agent always creates into the private root;
+  Keep is open to the app and the CLI, the Desk included, and refused for a run's agent; Discuss never sends on its own;
+  the Desk's edits to the main checkout are flagged, not blocked, because Bash can still write files and a read-only
+  copy would hide the user's working changes; one Desk per board; only a person continues a session as another kind,
+  from the app. In writing the plan text: the proposal's `share` op is Share's reserved `move` op for one item, and a
+  run agent's `conclude` is refused like the other person-only ops, with Conclude on the panel, rather than becoming a
+  Queue confirmation (0.10, `ts-0128-bb`). The same fix applies to Plan…'s wording in 0.11.
+- **Review (Fable, 2026-11-18):** a run's follow-up links `raised-by` to the run's item, not always a task, and a Plan…
+  proposal's own items are not follow-ups; Continue as… passes the old run's `task` workspace to the new item rather
+  than making it an adopted worktree (0.8), and the old run ends in a new terminal state, `continued` (0.7); a run's
+  agent reaches the CLI on purpose, with `collide` on its `PATH` and `Bash(collide:*)` on Claude's launch line (0.2;
+  `ts-0140-gk`), where 0.2 said run agents had no way in; the scripted spike workflow's `human` decide phase is the
+  person's `conclude`; Share moves rather than copies, and Keep lands in the same epic's folder and is refused for a
+  proposal or an item linked to a private one; the Desk is not a run, and its turn-end check leaves out Collide's own
+  writes.

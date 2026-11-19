@@ -6,6 +6,8 @@ title: "Owner check: planning on the Orchard repo and Collide's own records"
 owners: []
 links:
   - { type: blocked-by, to: ts-0137-pg }
+  - { type: blocked-by, to: ts-0139-wq }
+  - { type: blocked-by, to: ts-0140-gk }
 ---
 
 ## Goal
@@ -16,8 +18,8 @@ planning provider against the real `arch/` shapes of ADRs, spikes and questions.
 
 A build agent never runs it. It never touches the Orchard repo or any other repo, never starts a daemon against the
 owner's data, and never runs `claude`. It writes the command lines and a short checklist under `### Owner checklist`,
-from the code and from the Built sections of `ts-0124-xm` to `ts-0137-pg`. The owner runs them and records the result
-here as owner judgement, with what was awkward.
+from the code and from the Built sections of `ts-0124-xm` to `ts-0137-pg`, `ts-0139-wq` and `ts-0140-gk`. The owner runs
+them and records the result here as owner judgement, with what was awkward.
 
 The owner's run is also the one place the fixtures of `ts-0137-pg` are compared with the real `arch/` files and the real
 `plan status --format json`. A difference is recorded here and becomes a fix item.
@@ -38,6 +40,10 @@ The owner's run is also the one place the fixtures of `ts-0137-pg` are compared 
   it. Owner-run.
 - The fixtures of `ts-0137-pg` match the real `arch/` shapes and the real plan CLI, or each difference is written down.
   Owner-run.
+- A run started from the owner's own Claude Code session, after `collide guide`, shows on the loop page (revision 24).
+  Owner-run, with a small `--budget`.
+- A quick run told to file a follow-up runs `collide task new` with no permission prompt, and the item shows in the
+  `follow-ups` view (revision 24; checks `ts-0140-gk`'s allow rule). Owner-run, with a small `--budget`.
 - The checklist holds the command lines, with `<collide checkout>`, `<orchard copy>` and `<collide clone>` as
   placeholders, what to look at, how to clean up, and a line for the owner's result and one for what was awkward.
 - A line records the date Stage 4c is judged done by the owner.
@@ -51,7 +57,8 @@ None by a build agent: this check is the owner's. The checklist names the automa
 - `ts-0128-bb`, `ts-0129-uv`: the actor and the person-only rule, the proposal's transitions;
 - `ts-0130-mv` to `ts-0134-ch`: feature ops, the quality parts, coverage, claim blocks;
 - `ts-0135-cx`, `ts-0136-rr`: the pack's views and roles, the CLI behind the daemon;
-- `ts-0137-pg`: the Orchard plan provider for ADRs, spikes and questions.
+- `ts-0137-pg`: the Orchard plan provider for ADRs, spikes and questions;
+- `ts-0139-wq`, `ts-0140-gk`: follow-ups and `collide guide` (revision 24).
 
 ## Notes
 
@@ -70,6 +77,8 @@ None by a build agent: this check is the owner's. The checklist names the automa
   - **Orchard.** `collide init`, commit, `collide trust`; `collide tasks --view decisions-needed --json` against
     `plan status --format json`; the evidence link from a spike.
   - **Accept.** A proposal from the app, then from the CLI.
+  - **Own terminal.** `collide guide` in the owner's own Claude Code session, then a run started from it, seen on
+    the loop page; then a quick run that files a follow-up with no permission prompt.
   - **Reid.** The two-branch collision in a clone.
   - **Fixtures.** The real ADR, spike and question files and the plan CLI's JSON, next to `fixtures/orchard-arch/`.
   - **Record.** The result, the time it took, and what was awkward.
