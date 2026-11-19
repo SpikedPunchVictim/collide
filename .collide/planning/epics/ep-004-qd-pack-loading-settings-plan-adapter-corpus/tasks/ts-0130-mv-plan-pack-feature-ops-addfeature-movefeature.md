@@ -1,7 +1,7 @@
 ---
 id: ts-0130-mv
 kind: task
-status: ready
+status: done
 title: "Plan pack: feature ops addFeature, moveFeature and renameSection"
 owners: []
 links:
