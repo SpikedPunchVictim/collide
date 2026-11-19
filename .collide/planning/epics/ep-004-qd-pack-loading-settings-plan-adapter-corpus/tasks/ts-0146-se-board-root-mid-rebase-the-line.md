@@ -1,7 +1,7 @@
 ---
 id: ts-0146-se
 kind: task
-status: ready
+status: done
 title: "Board root mid-rebase: the line is the branch git is rebasing"
 owners: []
 links: []
