@@ -32,7 +32,7 @@ use collide_host::sources::{Sources, SourcesConfig};
 use collide_host::store::Store;
 use collide_host::supervisor::{BackoffPolicy, SupervisorPolicy};
 use common::config_fixture::{CapturedLog, Fixture};
-use common::git_repo::GitRepo;
+use common::git_repo::{GitRepo, git_command};
 use common::{TempRoot, node_missing_message, pid_alive, wait_until};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -154,12 +154,17 @@ impl Rig {
 
     /// Records trust in the line `main` at the hash it has now.
     fn trust(&self, board: &str) {
+        self.trust_line(board, "main");
+    }
+
+    /// Records trust in the line `line` at the hash it has now.
+    fn trust_line(&self, board: &str, line: &str) {
         let review: BoardTrustReviewResult = rpc(
             self,
             "board.trust_review",
             &BoardTrustReviewParams {
                 board: board.to_string(),
-                line: "main".to_string(),
+                line: line.to_string(),
             },
         )
         .unwrap();
@@ -176,7 +181,7 @@ impl Rig {
             "board.trust",
             &BoardTrustParams {
                 board: board.to_string(),
-                line: "main".to_string(),
+                line: line.to_string(),
                 hash,
                 hosts: Vec::new(),
                 dev_folders: Vec::new(),
@@ -525,6 +530,106 @@ fn an_edit_in_the_working_copy_or_on_another_branch_is_not_what_runs() {
     assert_eq!(seen["version"], "one");
     // The trust of the line did not change, so nothing asked again.
     assert_eq!(rig.started(&board, "ferry").len(), 1);
+}
+
+// ---- a rebase at the root (ts-0146-se) ----------------------------------------------------------------------------
+
+impl Rig {
+    /// A board whose pack `ferry` has the script version `one` on `topic` and `two` on `main`, and the checkout in a
+    /// rebase of `topic` onto `main` that stopped on a conflict. `main` is trusted; `topic` is when `trust_topic` is.
+    fn stop_in_a_rebase(&self, trust_topic: bool) -> String {
+        let repo = &self.fixture.repo;
+        self.pack("ferry", "fake", "one", "");
+        self.board_yaml(&["ferry"]);
+        self.fixture.write("line.txt", "one\n");
+        self.fixture.commit();
+        let board = self.fixture.board();
+        repo.git(&["checkout", "--quiet", "-b", "topic"]);
+        self.fixture.write("line.txt", "topic\n");
+        self.fixture.commit();
+        if trust_topic {
+            self.trust_line(&board, "topic");
+        }
+        repo.git(&["checkout", "--quiet", "main"]);
+        self.pack("ferry", "fake", "two", "");
+        self.fixture.write("line.txt", "main\n");
+        self.fixture.commit();
+        self.trust(&board);
+        repo.git(&["checkout", "--quiet", "topic"]);
+        let rebase = git_command(repo.root().path(), repo.work())
+            .args(["rebase", "main"])
+            .output()
+            .expect("git runs");
+        assert!(!rebase.status.success(), "the rebase stops on the conflict");
+        assert!(repo.git_dir().join("rebase-merge").is_dir());
+        board
+    }
+}
+
+#[test]
+fn in_a_rebase_of_a_trusted_branch_the_source_starts_from_that_branchs_own_commit() {
+    let rig = rig();
+    let board = rig.stop_in_a_rebase(true);
+
+    // HEAD holds the script of `main`, which is version two. The branch holds version one.
+    assert_eq!(rig.echo(&board, "fake")["version"], "one");
+    assert_eq!(rig.started(&board, "ferry").len(), 1);
+}
+
+#[test]
+fn in_a_rebase_of_an_untrusted_branch_the_source_does_not_start() {
+    let rig = rig();
+    let board = rig.stop_in_a_rebase(false);
+
+    // The commit HEAD names holds `main`, which is trusted. That is not what the rebase is of.
+    let error = rig.get(&board, "fake:1").unwrap_err();
+    assert_eq!(error.code, code::CONFLICT);
+    assert!(
+        error.message.contains("the line `topic` is not trusted"),
+        "{}",
+        error.message
+    );
+    let error = rig.apply(&board, "fake:1", "ok", None).unwrap_err();
+    assert_eq!(error.code, code::CONFLICT);
+    assert!(rig.started(&board, "ferry").is_empty());
+}
+
+#[test]
+fn a_write_at_the_root_in_a_rebase_waits_and_applies_after_the_abort() {
+    let rig = rig();
+    let board = rig.stop_in_a_rebase(true);
+    let work = rig.root();
+    let (log, open) = (
+        rig.fixture.home().join("gate.log"),
+        rig.fixture.home().join("gate.open"),
+    );
+    fs::write(&open, "open\n").unwrap();
+
+    let params = TaskApplyParams {
+        board: board.clone(),
+        source: Some("fake".to_string()),
+        apply: ApplyParams {
+            actor: None,
+            op: "gate".to_string(),
+            id: Some("1".to_string()),
+            args: BTreeMap::from([
+                ("log".to_string(), json!(log)),
+                ("open".to_string(), json!(open)),
+            ]),
+            version: None,
+            checkout: None,
+        },
+        commit: false,
+    };
+    let answer: TaskApplyResult = rpc(&rig, "task.apply", &params).unwrap();
+    let queued = answer.queued.expect("the write waits");
+    assert_eq!(queued.reason, format!("a rebase is in progress in {work}"));
+    assert!(lines(&log).is_empty(), "the provider has not been asked");
+
+    rig.fixture.repo.git(&["rebase", "--abort"]);
+    wait_until("the waiting write applies", DEADLINE, || {
+        lines(&log).last().is_some_and(|line| line == "end fake")
+    });
 }
 
 // ---- settings and secrets -----------------------------------------------------------------------------------------

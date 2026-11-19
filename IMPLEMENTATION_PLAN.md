@@ -1374,8 +1374,11 @@ How packs share points:
     - experiments.
 - **Line lock.** Everything that writes a line's root checkout holds that root's lock: `record`, `integrate` and
   provider writes there. Writes to one root run one at a time. Different lines' roots do not block each other.
-- **Root busy.** The default line's root is the user's own checkout. While a rebase, merge, cherry-pick or bisect is
-  in progress there, writes to it wait, and the Queue says why (0.12).
+- **Root busy.** The default line's root is the user's own checkout. While a rebase, merge, cherry-pick or bisect is in
+  progress there, writes to it wait, and the Queue says why (0.12). During a rebase or a bisect, which detach `HEAD`,
+  the line is still the branch git holds (the rebase's `head-name`, the bisect's start): that branch's trust and that
+  branch's own commit, never what `HEAD` names meanwhile. A name that is not a branch of the repo leaves the line
+  `HEAD`, which is never trusted (`ts-0146-se`).
 
 Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is passed through, never reinvented.
 

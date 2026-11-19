@@ -1,6 +1,7 @@
 //! The lines of a board with their trust, and `board.trust` and `board.trust_review` (ts-0102-vu; 0.9, Untrusted
 //! input). A board has one line in 4a: the ref its checkout is on. Its snapshot is the commit that ref names, and its
 //! trust is [`Trust::trust_state`] of the line the loader read at that commit.
+//! While git has `HEAD` detached for a rebase or a bisect, the ref is the branch git holds ([`Checkout::held`]).
 //!
 //! A line that does not load (a bad `board.yaml`, a pack that needs a first fetch) is still listed: its problems are
 //! in the summary and its hash is empty, because there is nothing to hash. Two things block a load until the person
@@ -120,7 +121,7 @@ impl Lines {
     /// [`LineError::Refused`], one problem on each line of the message.
     pub fn for_sources(&self, board: BoardRef, tools: &OsStr) -> Result<SourceLine, LineError> {
         let checkout = boards::checkout_of(board.root, &self.git_env).map_err(LineError::Failed)?;
-        let commit = boards::head_commit(&checkout.root, &self.git_env).ok_or_else(|| {
+        let commit = boards::line_commit(&checkout, &self.git_env).ok_or_else(|| {
             LineError::Failed(format!(
                 "the checkout `{}` has no commit yet, so it has no line",
                 checkout.root.display()
@@ -131,10 +132,10 @@ impl Lines {
             .load(&commit)
             .map_err(|problems| LineError::Refused(texts(&problems).join("\n")))?;
         let root = board.root.display().to_string();
-        let (trust, problems) = state_of(&opened, &root, &checkout.branch, &line);
+        let (trust, problems) = state_of(&opened, &root, checkout.line_branch(), &line);
         Ok(SourceLine {
             git_dir: opened.git_dir.clone(),
-            ref_name: checkout.branch,
+            ref_name: checkout.line_branch().to_string(),
             line,
             trust,
             problems,
@@ -180,9 +181,9 @@ impl Lines {
         checkout: &Checkout,
         tools: &OsStr,
     ) -> Option<LineSummary> {
-        let snapshot = boards::head_commit(&checkout.root, &self.git_env)?;
+        let snapshot = boards::line_commit(checkout, &self.git_env)?;
         let summary = |trust, problems| LineSummary {
-            ref_name: checkout.branch.clone(),
+            ref_name: checkout.line_branch().to_string(),
             root: checkout.root.display().to_string(),
             snapshot: Some(snapshot.clone()),
             trust,
@@ -203,7 +204,7 @@ impl Lines {
         match opened.load(&snapshot) {
             Err(problems) => Some(summary(unknown, texts(&problems))),
             Ok(line) => {
-                let (trust, mut problems) = state_of(&opened, root, &checkout.branch, &line);
+                let (trust, mut problems) = state_of(&opened, root, checkout.line_branch(), &line);
                 problems.extend(source_problems(&line));
                 Some(summary(trust, problems))
             }

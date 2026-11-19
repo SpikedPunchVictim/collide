@@ -5,6 +5,7 @@
 //! Only the `git_repo` check is made here. The checks for `claude` come with the no-setup open (Stage 6a), and
 //! `git init` for a folder that is not a checkout is that stage's too.
 
+use crate::checkout::root_busy;
 use collide_core::owner::{CheckId, FirstRunCheck};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,6 +16,17 @@ pub struct Checkout {
     pub root: PathBuf,
     /// The branch name, or `HEAD` when the checkout is on no branch.
     pub branch: String,
+    /// The branch git holds while `HEAD` is detached for a rebase or a bisect (ts-0146-se): the line stays that
+    /// branch, with its trust and its own commit. `None` on a branch, and on a detached `HEAD` with no operation.
+    pub held: Option<String>,
+}
+
+impl Checkout {
+    /// The branch the checkout's line is: the held one while git has `HEAD` detached for an operation, else
+    /// [`Checkout::branch`] (`HEAD` when the checkout is on no branch).
+    pub fn line_branch(&self) -> &str {
+        self.held.as_deref().unwrap_or(&self.branch)
+    }
 }
 
 /// Runs `git` in `folder` and returns what it printed when it succeeded. `None` when it failed or did not run. `env` is
@@ -62,7 +74,54 @@ pub fn checkout_of(folder: &Path, env: &[(String, String)]) -> Result<Checkout, 
     let branch = git(&root, env, &["symbolic-ref", "--quiet", "--short", "HEAD"])?
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "HEAD".to_string());
-    Ok(Checkout { root, branch })
+    let held = if branch == "HEAD" {
+        held_branch(&root, env)?
+    } else {
+        None
+    };
+    Ok(Checkout { root, branch, held })
+}
+
+/// The branch git holds while `HEAD` is detached for a rebase (its `head-name`) or a bisect (its `BISECT_START`), found
+/// in the files of this checkout's own git directory. That a rebase or a bisect is in progress is
+/// [`root_busy`]'s answer. `None` when neither is, when the file does not name a branch, and when the branch is not
+/// in the repository: the line is then `HEAD`, which is never trusted.
+fn held_branch(root: &Path, env: &[(String, String)]) -> Result<Option<String>, String> {
+    let files: &[&str] = match root_busy(env, root).map_err(|error| error.to_string())? {
+        Some("a rebase") => &["rebase-merge/head-name", "rebase-apply/head-name"],
+        Some("a bisect") => &["BISECT_START"],
+        _ => return Ok(None),
+    };
+    for file in files {
+        let Some(path) = git(root, env, &["rev-parse", "--git-path", file])? else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(root.join(path)) else {
+            continue;
+        };
+        let text = text.trim();
+        // A rebase writes the full ref (`detached HEAD` for a rebase of no branch); a bisect writes the bare name.
+        let name = if *file == "BISECT_START" {
+            Some(text)
+        } else {
+            text.strip_prefix("refs/heads/")
+        };
+        if let Some(name) = name.filter(|name| !name.is_empty())
+            && branch_commit(root, env, name).is_some()
+        {
+            return Ok(Some(name.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// The commit the branch `name` names, or `None` when there is no such branch.
+fn branch_commit(root: &Path, env: &[(String, String)], name: &str) -> Option<String> {
+    let reference = format!("refs/heads/{name}^{{commit}}");
+    git(root, env, &["rev-parse", "--verify", "--quiet", &reference])
+        .ok()
+        .flatten()
+        .filter(|commit| !commit.is_empty())
 }
 
 /// The git directory of the checkout at `root`, as an absolute path (for a linked worktree it is not `root/.git`).
@@ -87,6 +146,15 @@ pub fn head_commit(root: &Path, env: &[(String, String)]) -> Option<String> {
     .ok()
     .flatten()
     .filter(|commit| !commit.is_empty())
+}
+
+/// The commit the line of `checkout` names: its held branch's own commit while git has `HEAD` detached for an
+/// operation, else the commit `HEAD` names. `None` when it names none or git cannot be run.
+pub fn line_commit(checkout: &Checkout, env: &[(String, String)]) -> Option<String> {
+    match &checkout.held {
+        Some(name) => branch_commit(&checkout.root, env, name),
+        None => head_commit(&checkout.root, env),
+    }
 }
 
 /// One entry of `git worktree list`: a checkout of the repository, and the branch it is on (`None` when it is on no

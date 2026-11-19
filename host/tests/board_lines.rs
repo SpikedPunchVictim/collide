@@ -12,6 +12,7 @@ use collide_core::owner::{
 };
 use collide_host::owner_client::ClientError;
 use common::config_fixture::Fixture;
+use common::git_repo::git_command;
 use std::fs;
 use std::time::Duration;
 
@@ -242,6 +243,32 @@ fn a_detached_head_is_the_line_named_head() {
         found.snapshot,
         Some(fixture.repo.git(&["rev-parse", "HEAD"]))
     );
+}
+
+#[test]
+fn a_rebase_at_the_root_leaves_the_line_the_branch_with_its_own_commit() {
+    let fixture = Fixture::new();
+    let board = fixture.board();
+    let repo = &fixture.repo;
+    fixture.write("line.txt", "one\n");
+    fixture.commit();
+    repo.git(&["checkout", "--quiet", "-b", "topic"]);
+    fixture.write("line.txt", "topic\n");
+    fixture.commit();
+    let topic = repo.git(&["rev-parse", "topic"]);
+    repo.git(&["checkout", "--quiet", "main"]);
+    fixture.write("line.txt", "main\n");
+    fixture.commit();
+    repo.git(&["checkout", "--quiet", "topic"]);
+    let rebase = git_command(repo.root().path(), repo.work())
+        .args(["rebase", "main"])
+        .output()
+        .expect("git runs");
+    assert!(!rebase.status.success(), "the rebase stops on the conflict");
+
+    let found = line(&fixture, &board);
+    assert_eq!(found.ref_name, "topic");
+    assert_eq!(found.snapshot, Some(topic));
 }
 
 #[test]
