@@ -507,6 +507,17 @@ impl Rig {
         )
     }
 
+    /// Answers a Queue item that the writer may have applied and removed meanwhile: an error is not a failure.
+    fn answer_if_there(&self, item: &str, answer: QueueAnswer) {
+        let mut client = OwnerClient::connect(self.daemon().paths(), "write-guard-test")
+            .expect("the client connects");
+        let params = QueueAnswerParams {
+            item: item.to_string(),
+            answer,
+        };
+        let _: Result<QueueAnswerResult, _> = client.call("queue.answer", &params, WAIT);
+    }
+
     /// The keys of the `task.changed` events recorded so far, oldest first, with who made each. The ones the corpus
     /// records at startup, for the tasks the board already has, are not writes and are left out (ts-0116-wh).
     fn changed(&self) -> Vec<(String, ActorKind)> {
@@ -715,7 +726,7 @@ fn retry_applies_a_queued_write_that_can_go_now_and_says_when_it_cannot() {
     // The writer may have looked first; a Retry for an item that is gone is not an item to find.
     wait_until("the write to apply", DEADLINE, || {
         rig.status_on_disk(SECOND) == "active" || {
-            let _ = rig.answer(&item, QueueAnswer::Retry {});
+            rig.answer_if_there(&item, QueueAnswer::Retry {});
             false
         }
     });
