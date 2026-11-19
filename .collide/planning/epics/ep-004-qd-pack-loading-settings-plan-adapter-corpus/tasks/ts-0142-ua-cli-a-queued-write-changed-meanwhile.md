@@ -1,7 +1,7 @@
 ---
 id: ts-0142-ua
 kind: task
-status: ready
+status: done
 title: "CLI: a queued write whose file changed meanwhile is never reported applied"
 owners: []
 links:
