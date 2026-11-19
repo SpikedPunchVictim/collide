@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One claim of a spike's record, read from a fenced `claim` block (0.10, \"A `spike`\"). `label` is `measured`,\n`inferred` or `unmeasured`. `verifiable` is the block's `yes` or `no`, and is left out when the block has none. Only\na block with no problem is a claim; the prose is never compared.",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "loadBearing": {
+      "type": "boolean"
+    },
+    "verifiable": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "label",
+    "loadBearing"
+  ],
+  "title": "Claim",
+  "type": "object"
+}

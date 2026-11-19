@@ -30,8 +30,8 @@
 
 use crate::change::{Effect, FieldDiff, ItemState, Rename};
 use crate::item::{
-    Assumption, Category, Checklist, Coverage, Decision, Feature, FeatureProblem, Finding,
-    KindDecl, Link, LinkTypeDecl, OpDecl, PartProblem, StatusDecl,
+    Assumption, Category, Checklist, Claim, Coverage, Decision, Feature, FeatureProblem, Finding,
+    KindDecl, Link, LinkTypeDecl, OpDecl, PartProblem, Preregistration, StatusDecl,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -174,6 +174,12 @@ pub struct Task {
     /// What a proposal's features and included tasks cover, derived (0.10). Left out when it has neither.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<Coverage>,
+    /// A spike's claims, read from the fenced `claim` blocks of its record (0.10). Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claims: Vec<Claim>,
+    /// A spike's Pre-registration part (0.10). Left out when its record has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preregistration: Option<Preregistration>,
 }
 
 impl Task {

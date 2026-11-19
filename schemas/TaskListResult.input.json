@@ -132,6 +132,33 @@
       ],
       "type": "string"
     },
+    "Claim": {
+      "additionalProperties": false,
+      "description": "One claim of a spike's record, read from a fenced `claim` block (0.10, \"A `spike`\"). `label` is `measured`,\n`inferred` or `unmeasured`. `verifiable` is the block's `yes` or `no`, and is left out when the block has none. Only\na block with no problem is a claim; the prose is never compared.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "loadBearing": {
+          "type": "boolean"
+        },
+        "verifiable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "loadBearing"
+      ],
+      "type": "object"
+    },
     "Collection": {
       "additionalProperties": false,
       "description": "A grouping the source holds itself, such as an epic or a milestone (0.10). Each task names the collections it\nbelongs to in `Task.collections`.",
@@ -474,6 +501,51 @@
       ],
       "type": "object"
     },
+    "Preregistration": {
+      "additionalProperties": false,
+      "description": "A spike's Pre-registration part (0.10, \"A `spike`\"): the text of each of its four labels, as written, and left out\nwhen the label is missing. `amendments` counts the `### Amendment` sections below the original text. `hashMatches`\nis present only when the frontmatter has `preregistered`: whether it is the hash of the original text.",
+      "properties": {
+        "amendments": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "budget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cheapestTest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hashMatches": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hypothesis": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "killCriterion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "amendments"
+      ],
+      "type": "object"
+    },
     "StaleSource": {
       "additionalProperties": false,
       "description": "A source whose last answer may be out of date, and why (`source.stale`, or a provider that is gone).",
@@ -530,6 +602,13 @@
             "string",
             "null"
           ]
+        },
+        "claims": {
+          "description": "A spike's claims, read from the fenced `claim` blocks of its record (0.10). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
         },
         "collections": {
           "default": [],
@@ -627,6 +706,17 @@
             "string",
             "null"
           ]
+        },
+        "preregistration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Preregistration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A spike's Pre-registration part (0.10). Left out when its record has none."
         },
         "state": {
           "$ref": "#/$defs/ItemState"
@@ -757,6 +847,12 @@
         "over_task_budget": {
           "default": 0,
           "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "part_problems": {
+          "description": "The problems in the quality parts, claim blocks and Pre-registration of the members (`Task.part_problems`), one\nfor each problem entry. Left out when there are none. A member that is two files counts once.",
+          "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },

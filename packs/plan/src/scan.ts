@@ -5,16 +5,20 @@ import { readAssumptions } from './assumptions.ts'
 import type { Assumption } from './assumptions.ts'
 import { readDecisions } from './decisions.ts'
 import type { Decision, ItemLookup } from './decisions.ts'
+import { readClaims } from './claims.ts'
+import type { Claim } from './claims.ts'
 import { coverageOf } from './coverage.ts'
 import { parseFeatures } from './features.ts'
 import { readFindings } from './findings.ts'
 import type { Finding } from './findings.ts'
-import { KNOWN_KINDS, PROPOSAL, readItem, stateOf } from './item.ts'
+import { KNOWN_KINDS, PROPOSAL, readItem, SPIKE, stateOf } from './item.ts'
 import type { Item } from './item.ts'
 import { DEFAULT_LAYOUT, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { featuresOf, isBrokenLink } from './links.ts'
 import type { PartProblem } from './parts.ts'
+import { readPreregistration } from './preregistration.ts'
+import type { Preregistration } from './preregistration.ts'
 import { readItemFile } from './read-file.ts'
 
 const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
@@ -201,12 +205,36 @@ interface QualityParts {
   decisions: Decision[]
   assumptions: Assumption[]
   findings: Finding[]
+  claims: Claim[]
+  preregistration: Preregistration | null
   problems: PartProblem[]
 }
 
-/** A proposal's Decision log, Assumption ledger and Findings, with the problems of the three in line order. */
+const NO_PARTS: QualityParts = {
+  decisions: [],
+  assumptions: [],
+  findings: [],
+  claims: [],
+  preregistration: null,
+  problems: [],
+}
+
+/** A spike's claim blocks and Pre-registration part, with the problems of both in line order. */
+function spikePartsOf(found: FoundItem): QualityParts {
+  const { body, bodyLine, item } = found
+  const claimed = readClaims(body, bodyLine)
+  const registered = readPreregistration(body, bodyLine, item.fields.preregistered)
+  const problems = [...claimed.problems, ...registered.problems].sort((a, b) => a.line - b.line)
+  return { ...NO_PARTS, claims: claimed.claims, preregistration: registered.preregistration, problems }
+}
+
+/**
+ * A proposal's Decision log, Assumption ledger and Findings, or a spike's claims and Pre-registration, with the
+ * problems of its parts in line order. Any other kind has none.
+ */
 function qualityPartsOf(found: FoundItem, featureIds: string[], items: readonly FoundItem[]): QualityParts {
-  if (found.item.kind !== PROPOSAL) return { decisions: [], assumptions: [], findings: [], problems: [] }
+  if (found.item.kind === SPIKE) return spikePartsOf(found)
+  if (found.item.kind !== PROPOSAL) return NO_PARTS
   const lookup = lookupIn(items)
   const { body, bodyLine } = found
   const log = readDecisions(body, bodyLine, lookup)
@@ -215,7 +243,8 @@ function qualityPartsOf(found: FoundItem, featureIds: string[], items: readonly 
   for (const one of [...log.decisions, ...ledger.assumptions]) own.add(one.id)
   const reviewed = readFindings(body, bodyLine, own)
   const problems = [...log.problems, ...ledger.problems, ...reviewed.problems].sort((a, b) => a.line - b.line)
-  return { decisions: log.decisions, assumptions: ledger.assumptions, findings: reviewed.findings, problems }
+  const { decisions } = log
+  return { ...NO_PARTS, decisions, assumptions: ledger.assumptions, findings: reviewed.findings, problems }
 }
 
 /**
@@ -256,5 +285,7 @@ export function toTask(found: FoundItem, withBody: boolean, items: readonly Foun
     ...(quality.findings.length === 0 ? {} : { findings: quality.findings }),
     ...(quality.problems.length === 0 ? {} : { partProblems: quality.problems }),
     ...(coverage === null ? {} : { coverage }),
+    ...(quality.claims.length === 0 ? {} : { claims: quality.claims }),
+    ...(quality.preregistration === null ? {} : { preregistration: quality.preregistration }),
   }
 }

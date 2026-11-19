@@ -288,6 +288,38 @@ pub struct Finding {
     pub line: u32,
 }
 
+/// One claim of a spike's record, read from a fenced `claim` block (0.10, "A `spike`"). `label` is `measured`,
+/// `inferred` or `unmeasured`. `verifiable` is the block's `yes` or `no`, and is left out when the block has none. Only
+/// a block with no problem is a claim; the prose is never compared.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Claim {
+    pub id: String,
+    pub label: String,
+    pub load_bearing: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifiable: Option<bool>,
+}
+
+/// A spike's Pre-registration part (0.10, "A `spike`"): the text of each of its four labels, as written, and left out
+/// when the label is missing. `amendments` counts the `### Amendment` sections below the original text. `hashMatches`
+/// is present only when the frontmatter has `preregistered`: whether it is the hash of the original text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Preregistration {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hypothesis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cheapest_test: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kill_criterion: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<String>,
+    pub amendments: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash_matches: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KindError {
     UnknownKind(String),

@@ -3104,7 +3104,7 @@ fn viewed(
 
 /// One view of `task.views`: its counts come from the last evaluation, which is made again when the corpus changed.
 /// `error_count` is the board's invalid items, which no view can match, and the tasks whose `where` raised an error or
-/// ran out of steps.
+/// ran out of steps. `problem_count` is the problems in the parts of the view's members, which are no error.
 fn view_entry(
     shared: &Shared,
     board: &str,
@@ -3116,6 +3116,7 @@ fn view_entry(
         source: loaded.source.clone(),
         task_count: 0,
         error_count: 0,
+        problem_count: 0,
         error: None,
     };
     match viewed(shared, board, service, loaded) {
@@ -3125,6 +3126,7 @@ fn view_entry(
                 counts.invalid_items as u64 + counts.error_count() + counts.over_task_budget;
             entry.task_count = u32::try_from(result.members.len()).unwrap_or(u32::MAX);
             entry.error_count = u32::try_from(errors).unwrap_or(u32::MAX);
+            entry.problem_count = u32::try_from(counts.part_problems).unwrap_or(u32::MAX);
         }
         Err(reason) => entry.error = Some(reason),
     }

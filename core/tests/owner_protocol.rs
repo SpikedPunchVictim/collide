@@ -1337,3 +1337,54 @@ fn the_task_get_link_types_key_is_in_the_schema_and_is_not_required() {
         .unwrap_or_default();
     assert!(!required.contains(&"link_types"), "{required:?}");
 }
+
+#[test]
+fn a_view_report_and_a_view_entry_carry_the_part_problem_counts_and_leave_them_out_at_zero() {
+    use collide_core::owner::task::{ViewEntry, ViewReport};
+    let report = ViewReport {
+        name: "spikes".into(),
+        part_problems: 3,
+        ..ViewReport::default()
+    };
+    let written = serde_json::to_value(&report).unwrap();
+    assert_eq!(written["part_problems"], 3);
+    assert_eq!(
+        serde_json::from_value::<ViewReport>(written).unwrap(),
+        report
+    );
+    let clean = serde_json::to_value(ViewReport::default()).unwrap();
+    assert!(clean.get("part_problems").is_none(), "{clean}");
+
+    let entry: ViewEntry = serde_json::from_value(json!({
+        "view": { "name": "spikes" }, "source": { "type": "repo" },
+        "task_count": 3, "error_count": 0, "problem_count": 3
+    }))
+    .unwrap();
+    assert_eq!(entry.problem_count, 3);
+    let older: ViewEntry = serde_json::from_value(json!({
+        "view": { "name": "spikes" }, "source": { "type": "repo" }, "task_count": 3, "error_count": 0
+    }))
+    .unwrap();
+    assert_eq!(older.problem_count, 0);
+    assert!(
+        serde_json::to_value(&older)
+            .unwrap()
+            .get("problem_count")
+            .is_none()
+    );
+}
+
+#[test]
+fn the_part_problem_counts_are_in_the_schemas_and_are_not_required() {
+    let files = schema::registry().render();
+    for (file, definition, key) in [
+        ("TaskListResult.output.json", "ViewReport", "part_problems"),
+        ("TaskViewsResult.output.json", "ViewEntry", "problem_count"),
+    ] {
+        let schema: Value = serde_json::from_str(&files[file]).unwrap();
+        let node = &schema["$defs"][definition];
+        assert!(node["properties"].get(key).is_some(), "{file} {key}");
+        let required = node["required"].as_array().cloned().unwrap_or_default();
+        assert!(!required.contains(&json!(key)), "{file} {key}");
+    }
+}

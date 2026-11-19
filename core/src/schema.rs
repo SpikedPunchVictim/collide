@@ -20,8 +20,8 @@ use crate::context::ContextRecord;
 use crate::events::Event;
 use crate::hook::{HookInput, HookResult};
 use crate::item::{
-    Assumption, Coverage, Decision, Evidence, Feature, FeatureProblem, Finding, KindDecl,
-    LinkTypeDecl, PartProblem, PlanningFields,
+    Assumption, Claim, Coverage, Decision, Evidence, Feature, FeatureProblem, Finding, KindDecl,
+    LinkTypeDecl, PartProblem, PlanningFields, Preregistration,
 };
 use crate::lock::{PackLock, UserPacks};
 use crate::observer::{ObserverAck, ObserverEvent};
@@ -111,6 +111,7 @@ pub fn registry() -> Registry {
     registry.add::<Board>();
     registry.add::<Capabilities>();
     registry.add::<Change>();
+    registry.add::<Claim>();
     registry.add::<CollidePointer>();
     registry.add::<ConfigFile>();
     registry.add::<ContextRecord>();
@@ -144,6 +145,7 @@ pub fn registry() -> Registry {
     registry.add::<PhaseState>();
     registry.add::<Point>();
     registry.add::<PlanningFields>();
+    registry.add::<Preregistration>();
     registry.add::<PreviewResult>();
     registry.add::<Profile>();
     registry.add::<ReportLine>();

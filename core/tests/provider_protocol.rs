@@ -374,6 +374,98 @@ fn an_evidence_kind_that_is_not_item_feature_or_path_is_refused() {
     refused::<Task>(bad);
 }
 
+/// A spike with the claims and the Pre-registration the provider reads from its record.
+fn spike_with_parts() -> Value {
+    let mut doc = task();
+    doc["kind"] = json!("spike");
+    doc["state"] = state("results", "review");
+    doc["claims"] = json!([
+        { "id": "Q1.c1", "label": "measured", "loadBearing": true, "verifiable": false },
+        { "id": "Q1.c2", "label": "inferred", "loadBearing": false }
+    ]);
+    doc["preregistration"] = json!({
+        "hypothesis": "A fresh session is cheaper.",
+        "cheapestTest": "Run both once.",
+        "killCriterion": "It costs more.",
+        "budget": "$0.10",
+        "amendments": 2,
+        "hashMatches": false
+    });
+    doc
+}
+
+#[test]
+fn a_spike_carries_claims_and_a_preregistration_and_they_round_trip() {
+    let parsed: Task = round_trip(spike_with_parts());
+    assert_eq!(parsed.claims.len(), 2);
+    assert_eq!(parsed.claims[0].id, "Q1.c1");
+    assert!(parsed.claims[0].load_bearing);
+    assert_eq!(parsed.claims[0].verifiable, Some(false));
+    assert_eq!(parsed.claims[1].verifiable, None);
+    let registered = parsed.preregistration.unwrap();
+    assert_eq!(registered.cheapest_test.as_deref(), Some("Run both once."));
+    assert_eq!(registered.kill_criterion.as_deref(), Some("It costs more."));
+    assert_eq!(registered.amendments, 2);
+    assert_eq!(registered.hash_matches, Some(false));
+}
+
+#[test]
+fn a_task_with_no_claims_or_preregistration_serializes_neither_key() {
+    let parsed: Task = round_trip(task());
+    assert!(parsed.claims.is_empty() && parsed.preregistration.is_none());
+    let written = serde_json::to_value(&parsed).unwrap();
+    assert!(written.get("claims").is_none() && written.get("preregistration").is_none());
+}
+
+#[test]
+fn a_preregistration_with_only_its_amendments_keeps_no_text_and_no_hash_key() {
+    let mut doc = task();
+    doc["preregistration"] = json!({ "amendments": 0 });
+    let parsed: Task = round_trip(doc);
+    let registered = parsed.preregistration.unwrap();
+    assert!(registered.hypothesis.is_none() && registered.budget.is_none());
+    assert!(registered.hash_matches.is_none());
+}
+
+#[test]
+fn a_claim_or_a_preregistration_with_a_missing_extra_or_snake_case_key_is_refused() {
+    for key in ["id", "label", "loadBearing"] {
+        let mut missing = spike_with_parts();
+        missing["claims"][0].as_object_mut().unwrap().remove(key);
+        refused::<Task>(missing);
+    }
+    let mut extra = spike_with_parts();
+    extra["claims"][0]["says"] = json!("the prose is never carried");
+    refused::<Task>(extra);
+    let mut snake = spike_with_parts();
+    snake["claims"][0] = json!({ "id": "Q1.c1", "label": "measured", "load_bearing": true });
+    refused::<Task>(snake);
+
+    let mut no_amendments = spike_with_parts();
+    no_amendments["preregistration"]
+        .as_object_mut()
+        .unwrap()
+        .remove("amendments");
+    refused::<Task>(no_amendments);
+    let mut extra = spike_with_parts();
+    extra["preregistration"]["extra"] = json!(1);
+    refused::<Task>(extra);
+    let mut snake = spike_with_parts();
+    snake["preregistration"] = json!({ "amendments": 0, "hash_matches": true });
+    refused::<Task>(snake);
+}
+
+#[test]
+fn claims_and_preregistration_are_in_the_task_schema() {
+    let keys = keys_of("Task");
+    assert!(keys.contains("claims") && keys.contains("preregistration"));
+    let names: BTreeSet<String> = schema::registry().render().into_keys().collect();
+    for name in ["Claim", "Preregistration"] {
+        assert!(names.contains(&format!("{name}.input.json")), "{name}");
+        assert!(names.contains(&format!("{name}.output.json")), "{name}");
+    }
+}
+
 /// A proposal with the coverage the provider derives.
 fn proposal_with_coverage() -> Value {
     let mut doc = proposal();

@@ -95,4 +95,90 @@ Write these first.
 - Stage 4c item (revision 23 scope, split 2026-11-18). Items of Stage 4c run one at a time, in id order, because they
   share `core`, `host`, `packs/plan` and the generated files.
 - Nothing here runs a real `claude`. No dependency is added.
-- Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+- Owner decisions (2026-11-18, at the build): the item's choices as it recommends (a bad block leaves the record an item
+  and the view counts its problems; the hash as written; spikes only; the count is of entries), and the builder's
+  decisions 1 to 11 as built, on the owner's delegation, including 9 (the Pre-registration part is read by its own label
+  reader, not `readPart`, because `readPart` reads entries and flags unknown labels, which would flag prose). The
+  builder's plan text (decision 12) is applied to 0.8, 0.10 and the Stage 4c criterion. At review four mutations were
+  each caught: the hash taken over the amendments, the view counting records not entries, a snake-case `loadBearing` on
+  the wire, and the view counting an excluded item's problems.
+
+### Built
+
+- `core/src/item.rs`: `Claim` (`id`, `label`, `loadBearing`, `verifiable` left out when none) and `Preregistration`
+  (`hypothesis`, `cheapestTest`, `killCriterion`, `budget`, each left out when absent; `amendments`; `hashMatches`
+  left out when the frontmatter has no `preregistered`). `core/src/provider.rs`: `Task.claims` (left out when empty)
+  and `Task.preregistration` (left out when none). `core/src/schema.rs` registers both. `pnpm gen` rewrote
+  `schemas/` and `packages/pack-sdk/src/generated/`. The task literals in `core/src/testing/provider.rs` and
+  `host/src/scratch.rs` take the two new fields.
+- `core/src/owner/task.rs`: `ViewReport.part_problems` and `ViewEntry.problem_count`, both left out when 0, so a
+  clean view serializes as before. `core/src/view_eval.rs`: `ViewCounts.part_problems` counts the problem entries of
+  the view's members, a member once however many paths hold it. `host/src/daemon.rs` `view_entry` fills
+  `problem_count`. `host/src/task_daemon.rs` `tasks` prints one stderr line when the count is above 0 and exits 0.
+- `packs/plan/src/claims.ts` (new): `readClaims`. `packs/plan/src/preregistration.ts` (new): `readPreregistration`.
+  `read-file.ts` exports `YAML_OPTIONS` and `MAX_ALIAS_COUNT`, which the frontmatter reader and the claim reader
+  share. `scan.ts`: `spikePartsOf`, `qualityPartsOf` for spikes, `toTask` fills `claims` and `preregistration`.
+- Tests, `packs/plan/test/claims.test.ts` (44) and `packs/plan/test/preregistration.test.ts` (31): every key, each
+  problem, nested fences of both characters and of lengths 4 and 5, an indented fence, an unclosed fence, tabs, CRLF,
+  the S5 hazards (unquoted `no`, `1e10`, duplicate key, alias bomb, merge key, cap), the hash, amendments, an edited
+  original, a number-valued `preregistered`, list equals get, only spikes searched, and Collide's own spikes (the
+  copied fixture and the real folder) with no problem and no `claims`.
+- Rust tests: `core/tests/provider_protocol.rs` (`a_spike_carries_claims_and_a_preregistration_and_they_round_trip`,
+  `a_task_with_no_claims_or_preregistration_serializes_neither_key`,
+  `a_preregistration_with_only_its_amendments_keeps_no_text_and_no_hash_key`,
+  `a_claim_or_a_preregistration_with_a_missing_extra_or_snake_case_key_is_refused`,
+  `claims_and_preregistration_are_in_the_task_schema`), `core/tests/view_eval.rs` (4: counts each entry of its
+  members, ignores a task the view does not hold, adds nothing when clean, a member at two paths counts once),
+  `core/tests/owner_protocol.rs` (2: the two counts round trip and are left out at 0; both are in the schemas and not
+  required), `host/tests/daemon_corpus.rs`
+  (`a_view_over_spikes_with_part_problems_reports_their_count_in_task_list_and_task_views`),
+  `host/tests/task_daemon_cli.rs` (3: the stderr line and exit 0, a clean view says nothing and `--json` carries the
+  count, `task --json` of a spike carries `claims` and `partProblems`). The fixture provider
+  `host/tests/fixtures/corpus_pack_provider.mjs` passes `partProblems` through.
+- Seen red at runtime: with `readClaims` and `readPreregistration` stubbed to return nothing, 36 of 44 claim tests
+  and 26 of 31 pre-registration tests failed (the rest assert that nothing is there). With the view count stubbed, the
+  4 `view_eval` tests failed. With `view_entry` leaving `problem_count` at 0, the daemon test failed on the
+  `task.views` wait; with no stderr line, both CLI view tests failed. Mutations reverted: hashing the whole part
+  (5 failed), not dropping trailing blank lines (9), any three-character fence closing a claim (2), no repeated-id
+  check (2), counting a member at two paths twice (1). The wire tests in `provider_protocol.rs` and
+  `owner_protocol.rs` were written against the finished types and not seen red by a mutation.
+- App test doubles under `app/test/support/` need no change: every new key is optional on the wire.
+
+### Decisions for the owner
+
+1. **A bad block is not listed in `claims`.** Only a block with no problem is a claim. Alternative: list a block that
+   has only soft problems. Recommend as built: a half-read claim is worse than none.
+2. **One problem entry per violation**: each unknown key, and each fault of one block. A problem carries the line of
+   the block's opening fence. The count in a view is of these entries.
+3. **Cap**: 8 KiB per block, checked before parsing. Ids are `Q<n>.c<n>` counting from 1, like parts.
+4. **Wrong types on `value`, `unit`, `tolerance`, `repro`, `output`, `cost_usd`** are problems, not just the carried
+   keys. Alternative: check only what is carried. Recommend as built: the YAML hazard of an unquoted `1e10` or `no`
+   is the same for all.
+5. **`verifiable`** is `yes` or `no` in the file and an optional boolean on the wire; `loadBearing` defaults to
+   false. An unclosed `claim` fence is one problem and is not read. A repeated id is a problem on the later block,
+   and an id is used by any block with a well-formed id, even a refused one.
+6. **Claims and the Pre-registration part are read for spikes only.**
+7. **Label syntax**: a label is at column 0, in any case, and its text runs over following lines up to a blank line,
+   a heading, a fence or the next label. Only an empty Kill criterion is a problem (as well as a missing label);
+   an empty Hypothesis, Cheapest test or Budget is not. The first duplicate label wins, silently. A second
+   `## Pre-registration` is a problem and is not read. The amendment date is not checked.
+8. **Hash**: the part's lines from the heading to the last non-blank line, joined by LF, no final line end (so CRLF
+   and trailing blank lines do not change it). `hashMatches` is exact string equality, so an upper-case or non-string
+   hash gives false. Stage 9 will need this function; it is not exported on the wire.
+9. **`readPart` from `parts.ts` is not reused** for the Pre-registration part, against the brief. It reads entries
+   (`- **D1 title**:`) and reports an unknown label as a problem, which would flag prose such as `Stop rule:`. The
+   fence helpers and `PartProblem` are shared. Alternative: add an entry-less, loose mode to `readPart`. Recommend as
+   built until a second label-style part exists.
+10. **Problem part names** are `claims` and `Pre-registration`.
+11. **`part_problems` and `problem_count` are left out at 0**, so a clean view is byte-for-byte as before. The CLI
+    prints its own stderr line, not folded into the "could not check" line, because an error is not a problem.
+12. **Plan text to propose**, 0.8, Task: `claims` and `preregistration` as above, and `ViewReport.part_problems` and
+    `ViewEntry.problem_count`. 0.10, A spike: the claim keys, the id form, the cap, the hash rule and the label rules.
+
+### Not done, by design
+
+- Showing `claims`, `preregistration` or the problem counts in the CLI list output or the app: `ts-0136-rr` and
+  Stage 6a.
+- Writing a claim or an amendment, and any check that a claim has a repro or that the hash matches: Stage 9 and
+  Stage 8.
+- Pre-registration for kinds other than spikes.

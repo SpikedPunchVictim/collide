@@ -129,6 +129,8 @@ pub struct ViewCounts {
     pub goal_unmatched: Option<String>,
     /// The corpus's invalid items. Every view counts them: an unreadable file has no fields to match.
     pub invalid_items: usize,
+    /// The problems in the parts of the members: the entries of each member's `part_problems`, a member once.
+    pub part_problems: usize,
 }
 
 impl ViewCounts {
@@ -166,6 +168,7 @@ pub fn view_report(name: &str, result: &ViewResult) -> ViewReport {
         unmatched_exclude: counts.unmatched_exclude.clone(),
         goal_unmatched: counts.goal_unmatched.clone(),
         invalid_items: wire_count(counts.invalid_items),
+        part_problems: wire_count(counts.part_problems),
         steps: result.steps.clone(),
         cycle: result.cycle.clone(),
     }
@@ -215,12 +218,19 @@ pub fn evaluate_view(
     cycle.retain(|key| !excluded.contains(key));
 
     let mut seen = BTreeSet::new();
+    let mut part_problems = 0;
     let members = rows
         .iter()
-        .map(|row| &row.task.key)
-        .filter(|key| members.contains(*key) && !excluded.contains(*key) && seen.insert(*key))
-        .cloned()
+        .filter(|row| {
+            let key = &row.task.key;
+            members.contains(key) && !excluded.contains(key) && seen.insert(key)
+        })
+        .map(|row| {
+            part_problems += row.task.part_problems.len();
+            row.task.key.clone()
+        })
         .collect();
+    counts.part_problems = part_problems;
     Ok(ViewResult {
         members,
         steps,

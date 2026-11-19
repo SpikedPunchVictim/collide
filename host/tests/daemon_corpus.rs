@@ -2113,6 +2113,73 @@ fn an_inline_view_evaluates_without_saving_and_a_bad_one_is_refused_with_the_rea
     }
 }
 
+/// The `partProblems` of a spike with a problem at each of `lines`, as a provider reports them.
+fn problems_at(lines: &[u32]) -> Value {
+    let found: Vec<Value> = lines
+        .iter()
+        .map(
+            |line| json!({ "part": "claims", "line": line, "reason": "a claim block is not read" }),
+        )
+        .collect();
+    json!(found)
+}
+
+#[test]
+fn a_view_over_spikes_with_part_problems_reports_their_count_in_task_list_and_task_views() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/spikes.yaml",
+        "name: spikes\ninclude: [files:1, files:2, files:3]\n",
+    );
+    rig.f().write(
+        ".collide/views/clean.yaml",
+        "name: clean\ninclude: [files:3]\n",
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    for (short, lines) in [
+        ("1", vec![12, 17]),
+        ("2", vec![9]),
+        ("3", vec![]),
+        ("4", vec![3, 4, 5]),
+    ] {
+        let mut data = json!({ "short": short, "kind": "spike", "status": "todo" });
+        if !lines.is_empty() {
+            data["partProblems"] = problems_at(&lines);
+        }
+        rig.task_json(&root, &format!("{short}.json"), data);
+    }
+    rig.settled(&board);
+
+    let inline = rig
+        .view_list(
+            &board,
+            json!({ "type": "inline", "view": { "name": "adhoc", "include": ["files:1", "files:2", "files:3"] } }),
+            json!({}),
+        )
+        .unwrap();
+    let named = rig.named(&board, "clean", json!({})).unwrap();
+
+    assert_eq!(inline.view.expect("a report").part_problems, 3);
+    let clean = named.view.expect("a report");
+    assert_eq!(clean.part_problems, 0);
+    let written = serde_json::to_value(&clean).unwrap();
+    assert!(written.get("part_problems").is_none(), "{written}");
+    assert_eq!(
+        inline.tasks[0].part_problems.len(),
+        2,
+        "the problems are on the task, as the provider gave them"
+    );
+    let views = rig.views_until(&board, "the counts are in", |views| {
+        views
+            .iter()
+            .any(|view| view.view.name == "spikes" && view.problem_count == 3)
+    });
+    assert_eq!(entry(&views, "clean").problem_count, 0);
+    assert_eq!(entry(&views, "spikes").task_count, 3);
+    assert_eq!(entry(&views, "spikes").error_count, 0);
+}
+
 #[test]
 fn the_count_of_a_view_is_the_length_of_its_list_and_follows_the_corpus() {
     let rig = rig();

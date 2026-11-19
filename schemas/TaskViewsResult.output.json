@@ -175,6 +175,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "problem_count": {
+          "description": "The problems in the parts of the members, as `ViewReport.part_problems` counts them. Left out when none.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "source": {
           "$ref": "#/$defs/ViewSource"
         },

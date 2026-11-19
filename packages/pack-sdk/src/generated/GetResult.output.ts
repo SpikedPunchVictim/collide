@@ -33,6 +33,10 @@ export interface Task {
   body?: string | null
   checklist?: Checklist | null
   checkout?: string | null
+  /**
+   * A spike's claims, read from the fenced `claim` blocks of its record (0.10). Left out when there are none.
+   */
+  claims?: Claim[]
   collections: string[]
   /**
    * What a proposal's features and included tasks cover, derived (0.10). Left out when it has neither.
@@ -68,6 +72,10 @@ export interface Task {
    */
   partProblems?: PartProblem[]
   path?: string | null
+  /**
+   * A spike's Pre-registration part (0.10). Left out when its record has none.
+   */
+  preregistration?: Preregistration | null
   state: ItemState
   templateFields: {
     [k: string]: string
@@ -112,6 +120,17 @@ export interface ChecklistItem {
   id: string
   reason?: string | null
   state: ChecklistState
+}
+/**
+ * One claim of a spike's record, read from a fenced `claim` block (0.10, "A `spike`"). `label` is `measured`,
+ * `inferred` or `unmeasured`. `verifiable` is the block's `yes` or `no`, and is left out when the block has none. Only
+ * a block with no problem is a claim; the prose is never compared.
+ */
+export interface Claim {
+  id: string
+  label: string
+  loadBearing: boolean
+  verifiable?: boolean | null
 }
 /**
  * What a proposal's features and tasks cover, derived and never written (0.10, "A proposal's quality parts").
@@ -187,6 +206,19 @@ export interface PartProblem {
   line: number
   part: string
   reason: string
+}
+/**
+ * A spike's Pre-registration part (0.10, "A `spike`"): the text of each of its four labels, as written, and left out
+ * when the label is missing. `amendments` counts the `### Amendment` sections below the original text. `hashMatches`
+ * is present only when the frontmatter has `preregistered`: whether it is the hash of the original text.
+ */
+export interface Preregistration {
+  amendments: number
+  budget?: string | null
+  cheapestTest?: string | null
+  hashMatches?: boolean | null
+  hypothesis?: string | null
+  killCriterion?: string | null
 }
 /**
  * An item's status and its category.

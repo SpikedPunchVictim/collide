@@ -10,7 +10,8 @@
 // A task file is `{ "short": "12", "title": "...", "status": "todo", "version": "v1", "kind": "task" }`, and its key is
 // `<source>:<short>`. A file that is not JSON, or has no `short`, is an invalid item in `list`. It may also have
 // `labels` (strings), `collections` (ids) and `links` (`[{ "type": "blocked-by", "to": "41" }]`), which a view reads,
-// and `features` (`[{ "id": "F1", "title": "...", "section": "", "summary": "" }]`) on a proposal. `initialize`
+// and `features` (`[{ "id": "F1", "title": "...", "section": "", "summary": "" }]`) on a proposal, and
+// `partProblems` (`[{ "part": "claims", "line": 12, "reason": "..." }]`), which a view counts. `initialize`
 // declares `blocked-by` and `covers`, a link to a feature (`"to": "10#F1"`), each with the label of its other end.
 //
 // The data folder (`COLLIDE_PACK_DATA`) is the test's way in and out:
@@ -77,6 +78,7 @@ const read = (checkout, file) => {
     if (data.collections) task.collections = data.collections
     if (data.links) task.links = data.links
     if (data.features) task.features = data.features
+    if (data.partProblems) task.partProblems = data.partProblems
     return { task, file }
   } catch (error) {
     return { invalid: { path, checkout, reason: `not JSON: ${error.message}` } }

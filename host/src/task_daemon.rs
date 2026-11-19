@@ -336,6 +336,13 @@ fn tasks(
     if let Some(line) = errors_line(report) {
         let _ = writeln!(err, "collide: {line}");
     }
+    if report.part_problems > 0 {
+        let _ = writeln!(
+            err,
+            "collide: view `{}` has {} problem(s) in the parts of its items",
+            report.name, report.part_problems
+        );
+    }
     Ok(exit::OK)
 }
 

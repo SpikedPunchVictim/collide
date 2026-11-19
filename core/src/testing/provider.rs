@@ -117,6 +117,8 @@ pub fn fake_task(id: &str, title: &str, status: &str, category: Category) -> Tas
         findings: Vec::new(),
         part_problems: Vec::new(),
         coverage: None,
+        claims: Vec::new(),
+        preregistration: None,
     }
 }
 

@@ -37,6 +37,10 @@ export interface TaskViewsResult {
 export interface ViewEntry {
   error?: string | null
   error_count: number
+  /**
+   * The problems in the parts of the members, as `ViewReport.part_problems` counts them. Left out when none.
+   */
+  problem_count?: number
   source: ViewSource
   task_count: number
   view: View

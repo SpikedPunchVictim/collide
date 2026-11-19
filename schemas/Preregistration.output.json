@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A spike's Pre-registration part (0.10, \"A `spike`\"): the text of each of its four labels, as written, and left out\nwhen the label is missing. `amendments` counts the `### Amendment` sections below the original text. `hashMatches`\nis present only when the frontmatter has `preregistered`: whether it is the hash of the original text.",
+  "properties": {
+    "amendments": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "budget": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cheapestTest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hashMatches": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "hypothesis": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "killCriterion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "amendments"
+  ],
+  "title": "Preregistration",
+  "type": "object"
+}

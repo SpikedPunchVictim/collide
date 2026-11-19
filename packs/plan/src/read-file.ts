@@ -12,7 +12,10 @@ export const FRONTMATTER_CAP = 64 * 1024
 export const BODY_CAP = 256 * 1024
 
 /** How many aliases `yaml` expands before it refuses (its own default, kept explicit). */
-const MAX_ALIAS_COUNT = 100
+export const MAX_ALIAS_COUNT = 100
+
+/** The `yaml` options for everything the pack reads (S5): YAML 1.2 core, duplicate keys refused, no merge key. */
+export const YAML_OPTIONS = { version: '1.2', schema: 'core', uniqueKeys: true, merge: false } as const
 
 export type ReadResult =
   | { ok: true; frontmatter: Record<string, unknown>; body: string; bodyLine: number; version: string }
@@ -53,7 +56,7 @@ const isMapping = (value: unknown): value is Record<string, unknown> => typeof v
  */
 export function parseFrontmatter(text: string): { ok: true; value: Record<string, unknown> } | { ok: false; reason: string } {
   try {
-    const doc = parseDocument(text, { version: '1.2', schema: 'core', uniqueKeys: true, merge: false })
+    const doc = parseDocument(text, YAML_OPTIONS)
     const problem = doc.errors[0] ?? doc.warnings[0]
     if (problem) return { ok: false, reason: `frontmatter is not valid YAML: ${problem.message.split('\n')[0]}` }
     const value: unknown = doc.toJS({ maxAliasCount: MAX_ALIAS_COUNT })

@@ -3,7 +3,7 @@
 //! a process.
 
 use collide_core::corpus::{CheckoutInfo, CheckoutKind, Corpus};
-use collide_core::item::{Category, StatusDecl};
+use collide_core::item::{Category, PartProblem, StatusDecl};
 use collide_core::owner::task::ViewReport;
 use collide_core::provider::{Collection, InitializeResult, ListResult, Scope, Task, TaskInvalid};
 use collide_core::testing::{default_initialize, fake_task};
@@ -989,6 +989,97 @@ fn the_report_of_a_result_carries_its_members_steps_and_counts() {
     assert_eq!(report.unmatched_include, ["plan:nope"]);
     assert_eq!(report.invalid_items, 1);
     assert!(!report.pass_budget_exhausted);
+}
+
+// --- part problems ---
+
+/// A spike with `lines` problems in its parts, one at each of the lines.
+fn spike_with_problems(short: &str, lines: &[u32]) -> Task {
+    let mut spike = task(short, "ready");
+    spike.kind = Some("spike".into());
+    spike.part_problems = lines
+        .iter()
+        .map(|line| PartProblem {
+            part: "claims".into(),
+            line: *line,
+            reason: format!("a problem on line {line}"),
+        })
+        .collect();
+    spike
+}
+
+#[test]
+fn a_view_over_spikes_with_problems_counts_each_problem_entry_of_its_members() {
+    let corpus = board(vec![
+        spike_with_problems("S1", &[12, 17]),
+        spike_with_problems("S2", &[9]),
+        spike_with_problems("S3", &[]),
+        spike_with_problems("S4", &[3, 4, 5]),
+    ]);
+    let result = run("name: v\ninclude: [plan:S1, plan:S2, plan:S3]", &corpus);
+    assert_eq!(result.members, keys(&["S1", "S2", "S3"]));
+    assert_eq!(
+        result.counts.part_problems, 3,
+        "two bad blocks in one record count two"
+    );
+    assert_eq!(view_report("v", &result).part_problems, 3);
+}
+
+#[test]
+fn problems_of_a_task_the_view_does_not_hold_are_not_counted() {
+    let corpus = board(vec![
+        spike_with_problems("S1", &[1, 2]),
+        spike_with_problems("S2", &[1]),
+    ]);
+    let result = run("name: v\ninclude: [plan:S2]", &corpus);
+    assert_eq!(result.counts.part_problems, 1);
+    let excluded = run(
+        "name: v\ninclude: [plan:S1, plan:S2]\nexclude: [plan:S1]",
+        &corpus,
+    );
+    assert_eq!(excluded.counts.part_problems, 1);
+}
+
+#[test]
+fn a_view_over_spikes_with_no_problem_adds_nothing_to_its_report() {
+    let corpus = board(vec![
+        spike_with_problems("S1", &[]),
+        spike_with_problems("S2", &[]),
+        spike_with_problems("S3", &[7]),
+    ]);
+    let result = run("name: v\ninclude: [plan:S1, plan:S2]", &corpus);
+    assert_eq!(result.counts.part_problems, 0);
+    let written = serde_json::to_value(view_report("v", &result)).unwrap();
+    assert!(written.get("part_problems").is_none(), "{written}");
+    let counted = serde_json::to_value(view_report("w", &run("name: w\nwhere: \"true\"", &corpus)));
+    assert_eq!(counted.unwrap()["part_problems"], 1);
+}
+
+#[test]
+fn a_member_held_at_two_paths_counts_its_problems_once() {
+    let mut corpus = Corpus::default();
+    corpus.set_checkouts(vec![
+        CheckoutInfo {
+            path: "/repo".into(),
+            kind: CheckoutKind::Line { default: true },
+        },
+        CheckoutInfo {
+            path: "/repo-line".into(),
+            kind: CheckoutKind::Line { default: false },
+        },
+    ]);
+    corpus.declare_source("plan", &init(Scope::Ref));
+    for (checkout, path) in [("/repo", "arch/a.md"), ("/repo-line", "arch/b.md")] {
+        let mut copy = spike_with_problems("S1", &[4, 8]);
+        copy.path = Some(path.into());
+        corpus
+            .load("plan", Some(checkout), listed(vec![copy], Vec::new()))
+            .unwrap();
+    }
+    assert_eq!(corpus.rows().len(), 2);
+    let result = run("name: v\ninclude: [plan:S1]", &corpus);
+    assert_eq!(result.members, keys(&["S1"]));
+    assert_eq!(result.counts.part_problems, 2);
 }
 
 #[test]

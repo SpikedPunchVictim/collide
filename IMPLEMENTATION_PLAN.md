@@ -2100,6 +2100,10 @@ Collide plays the lead, so it does all four, through the pack.
   - on a proposal (revision 18), `decisions`, `assumptions` and `findings`, read from those parts of the body (0.10),
     with `partProblems` for the lines that did not parse, and `coverage`, derived: its features that no task implements
     and its included tasks that implement none, left out for a proposal with no features and no includes (`ts-0133-kg`);
+  - on a spike (revision 18), `claims`, one for each fenced `claim` block with no problem (`id`, `label`, `loadBearing`
+    and `verifiable`, never the prose), and `preregistration`, the four texts of its Pre-registration part with
+    `amendments` and, when frontmatter has `preregistered`, `hashMatches` (0.10). Their problems are in `partProblems`,
+    under the parts `claims` and `Pre-registration`. Each key is left out when the record has none (`ts-0134-ch`);
   - `version`, required.
 
   See 0.10.
@@ -2591,17 +2595,25 @@ layout: { default: board, groupBy: category }
       mistake, not an agent that means to get around it. The phase-end check hashes the planning files that hold a
       `status:` or `by:` line before and after the phase and compares the lines that changed, so an edit that bypasses
       the CLI is caught as well.
-    - **A `spike`** (R5) is a folder with a `record.md` at the top level of the shared root. Its statuses, as
-      the records in `.collide/planning/spikes/` use them: `planned` (`ready`); `running` (`active`) while its scripts
-      run; `results` (`review`), when the results are in and the conclusions are not yet written down; `concluded`
-      (`done`), when the record's conclusions are written; and `dropped` (`dropped`). The records in this repo use
-      `results` and `concluded`; the others are for the spike workflow of Stage 9. A spike links to the
-      epics it informs. The slice reads a spike as an item of kind `spike` only from Stage 4c; until then it reads
-      only `epics/` (below).
-      A spike's pre-registration (revision 18) is a `## Pre-registration` part of its record, with the labels
-      `Hypothesis:`, `Cheapest test:`, `Kill criterion:` (the result that would end the idea, written before any
-      run) and `Budget:`. Approving it writes `preregistered:` with the part's hash. A later change to the part is
-      an amendment kept below the original, and the view shows that the hash no longer matches.
+    - **A `spike`** (R5) is a folder with a `record.md` at the top level of the shared root. Its statuses, as the
+      records in `.collide/planning/spikes/` use them: `planned` (`ready`); `running` (`active`) while its scripts run;
+      `results` (`review`), when the results are in and the conclusions are not yet written down; `concluded` (`done`),
+      when the record's conclusions are written; and `dropped` (`dropped`). The records in this repo use `results` and
+      `concluded`; the others are for the spike workflow of Stage 9. A spike links to the epics it informs. The slice
+      reads a spike as an item of kind `spike` only from Stage 4c; until then it reads only `epics/` (below). A spike's
+      pre-registration (revision 18) is a `## Pre-registration` part of its record, with the labels `Hypothesis:`,
+      `Cheapest test:`, `Kill criterion:` (the result that would end the idea, written before any run) and `Budget:`.
+      Approving it writes `preregistered:` with the part's hash. A later change to the part is an amendment kept below
+      the original under `### Amendment <date>`. The hash is the first 16 lowercase hex characters of the SHA-256 of the
+      original text (the heading to its last line that is not blank before the first amendment or the next `##`, joined
+      by LF), so an amendment keeps it and an edit of the original shows in the view as a hash that no longer matches. A
+      missing label, or an empty `Kill criterion:`, is a problem. A spike's claims are fenced blocks whose info string
+      is `claim`, read as YAML the way frontmatter is (S5), each at most 8 KiB: `id` (`Q<n>.c<n>`), `label` (`measured`,
+      `inferred` or `unmeasured`) and `says`, with the optional `value`, `unit`, `tolerance`, `repro`, `output`,
+      `cost_usd`, `verifiable` (`yes` or `no`) and `load_bearing`. Fences match by length, so a block shown inside a
+      longer fence is text. Each fault of a block (an unknown key, a bad or repeated id, a bad label, a YAML error, a
+      block over the cap or with no closing fence) is one problem, and a block with any is not a claim; the record stays
+      an item (`ts-0134-ch`).
     - There are no decision or deferred files. The planning view's "Decisions made" lists the Decision sections of
       accepted proposals and resolved questions. A team system keeps its own decision kind through the role mapping;
   - **ids** (owner, 2026-11-13): a kind prefix, a number and a two-letter suffix, as in `ts-0012-ua`. Epics use
@@ -4536,7 +4548,9 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   - over the Orchard repo, the Decisions needed view lists the same question ids as the human queue in
     `plan status --format json`;
   - an ADR's `evidence` link shows from the spike's side as "evidence for";
-  - a malformed claim block is a counted parse error on the view;
+  - a malformed claim block is a counted parse error on the view: the view's report counts its members' problem entries
+    in `part_problems` and each entry's `problem_count`, both left out at 0, and `collide tasks --view` prints the count
+    on stderr and exits 0 (`ts-0134-ch`);
   - two branches that each create ten items in the shared root merge with no id collision;
   - a private-root item never appears in `git status`;
   - `collide task reid` on a colliding item rewrites the links that name it, and a repeated suffix draw is redrawn

@@ -110,6 +110,10 @@ pub struct ViewReport {
     /// The board's invalid items, which no view can match.
     #[serde(default)]
     pub invalid_items: u32,
+    /// The problems in the quality parts, claim blocks and Pre-registration of the members (`Task.part_problems`), one
+    /// for each problem entry. Left out when there are none. A member that is two files counts once.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub part_problems: u32,
     #[serde(default)]
     pub steps: Vec<Vec<String>>,
     #[serde(default)]
@@ -249,8 +253,15 @@ pub struct ViewEntry {
     pub source: ViewSource,
     pub task_count: u32,
     pub error_count: u32,
+    /// The problems in the parts of the members, as `ViewReport.part_problems` counts them. Left out when none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub problem_count: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 /// `task.views` params.

@@ -135,6 +135,8 @@ fn task_of(
         findings: Vec::new(),
         part_problems: Vec::new(),
         coverage: None,
+        claims: Vec::new(),
+        preregistration: None,
     })
 }
 

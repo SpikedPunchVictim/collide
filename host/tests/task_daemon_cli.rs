@@ -632,6 +632,97 @@ fn ready_and_kind_apply_on_top_of_a_view() {
     assert_eq!(first_words(&out), expected);
 }
 
+const SPIKE_VIEWS: [(&str, &str); 2] = [
+    (
+        ".collide/views/spikes.yaml",
+        "name: spikes\ninclude: [plan:sp-0001-aa]\n",
+    ),
+    (
+        ".collide/views/clean-spikes.yaml",
+        "name: clean-spikes\ninclude: [plan:sp-0002-bb]\n",
+    ),
+];
+
+/// A spike record with `body` below its frontmatter.
+fn spike_text(id: &str, body: &str) -> String {
+    format!(
+        "---\nid: {id}\nkind: spike\nstatus: results\ntitle: \"Made-up spike\"\nowners: []\nlinks: []\n---\n\n{body}"
+    )
+}
+
+/// A rig with two spikes: `sp-0001-aa` has two claim blocks that are not right, `sp-0002-bb` has one that is.
+fn spike_rig() -> Rig {
+    let bad = "# Spike\n\n```claim\nlabel: measured\nsays: no id\n```\n\n\
+               ```claim\nid: Q1.c2\nlabel: guessed\nsays: a bad label\n```\n";
+    let good = "# Spike\n\n```claim\nid: Q1.c1\nlabel: measured\nsays: fine\n```\n";
+    let mut files = vec![
+        (
+            ".collide/planning/spikes/sp-0001-aa-bad/record.md",
+            spike_text("sp-0001-aa", bad),
+        ),
+        (
+            ".collide/planning/spikes/sp-0002-bb-good/record.md",
+            spike_text("sp-0002-bb", good),
+        ),
+    ];
+    files.extend(
+        SPIKE_VIEWS
+            .iter()
+            .map(|(path, text)| (*path, (*text).to_string())),
+    );
+    Rig::with_files(&files)
+}
+
+#[test]
+fn a_view_over_spikes_prints_the_count_of_part_problems_on_standard_error_and_exits_0() {
+    let rig = spike_rig();
+
+    let (code, out, err) = rig.cli(&["tasks", "--view", "spikes"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(first_words(&out), ["plan:sp-0001-aa"]);
+    assert_eq!(
+        err,
+        "collide: view `spikes` has 2 problem(s) in the parts of its items\n"
+    );
+}
+
+#[test]
+fn a_view_over_spikes_with_no_problem_says_nothing_and_json_carries_the_count() {
+    let rig = spike_rig();
+
+    let (code, out, err) = rig.cli(&["tasks", "--view", "clean-spikes"]);
+
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+    assert_eq!(first_words(&out), ["plan:sp-0002-bb"]);
+    let (code, out, err) = rig.cli(&["tasks", "--view", "spikes", "--json"]);
+    assert_eq!(code, exit::OK);
+    assert_eq!(json(&out)["view"]["part_problems"], 2);
+    assert!(err.contains("2 problem(s) in the parts"), "{err}");
+}
+
+#[test]
+fn json_of_a_spike_carries_its_claims_and_the_problems_of_its_claim_blocks() {
+    let rig = spike_rig();
+
+    let bad = json(&rig.cli(&["task", "sp-0001-aa", "--json"]).1);
+    let good = json(&rig.cli(&["task", "sp-0002-bb", "--json"]).1);
+
+    assert_eq!(bad["task"]["state"]["status"], "results");
+    let problems = bad["task"]["partProblems"].as_array().unwrap();
+    let lines: Vec<u64> = problems
+        .iter()
+        .map(|p| p["line"].as_u64().unwrap())
+        .collect();
+    assert_eq!(lines, [12, 17]);
+    assert!(bad["task"].get("claims").is_none(), "{bad}");
+    assert_eq!(
+        good["task"]["claims"],
+        json!([{ "id": "Q1.c1", "label": "measured", "loadBearing": false }])
+    );
+    assert!(good["task"].get("partProblems").is_none(), "{good}");
+}
+
 #[test]
 fn a_view_with_an_error_prints_the_error_and_no_member_and_exits_10() {
     let rig = Rig::new();

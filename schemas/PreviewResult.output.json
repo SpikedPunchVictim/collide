@@ -133,6 +133,33 @@
       ],
       "type": "string"
     },
+    "Claim": {
+      "additionalProperties": false,
+      "description": "One claim of a spike's record, read from a fenced `claim` block (0.10, \"A `spike`\"). `label` is `measured`,\n`inferred` or `unmeasured`. `verifiable` is the block's `yes` or `no`, and is left out when the block has none. Only\na block with no problem is a claim; the prose is never compared.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "loadBearing": {
+          "type": "boolean"
+        },
+        "verifiable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "loadBearing"
+      ],
+      "type": "object"
+    },
     "Coverage": {
       "additionalProperties": false,
       "description": "What a proposal's features and tasks cover, derived and never written (0.10, \"A proposal's quality parts\").\n`featuresWithoutTask` are the `F<n>` that no task implements. `tasksWithoutFeature` are the ids of the tasks the\nproposal includes, not dropped, that implement no feature.",
@@ -455,6 +482,51 @@
       ],
       "type": "object"
     },
+    "Preregistration": {
+      "additionalProperties": false,
+      "description": "A spike's Pre-registration part (0.10, \"A `spike`\"): the text of each of its four labels, as written, and left out\nwhen the label is missing. `amendments` counts the `### Amendment` sections below the original text. `hashMatches`\nis present only when the frontmatter has `preregistered`: whether it is the hash of the original text.",
+      "properties": {
+        "amendments": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "budget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cheapestTest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hashMatches": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hypothesis": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "killCriterion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "amendments"
+      ],
+      "type": "object"
+    },
     "Task": {
       "additionalProperties": false,
       "description": "One task as a provider reports it. `key` is `source:shortId`; `id` is the long form that `get` and `apply`\ntake. `checkout` and `path` are set by a ref-scoped source. `kind` may be left out when the provider has one.",
@@ -494,6 +566,13 @@
             "string",
             "null"
           ]
+        },
+        "claims": {
+          "description": "A spike's claims, read from the fenced `claim` blocks of its record (0.10). Left out when there are none.",
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
         },
         "collections": {
           "default": [],
@@ -591,6 +670,17 @@
             "string",
             "null"
           ]
+        },
+        "preregistration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Preregistration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A spike's Pre-registration part (0.10). Left out when its record has none."
         },
         "state": {
           "$ref": "#/$defs/ItemState"
