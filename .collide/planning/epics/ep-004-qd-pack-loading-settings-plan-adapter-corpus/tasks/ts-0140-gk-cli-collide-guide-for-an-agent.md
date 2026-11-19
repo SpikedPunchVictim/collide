@@ -1,7 +1,7 @@
 ---
 id: ts-0140-gk
 kind: task
-status: ready
+status: done
 title: "CLI: collide guide, for an agent in your own terminal"
 owners: []
 links:
