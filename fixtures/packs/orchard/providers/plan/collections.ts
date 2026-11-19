@@ -18,9 +18,10 @@ export interface Listed {
 const keyOf = (shortId: string): string => `plan:${shortId}`
 
 /**
- * Each epic file as a collection, in epic id order, and for each task the epics that hold it. A task is in an epic when
- * its own `epic:` says so or when the epic's tables name it, and only an epic that has a file counts. An epic file that
- * cannot be read, or has the id of one already read, is logged and skipped.
+ * Each epic file as a collection, in epic id order, and for each task the epics that hold it. A task is in an epic only
+ * when its own `epic:` says so, and only an epic that has a file counts. The epic's tables give its groups and their
+ * order; a task they name is not in the epic for that. An epic file that cannot be read, or has the id of one already
+ * read, is logged and skipped.
  */
 export async function readCollections(
   root: string,
@@ -57,9 +58,7 @@ export async function readCollections(
 
     const tables = readEpicTables(file.body)
     const id = keyOf(shortId)
-    const members = new Set(tables.members.map(keyOf))
-    for (const { task, epic } of listed) if (epic === shortId) members.add(task.key)
-    for (const { task } of listed) if (members.has(task.key)) hold(task.key, id)
+    for (const { task, epic } of listed) if (epic === shortId) hold(task.key, id)
     collections.push({
       id,
       title,

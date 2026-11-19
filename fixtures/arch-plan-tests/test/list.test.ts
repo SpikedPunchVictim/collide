@@ -126,30 +126,41 @@ describe('collections', () => {
     ])
   })
 
-  test('plan:E-07 is on exactly the tasks the epic tables list', async () => {
+  test('plan:E-07 is on exactly the tasks whose epic: names it, not those another table names', async () => {
     const result = await listAll(ROOT)
     const tasks = result.tasks as Array<Record<string, any>>
     const inEpic = (epic: string) => tasks.filter((task) => task.collections.includes(epic)).map((task) => task.key)
-    expect(inEpic('plan:E-07')).toEqual([
-      'plan:T-03-001', 'plan:T-03-002', 'plan:T-03-003', 'plan:T-03-005', 'plan:T-05-003',
-    ])
+    expect(inEpic('plan:E-07')).toEqual(['plan:T-03-001', 'plan:T-03-002', 'plan:T-03-003', 'plan:T-03-005'])
     expect(inEpic('plan:E-08')).toEqual(['plan:T-03-004', 'plan:T-05-001', 'plan:T-05-002', 'plan:T-05-003'])
   })
 
-  test('a task carries each epic that names it, in epic order, and no slice or stream', async () => {
+  test('a task carries the one epic its epic: names, and no slice or stream', async () => {
     const result = await listAll(ROOT)
     expect(taskOf(result, 'T-03-002').collections).toEqual(['plan:E-07'])
-    expect(taskOf(result, 'T-05-003').collections).toEqual(['plan:E-07', 'plan:E-08'])
+    expect(taskOf(result, 'T-05-003').collections).toEqual(['plan:E-08'])
     expect(taskOf(result, 'T-05-002').collections).toEqual(['plan:E-08'])
   })
 
-  test('a gaps table, prose and a code fence name tasks but join no group', async () => {
+  test('a task that a table of another epic names stays out of that epic, its group lists it', async () => {
+    const root = copyTree('basic')
+    const epic = join(root, 'arch/work/epics/E-08-signal-lamps.md')
+    const streams = '\n## Streams\n\n| Stream | Tasks |\n|---|---|\n| **Borrowed** | T-03-001 |\n'
+    writeFileSync(epic, `${readFileSync(epic, 'utf8')}${streams}`)
+    const result = await listAll(root)
+    expect(taskOf(result, 'T-03-001').collections).toEqual(['plan:E-07'])
+    const lamps = (result.collections as Array<Record<string, any>>).find((c) => c.id === 'plan:E-08')
+    expect(lamps?.groups).toEqual([{ name: 'Borrowed', tasks: ['plan:T-03-001'] }])
+  })
+
+  test('a task whose epic: is bare (E-08) or has the slug (E-08-signal-lamps) belongs to that epic', async () => {
     const result = await listAll(ROOT)
+    expect(taskOf(result, 'T-03-004').fields.epic).toBe('E-08')
     expect(taskOf(result, 'T-03-004').collections).toEqual(['plan:E-08'])
+    expect(taskOf(result, 'T-05-001').fields.epic).toBe('E-08')
     expect(taskOf(result, 'T-05-001').collections).toEqual(['plan:E-08'])
   })
 
-  test('a task whose epic: names the epic belongs to it even when the generated table does not list it', async () => {
+  test('a task whose epic: names the epic belongs to it even when no table of the epic file lists it', async () => {
     const root = copyTree('basic')
     const epic = join(root, 'arch/work/epics/E-07-harbor-plan.md')
     writeFileSync(epic, readFileSync(epic, 'utf8').replace(/^\| \[T-03-005\].*\n/m, ''))

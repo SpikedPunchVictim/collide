@@ -7,8 +7,6 @@ export interface EpicGroup {
 }
 
 export interface EpicTables {
-  /** Every task id the epic's tables name, in the order they appear: the generated list, the slices and the streams. */
-  members: string[]
   groups: EpicGroup[]
 }
 
@@ -37,13 +35,12 @@ function dataRows(block: string[]): string[][] {
 type Section = 'slice' | 'streams' | 'other'
 
 /**
- * Reads an epic file's body for its tasks. Three things count: the generated list of tasks (the first column of its
- * rows), each table under a `Slice N` heading (one group per slice, from the second column), and each row of the
- * table under a heading that says "streams" (one group per row, from the second column). A table under any other
- * heading, a line in a code fence and prose name tasks without joining a group or the epic.
+ * Reads an epic file's body for its groups. Two things count: each table under a `Slice N` heading (one group per
+ * slice, from the second column) and each row of the table under a heading that says "streams" (one group per row,
+ * from the second column). The generated list of tasks, a table under any other heading, a line in a code fence and
+ * prose give no group. Which tasks are in the epic is not read here: that is each task's own `epic:`.
  */
 export function readEpicTables(body: string): EpicTables {
-  const members: string[] = []
   const groups: EpicGroup[] = []
   let section: Section = 'other'
   let sliceGroup: EpicGroup | null = null
@@ -55,16 +52,14 @@ export function readEpicTables(body: string): EpicTables {
     if (table.length === 0) return
     const rows = dataRows(table)
     table = []
-    if (inGenerated) {
-      for (const row of rows) members.push(...idsIn(row[0] ?? ''))
-    } else if (section === 'slice' && sliceGroup !== null) {
+    if (inGenerated) return
+    if (section === 'slice' && sliceGroup !== null) {
       for (const row of rows) sliceGroup.shortIds.push(...idsIn(row[1] ?? ''))
     } else if (section === 'streams') {
       for (const row of rows) {
         const name = (row[0] ?? '').replace(/\*\*/g, '').trim()
         const shortIds = once(idsIn(row[1] ?? ''))
         if (name !== '') groups.push({ name, shortIds })
-        members.push(...shortIds)
       }
     }
   }
@@ -106,7 +101,5 @@ export function readEpicTables(body: string): EpicTables {
   endTable()
 
   for (const group of groups) group.shortIds = once(group.shortIds)
-  // Slice tables name tasks for the slice; the epic holds them too.
-  for (const group of groups) members.push(...group.shortIds)
-  return { members: once(members), groups }
+  return { groups }
 }

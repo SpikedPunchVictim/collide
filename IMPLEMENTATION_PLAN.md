@@ -2377,7 +2377,9 @@ Why the plan adapter parses files itself:
 
 **Collections.**
 - Sources expose their own groupings as collections, each with ordered groups:
-  - orchard epics, with the slices and streams from the epic file's tables (as the prototype board reads them);
+  - orchard epics, with the slices and streams from the epic file's tables (as the prototype board reads them). A task
+    is in an epic when its own `epic:` names it: a task that only a table names is not a member, though that table's
+    group still lists it (`ts-0148-cv`);
   - GitHub milestones and Projects.
 - Every task carries `collections: [...]`. That is how a view reaches membership that is not a task field.
 
