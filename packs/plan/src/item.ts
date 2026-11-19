@@ -58,15 +58,15 @@ export const SUPERSEDES = 'supersedes'
  * it builds, so its target is `feature` (revision 14); the others name an item, which is what a declaration with no
  * `target` means. `informs` is a link to what a spike informs, `includes` is a proposal's link to the tasks, spikes and
  * questions it holds, and `supersedes` is a proposal's link to the proposal it replaces, or a spike's to a spike. None
- * of the three blocks anything.
+ * of the three blocks anything. `inverse` is what the other end calls the link, which Collide shows from there.
  */
 export const LINK_TYPES: ReadonlyArray<LinkTypeDeclInput> = [
-  { name: BLOCKED_BY, dir: 'out', blocking: true },
-  { name: 'part-of', dir: 'out', blocking: false },
-  { name: IMPLEMENTS, dir: 'out', blocking: false, target: 'feature' },
-  { name: INFORMS, dir: 'out', blocking: false },
-  { name: INCLUDES, dir: 'out', blocking: false },
-  { name: SUPERSEDES, dir: 'out', blocking: false },
+  { name: BLOCKED_BY, dir: 'out', blocking: true, inverse: 'blocks' },
+  { name: 'part-of', dir: 'out', blocking: false, inverse: 'has part' },
+  { name: IMPLEMENTS, dir: 'out', blocking: false, target: 'feature', inverse: 'implemented by' },
+  { name: INFORMS, dir: 'out', blocking: false, inverse: 'informed by' },
+  { name: INCLUDES, dir: 'out', blocking: false, inverse: 'included in' },
+  { name: SUPERSEDES, dir: 'out', blocking: false, inverse: 'superseded by' },
 ]
 
 /** What a link of `type` points at: a feature when the type is declared so, otherwise an item. */

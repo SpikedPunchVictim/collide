@@ -134,6 +134,7 @@ fn task_of(
         assumptions: Vec::new(),
         findings: Vec::new(),
         part_problems: Vec::new(),
+        coverage: None,
     })
 }
 

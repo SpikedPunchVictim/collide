@@ -19,13 +19,19 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no\n`target` targets an item, so every declaration written before revision 14 reads as it did.",
+  "description": "A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no\n`target` targets an item, so every declaration written before revision 14 reads as it did. `inverse` is what the\nother end calls the link (\"blocks\" for `blocked-by`); a declaration with none reads as it did.",
   "properties": {
     "blocking": {
       "type": "boolean"
     },
     "dir": {
       "$ref": "#/$defs/LinkDir"
+    },
+    "inverse": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "name": {
       "type": "string"

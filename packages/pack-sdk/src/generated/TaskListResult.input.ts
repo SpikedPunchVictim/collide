@@ -102,6 +102,10 @@ export interface Task {
   checkout?: string | null
   collections?: string[]
   /**
+   * What a proposal's features and included tasks cover, derived (0.10). Left out when it has neither.
+   */
+  coverage?: Coverage | null
+  /**
    * A proposal's Decision log (0.10). Left out when there are none.
    */
   decisions?: Decision[]
@@ -175,6 +179,15 @@ export interface ChecklistItem {
   id: string
   reason?: string | null
   state: ChecklistState
+}
+/**
+ * What a proposal's features and tasks cover, derived and never written (0.10, "A proposal's quality parts").
+ * `featuresWithoutTask` are the `F<n>` that no task implements. `tasksWithoutFeature` are the ids of the tasks the
+ * proposal includes, not dropped, that implement no feature.
+ */
+export interface Coverage {
+  featuresWithoutTask: string[]
+  tasksWithoutFeature: string[]
 }
 /**
  * One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is

@@ -12,11 +12,13 @@ export type LinkTarget = 'item' | 'feature'
 
 /**
  * A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no
- * `target` targets an item, so every declaration written before revision 14 reads as it did.
+ * `target` targets an item, so every declaration written before revision 14 reads as it did. `inverse` is what the
+ * other end calls the link ("blocks" for `blocked-by`); a declaration with none reads as it did.
  */
 export interface LinkTypeDecl {
   blocking: boolean
   dir: LinkDir
+  inverse?: string | null
   name: string
   target?: LinkTarget
 }

@@ -223,6 +223,61 @@ fn a_link_written_without_missing_reads_as_present() {
 }
 
 #[test]
+fn a_link_to_a_feature_names_it_and_a_link_to_an_item_leaves_the_key_out() {
+    let mut doc = workspace_input();
+    doc["tasks"][0]["links"][0] = json!({
+        "type": "implements",
+        "dir": "out",
+        "key": "plan:0003",
+        "kind": "proposal",
+        "status": "accepted",
+        "category": "done",
+        "stale": false,
+        "missing": false,
+        "feature": "F2"
+    });
+    let input: HookInput = round_trip(doc);
+    assert_eq!(input.tasks[0].links[0].feature.as_deref(), Some("F2"));
+    assert_eq!(input.tasks[0].links[1].feature, None);
+}
+
+#[test]
+fn a_link_written_before_the_feature_key_reads_with_none() {
+    let input: HookInput = serde_json::from_value(workspace_input()).unwrap();
+    assert!(
+        input.tasks[0]
+            .links
+            .iter()
+            .all(|link| link.feature.is_none())
+    );
+}
+
+#[test]
+fn the_link_feature_key_is_in_the_hook_input_schema_and_is_not_required() {
+    let files = schema::registry().render();
+    let schema: Value = serde_json::from_str(&files["HookInput.input.json"]).unwrap();
+    let link = &schema["$defs"]["HookLink"];
+    assert!(
+        link["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("feature")
+    );
+    let required: Vec<&str> = link["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|key| key.as_str().unwrap())
+        .collect();
+    assert!(!required.contains(&"feature"), "{required:?}");
+    assert!(
+        link["properties"]["feature"]["type"]
+            .to_string()
+            .contains("string")
+    );
+}
+
+#[test]
 fn a_tasks_entry_has_no_body() {
     let mut doc = workspace_input();
     doc["tasks"][0]["body"] = json!("the task text");

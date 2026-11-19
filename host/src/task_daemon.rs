@@ -500,6 +500,7 @@ fn empty_get() -> TaskGetResult {
         latest_run: None,
         links: Vec::new(),
         ops: Vec::new(),
+        link_types: Vec::new(),
     }
 }
 

@@ -1399,7 +1399,9 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     - Each `tasks[]` entry carries its links one hop out, in both directions, as `{type, dir, key, kind, status,
       category, stale, missing}`, resolved across sources. `missing` is true when the corpus holds no task the link
       names, or a bare id names more than one; `kind` and `status` are then empty and `category` is `backlog`, so a gate
-      can refuse it (owner, 2026-11-17; `ts-0115-ug`). It still carries fields and paths, never bodies.
+      can refuse it (owner, 2026-11-17; `ts-0115-ug`). A link whose type targets a feature (`pr-0003-km#F2`) also
+      carries `feature` (`F2`): `key` and the state are the proposal's, and on the holder's side `missing` is also true
+      when the proposal has no such feature (`ts-0133-kg`). It still carries fields and paths, never bodies.
     - Outside a run, `latestRun` as before: the item's latest finished run, read-only.
   - Point bindings take `timeout:`. The default is 30 s for task points and 120 s for move points, which may scan
     files. A timeout is `error`.
@@ -2095,9 +2097,9 @@ Collide plays the lead, so it does all four, through the pack.
   - on a proposal, `features` (revision 14): each feature's `F<n>` id, title, section (empty when unsorted) and
     summary, read from the body's Features part, and `featureProblems`: each line of that part that did not parse,
     with its reason (0.10). A link's `to` may name a feature, as `pr-0003-km#F2`;
-  - on a proposal (revision 18), `decisions`, `assumptions` and `findings`, read from those parts of the body
-    (0.10), with `partProblems` for the lines that did not parse, and `coverage`, derived: its features that no
-    task implements and its included tasks that implement none;
+  - on a proposal (revision 18), `decisions`, `assumptions` and `findings`, read from those parts of the body (0.10),
+    with `partProblems` for the lines that did not parse, and `coverage`, derived: its features that no task implements
+    and its included tasks that implement none, left out for a proposal with no features and no includes (`ts-0133-kg`);
   - `version`, required.
 
   See 0.10.
@@ -2565,14 +2567,17 @@ layout: { default: board, groupBy: category }
         `D<n>` or `A<n>` of this proposal; then either `Accepted:`, with the change it made to the plan, or
         `Dismissed:`, with the reason. A finding with neither is open;
       - **coverage** is derived, never written: the proposal's features that no task implements, and the tasks the
-        proposal includes that implement no feature. Both break the link a feature's derived state needs, so a
-        feature with no task never shows progress.
+        proposal includes that implement no feature. Both break the link a feature's derived state needs, so a feature
+        with no task never shows progress. Only items of kind `task` count, and a dropped task neither covers a feature
+        nor is named (`ts-0133-kg`).
     - A question holds its own decision once it is resolved (`resolved_by: human:<date>`). Its statuses are `open`
       (`ready`), `resolved` (`done`) and `dropped` (`dropped`). `resolved_by` is `human:<date>` or the id of the item
       that settled it, required when `resolved` and refused otherwise; `needs` is `human`, `evidence` or `either`.
       `includes` (a proposal to the tasks, spikes and questions it holds), `supersedes` (a proposal to a proposal, a
       spike to a spike) and `raised-by` (a follow-up to the item whose run raised it, below; revision 24) block nothing.
-      A `reid` of a shared epic renames its folder in the private root too (`ts-0127-js`).
+      Each link type names its other end in `inverse` ("blocks", "has part", "implemented by", "informed by", "included
+      in", "superseded by"), and `task.get` returns the source's declarations as `link_types`, so a reader can name an
+      incoming link (`ts-0133-kg`). A `reid` of a shared epic renames its folder in the private root too (`ts-0127-js`).
     - Only a person accepts, defers, rejects or resolves. `collide/plan` refuses those ops from a run (`actor.kind:
       agent`), and refuses `accepted` while a question the proposal includes is open. An agent phase that writes a
       planning file's `status` or `by:` line itself fails at phase end, as an edit to checklist state does. **The actor

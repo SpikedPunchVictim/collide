@@ -374,6 +374,61 @@ fn an_evidence_kind_that_is_not_item_feature_or_path_is_refused() {
     refused::<Task>(bad);
 }
 
+/// A proposal with the coverage the provider derives.
+fn proposal_with_coverage() -> Value {
+    let mut doc = proposal();
+    doc["coverage"] = json!({
+        "featuresWithoutTask": ["F1", "F3"],
+        "tasksWithoutFeature": ["ts-0002-bb"]
+    });
+    doc
+}
+
+#[test]
+fn a_task_carries_coverage_and_it_round_trips() {
+    let parsed: Task = round_trip(proposal_with_coverage());
+    let coverage = parsed.coverage.unwrap();
+    assert_eq!(coverage.features_without_task, ["F1", "F3"]);
+    assert_eq!(coverage.tasks_without_feature, ["ts-0002-bb"]);
+}
+
+#[test]
+fn a_task_with_no_coverage_serializes_no_key_and_one_written_before_reads_none() {
+    let parsed: Task = round_trip(proposal());
+    assert!(parsed.coverage.is_none());
+    assert!(
+        serde_json::to_value(&parsed)
+            .unwrap()
+            .get("coverage")
+            .is_none()
+    );
+}
+
+#[test]
+fn coverage_with_two_empty_lists_is_kept_and_a_missing_or_extra_key_is_refused() {
+    let mut empty = proposal();
+    empty["coverage"] = json!({ "featuresWithoutTask": [], "tasksWithoutFeature": [] });
+    assert!(round_trip::<Task>(empty).coverage.is_some());
+    for key in ["featuresWithoutTask", "tasksWithoutFeature"] {
+        let mut missing = proposal_with_coverage();
+        missing["coverage"].as_object_mut().unwrap().remove(key);
+        refused::<Task>(missing);
+    }
+    let mut extra = proposal_with_coverage();
+    extra["coverage"]["extra"] = json!(1);
+    refused::<Task>(extra);
+    let mut snake = proposal_with_coverage();
+    snake["coverage"] = json!({ "features_without_task": [], "tasks_without_feature": [] });
+    refused::<Task>(snake);
+}
+
+#[test]
+fn the_coverage_key_is_in_the_task_schema() {
+    assert!(keys_of("Task").contains("coverage"));
+    let names: BTreeSet<String> = schema::registry().render().into_keys().collect();
+    assert!(names.contains("Coverage.input.json") && names.contains("Coverage.output.json"));
+}
+
 #[test]
 fn watch_params_and_result_round_trip() {
     round_trip::<WatchParams>(json!({ "checkouts": ["main", "wt-1"] }));

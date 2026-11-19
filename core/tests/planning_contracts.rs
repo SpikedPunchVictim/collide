@@ -764,7 +764,7 @@ fn the_kind_link_owner_checklist_and_budget_keys_are_in_the_schema() {
     );
     assert_eq!(
         keys_of("LinkTypeDecl", None),
-        set(&["blocking", "dir", "name", "target"])
+        set(&["blocking", "dir", "inverse", "name", "target"])
     );
     assert_eq!(
         keys_of("PlanningFields", None),
@@ -912,10 +912,49 @@ fn a_feature_link_type_round_trips_with_its_target() {
 }
 
 #[test]
+fn a_link_type_may_say_what_the_other_end_calls_it_and_round_trips_with_it() {
+    let doc = link_type(json!({ "inverse": "implemented by" }));
+    let declared: LinkTypeDecl = serde_json::from_value(doc.clone()).unwrap();
+    assert_eq!(declared.inverse.as_deref(), Some("implemented by"));
+    assert_eq!(serde_json::to_value(&declared).unwrap(), doc);
+}
+
+#[test]
+fn a_link_type_written_before_the_inverse_reads_with_none_and_writes_without_it() {
+    let declared: LinkTypeDecl = serde_json::from_value(link_type(json!({}))).unwrap();
+    assert_eq!(declared.inverse, None);
+    assert!(
+        serde_json::to_value(&declared)
+            .unwrap()
+            .get("inverse")
+            .is_none()
+    );
+}
+
+#[test]
+fn the_link_inverse_key_is_in_the_schema_and_is_not_required() {
+    let text = &schema::registry().render()["LinkTypeDecl.input.json"];
+    let schema: Value = serde_json::from_str(text).unwrap();
+    assert!(
+        schema["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("inverse")
+    );
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|key| key.as_str().unwrap())
+        .collect();
+    assert!(!required.contains(&"inverse"), "{required:?}");
+}
+
+#[test]
 fn the_link_target_key_is_in_the_schema_and_is_not_required() {
     assert_eq!(
         keys_of("LinkTypeDecl", None),
-        set(&["blocking", "dir", "name", "target"])
+        set(&["blocking", "dir", "inverse", "name", "target"])
     );
     let text = &schema::registry().render()["LinkTypeDecl.input.json"];
     let schema: Value = serde_json::from_str(text).unwrap();

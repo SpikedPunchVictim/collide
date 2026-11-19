@@ -111,7 +111,7 @@ describe('initialize declares the spike kind', () => {
 
   test('the link type informs, outward and not blocking, and link and create take it', async () => {
     const init = await declared()
-    expect(init?.links).toContainEqual({ name: 'informs', dir: 'out', blocking: false })
+    expect(init?.links).toContainEqual({ name: 'informs', dir: 'out', blocking: false, inverse: 'informed by' })
     expect((init?.links as Row[]).filter((link) => link.blocking).map((link) => link.name)).toEqual(['blocked-by'])
     const ops = init?.ops as Row[]
     expect(ops.find((op) => op.name === 'link')?.args.properties.type).toEqual({

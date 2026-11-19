@@ -87,4 +87,69 @@ Write these first.
 - Stage 4c item (revision 23 scope, split 2026-11-18). Items of Stage 4c run one at a time, in id order, because they
   share `core`, `host`, `packs/plan` and the generated files.
 - Nothing here runs a real `claude`. No dependency is added.
-- Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+- Owner decisions (2026-11-18, at the build): the item's decisions as it recommends, and the builder's 1 to 5 as built,
+  on the owner's delegation. At review a dropped task no longer covers a feature (the builder had it count): the
+  Readiness checklist's "every feature has a task" means a task that will be built, so `isLiveTask` in `coverage.ts` now
+  gates both lists, and the test reads "a dropped task that implements a feature covers nothing". The builder's plan
+  text (decision 6) is applied to 0.5, 0.8 and 0.10, with that rule.
+
+### Built
+
+- `core/src/hook.rs`: `HookLink.feature` (optional, left out for an item link). `core/src/item.rs`:
+  `LinkTypeDecl.inverse` (optional) and `Coverage` (`featuresWithoutTask`, `tasksWithoutFeature`).
+  `core/src/provider.rs`: `Task.coverage`. `core/src/owner/task.rs`: `TaskGetResult.link_types` (left out when empty).
+  `core/src/schema.rs` registers `Coverage`. `pnpm gen` rewrote `schemas/` and `packages/pack-sdk/src/generated/`
+  (`Coverage.input/output` are new there; `LinkTypeDeclInput` takes `inverse`).
+- `core/src/corpus.rs`: `Reach` and `OutLink` read a link of a feature-type declaration as item plus feature.
+  `links_of` shows it out on the task and in on the proposal with the same `feature`. `key`, `kind`, `status` and
+  `category` are the proposal's. `missing` is set for the out side when the proposal is not held or has no such
+  feature (`has_feature`, on the shown copy). `reindex` indexes the item part, so a rename or a removal of either
+  side follows. `link_types_of` feeds `Corpus::get`, which fills `link_types` for one found task.
+- `packs/plan/src/coverage.ts` (new): `coverageOf`. `scan.ts` `toTask` fills `coverage` for a proposal. `item.ts`
+  `LINK_TYPES` carries the six inverses.
+- Cache: `Task` and `InitializeResult` are cached as JSON, and every new field is defaulted, so no migration.
+  Checked by `host/tests/corpus_store.rs`, which rewrites a cached row to the older shape and reads it back.
+- Tests. `core/tests/corpus.rs` (16 new, from `a_feature_link_resolves_to_its_proposal_and_names_the_feature` to
+  `a_task_get_that_found_nothing_carries_no_link_types`), `core/tests/hook_protocol.rs` (3),
+  `core/tests/planning_contracts.rs` (3 and the key pins), `core/tests/provider_protocol.rs` (4),
+  `core/tests/owner_protocol.rs` (3), `host/tests/schema_command.rs` (pins), `host/tests/corpus_store.rs` (4:
+  `a_task_cached_before_coverage_reads_back_with_none_and_is_not_dropped`,
+  `a_task_with_coverage_reads_back_as_it_was_put`,
+  `a_declaration_cached_before_the_inverse_reads_back_with_none_and_is_not_dropped`,
+  `a_declaration_with_an_inverse_reads_back_as_it_was_put`), `host/tests/daemon_corpus.rs` (2: feature links and
+  link types through `task.get`, and after a restart with the source unlistable; a feature added to a proposal),
+  `host/tests/daemon_plan_feature_links.rs` (3, through the built plan pack), `packs/plan/test/coverage.test.ts`
+  (15), `packs/plan/test/link-types.test.ts` (2). Four existing declaration tests in `packs/plan/test/` gained
+  `inverse`.
+- Seen red at runtime: 13 corpus tests with the old behaviour stubbed in; 14 of the 15 coverage tests (no
+  `coverage`); both link-types tests. Serde and schema tests were seen red by mutation, then reverted: dropping
+  `skip_serializing_if` on `feature`, `inverse`, `link_types` and `coverage` fails the key-absent tests in
+  `hook_protocol`, `planning_contracts`, `owner_protocol` and `provider_protocol`. Corpus mutations (`has_feature`
+  always true, `link_types_of` empty, feature links not skipped when unreadable) failed 4, 1 and 4 tests. Coverage
+  mutations (dropped task counted, non-task counted, a missing feature counted as implemented) each failed one test.
+  The daemon tests in `daemon_corpus.rs` and `daemon_plan_feature_links.rs` were written against the finished code and
+  not seen red.
+- App test doubles under `app/test/support/` need no change: `links` and `link_types` are optional on the wire and
+  `pnpm typecheck` passes.
+
+### Decisions for the owner
+
+1. **A feature link whose target is not a feature target** (no `#`, or a bad id) is `missing` with no `feature`, and
+   is not indexed. Alternative: treat it as an item link. Recommend as built: the type said it targets a feature.
+2. **`missing` is set for the out side only.** The proposal's in side lists a task that exists, so it is never
+   missing, even when the feature does not exist. Alternative: mark both. Recommend as built.
+3. **The shown copy of the proposal decides which features it has**, the same copy `task.get` shows. Alternative:
+   any checkout. Recommend as built.
+4. **`coverage` counts only tasks of kind `task`.** An included question, spike or epic is not named. Includes are
+   de-duplicated. A task implements a feature whether or not the proposal includes it. Alternative: count every kind.
+   Recommend as built: the item says tasks.
+5. **`link_types` is sent with `task.get` only for a found task.** `ambiguous` and not-found results carry none.
+6. **Plan text to propose**, 0.8, Task: `coverage` has the two lists above and is left out for a proposal with no
+   features and no includes. 0.5: a hook's link entry carries `feature` for a link to a feature. 0.10: the six
+   inverse labels of the plan pack.
+
+### Not done, by design
+
+- Any display of `inverse` or `coverage` in the CLI or the app: `ts-0136-rr` and Stage 6a.
+- Writing a feature link, or an op that adds an `implements` link to a feature: later items of Stage 4c.
+- A gate on coverage (for example "every feature has a done task"): Stage 8.

@@ -323,6 +323,58 @@ fn a_task_with_decisions_and_part_problems_reads_back_as_it_was_put() {
 }
 
 #[test]
+fn a_task_cached_before_coverage_reads_back_with_none_and_is_not_dropped() {
+    let root = TempRoot::new();
+    let store = store(&root);
+    store
+        .corpus_put_task(
+            "board-1",
+            "plan",
+            Some("/a"),
+            &task("plan:1", "draft", Some("/a"), None),
+        )
+        .unwrap();
+    // What the last release wrote: a proposal with features and quality parts, and no `coverage`.
+    let older = json!({
+        "key": "plan:1", "id": "1", "title": "title of plan:1", "kind": "proposal",
+        "state": { "status": "draft", "category": "active" }, "version": "v1", "checkout": "/a",
+        "features": [{ "id": "F1", "title": "A", "section": "", "summary": "b" }],
+        "decisions": [], "partProblems": [{ "part": "Decision", "line": 4, "reason": "stray" }]
+    });
+    let conn = Connection::open(store.db_path()).unwrap();
+    conn.execute(
+        "UPDATE corpus_tasks SET json = ?1 WHERE key = 'plan:1'",
+        [older.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let cache = store.corpus_cache("board-1").unwrap();
+    assert!(cache.dropped.is_empty(), "{:?}", cache.dropped);
+    let read = &cache.tasks[0].task;
+    assert_eq!(read.features.len(), 1);
+    assert!(read.coverage.is_none());
+}
+
+#[test]
+fn a_task_with_coverage_reads_back_as_it_was_put() {
+    let root = TempRoot::new();
+    let store = store(&root);
+    let mut doc = serde_json::to_value(task("plan:1", "draft", Some("/a"), None)).unwrap();
+    doc["coverage"] =
+        json!({ "featuresWithoutTask": ["F2"], "tasksWithoutFeature": ["ts-0002-bb"] });
+    let proposal: Task = serde_json::from_value(doc).unwrap();
+    store
+        .corpus_put_task("board-1", "plan", Some("/a"), &proposal)
+        .unwrap();
+
+    let cache = store.corpus_cache("board-1").unwrap();
+    assert_eq!(cache.tasks[0].task, proposal);
+    let coverage = cache.tasks[0].task.coverage.as_ref().unwrap();
+    assert_eq!(coverage.features_without_task, ["F2"]);
+}
+
+#[test]
 fn a_second_handle_on_the_same_folder_reads_what_the_first_wrote_before_it_closed() {
     let root = TempRoot::new();
     let first = store(&root);
@@ -363,6 +415,53 @@ fn a_sources_declaration_reads_back_and_a_newer_one_replaces_it() {
 
     assert_eq!(cache.sources, [("plan".to_string(), declared(Scope::Ref))]);
     assert!(cache.dropped.is_empty());
+}
+
+#[test]
+fn a_declaration_cached_before_the_inverse_reads_back_with_none_and_is_not_dropped() {
+    let root = TempRoot::new();
+    let store = store(&root);
+    store
+        .corpus_put_source("board-1", "plan", &declared(Scope::Ref))
+        .unwrap();
+    // What the last release wrote: link types with a direction, `blocking` and a target, and no `inverse`.
+    let mut older = serde_json::to_value(declared(Scope::Ref)).unwrap();
+    older["links"] = json!([
+        { "name": "blocked-by", "dir": "out", "blocking": true },
+        { "name": "implements", "dir": "out", "blocking": false, "target": "feature" }
+    ]);
+    let conn = Connection::open(store.db_path()).unwrap();
+    conn.execute(
+        "UPDATE corpus_sources SET json = ?1 WHERE source = 'plan'",
+        [older.to_string()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let cache = store.corpus_cache("board-1").unwrap();
+    assert!(cache.dropped.is_empty(), "{:?}", cache.dropped);
+    let links = &cache.sources[0].1.links;
+    assert_eq!(links.len(), 2);
+    assert!(links.iter().all(|decl| decl.inverse.is_none()));
+}
+
+#[test]
+fn a_declaration_with_an_inverse_reads_back_as_it_was_put() {
+    let root = TempRoot::new();
+    let store = store(&root);
+    let mut init = declared(Scope::Ref);
+    init.links = serde_json::from_value(json!([
+        { "name": "blocked-by", "dir": "out", "blocking": true, "inverse": "blocks" }
+    ]))
+    .unwrap();
+    store.corpus_put_source("board-1", "plan", &init).unwrap();
+
+    let cache = store.corpus_cache("board-1").unwrap();
+    assert_eq!(cache.sources, [("plan".to_string(), init)]);
+    assert_eq!(
+        cache.sources[0].1.links[0].inverse.as_deref(),
+        Some("blocks")
+    );
 }
 
 #[test]

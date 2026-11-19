@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What a proposal's features and tasks cover, derived and never written (0.10, \"A proposal's quality parts\").\n`featuresWithoutTask` are the `F<n>` that no task implements. `tasksWithoutFeature` are the ids of the tasks the\nproposal includes, not dropped, that implement no feature.",
+  "properties": {
+    "featuresWithoutTask": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tasksWithoutFeature": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "featuresWithoutTask",
+    "tasksWithoutFeature"
+  ],
+  "title": "Coverage",
+  "type": "object"
+}

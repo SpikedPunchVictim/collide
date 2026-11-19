@@ -305,7 +305,7 @@ fn schema_lists_kinds_op_effects_links_owners_checklist_and_budget() {
     );
     assert_eq!(
         keys(&types, "LinkTypeDecl"),
-        ["blocking", "dir", "name", "target"]
+        ["blocking", "dir", "inverse", "name", "target"]
     );
     assert_eq!(
         keys(&types, "PlanningFields"),
@@ -397,7 +397,7 @@ fn schema_lists_the_hook_input_result_and_report_line() {
     assert_eq!(
         keys(&types, "HookLink"),
         [
-            "category", "dir", "key", "kind", "missing", "stale", "status", "type"
+            "category", "dir", "feature", "key", "kind", "missing", "stale", "status", "type"
         ]
     );
     // `ReportLine` is one object per kind, so the listing shows the keys of all six together.

@@ -5,6 +5,7 @@ import { readAssumptions } from './assumptions.ts'
 import type { Assumption } from './assumptions.ts'
 import { readDecisions } from './decisions.ts'
 import type { Decision, ItemLookup } from './decisions.ts'
+import { coverageOf } from './coverage.ts'
 import { parseFeatures } from './features.ts'
 import { readFindings } from './findings.ts'
 import type { Finding } from './findings.ts'
@@ -220,19 +221,17 @@ function qualityPartsOf(found: FoundItem, featureIds: string[], items: readonly 
 /**
  * One item as the provider reports it. `body` is left out of `list`, which carries every item. A proposal also carries
  * its features and the problems of its Features part, and its Decision log, Assumption ledger and Findings with the
- * problems of those parts, which are read from the body whether or not it is sent. `items` is the scan, which says what
- * an evidence id or a spike names; a finding's `Target:` is read against the proposal's own features, decisions and
- * assumptions.
+ * problems of those parts, which are read from the body whether or not it is sent, and its `coverage`. `items` is the
+ * scan, which says what an evidence id or a spike names and which tasks implement its features; a finding's
+ * `Target:` is read against the proposal's own features, decisions and assumptions.
  */
 export function toTask(found: FoundItem, withBody: boolean, items: readonly FoundItem[]): TaskInput {
   const { item } = found
   const isProposal = item.kind === PROPOSAL
   const { features, problems } = isProposal ? parseFeatures(found.body, found.bodyLine) : { features: [], problems: [] }
-  const quality = qualityPartsOf(
-    found,
-    features.map((feature) => feature.id),
-    items,
-  )
+  const featureIds = features.map((feature) => feature.id)
+  const quality = qualityPartsOf(found, featureIds, items)
+  const coverage = coverageOf(found, featureIds, items)
   const partOf = found.epic === null ? [] : [{ type: 'part-of', to: found.epic }]
   // A private item says so in `fields.root`, over any `root` field the file has.
   const own = Object.keys(item.fields).length === 0 ? null : item.fields
@@ -256,5 +255,6 @@ export function toTask(found: FoundItem, withBody: boolean, items: readonly Foun
     ...(quality.assumptions.length === 0 ? {} : { assumptions: quality.assumptions }),
     ...(quality.findings.length === 0 ? {} : { findings: quality.findings }),
     ...(quality.problems.length === 0 ? {} : { partProblems: quality.problems }),
+    ...(coverage === null ? {} : { coverage }),
   }
 }

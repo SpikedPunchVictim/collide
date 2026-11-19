@@ -40,12 +40,12 @@ describe('the declaration', () => {
   test('implements is declared outward, not blocking, with a feature target; the other link types declare none', async () => {
     const { result } = await call(repo(), 'initialize', { config: {} })
     expect(result?.links).toEqual([
-      { name: 'blocked-by', dir: 'out', blocking: true },
-      { name: 'part-of', dir: 'out', blocking: false },
-      { name: 'implements', dir: 'out', blocking: false, target: 'feature' },
-      { name: 'informs', dir: 'out', blocking: false },
-      { name: 'includes', dir: 'out', blocking: false },
-      { name: 'supersedes', dir: 'out', blocking: false },
+      { name: 'blocked-by', dir: 'out', blocking: true, inverse: 'blocks' },
+      { name: 'part-of', dir: 'out', blocking: false, inverse: 'has part' },
+      { name: 'implements', dir: 'out', blocking: false, target: 'feature', inverse: 'implemented by' },
+      { name: 'informs', dir: 'out', blocking: false, inverse: 'informed by' },
+      { name: 'includes', dir: 'out', blocking: false, inverse: 'included in' },
+      { name: 'supersedes', dir: 'out', blocking: false, inverse: 'superseded by' },
     ])
   })
 

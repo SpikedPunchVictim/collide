@@ -30,8 +30,8 @@
 
 use crate::change::{Effect, FieldDiff, ItemState, Rename};
 use crate::item::{
-    Assumption, Category, Checklist, Decision, Feature, FeatureProblem, Finding, KindDecl, Link,
-    LinkTypeDecl, OpDecl, PartProblem, StatusDecl,
+    Assumption, Category, Checklist, Coverage, Decision, Feature, FeatureProblem, Finding,
+    KindDecl, Link, LinkTypeDecl, OpDecl, PartProblem, StatusDecl,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -171,6 +171,9 @@ pub struct Task {
     /// The lines of those parts that are not right. Left out when there are none. They never refuse a move.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub part_problems: Vec<PartProblem>,
+    /// What a proposal's features and included tasks cover, derived (0.10). Left out when it has neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<Coverage>,
 }
 
 impl Task {

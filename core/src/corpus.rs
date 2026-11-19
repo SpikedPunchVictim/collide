@@ -15,7 +15,8 @@
 //! - **Caps.** A task whose lists or strings pass the caps of 0.9 (`crate::view_expr::check_task_caps`) is an invalid
 //!   item, with the reason, and is not listed: a view never has to bind it.
 //! - **Links**, one hop out, both directions, across sources ([`Corpus::links_of`]). A link to a key the corpus does
-//!   not hold is reported with `missing` set, never dropped.
+//!   not hold is reported with `missing` set, never dropped. A link whose type targets a feature (`pr-0003-km#F2`)
+//!   goes to the proposal and names the feature; it is `missing` when the proposal is not held or has no such feature.
 //! - **Updates.** Each notification of a source is applied by a method, and [`reconcile`] is the difference of a
 //!   cached corpus and a fresh one, as the events core emits at start.
 //!
@@ -29,8 +30,9 @@
 //! runs and the store cache of the daemon are not here.
 
 use crate::change::{FieldDiff, ItemState, Rename};
+use crate::feature::parse_feature_target;
 use crate::hook::HookLink;
-use crate::item::{Category, KindDecl, LinkDir, LinkTarget, StatusDecl};
+use crate::item::{Category, KindDecl, Link, LinkDir, LinkTarget, LinkTypeDecl, StatusDecl};
 use crate::owner::task::{StaleSource, TaskCopy, TaskGetResult, TaskListResult};
 use crate::provider::{
     ChangeCause, Collection, InitializeResult, ListResult, ProviderEvent, RemovedCause, Task,
@@ -157,7 +159,9 @@ pub enum Applied {
 struct SourceState {
     statuses: Vec<StatusDecl>,
     kinds: Vec<KindDecl>,
-    /// Link types that target a feature of a proposal. They are planning's (4c), and are not resolved here.
+    /// The link types the source declared, in its order.
+    links: Vec<LinkTypeDecl>,
+    /// The names of those that target a feature of a proposal.
     feature_links: BTreeSet<String>,
     stale: Option<String>,
     /// By (checkout, path): the source's own invalid items, and the tasks whose status was not declared.
@@ -172,6 +176,7 @@ impl SourceState {
         let mut state = SourceState {
             statuses: Vec::new(),
             kinds: Vec::new(),
+            links: Vec::new(),
             feature_links: BTreeSet::new(),
             stale: None,
             invalid: BTreeMap::new(),
@@ -185,6 +190,7 @@ impl SourceState {
     fn declare(&mut self, init: &InitializeResult) {
         self.statuses = init.statuses.clone();
         self.kinds = init.kinds.clone();
+        self.links = init.links.clone();
         self.feature_links = init
             .links
             .iter()
@@ -231,6 +237,41 @@ struct Entry {
 }
 
 type Location = (String, Option<String>, String);
+
+/// What a link points at, read from its `to`: the task's name, and for a feature link the feature (`F2`). A feature
+/// link whose `to` is not a feature target has no feature and names `to` whole.
+struct Reach<'a> {
+    item: &'a str,
+    feature: Option<String>,
+}
+
+impl<'a> Reach<'a> {
+    fn of(link: &'a Link, feature_link: bool) -> Reach<'a> {
+        if feature_link && let Ok(target) = parse_feature_target(&link.to) {
+            let item = link
+                .to
+                .split_once('#')
+                .map_or(link.to.as_str(), |(item, _)| item);
+            return Reach {
+                item,
+                feature: Some(target.feature_id()),
+            };
+        }
+        Reach {
+            item: &link.to,
+            feature: None,
+        }
+    }
+}
+
+/// A link a task holds, resolved: the key of its target when the corpus holds one, the key to show when it does not,
+/// and the feature a feature link names.
+struct OutLink<'a> {
+    link: &'a Link,
+    target: Option<String>,
+    shown: String,
+    feature: Option<String>,
+}
 
 /// What a board holds. See the module comment.
 #[derive(Debug, Clone, Default)]
@@ -786,6 +827,7 @@ impl Corpus {
             latest_run: None,
             links: Vec::new(),
             ops: Vec::new(),
+            link_types: Vec::new(),
         };
         match self.lookup(query) {
             Found::None => nothing,
@@ -803,6 +845,7 @@ impl Corpus {
                 task: Some(self.shown(&self.entries[&key]).clone()),
                 copies: self.copies_of(&key),
                 links: self.links_of(&key),
+                link_types: self.link_types_of(&key),
                 ..nothing
             },
         }
@@ -975,24 +1018,60 @@ impl Corpus {
         }
     }
 
-    /// The links a task holds, each with the key of its target when the corpus holds one. A link whose type targets
-    /// a feature is left out.
-    fn out_links<'a>(
-        &self,
-        source: &str,
-        task: &'a Task,
-    ) -> Vec<(&'a crate::item::Link, Option<String>)> {
+    /// The link types the source of `key` declared, so a reader can name a link from its other end.
+    fn link_types_of(&self, key: &str) -> Vec<LinkTypeDecl> {
+        let source = &self.entries[key].source;
+        self.sources
+            .get(source)
+            .map_or_else(Vec::new, |state| state.links.clone())
+    }
+
+    /// The links a task holds, each with the key of its target when the corpus holds one. A link of a type that
+    /// targets a feature goes to the proposal, and names the feature.
+    fn out_links<'a>(&self, source: &str, task: &'a Task) -> Vec<OutLink<'a>> {
         let features = self.sources.get(source).map(|state| &state.feature_links);
         task.links
             .iter()
-            .filter(|link| !features.is_some_and(|set| set.contains(&link.link_type)))
-            .map(|link| (link, self.resolve_target(source, &link.to)))
+            .map(|link| {
+                let feature_link = features.is_some_and(|set| set.contains(&link.link_type));
+                let reach = Reach::of(link, feature_link);
+                // A feature link whose target does not read points at nothing, whatever `to` names.
+                let reads = !feature_link || reach.feature.is_some();
+                OutLink {
+                    target: reads
+                        .then(|| self.resolve_target(source, reach.item))
+                        .flatten(),
+                    shown: qualified(source, reach.item),
+                    feature: reach.feature,
+                    link,
+                }
+            })
             .collect()
     }
 
-    fn link_to(&self, link_type: &str, dir: LinkDir, key: &str) -> HookLink {
+    /// Whether the shown copy of `key` has the feature `feature` (`F2`).
+    fn has_feature(&self, key: &str, feature: &str) -> bool {
+        self.shown(&self.entries[key])
+            .features
+            .iter()
+            .any(|held| held.id == feature)
+    }
+
+    fn link_to(
+        &self,
+        link_type: &str,
+        dir: LinkDir,
+        key: &str,
+        feature: Option<String>,
+    ) -> HookLink {
         let entry = &self.entries[key];
         let task = self.shown(entry);
+        // The other end of an incoming link is the task that holds it, so only an outgoing one can name a feature
+        // the proposal lacks.
+        let missing = dir == LinkDir::Out
+            && feature
+                .as_deref()
+                .is_some_and(|feature| !self.has_feature(key, feature));
         HookLink {
             link_type: link_type.to_string(),
             dir,
@@ -1001,36 +1080,39 @@ impl Corpus {
             status: task.state.status.clone(),
             category: task.state.category,
             stale: self.is_stale(&entry.source),
-            missing: false,
+            missing,
+            feature,
         }
     }
 
     /// A task's links one hop out, as a hook reads them (0.5): its own first, in its order (`out`), then the ones
     /// other tasks hold to it (`in`), in key order. They are read from the shown copy, and resolved from the corpus
     /// alone, across sources. A link to a key the corpus does not hold is `missing`, with no kind or status and the
-    /// category `backlog`. A link of a type that targets a feature (`ts-0115-ug`: planning's, 4c) is not resolved.
+    /// category `backlog`. A link of a type that targets a feature (`ts-0133-kg`) is to the proposal, with `feature`
+    /// set: it is `missing` when the proposal has no such feature, with the proposal's own state. A target that does
+    /// not read as a feature target is `missing`, names no feature and is never an incoming link.
     pub fn links_of(&self, key: &str) -> Vec<HookLink> {
         let Some(key) = self.resolve_key(key) else {
             return Vec::new();
         };
         let entry = &self.entries[&key];
         let mut links = Vec::new();
-        for (link, target) in self.out_links(&entry.source, self.shown(entry)) {
-            links.push(match target {
-                Some(target) => self.link_to(&link.link_type, LinkDir::Out, &target),
-                None => {
-                    let key = qualified(&entry.source, &link.to);
-                    HookLink {
-                        link_type: link.link_type.clone(),
-                        dir: LinkDir::Out,
-                        stale: source_of_key(&key).is_some_and(|source| self.is_stale(source)),
-                        key,
-                        kind: String::new(),
-                        status: String::new(),
-                        category: Category::Backlog,
-                        missing: true,
-                    }
+        for out in self.out_links(&entry.source, self.shown(entry)) {
+            links.push(match out.target {
+                Some(target) => {
+                    self.link_to(&out.link.link_type, LinkDir::Out, &target, out.feature)
                 }
+                None => HookLink {
+                    link_type: out.link.link_type.clone(),
+                    dir: LinkDir::Out,
+                    stale: source_of_key(&out.shown).is_some_and(|source| self.is_stale(source)),
+                    key: out.shown,
+                    kind: String::new(),
+                    status: String::new(),
+                    category: Category::Backlog,
+                    missing: true,
+                    feature: out.feature,
+                },
             });
         }
         let mut holders = BTreeSet::new();
@@ -1039,9 +1121,14 @@ impl Corpus {
         }
         for holder in holders {
             let held = &self.entries[&holder];
-            for (link, target) in self.out_links(&held.source, self.shown(held)) {
-                if target.as_deref() == Some(key.as_str()) {
-                    links.push(self.link_to(&link.link_type, LinkDir::In, &holder));
+            for out in self.out_links(&held.source, self.shown(held)) {
+                if out.target.as_deref() == Some(key.as_str()) {
+                    links.push(self.link_to(
+                        &out.link.link_type,
+                        LinkDir::In,
+                        &holder,
+                        out.feature,
+                    ));
                 }
             }
         }
@@ -1204,8 +1291,10 @@ impl Corpus {
         for task in entry.copies.values() {
             names.extend(names_of(&source, task));
             for link in &task.links {
-                if !features.is_some_and(|set| set.contains(&link.link_type)) {
-                    targets.insert(qualified(&source, &link.to));
+                let feature_link = features.is_some_and(|set| set.contains(&link.link_type));
+                // A feature target that does not read points at nothing, so it is nobody's incoming link.
+                if !feature_link || Reach::of(link, true).feature.is_some() {
+                    targets.insert(qualified(&source, Reach::of(link, feature_link).item));
                 }
             }
         }

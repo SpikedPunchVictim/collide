@@ -75,8 +75,8 @@ describe('initialize declares the question kind and the planning links', () => {
 
   test('includes and supersedes are outward and block nothing; link and create take them', async () => {
     const init = await declared()
-    expect(init?.links).toContainEqual({ name: 'includes', dir: 'out', blocking: false })
-    expect(init?.links).toContainEqual({ name: 'supersedes', dir: 'out', blocking: false })
+    expect(init?.links).toContainEqual({ name: 'includes', dir: 'out', blocking: false, inverse: 'included in' })
+    expect(init?.links).toContainEqual({ name: 'supersedes', dir: 'out', blocking: false, inverse: 'superseded by' })
     const blocking = (init?.links as Row[]).filter((candidate) => candidate.blocking)
     expect(blocking.map((candidate) => candidate.name)).toEqual(['blocked-by'])
     const ops = init?.ops as Row[]

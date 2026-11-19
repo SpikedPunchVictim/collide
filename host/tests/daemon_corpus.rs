@@ -13,6 +13,7 @@ mod common;
 
 use collide_core::change::{Actor, ActorKind};
 use collide_core::events::{Event, EventBody};
+use collide_core::item::LinkDir;
 use collide_core::non_empty::NonEmpty;
 use collide_core::owner::{
     BoardOpenParams, BoardOpenResult, BoardTrustParams, BoardTrustResult, BoardTrustReviewParams,
@@ -1483,6 +1484,98 @@ fn a_source_without_watch_is_listed_again_at_each_look_and_a_change_is_recorded(
             .any(|line| line.starts_with("watch ")),
         "a source without the capability is never told to watch"
     );
+}
+
+// ---- feature links (ts-0133-kg) -----------------------------------------------------------------------------------
+
+const PROPOSAL_ONE_FEATURE: &str = r#"{"short":"10","kind":"proposal","version":"v1",
+    "features":[{"id":"F1","title":"First","section":"","summary":""}]}"#;
+const PROPOSAL_TWO_FEATURES: &str = r#"{"short":"10","kind":"proposal","version":"v2",
+    "features":[{"id":"F1","title":"First","section":"","summary":""},
+                {"id":"F2","title":"Second","section":"","summary":""}]}"#;
+const COVERING_TASK: &str = r#"{"short":"11","links":[
+    {"type":"covers","to":"10#F1"},{"type":"covers","to":"10#F2"}]}"#;
+
+impl Rig {
+    /// `(feature, missing)` of each link of `id` in `dir` ("out" or "in"), in the order `task.get` gave them.
+    fn feature_links(&self, board: &str, id: &str, dir: &str) -> Vec<(String, bool)> {
+        let wanted = if dir == "out" {
+            LinkDir::Out
+        } else {
+            LinkDir::In
+        };
+        self.get(board, id)
+            .links
+            .iter()
+            .filter(|link| link.dir == wanted)
+            .filter_map(|link| Some((link.feature.clone()?, link.missing)))
+            .collect()
+    }
+}
+
+#[test]
+fn feature_links_and_link_types_come_through_task_get_and_the_cache_serves_them_after_a_restart() {
+    let mut rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.file(&root, "10.json", PROPOSAL_ONE_FEATURE);
+    rig.file(&root, "11.json", COVERING_TASK);
+    rig.list_until(&board, "both tasks are listed", |list| {
+        !list.refreshing && Rig::keys(list).len() == 2
+    });
+    // The proposal has no F2, so the task's link is missing; the proposal sees the task, which is there, in both.
+    let expected_out = [("F1".to_string(), false), ("F2".to_string(), true)];
+    let expected_in = [("F1".to_string(), false), ("F2".to_string(), false)];
+    assert_eq!(rig.feature_links(&board, "files:11", "out"), expected_out);
+    assert_eq!(rig.feature_links(&board, "files:10", "in"), expected_in);
+    let got = rig.get(&board, "files:11");
+    let covers = got.link_types.iter().find(|decl| decl.name == "covers");
+    assert_eq!(
+        covers.and_then(|decl| decl.inverse.as_deref()),
+        Some("covered by")
+    );
+    let held = got
+        .links
+        .iter()
+        .find(|link| link.feature.as_deref() == Some("F1"));
+    assert_eq!(held.map(|link| link.kind.as_str()), Some("proposal"));
+
+    // The next start cannot list the source, so what it serves is what the cache held.
+    fs::write(rig.data(&board, &FILES).join("fail-list"), "").unwrap();
+    rig.restart();
+    rig.list_until(&board, "the source is stale", |list| {
+        !list.stale_sources.is_empty()
+    });
+    assert_eq!(rig.feature_links(&board, "files:11", "out"), expected_out);
+    assert_eq!(rig.feature_links(&board, "files:10", "in"), expected_in);
+    let cached = rig.get(&board, "files:11");
+    let covers = cached.link_types.iter().find(|decl| decl.name == "covers");
+    assert_eq!(
+        covers.and_then(|decl| decl.inverse.as_deref()),
+        Some("covered by")
+    );
+}
+
+#[test]
+fn a_feature_added_to_a_proposal_turns_a_missing_link_to_resolved_at_the_next_look() {
+    let rig = rig();
+    let board = rig.board_with(&[&DOCS], "");
+    let root = rig.root();
+    rig.file(&root, "10.json", PROPOSAL_ONE_FEATURE);
+    rig.file(&root, "11.json", COVERING_TASK);
+    rig.list_until(&board, "both tasks are listed", |list| {
+        !list.refreshing && Rig::keys(list).len() == 2
+    });
+    assert_eq!(
+        rig.feature_links(&board, "docs:11", "out"),
+        [("F1".to_string(), false), ("F2".to_string(), true)]
+    );
+
+    rig.file(&root, "10.json", PROPOSAL_TWO_FEATURES);
+    wait_until("the link resolves", DEADLINE, || {
+        rig.feature_links(&board, "docs:11", "out")
+            == [("F1".to_string(), false), ("F2".to_string(), false)]
+    });
 }
 
 #[test]

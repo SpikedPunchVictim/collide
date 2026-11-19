@@ -8,7 +8,7 @@
 
 use crate::change::{ItemState, LatestRun};
 use crate::hook::HookLink;
-use crate::item::OpDecl;
+use crate::item::{LinkTypeDecl, OpDecl};
 use crate::provider::{ApplyParams, ApplyResult, Collection, Task, TaskCollision, TaskInvalid};
 use crate::view::View;
 use schemars::JsonSchema;
@@ -152,7 +152,8 @@ pub struct TaskCopy {
 /// `get`). When a short id matches several items (two tasks numbered 12) `task` is absent and `ambiguous` lists their
 /// keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first. `links` are the task's
 /// links one hop out in both directions, as a hook reads them (0.5). `ops` are the ops its source declares for its
-/// kind: what `collide task <id> <op>` maps its words to. Both are additive.
+/// kind: what `collide task <id> <op>` maps its words to. `link_types` are the link types its source declares, so a
+/// reader can name the other end of a link (`inverse`). All three are additive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskGetResult {
@@ -172,6 +173,8 @@ pub struct TaskGetResult {
     pub links: Vec<HookLink>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ops: Vec<OpDecl>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_types: Vec<LinkTypeDecl>,
 }
 
 /// `task.apply` params (`collide task <id> <op>`, `collide task new`, `collide task reid`, and the drawer's forms):

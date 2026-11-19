@@ -9,7 +9,9 @@
 //
 // A task file is `{ "short": "12", "title": "...", "status": "todo", "version": "v1", "kind": "task" }`, and its key is
 // `<source>:<short>`. A file that is not JSON, or has no `short`, is an invalid item in `list`. It may also have
-// `labels` (strings), `collections` (ids) and `links` (`[{ "type": "blocked-by", "to": "41" }]`), which a view reads.
+// `labels` (strings), `collections` (ids) and `links` (`[{ "type": "blocked-by", "to": "41" }]`), which a view reads,
+// and `features` (`[{ "id": "F1", "title": "...", "section": "", "summary": "" }]`) on a proposal. `initialize`
+// declares `blocked-by` and `covers`, a link to a feature (`"to": "10#F1"`), each with the label of its other end.
 //
 // The data folder (`COLLIDE_PACK_DATA`) is the test's way in and out:
 //   started       a line with the pid for each `initialize`
@@ -74,6 +76,7 @@ const read = (checkout, file) => {
     if (data.labels) task.labels = data.labels
     if (data.collections) task.collections = data.collections
     if (data.links) task.links = data.links
+    if (data.features) task.features = data.features
     return { task, file }
   } catch (error) {
     return { invalid: { path, checkout, reason: `not JSON: ${error.message}` } }
@@ -141,6 +144,10 @@ const answer = (method, params) => {
             { name: 'done', category: 'done' },
           ],
           ops: [{ name: 'setStatus' }],
+          links: [
+            { name: 'blocked-by', dir: 'out', blocking: true, inverse: 'blocks' },
+            { name: 'covers', dir: 'out', blocking: false, target: 'feature', inverse: 'covered by' },
+          ],
           capabilities: { watch: WATCH, preview: false },
         },
         null,

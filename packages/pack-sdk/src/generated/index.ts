@@ -83,6 +83,8 @@ export type { ConfigSetResult as ConfigSetResultInput } from './ConfigSetResult.
 export type { ConfigSetResult as ConfigSetResultOutput } from './ConfigSetResult.output.ts'
 export type { ContextRecord as ContextRecordInput } from './ContextRecord.input.ts'
 export type { ContextRecord as ContextRecordOutput } from './ContextRecord.output.ts'
+export type { Coverage as CoverageInput } from './Coverage.input.ts'
+export type { Coverage as CoverageOutput } from './Coverage.output.ts'
 export type { DaemonAgentVersionsParams as DaemonAgentVersionsParamsInput } from './DaemonAgentVersionsParams.input.ts'
 export type { DaemonAgentVersionsParams as DaemonAgentVersionsParamsOutput } from './DaemonAgentVersionsParams.output.ts'
 export type { DaemonAgentVersionsResult as DaemonAgentVersionsResultInput } from './DaemonAgentVersionsResult.input.ts'

@@ -220,11 +220,14 @@ export interface HookTask {
  * A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says
  * that the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.
  * `missing` says that the corpus holds no task with the key: `kind` and `status` are then empty and `category` is
- * `backlog`, so a gate can refuse a link that goes nowhere.
+ * `backlog`, so a gate can refuse a link that goes nowhere. `feature` is set for a link whose type targets a feature
+ * of a proposal (`F2`, from `pr-0003-km#F2`): `key`, `kind`, `status` and `category` are then the proposal's, and
+ * `missing` says that the proposal is not held or has no such feature. It is left out for a link to an item.
  */
 export interface HookLink {
   category: Category
   dir: LinkDir
+  feature?: string | null
   key: string
   kind: string
   missing?: boolean

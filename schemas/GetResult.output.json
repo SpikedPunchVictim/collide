@@ -133,6 +133,29 @@
       ],
       "type": "string"
     },
+    "Coverage": {
+      "additionalProperties": false,
+      "description": "What a proposal's features and tasks cover, derived and never written (0.10, \"A proposal's quality parts\").\n`featuresWithoutTask` are the `F<n>` that no task implements. `tasksWithoutFeature` are the ids of the tasks the\nproposal includes, not dropped, that implement no feature.",
+      "properties": {
+        "featuresWithoutTask": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tasksWithoutFeature": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "featuresWithoutTask",
+        "tasksWithoutFeature"
+      ],
+      "type": "object"
+    },
     "Decision": {
       "additionalProperties": false,
       "description": "One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is\n`low`, `medium` or `high`. `line` is the entry's first line in the item's file.",
@@ -439,6 +462,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coverage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What a proposal's features and included tasks cover, derived (0.10). Left out when it has neither."
         },
         "decisions": {
           "description": "A proposal's Decision log (0.10). Left out when there are none.",

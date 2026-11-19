@@ -10,6 +10,10 @@ export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dro
  */
 export type LinkDir = 'out' | 'in'
 /**
+ * What a link type points at: an item, or a feature of a proposal (`pr-0003-km#F2`, revision 14).
+ */
+export type LinkTarget = 'item' | 'feature'
+/**
  * What an `Evidence:` entry names: an item, a feature of a proposal as `pr-0003-km#F2`, or a path in the repo.
  */
 export type EvidenceKind = 'item' | 'feature' | 'path'
@@ -23,13 +27,15 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
  * `get`). When a short id matches several items (two tasks numbered 12) `task` is absent and `ambiguous` lists their
  * keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first. `links` are the task's
  * links one hop out in both directions, as a hook reads them (0.5). `ops` are the ops its source declares for its
- * kind: what `collide task <id> <op>` maps its words to. Both are additive.
+ * kind: what `collide task <id> <op>` maps its words to. `link_types` are the link types its source declares, so a
+ * reader can name the other end of a link (`inverse`). All three are additive.
  */
 export interface TaskGetResult {
   ambiguous?: string[]
   collisions?: TaskCollision[]
   copies?: TaskCopy[]
   latest_run?: LatestRun | null
+  link_types?: LinkTypeDecl[]
   links?: HookLink[]
   ops?: OpDecl[]
   runs?: string[]
@@ -78,14 +84,29 @@ export interface LatestRun {
   workflow: string
 }
 /**
+ * A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no
+ * `target` targets an item, so every declaration written before revision 14 reads as it did. `inverse` is what the
+ * other end calls the link ("blocks" for `blocked-by`); a declaration with none reads as it did.
+ */
+export interface LinkTypeDecl {
+  blocking: boolean
+  dir: LinkDir
+  inverse?: string | null
+  name: string
+  target?: LinkTarget
+}
+/**
  * A link of a `tasks[]` entry, one hop out, in either direction and resolved across sources (0.5). `stale` says
  * that the source holding the other end is stale, so `kind`, `status` and `category` are the last it reported.
  * `missing` says that the corpus holds no task with the key: `kind` and `status` are then empty and `category` is
- * `backlog`, so a gate can refuse a link that goes nowhere.
+ * `backlog`, so a gate can refuse a link that goes nowhere. `feature` is set for a link whose type targets a feature
+ * of a proposal (`F2`, from `pr-0003-km#F2`): `key`, `kind`, `status` and `category` are then the proposal's, and
+ * `missing` says that the proposal is not held or has no such feature. It is left out for a link to an item.
  */
 export interface HookLink {
   category: Category
   dir: LinkDir
+  feature?: string | null
   key: string
   kind: string
   missing?: boolean
@@ -118,6 +139,10 @@ export interface Task {
   checklist?: Checklist | null
   checkout?: string | null
   collections?: string[]
+  /**
+   * What a proposal's features and included tasks cover, derived (0.10). Left out when it has neither.
+   */
+  coverage?: Coverage | null
   /**
    * A proposal's Decision log (0.10). Left out when there are none.
    */
@@ -192,6 +217,15 @@ export interface ChecklistItem {
   id: string
   reason?: string | null
   state: ChecklistState
+}
+/**
+ * What a proposal's features and tasks cover, derived and never written (0.10, "A proposal's quality parts").
+ * `featuresWithoutTask` are the `F<n>` that no task implements. `tasksWithoutFeature` are the ids of the tasks the
+ * proposal includes, not dropped, that implement no feature.
+ */
+export interface Coverage {
+  featuresWithoutTask: string[]
+  tasksWithoutFeature: string[]
 }
 /**
  * One entry `D<n>` of a proposal's Decision log (0.10). The labels' values are text as written; `confidence` is

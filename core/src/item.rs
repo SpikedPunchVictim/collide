@@ -91,7 +91,8 @@ impl LinkTarget {
 }
 
 /// A link type a provider holds: its direction, whether it blocks, and what it targets. A declaration with no
-/// `target` targets an item, so every declaration written before revision 14 reads as it did.
+/// `target` targets an item, so every declaration written before revision 14 reads as it did. `inverse` is what the
+/// other end calls the link ("blocks" for `blocked-by`); a declaration with none reads as it did.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinkTypeDecl {
@@ -100,6 +101,8 @@ pub struct LinkTypeDecl {
     pub blocking: bool,
     #[serde(default, skip_serializing_if = "LinkTarget::is_item")]
     pub target: LinkTarget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inverse: Option<String>,
 }
 
 /// A typed link on an item (0.8).
@@ -173,6 +176,16 @@ pub struct Feature {
     pub title: String,
     pub section: String,
     pub summary: String,
+}
+
+/// What a proposal's features and tasks cover, derived and never written (0.10, "A proposal's quality parts").
+/// `featuresWithoutTask` are the `F<n>` that no task implements. `tasksWithoutFeature` are the ids of the tasks the
+/// proposal includes, not dropped, that implement no feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Coverage {
+    pub features_without_task: Vec<String>,
+    pub tasks_without_feature: Vec<String>,
 }
 
 /// A line of the Features part that did not parse, with why (0.8, 0.10). `line` counts from 1 in the item's file.

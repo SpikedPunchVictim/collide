@@ -5,7 +5,8 @@
 use collide_core::owner::{
     Ack, CODES, MAX_MESSAGE_BYTES, Method, Notice, Notification, OWNER_PROTOCOL,
     OwnerInitializeParams, OwnerInitializeResult, Request, RequestId, Response, Routed, RpcError,
-    VersionRefused, check_initialize, code, encode_line, parse_request, route, tokens_match,
+    TaskGetResult, VersionRefused, check_initialize, code, encode_line, parse_request, route,
+    tokens_match,
 };
 use collide_core::schema;
 use serde::Serialize;
@@ -1282,4 +1283,57 @@ fn a_run_without_warnings_reads_as_an_empty_list_and_a_warning_refuses_an_unknow
         json!({ "kind": "something_else", "phase": "build", "files": [] }),
     );
     assert!(unknown_kind.is_err());
+}
+
+// Link types in `task.get` (ts-0133-kg).
+
+fn task_get_with(extra: Value) -> Value {
+    let mut doc = json!({ "task": task(), "ambiguous": [], "copies": [], "collisions": [], "runs": [], "links": [] });
+    doc.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    doc
+}
+
+#[test]
+fn a_task_get_result_carries_the_link_types_with_their_inverse_and_round_trips() {
+    let wire = task_get_with(json!({ "link_types": [
+        { "name": "blocked-by", "dir": "out", "blocking": true, "inverse": "blocks" },
+        { "name": "implements", "dir": "out", "blocking": false, "target": "feature" }
+    ] }));
+    let got: TaskGetResult = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(got.link_types[0].inverse.as_deref(), Some("blocks"));
+    assert_eq!(got.link_types[1].inverse, None);
+    let written = serde_json::to_value(&got).unwrap();
+    assert!(contains(&written, &wire), "{written}");
+}
+
+#[test]
+fn a_task_get_result_written_before_link_types_reads_with_none_and_writes_no_key() {
+    let wire = task_get_with(json!({}));
+    let got: TaskGetResult = serde_json::from_value(wire.clone()).unwrap();
+    assert!(got.link_types.is_empty());
+    assert!(
+        serde_json::to_value(&got)
+            .unwrap()
+            .get("link_types")
+            .is_none()
+    );
+}
+
+#[test]
+fn the_task_get_link_types_key_is_in_the_schema_and_is_not_required() {
+    let files = schema::registry().render();
+    let schema: Value = serde_json::from_str(&files["TaskGetResult.output.json"]).unwrap();
+    assert!(
+        schema["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("link_types")
+    );
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .map(|keys| keys.iter().map(|key| key.as_str().unwrap()).collect())
+        .unwrap_or_default();
+    assert!(!required.contains(&"link_types"), "{required:?}");
 }

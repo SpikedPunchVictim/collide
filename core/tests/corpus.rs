@@ -57,6 +57,7 @@ fn link_type(name: &str, target: LinkTarget) -> LinkTypeDecl {
         dir: LinkDir::Out,
         blocking: false,
         target,
+        inverse: None,
     }
 }
 
@@ -731,20 +732,312 @@ fn a_bare_target_is_a_short_id_an_id_or_an_alias_in_the_source_of_the_link() {
     }
 }
 
+// Feature links (ts-0133-kg): a link whose type targets a feature names the proposal and the feature.
+
+/// A proposal held by `plan`, with the features `ids` (`F1`, ...).
+fn proposal(short: &str, status: &str, checkout: &str, ids: &[&str]) -> Task {
+    let mut task = at(short, status, checkout);
+    task.kind = Some("proposal".into());
+    task.features = ids
+        .iter()
+        .map(|id| {
+            serde_json::from_value(json!({
+                "id": id, "title": format!("title of {id}"), "section": "", "summary": ""
+            }))
+            .expect("a feature reads")
+        })
+        .collect();
+    task
+}
+
+fn covers(short: &str, status: &str, to: &str) -> Task {
+    with_link(at(short, status, ROOT), "covers", to)
+}
+
 #[test]
-fn a_link_whose_type_targets_a_feature_is_not_resolved_here() {
+fn a_feature_link_resolves_to_its_proposal_and_names_the_feature() {
     let tasks = [
-        with_link(at("PR-1", "doing", ROOT), "covers", "pr-0003-km#F2"),
-        with_link(at("T-01", "doing", ROOT), "covers", "plan:T-02"),
-        at("T-02", "ready", ROOT),
+        proposal("PR-1", "doing", ROOT, &["F1", "F2"]),
+        covers("T-01", "ready", "PR-1#F2"),
     ];
     let corpus = plan_corpus(&tasks, &[ROOT]);
-    assert!(corpus.links_of("plan:PR-1").is_empty());
-    assert!(corpus.links_of("plan:T-01").is_empty());
-    assert!(
-        corpus.links_of("plan:T-02").is_empty(),
-        "no link in from a feature link"
+    let out = corpus.links_of("plan:T-01");
+    assert_eq!(out.len(), 1);
+    let to_feature = link(&out, LinkDir::Out, "plan:PR-1");
+    assert_eq!(to_feature.link_type, "covers");
+    assert_eq!(to_feature.feature.as_deref(), Some("F2"));
+    assert_eq!(to_feature.kind, "proposal");
+    assert_eq!(to_feature.status, "doing");
+    assert_eq!(to_feature.category, Category::Active);
+    assert!(!to_feature.missing && !to_feature.stale);
+}
+
+#[test]
+fn a_link_to_an_item_has_no_feature_and_serializes_without_the_key() {
+    let tasks = [
+        at("T-02", "done", ROOT),
+        with_link(at("T-01", "ready", ROOT), "blocked-by", "T-02"),
+    ];
+    let corpus = plan_corpus(&tasks, &[ROOT]);
+    let links = corpus.links_of("plan:T-01");
+    let item = link(&links, LinkDir::Out, "plan:T-02");
+    assert_eq!(item.feature, None);
+    let wire = serde_json::to_value(item).unwrap();
+    assert!(wire.get("feature").is_none(), "{wire}");
+}
+
+#[test]
+fn the_proposals_own_links_show_the_feature_link_in_with_the_same_feature() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1", "F2"]),
+        covers("T-01", "ready", "PR-1#F2"),
+        covers("T-02", "done", "PR-1#F1"),
+    ];
+    let corpus = plan_corpus(&tasks, &[ROOT]);
+    let links = corpus.links_of("plan:PR-1");
+    assert_eq!(links.len(), 2);
+    let from_first = link(&links, LinkDir::In, "plan:T-01");
+    assert_eq!(from_first.feature.as_deref(), Some("F2"));
+    assert_eq!(from_first.link_type, "covers");
+    assert_eq!(from_first.status, "ready");
+    assert!(!from_first.missing);
+    assert_eq!(
+        link(&links, LinkDir::In, "plan:T-02").feature.as_deref(),
+        Some("F1")
     );
+}
+
+#[test]
+fn a_feature_the_proposal_lacks_is_missing_with_the_proposals_own_state() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1"]),
+        covers("T-01", "ready", "PR-1#F9"),
+    ];
+    let corpus = plan_corpus(&tasks, &[ROOT]);
+    let out = corpus.links_of("plan:T-01");
+    let missing = link(&out, LinkDir::Out, "plan:PR-1");
+    assert!(missing.missing);
+    assert_eq!(missing.feature.as_deref(), Some("F9"));
+    assert_eq!(
+        (missing.kind.as_str(), missing.status.as_str()),
+        ("proposal", "doing")
+    );
+    assert_eq!(missing.category, Category::Active);
+}
+
+#[test]
+fn a_feature_of_a_proposal_the_corpus_does_not_hold_is_missing_with_no_state() {
+    let corpus = plan_corpus(&[covers("T-01", "ready", "PR-9#F1")], &[ROOT]);
+    let out = corpus.links_of("plan:T-01");
+    let missing = link(&out, LinkDir::Out, "plan:PR-9");
+    assert!(missing.missing);
+    assert_eq!(missing.feature.as_deref(), Some("F1"));
+    assert_eq!((missing.kind.as_str(), missing.status.as_str()), ("", ""));
+    assert_eq!(missing.category, Category::Backlog);
+}
+
+#[test]
+fn a_target_that_is_not_a_feature_target_is_missing_and_names_no_feature() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1"]),
+        covers("T-01", "ready", "PR-1"),
+        covers("T-02", "ready", "PR-1#x"),
+    ];
+    let corpus = plan_corpus(&tasks, &[ROOT]);
+    for holder in ["plan:T-01", "plan:T-02"] {
+        let out = corpus.links_of(holder);
+        assert_eq!(out.len(), 1, "{holder}: the link is not dropped");
+        assert!(
+            out[0].missing && out[0].feature.is_none(),
+            "{holder}: {:?}",
+            out[0]
+        );
+    }
+    assert!(
+        corpus.links_of("plan:PR-1").is_empty(),
+        "no link in from a bad target"
+    );
+}
+
+#[test]
+fn a_feature_link_may_name_the_proposal_by_key() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1"]),
+        covers("T-01", "ready", "plan:PR-1#F1"),
+    ];
+    let corpus = plan_corpus(&tasks, &[ROOT]);
+    let out = corpus.links_of("plan:T-01");
+    assert!(!link(&out, LinkDir::Out, "plan:PR-1").missing);
+    assert_eq!(corpus.links_of("plan:PR-1").len(), 1);
+}
+
+#[test]
+fn a_feature_added_to_the_proposal_resolves_a_missing_link_on_the_next_change() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1"]),
+        covers("T-01", "ready", "PR-1#F2"),
+    ];
+    let mut corpus = plan_corpus(&tasks, &[ROOT]);
+    assert!(link(&corpus.links_of("plan:T-01"), LinkDir::Out, "plan:PR-1").missing);
+
+    let more = proposal("PR-1", "doing", ROOT, &["F1", "F2"]);
+    let event = changed_to("plan:PR-1", ROOT, "doing", "v2");
+    corpus.apply_changed("plan", &event, Some(more)).unwrap();
+    assert!(!link(&corpus.links_of("plan:T-01"), LinkDir::Out, "plan:PR-1").missing);
+}
+
+#[test]
+fn a_removed_feature_turns_the_link_missing() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1", "F2"]),
+        covers("T-01", "ready", "PR-1#F2"),
+    ];
+    let mut corpus = plan_corpus(&tasks, &[ROOT]);
+    assert!(!link(&corpus.links_of("plan:T-01"), LinkDir::Out, "plan:PR-1").missing);
+
+    let fewer = proposal("PR-1", "doing", ROOT, &["F1"]);
+    let event = changed_to("plan:PR-1", ROOT, "doing", "v2");
+    corpus.apply_changed("plan", &event, Some(fewer)).unwrap();
+    assert!(link(&corpus.links_of("plan:T-01"), LinkDir::Out, "plan:PR-1").missing);
+}
+
+#[test]
+fn a_proposal_held_only_in_another_checkout_resolves_and_the_shown_copy_decides_the_features() {
+    let tasks = [
+        proposal("PR-1", "doing", WS_A, &["F1", "F2"]),
+        proposal("PR-2", "doing", ROOT, &["F1"]),
+        proposal("PR-2", "doing", WS_A, &["F1", "F2"]),
+        covers("T-01", "ready", "PR-1#F2"),
+        covers("T-02", "ready", "PR-2#F2"),
+    ];
+    let mut corpus = plan_corpus(&tasks, &[WS_A]);
+    corpus
+        .load("plan", Some(ROOT), list_of(&tasks, ROOT))
+        .unwrap();
+
+    let only_there = corpus.links_of("plan:T-01");
+    assert!(
+        !link(&only_there, LinkDir::Out, "plan:PR-1").missing,
+        "PR-1 is held in a workspace"
+    );
+    let in_both = corpus.links_of("plan:T-02");
+    assert!(
+        link(&in_both, LinkDir::Out, "plan:PR-2").missing,
+        "the root's copy is shown, and it has no F2"
+    );
+}
+
+#[test]
+fn a_feature_link_follows_the_proposal_when_it_is_renamed() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1"]),
+        covers("T-01", "ready", "plan:PR-1#F1"),
+    ];
+    let mut corpus = plan_corpus(&tasks, &[ROOT]);
+    let rename = Rename {
+        from: "plan:PR-1".into(),
+        to: "plan:PR-5".into(),
+        checkout: None,
+    };
+    corpus.apply_renamed("plan", &rename).unwrap();
+
+    let out = corpus.links_of("plan:T-01");
+    assert_eq!(
+        link(&out, LinkDir::Out, "plan:PR-5").feature.as_deref(),
+        Some("F1")
+    );
+    let into = corpus.links_of("plan:PR-5");
+    assert_eq!(
+        link(&into, LinkDir::In, "plan:T-01").feature.as_deref(),
+        Some("F1")
+    );
+}
+
+#[test]
+fn a_feature_link_in_a_source_that_is_stale_is_marked_stale() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1"]),
+        covers("T-01", "ready", "PR-1#F1"),
+    ];
+    let mut corpus = plan_corpus(&tasks, &[ROOT]);
+    corpus.mark_stale("plan", "unreadable").unwrap();
+    assert!(link(&corpus.links_of("plan:T-01"), LinkDir::Out, "plan:PR-1").stale);
+}
+
+#[test]
+fn a_removed_task_takes_its_feature_link_out_of_the_proposals_links() {
+    let tasks = [
+        proposal("PR-1", "doing", ROOT, &["F1"]),
+        covers("T-01", "ready", "PR-1#F1"),
+    ];
+    let mut corpus = plan_corpus(&tasks, &[ROOT]);
+    assert_eq!(corpus.links_of("plan:PR-1").len(), 1);
+    let gone = TaskRemoved {
+        key: "plan:T-01".into(),
+        checkout: Some(ROOT.into()),
+        cause: RemovedCause::Deleted,
+    };
+    corpus.apply_removed("plan", &gone).unwrap();
+    assert!(corpus.links_of("plan:PR-1").is_empty());
+}
+
+#[test]
+fn a_task_get_carries_the_link_types_of_its_source_with_their_inverse() {
+    let mut init = plan_init();
+    init.links[0].inverse = Some("blocks".into());
+    init.links[2].inverse = Some("covered by".into());
+    let mut corpus = Corpus::default();
+    corpus.set_checkouts(checkouts());
+    corpus.declare_source("plan", &init);
+    corpus
+        .load(
+            "plan",
+            Some(ROOT),
+            list_of(&[at("T-01", "ready", ROOT)], ROOT),
+        )
+        .unwrap();
+
+    let got = corpus.get("plan:T-01");
+    let inverse = |name: &str| {
+        got.link_types
+            .iter()
+            .find(|decl| decl.name == name)
+            .map(|decl| decl.inverse.clone())
+    };
+    assert_eq!(got.link_types.len(), 3);
+    assert_eq!(inverse("blocked-by"), Some(Some("blocks".to_string())));
+    assert_eq!(inverse("covers"), Some(Some("covered by".to_string())));
+    assert_eq!(inverse("relates-to"), Some(None));
+}
+
+#[test]
+fn a_task_get_of_a_source_that_declares_no_link_types_has_none_and_serializes_no_key() {
+    let mut init = plan_init();
+    init.links.clear();
+    let mut corpus = Corpus::default();
+    corpus.set_checkouts(checkouts());
+    corpus.declare_source("plan", &init);
+    corpus
+        .load(
+            "plan",
+            Some(ROOT),
+            list_of(&[at("T-01", "ready", ROOT)], ROOT),
+        )
+        .unwrap();
+    let got = corpus.get("plan:T-01");
+    assert!(got.link_types.is_empty());
+    assert!(
+        serde_json::to_value(&got)
+            .unwrap()
+            .get("link_types")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_task_get_that_found_nothing_carries_no_link_types() {
+    let corpus = plan_corpus(&[], &[ROOT]);
+    assert!(corpus.get("plan:T-01").link_types.is_empty());
 }
 
 #[test]
