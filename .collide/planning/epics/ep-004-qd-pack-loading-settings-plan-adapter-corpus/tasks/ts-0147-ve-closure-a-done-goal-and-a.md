@@ -1,7 +1,7 @@
 ---
 id: ts-0147-ve
 kind: task
-status: ready
+status: done
 title: "Closure: a done goal and a missing goal as the prototype generator has them"
 owners: []
 links: []
