@@ -1,7 +1,7 @@
 ---
 id: ts-0141-sn
 kind: task
-status: ready
+status: done
 title: "CLI: a listing says when a source of the board could not start"
 owners: []
 links:
