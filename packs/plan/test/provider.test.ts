@@ -28,7 +28,18 @@ describe('initialize', () => {
           { name: 'rejected', category: 'dropped' },
           { name: 'superseded', category: 'dropped' },
         ],
-        ops: [{ name: 'setStatus', args: expect.objectContaining({ properties: { status: { enum: ['draft', 'proposed', 'accepted', 'deferred', 'rejected', 'superseded'] } }, required: ['status'] }) }],
+        ops: [
+          {
+            name: 'setStatus',
+            args: expect.objectContaining({
+              properties: { status: { enum: ['draft', 'proposed', 'accepted', 'deferred', 'rejected', 'superseded'] } },
+              required: ['status'],
+            }),
+          },
+          { name: 'accept', args: expect.objectContaining({ additionalProperties: false }) },
+          { name: 'defer', args: expect.objectContaining({ required: ['trigger'] }) },
+          { name: 'reject', args: expect.objectContaining({ additionalProperties: false }) },
+        ],
       },
       {
         name: 'spike',
@@ -64,6 +75,7 @@ describe('initialize', () => {
               required: ['status'],
             }),
           },
+          { name: 'resolve', args: expect.objectContaining({ required: ['text'] }) },
         ],
       },
     ])

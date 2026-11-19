@@ -57,7 +57,7 @@ const listed = async (root: string) => {
 const declared = async (): Promise<Row | undefined> => (await call(repoOf({}, { git: false }), 'initialize')).result
 
 describe('initialize declares the question kind and the planning links', () => {
-  test('a question has open, resolved and dropped, and a setStatus that takes open and dropped', async () => {
+  test('a question has open, resolved and dropped, a setStatus that takes open and dropped, and resolve', async () => {
     const found = ((await declared())?.kinds as Row[]).find((kind) => kind.name === 'question')
     expect(found?.statuses).toEqual([
       { name: 'open', category: 'ready' },
@@ -69,6 +69,7 @@ describe('initialize declares the question kind and the planning links', () => {
         name: 'setStatus',
         args: expect.objectContaining({ properties: { status: { enum: ['open', 'dropped'] } }, required: ['status'] }),
       },
+      { name: 'resolve', args: expect.objectContaining({ required: ['text'] }) },
     ])
   })
 

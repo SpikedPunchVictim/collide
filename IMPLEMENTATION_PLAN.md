@@ -2477,7 +2477,12 @@ layout: { default: board, groupBy: category }
     - A proposal holds its decisions in its Decision section. Its statuses (owner, 2026-11-14) merge planning.md's
       session and decision roles: `draft` (`active`) while it is written; `proposed` (`review`) while it waits for
       the owner; `accepted` (`done`), with `by: human:<date>`; `deferred` (`backlog`), with its trigger, until a
-      person returns it to `proposed`; `rejected` and `superseded` (`dropped`).
+      person returns it to `proposed`; `rejected` and `superseded` (`dropped`). Its moves: `draft` to `proposed` or
+      `rejected`; `proposed` to `accepted`, `deferred`, `rejected` or `draft`; `deferred` to `proposed` or
+      `rejected`; `accepted` to `superseded`; `rejected` to `draft`; `superseded` is final. The ops `accept`,
+      `defer` (its `trigger:`, which it needs, so `setStatus` to `deferred` is refused) and `reject` (an optional
+      `reason:`) make them, as `setStatus` does; a question's `resolve` writes `resolved_by:` and its `## Decision`
+      text, and `reid` rewrites `resolved_by` (`ts-0129-uv`).
     - **A proposal's features** (owner, 2026-11-14; revision 14). Planning is mostly features before there are
       tasks, so a proposal holds its feature set in a fixed `## Features` part of its body, which Collide reads:
 

@@ -72,6 +72,10 @@ Write these first.
 
 ## Notes
 
+- Carried from `ts-0129-uv`: a bare-id write that runs without the daemon carries no `actor`. The plan provider reads
+  none as a person, so until this item it refuses `accept` and `resolve` (no date) and does not wall a run's `reject` or
+  `defer`. All writes going through the daemon here closes both; a test that a bare-id `accept` from the CLI waits as a
+  Queue confirmation shows it.
 - IMPLEMENTATION_PLAN.md:
   - Stage 4c: Planning ("The slice's CLI moves behind the provider supervisor"); Success Criteria (the spike view;
     `collide task reid`).

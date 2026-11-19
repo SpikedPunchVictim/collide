@@ -24,6 +24,16 @@ const unknownForm = (key: string, line: string, expected: string): Edit => refus
 
 const join = (all: string[]): Edit => ({ ok: true, text: all.join('') })
 
+/** Runs the edits one after the other, each on the text the one before made, and stops at the first refusal. */
+export function chain(text: string, ...steps: Array<(text: string) => Edit>): Edit {
+  let edit: Edit = { ok: true, text }
+  for (const step of steps) {
+    if (!edit.ok) return edit
+    edit = step(edit.text)
+  }
+  return edit
+}
+
 const STATUS = /^status:([ \t]+)(?:"([a-z]+)"|'([a-z]+)'|([a-z]+))([ \t]*(?:#.*)?)$/
 
 /** Changes the value on the `status:` line and nothing else on it. */
@@ -37,6 +47,50 @@ export function setStatusLine(text: string, category: string): Edit {
   if (match === null) return unknownForm('status', line, 'status: ready, with the value on the same line')
   const quote = match[2] !== undefined ? '"' : match[3] !== undefined ? "'" : ''
   all[at] = `status:${match[1]}${quote}${category}${quote}${match[5]}${endingOf(line)}`
+  return join(all)
+}
+
+/** A field on one line, with its value on that line (a block scalar, `|` or `>`, is not in this form). */
+const fieldLine = (key: string): RegExp => new RegExp(`^${key}:[ \\t]+(?![|>])\\S.*$`)
+
+/**
+ * Writes `key: value` for a field of the item's own (`by`, `trigger`, `reason`, `resolved_by`). `value` is already in
+ * YAML form. A `key:` line that is there gets the new value; otherwise the line goes in right after `status:`, in that
+ * line's own ending. A `key:` line in another form is refused. Every other line stays as it was.
+ */
+export function setFieldLine(text: string, key: string, value: string): Edit {
+  const all = splitLines(text)
+  const at = find(all, key)
+  if (typeof at !== 'number') return at
+  if (at !== -1) {
+    const line = all[at] as string
+    if (!fieldLine(key).test(withoutEnding(line))) return unknownForm(key, line, `${key}: <value>, on one line`)
+    all[at] = `${key}: ${value}${endingOf(line)}`
+    return join(all)
+  }
+  const statusAt = find(all, 'status')
+  if (typeof statusAt !== 'number') return statusAt
+  if (statusAt === -1) return refuse('the frontmatter has no "status:" line')
+  const status = all[statusAt] as string
+  const eol = endingOf(status) || '\n'
+  all.splice(statusAt, 1, `${withoutEnding(status)}${eol}`, `${key}: ${value}${eol}`)
+  return join(all)
+}
+
+/**
+ * Changes the value of the `key:` line from `from` to `to`, quoted or not, and keeps a comment after it. The caller
+ * parses the result and checks that only that field changed.
+ */
+export function replaceFieldValue(text: string, key: string, from: string, to: string): Edit {
+  const all = splitLines(text)
+  const at = find(all, key)
+  if (typeof at !== 'number') return at
+  if (at === -1) return refuse(`the frontmatter has no "${key}:" line`)
+  const line = all[at] as string
+  const form = new RegExp(`^${key}:([ \\t]+)(["']?)${from}\\2([ \\t]*(?:#.*)?)$`)
+  const match = form.exec(withoutEnding(line))
+  if (match === null) return unknownForm(key, line, `${key}: ${from}, with the value on the same line`)
+  all[at] = `${key}:${match[1]}${match[2]}${to}${match[2]}${match[3]}${endingOf(line)}`
   return join(all)
 }
 

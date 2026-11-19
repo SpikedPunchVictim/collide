@@ -14,6 +14,7 @@ use collide_core::owner::{
 use collide_host::board_load::LoadContext;
 use collide_host::builtin_packs::{BuiltinPacks, Environment};
 use collide_host::config_get::LoadContextFactory;
+use collide_host::daemon::DaemonOptions;
 use collide_host::owner_client::ClientError;
 use collide_host::pack_cache::ensure_sdk;
 use collide_host::pack_location::bundle_sdk;
@@ -64,6 +65,12 @@ impl std::ops::Deref for Rig {
 }
 
 pub fn rig(bundle_name: &str) -> Rig {
+    rig_with(bundle_name, |_| {})
+}
+
+/// As [`rig`], with `configure` run on the daemon's options after the rig has set its own: a test that needs another
+/// clock or another process tree sets it there.
+pub fn rig_with(bundle_name: &str, configure: impl FnOnce(&mut DaemonOptions) + 'static) -> Rig {
     if let Some(message) = node_missing_message(&std::env::var_os("PATH").unwrap_or_default()) {
         panic!("{message}");
     }
@@ -85,6 +92,7 @@ pub fn rig(bundle_name: &str) -> Rig {
             ))
         });
         options.load_context = Some(factory);
+        configure(options);
     });
     Rig {
         fixture,

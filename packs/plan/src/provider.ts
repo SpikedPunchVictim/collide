@@ -32,7 +32,11 @@ import {
 import type { Category } from './item.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
+import { ACCEPT, DECISION_MAX, DEFER, NOTE_MAX, REJECT, RESOLVE } from './person-ops.ts'
 import { applyOp } from './write.ts'
+
+const noExtraArgs = { additionalProperties: false }
+type OpDecls = NonNullable<KindDeclInput['ops']>
 
 const statuses = CATEGORIES.map((name) => ({ name, category: name }))
 const kind = (name: string): KindDeclInput => ({ name, statuses })
@@ -47,6 +51,7 @@ const ownStatusKind = (
   name: string,
   own: ReadonlyArray<{ name: string; category: Category }>,
   settable: readonly string[] = own.map((status) => status.name),
+  more: OpDecls = [],
 ): KindDeclInput => ({
   name,
   statuses: [...own],
@@ -60,15 +65,40 @@ const ownStatusKind = (
         additionalProperties: false,
       },
     },
+    ...more,
   ],
 })
 
-const proposalKind = ownStatusKind(PROPOSAL, PROPOSAL_STATUSES)
+/** The ops that only a person makes (0.10): each is declared for the kind it is for. */
+const noArgs = { type: 'object', properties: {}, ...noExtraArgs }
+const note = { type: 'string', minLength: 1, maxLength: NOTE_MAX }
+const PROPOSAL_OPS: OpDecls = [
+  { name: ACCEPT, args: noArgs },
+  {
+    name: DEFER,
+    args: { type: 'object', properties: { trigger: note }, required: ['trigger'], ...noExtraArgs },
+  },
+  { name: REJECT, args: { type: 'object', properties: { reason: note }, ...noExtraArgs } },
+]
+const QUESTION_OPS: OpDecls = [
+  {
+    name: RESOLVE,
+    args: {
+      type: 'object',
+      properties: {
+        by: { type: 'string', pattern: ID_PATTERN },
+        text: { type: 'string', minLength: 1, maxLength: DECISION_MAX },
+      },
+      required: ['text'],
+      ...noExtraArgs,
+    },
+  },
+]
+
+const proposalKind = ownStatusKind(PROPOSAL, PROPOSAL_STATUSES, undefined, PROPOSAL_OPS)
 const spikeKind = ownStatusKind(SPIKE, SPIKE_STATUSES)
 /** A question is resolved by the `resolve` op, which records who and what, so `setStatus` takes the other two. */
-const questionKind = ownStatusKind(QUESTION, QUESTION_STATUSES, ['open', 'dropped'])
-
-const noExtraArgs = { additionalProperties: false }
+const questionKind = ownStatusKind(QUESTION, QUESTION_STATUSES, ['open', 'dropped'], QUESTION_OPS)
 
 /**
  * The write ops, for every kind. `create` makes an item, so it is sent with no `id` and no `version`; `reid` is sent

@@ -5,11 +5,9 @@ import type { ApplyParamsOutput, ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile } from './atomic.ts'
 import { CheckoutError, isMainCheckout, resolveCheckout } from './checkout.ts'
 import { addLinkLine, clearOwnersLine, setOwnerLine, setStatusLine } from './frontmatter-edit.ts'
-import type { Edit } from './frontmatter-edit.ts'
 import { checkCreate, CREATE, createLocked, rootOfCreate } from './create.ts'
 import type { IdHooks } from './ids.ts'
 import { FEATURE_TARGET_EXAMPLE, parseFeatureTarget } from './feature-target.ts'
-import { parseFeatures } from './features.ts'
 import {
   BLOCKED_BY,
   CATEGORIES,
@@ -32,13 +30,17 @@ import {
 import { describeFeatures, featuresOf } from './links.ts'
 import { LOCK_FILE, withLock } from './lock.ts'
 import type { LockOptions } from './lock.ts'
-import { CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
+import { article, CONTROL, onlyKeys, refused, stringArg } from './op-util.ts'
+import type { Frontmatter, OpContext, OpSpec, Prepared } from './op-util.ts'
+import { PERSON_OPS, proposalMove } from './person-ops.ts'
 import { checkReid, REID, reidLocked } from './reid.ts'
-import { findFence, parseFrontmatter, readItemFile, versionOf } from './read-file.ts'
+import { BODY_CAP, findFence, parseFrontmatter, readItemFile, versionOf } from './read-file.ts'
 import { DEFAULT_LAYOUT, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import { scanEpics, toTask } from './scan.ts'
 import type { FoundItem, RootName, Scan } from './scan.ts'
+import { agentRefusal, moveRefusal, personOnlyWrite } from './transitions.ts'
+import type { Asker } from './transitions.ts'
 
 export { TEMP_SUFFIX } from './atomic.ts'
 
@@ -46,20 +48,6 @@ const SET_STATUS = 'setStatus'
 const LINK = 'link'
 const CLAIM = 'claim'
 const UNCLAIM = 'unclaim'
-
-type Frontmatter = Record<string, unknown>
-
-/** What an op does to one item: nothing, a refusal, or a line edit plus the frontmatter it must produce. */
-type Prepared =
-  | { kind: 'refuse'; message: string }
-  | { kind: 'nothing' }
-  | { kind: 'edit'; edit: (text: string) => Edit; expected: Frontmatter }
-
-interface OpSpec {
-  /** The problem with `args`, or null. Runs before the lock is taken. */
-  check: (args: Record<string, unknown>) => string | null
-  prepare: (found: FoundItem, scan: Scan, args: Record<string, unknown>, frontmatter: Frontmatter) => Prepared
-}
 
 const idRegex = new RegExp(ID_PATTERN)
 
@@ -86,8 +74,6 @@ const STATUS_WORDS = [
   `${SPIKE_STATUSES.map((status) => status.name).join(', ')} for a spike`,
   `${QUESTION_STATUSES.map((status) => status.name).join(', ')} for a question`,
 ].join('; ')
-
-const article = (kind: string): string => `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`
 
 /** The kinds that a proposal's `includes` may hold. */
 const INCLUDED_KINDS: readonly string[] = ['task', SPIKE, QUESTION]
@@ -118,20 +104,33 @@ function planningLinkRefusal(type: string, source: FoundItem, scan: Scan, to: st
   return to === id ? `${id} cannot supersede itself` : null
 }
 
-/** The refusal for a move to `proposed` while the Features part has problems: every problem, with its line. */
-function proposedRefusal(found: FoundItem): string | null {
-  const { problems } = parseFeatures(found.body, found.bodyLine)
-  if (problems.length === 0) return null
-  const lines = problems.map((problem) => `  line ${problem.line}: ${problem.reason}`)
-  return `${found.item.id} cannot move to proposed: its ## Features part in ${found.path} has ${problems.length} problem${problems.length === 1 ? '' : 's'}; fix ${problems.length === 1 ? 'it' : 'them'} first:\n${lines.join('\n')}`
-}
-
 const NO_PACK_DATA =
   "create: root private needs the pack's data folder, and there is none: COLLIDE_PACK_DATA is not set to an absolute " +
   'folder (a command that runs without the daemon has none)'
 const NOT_MAIN = 'create: root private is for the main checkout, and checkout names another: leave checkout out'
 
+/**
+ * A proposal's status write: the table and rules of the ops. `deferred` has its own op, which takes the trigger that a
+ * deferred proposal is held for, so a status write to it is refused (after the table, whose message names the moves).
+ */
+function setProposalStatus(
+  found: FoundItem,
+  scan: Scan,
+  frontmatter: Frontmatter,
+  status: string,
+  context: OpContext,
+): Prepared {
+  const { id, status: from } = found.item
+  if (status === 'deferred' && from !== 'deferred') {
+    const table = moveRefusal(id, from, status)
+    const use = 'a deferred proposal holds its trigger, so use defer, which takes it'
+    return { kind: 'refuse', message: table ?? `${id} cannot be set to deferred: ${use}` }
+  }
+  return proposalMove(found, scan, frontmatter, status, context)
+}
+
 const OPS: Record<string, OpSpec> = {
+  ...PERSON_OPS,
   [SET_STATUS]: {
     check: (args) => {
       const { status, category } = args
@@ -146,7 +145,7 @@ const OPS: Record<string, OpSpec> = {
       }
       return onlyKeys(args, ['status', 'category'])
     },
-    prepare: (found, _scan, args, frontmatter) => {
+    prepare: (found, scan, args, frontmatter, context) => {
       const { kind, id } = found.item
       const status = (args.status ?? args.category) as string
       const allowed = statusesOf(kind).map((candidate) => candidate.name)
@@ -167,11 +166,8 @@ const OPS: Record<string, OpSpec> = {
         const message = `${id} is resolved, and moving it would leave its resolved_by behind; reopen it by hand`
         return { kind: 'refuse', message }
       }
+      if (kind === PROPOSAL) return setProposalStatus(found, scan, frontmatter, status, context)
       if (found.item.status === status) return { kind: 'nothing' }
-      if (kind === PROPOSAL && status === 'proposed') {
-        const message = proposedRefusal(found)
-        if (message !== null) return { kind: 'refuse', message }
-      }
       return { kind: 'edit', edit: (text) => setStatusLine(text, status), expected: { ...frontmatter, status } }
     },
   },
@@ -280,6 +276,8 @@ async function writeLocked(
   layout: Layout,
   privateDir: string | null,
   lockedRoot: RootName,
+  op: string,
+  asker: Asker | null,
 ): Promise<ApplyResultInput> {
   const scan = await scanEpics(root, null, layout, privateDir)
   const found = scan.items.find((candidate) => candidate.item.id === id)
@@ -291,6 +289,11 @@ async function writeLocked(
   }
   const { absolute } = found
 
+  // The second wall (the daemon's is the first): before the version is compared, so a stale version hides nothing.
+  const write = personOnlyWrite(op, found.item.kind, found.item.status, args)
+  const wall = write === null ? null : agentRefusal(id, write, asker)
+  if (wall !== null) return refused(wall)
+
   const bytes = await readFile(absolute)
   if (versionOf(bytes) !== found.version) return refused(`${found.path} changed while it was being read; send the op again`)
   if (version !== found.version) return { outcome: 'conflict', current: toTask(found, true) }
@@ -301,7 +304,7 @@ async function writeLocked(
   const parsed = parseFrontmatter(text)
   if (!parsed.ok) return refused(`${found.path}: ${parsed.reason}`)
 
-  const prepared = spec.prepare(found, scan, args, parsed.value)
+  const prepared = spec.prepare(found, scan, args, parsed.value, { asker })
   if (prepared.kind === 'refuse') return refused(prepared.message)
   if (prepared.kind === 'nothing') return { outcome: 'ok', task: toTask(found, true), version: found.version, files: [], items: [] }
 
@@ -312,7 +315,18 @@ async function writeLocked(
     return refused(`${found.path}: the line edit would change more than the one field, so nothing was written; edit the file by hand`)
   }
 
-  const content = Buffer.concat([bytes.subarray(0, fence.start), Buffer.from(edited.text, 'utf8'), bytes.subarray(fence.end)])
+  let tail = bytes.subarray(fence.end)
+  if (prepared.body !== undefined) {
+    // The file's own line ending is the one its opening line has. The closing line gets one if it was the last thing.
+    const eol = fence.start === 5 ? '\r\n' : '\n'
+    const closing = bytes.subarray(fence.end, fence.bodyStart).toString('utf8')
+    const body = prepared.body(bytes.subarray(fence.bodyStart).toString('utf8'), eol)
+    tail = Buffer.from(`${closing}${closing.endsWith('\n') ? '' : eol}${body}`, 'utf8')
+    if (Buffer.byteLength(body) > BODY_CAP) {
+      return refused(`${found.path}: the body would be over the ${BODY_CAP}-byte cap`)
+    }
+  }
+  const content = Buffer.concat([bytes.subarray(0, fence.start), Buffer.from(edited.text, 'utf8'), tail])
   await replaceFile(absolute, content, (await stat(absolute)).mode & 0o777)
 
   const after = await readBack(found, absolute)
@@ -429,6 +443,10 @@ export async function applyOp(
   const work =
     spec === undefined
       ? () => reidLocked(root, id, args, hooks, layout, privateDir)
-      : () => writeLocked(root, id, version as string, spec, args, layout, privateDir, locked[0] as RootName)
+      : () => {
+          const held = locked[0] as RootName
+          const asker = params.actor ?? null
+          return writeLocked(root, id, version as string, spec, args, layout, privateDir, held, op, asker)
+        }
   return withLocks(locked.map((name) => lockOf[name]), work, lock)
 }

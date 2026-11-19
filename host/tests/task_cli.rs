@@ -1810,11 +1810,11 @@ fn a_proposals_set_status_takes_the_six_words_and_lists_them_when_it_is_wrong() 
     let moved = collide(
         &repo,
         &bundle,
-        &["task", "pr-0003", "setStatus", "deferred"],
+        &["task", "pr-0003", "setStatus", "rejected"],
     );
     assert_eq!(moved.code, 0, "{}", moved.stderr);
     assert!(
-        moved.stdout.contains("status  draft -> deferred"),
+        moved.stdout.contains("status  draft -> rejected"),
         "{}",
         moved.stdout
     );

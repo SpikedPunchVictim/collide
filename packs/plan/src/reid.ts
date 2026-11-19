@@ -3,7 +3,7 @@ import { basename, dirname, join, relative, sep } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { ApplyResultInput } from '@collide/pack-sdk'
 import { replaceFile, syncDirectory, TEMP_SUFFIX } from './atomic.ts'
-import { replaceLinkTarget, setIdLine } from './frontmatter-edit.ts'
+import { replaceFieldValue, replaceLinkTarget, setIdLine } from './frontmatter-edit.ts'
 import type { Edit } from './frontmatter-edit.ts'
 import { checkSeed, generatorFor } from './create.ts'
 import { namesItem } from './feature-target.ts'
@@ -11,7 +11,7 @@ import { drawFreeId, IdSourceError, takenIds } from './ids.ts'
 import type { IdHooks } from './ids.ts'
 import { DEFAULT_LAYOUT } from './layout.ts'
 import type { Layout } from './layout.ts'
-import { SPIKE, stateOf } from './item.ts'
+import { QUESTION, SPIKE, stateOf } from './item.ts'
 import { onlyKeys, refused } from './op-util.ts'
 import { findFence, parseFrontmatter, versionOf } from './read-file.ts'
 import { pathOf, PRIVATE_PREFIX, readEpicFiles, toTask } from './scan.ts'
@@ -47,6 +47,10 @@ async function privateEpicFolders(epicsDir: string, id: string): Promise<string[
   }
 }
 
+/** Whether `found` is a question that an item settled, by that item's id in its `resolved_by`. */
+const resolvedBy = (found: FoundItem, id: string): boolean =>
+  found.item.kind === QUESTION && found.item.fields.resolved_by === id
+
 /** One file with its new content, worked out and checked before anything is written. */
 interface Planned {
   found: FoundItem
@@ -56,9 +60,9 @@ interface Planned {
 }
 
 /**
- * Works out the new content of `found`: its own `id:` line when it is the item being renamed, and the target of every
- * link that names the old id. Returns the reason when a line is in a form the provider does not edit, or when the
- * edit changes more than those fields.
+ * Works out the new content of `found`: its own `id:` line when it is the item being renamed, the target of every
+ * link that names the old id, and a question's `resolved_by` when it holds the old id. Returns the reason when a line
+ * is in a form the provider does not edit, or when the edit changes more than those fields.
  */
 async function plan(found: FoundItem, oldId: string, newId: string, renamed: boolean): Promise<Planned | string> {
   const { absolute } = found
@@ -81,17 +85,24 @@ async function plan(found: FoundItem, oldId: string, newId: string, renamed: boo
     // A link to a feature, `pr-0003-km#F2`, keeps its feature: only the id before the `#` is the old one.
     expected.links = (parsed.value.links as Array<Record<string, unknown>>).map((link) => (typeof link.to === 'string' && namesItem(link.to, oldId) ? { ...link, to: `${newId}${link.to.slice(oldId.length)}` } : link))
   }
+  if (edited.ok && resolvedBy(found, oldId)) {
+    edited = replaceFieldValue(edited.text, 'resolved_by', oldId, newId)
+    expected.resolved_by = newId
+  }
   if (!edited.ok) return `${found.path}: ${edited.reason}`
   const reparsed = parseFrontmatter(edited.text)
   if (!reparsed.ok || !isDeepStrictEqual(reparsed.value, expected)) {
-    return `${found.path}: the line edit would change more than the id and the link targets, so nothing was written; edit the file by hand`
+    const fields = 'the id, the link targets and resolved_by'
+    const rest = 'so nothing was written; edit the file by hand'
+    return `${found.path}: the line edit would change more than ${fields}, ${rest}`
   }
   const content = Buffer.concat([bytes.subarray(0, fence.start), Buffer.from(edited.text, 'utf8'), bytes.subarray(fence.end)])
   return { found, absolute, content, mode: (await stat(absolute)).mode & 0o777 }
 }
 
 /**
- * Gives an item a new suffix and rewrites every link that names the old id, in every item file that reads. The item is
+ * Gives an item a new suffix and rewrites every link that names the old id, and every question's `resolved_by` that
+ * holds it, in every item file that reads. The item is
  * the file with that id; when two files share it, the second one in scan order is the one the scan sets aside as
  * invalid, and that is the one renamed (a third is reached by running `reid` again). Nothing is committed, and a
  * link meant for the other file with the old id is rewritten too: the id cannot tell them apart.
@@ -131,7 +142,11 @@ export async function reidLocked(
   }
 
   const planned: Planned[] = []
-  for (const found of all.filter((candidate) => candidate === target || candidate.item.links.some((link) => namesItem(link.to, id)))) {
+  const holders = all.filter(
+    (candidate) =>
+      candidate === target || candidate.item.links.some((link) => namesItem(link.to, id)) || resolvedBy(candidate, id),
+  )
+  for (const found of holders) {
     const result = await plan(found, id, newId, found === target)
     if (typeof result === 'string') return refused(result)
     planned.push(result)

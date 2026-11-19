@@ -166,8 +166,12 @@ describe('setStatus', () => {
     expect((await setStatus(root, 'proposed')).result).toMatchObject({ outcome: 'ok', files: [], items: [] })
   })
 
-  test.each(['draft', 'proposed', 'accepted', 'deferred', 'rejected', 'superseded'])('moves among the six: to %s', async (to) => {
-    const from = to === 'draft' ? 'proposed' : 'draft'
+  test.each([
+    ['draft', 'proposed'],
+    ['proposed', 'draft'],
+    ['draft', 'rejected'],
+    ['accepted', 'superseded'],
+  ])('moves along the table, from %s to %s, changing the status line and nothing else', async (from, to) => {
     const root = repoWith(proposal(from, GOOD_PART))
     const before = readFileSync(pathOf(root), 'utf8')
     const { result } = await setStatus(root, to)
