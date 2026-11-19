@@ -198,11 +198,19 @@ pub struct TempRoot(PathBuf);
 
 impl TempRoot {
     pub fn new() -> TempRoot {
-        let n = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = PathBuf::from(format!("/tmp/cdt-{}-{n}", std::process::id()));
-        fs::create_dir(&dir).unwrap();
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-        TempRoot(dir)
+        // A folder an earlier run left under this pid (pids are reused) is not ours: skip its name and take the next.
+        loop {
+            let n = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+            let dir = PathBuf::from(format!("/tmp/cdt-{}-{n}", std::process::id()));
+            match fs::create_dir(&dir) {
+                Ok(()) => {
+                    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+                    return TempRoot(dir);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("cannot make {}: {error}", dir.display()),
+            }
+        }
     }
 
     pub fn path(&self) -> &Path {
