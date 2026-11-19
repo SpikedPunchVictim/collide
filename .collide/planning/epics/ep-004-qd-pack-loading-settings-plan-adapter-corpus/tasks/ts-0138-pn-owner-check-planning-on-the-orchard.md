@@ -17,6 +17,7 @@ links:
   - { type: blocked-by, to: ts-0148-cv }
   - { type: blocked-by, to: ts-0149-kq }
   - { type: blocked-by, to: ts-0151-fk }
+  - { type: blocked-by, to: ts-0153-kp }
 ---
 
 ## Goal
