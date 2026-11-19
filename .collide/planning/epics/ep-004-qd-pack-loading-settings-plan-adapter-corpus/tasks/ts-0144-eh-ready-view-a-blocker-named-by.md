@@ -1,7 +1,7 @@
 ---
 id: ts-0144-eh
 kind: task
-status: ready
+status: done
 title: "Ready view: a blocker named by its short id is the task it names"
 owners: []
 links: []
