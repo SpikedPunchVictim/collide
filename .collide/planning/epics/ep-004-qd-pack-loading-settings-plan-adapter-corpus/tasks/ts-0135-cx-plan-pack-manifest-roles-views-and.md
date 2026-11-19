@@ -1,7 +1,7 @@
 ---
 id: ts-0135-cx
 kind: task
-status: ready
+status: done
 title: "Plan pack manifest: roles, views and bare view names"
 owners: []
 links:
