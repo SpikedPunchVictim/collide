@@ -1,7 +1,7 @@
 ---
 id: ts-0132-pm
 kind: task
-status: ready
+status: done
 title: "Plan pack: the Assumption ledger and the Findings part"
 owners: []
 links:
