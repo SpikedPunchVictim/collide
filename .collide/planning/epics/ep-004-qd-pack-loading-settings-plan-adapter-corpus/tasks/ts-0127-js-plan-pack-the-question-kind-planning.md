@@ -1,7 +1,7 @@
 ---
 id: ts-0127-js
 kind: task
-status: ready
+status: done
 title: "Plan pack: the question kind, planning links and ids over every kind"
 owners: []
 links:
