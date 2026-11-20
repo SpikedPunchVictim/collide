@@ -1,7 +1,7 @@
 ---
 id: ts-0158-ow
 kind: task
-status: ready
+status: done
 title: "Orchard: fetching one changed task rescans the checkout"
 owners: []
 links:
