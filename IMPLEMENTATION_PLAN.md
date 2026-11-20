@@ -4577,6 +4577,11 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   standard error's line count, the JSON envelope as its key tree with leaf types and ids named by pattern, no other
   text), and a test runs the stand-in through the same calls. The real CLI is recorded again by hand, in a throw-away
   clone, when it changes.
+- **Orchard `get`** (`ts-0158-ow`): a `get` for a checkout the provider watches is answered from the watcher's last read
+  when the task's own file is unchanged since that read, so a burst of changed tasks costs one scan and at most one
+  `./plan status`, not one each; otherwise, and after a write by the provider or a read with a question open and no
+  queue, it reads the tree. What comes from other files (collections, spike links) can lag by the watcher's debounce, or
+  its recheck when an event was missed.
 - **Feature ops** (revision 14): `addFeature {section, title, summary}` on a proposal, whose `section` is required
   and may be empty (owner, 2026-11-14), takes the next `F<n>` and writes under that section's heading, or under
   `### Unsorted`, made at the end of the part when it is missing; `moveFeature {feature, section}`; and

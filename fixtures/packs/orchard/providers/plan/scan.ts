@@ -217,8 +217,13 @@ export async function readQueueOf(
   return readQueue(root, new Set(questions.map(({ task }) => task.key)), { ...queue, log })
 }
 
+/** Whether `id` names the task: its long id, its short id, or its key. */
+export function isNamed(task: TaskInput, id: string): boolean {
+  const wanted = id.startsWith('plan:') ? id.slice('plan:'.length) : id
+  return task.id === wanted || task.key === `plan:${wanted}`
+}
+
 /** The task that an id names: its long id, its short id, or its key. */
 export function findTask(tasks: FoundTask[], id: string): FoundTask | undefined {
-  const wanted = id.startsWith('plan:') ? id.slice('plan:'.length) : id
-  return tasks.find(({ task }) => task.id === wanted || task.key === `plan:${wanted}`)
+  return tasks.find(({ task }) => isNamed(task, id))
 }

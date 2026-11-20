@@ -62,6 +62,8 @@ const message = (error: unknown): string => (error instanceof Error ? error.mess
 /** What the watcher holds for one checkout: its last snapshot and the two watchers it opened. */
 interface Watched {
   snapshot: Snapshot
+  /** When the read that made `snapshot` began, on the watcher's own count (`began`). */
+  readAt: number
   /** Whether the last `stale` was sent and no read has worked since. */
   stale: boolean
   arch: FsHandle | null
@@ -71,6 +73,19 @@ interface Watched {
 export interface Watcher {
   /** Makes these the checkouts that are watched: the others are dropped, new ones read once and given watchers. */
   set(checkouts: string[]): Promise<void>
+  /**
+   * The last read of a checkout that is watched, or null. It is null when the checkout is not watched, when its last
+   * read failed, when a question was open and the human queue could not be read, and when a write (`wrote`) ended
+   * after that read began. Otherwise it is what a read now would find, except for what changed since it was made and
+   * has not been read yet: the watcher reads again `debounceMs` after an event in `arch/`, and at the latest
+   * `recheckMs` after the change.
+   */
+  held(checkout: string): Snapshot | null
+  /**
+   * Says that a write ended in the checkout: no read that began before this call stands in for a read now. The
+   * checkout is read again soon, so that the watcher's next read is one that began after the write.
+   */
+  wrote(checkout: string): void
   /** Closes every watcher and clock. Nothing is sent after it. */
   stop(): void
 }
@@ -103,6 +118,10 @@ export function createWatcher(deps: {
   let queue: Promise<void> = Promise.resolve()
   let collisions = new Map<string, string>()
   let stopped = false
+  // A count, not a time: a read began before a write ended when its number is lower than the write's.
+  let counted = 0
+  const began = (): number => ++counted
+  const wroteAt = new Map<string, number>()
 
   // The same complaint about the same file, every ten seconds, would fill the log.
   const logged = new Set<string>()
@@ -214,6 +233,7 @@ export function createWatcher(deps: {
     const entry = watched.get(checkout)
     if (entry === undefined) return
     let next: Snapshot
+    const readAt = began()
     try {
       next = await takeSnapshot(checkout, entry.snapshot)
     } catch (error) {
@@ -237,6 +257,7 @@ export function createWatcher(deps: {
         : []
     if (stopped || watched.get(checkout) !== entry) return
     entry.snapshot = next
+    entry.readAt = readAt
     // Watchers first: whoever hears of the change may write at once, and that write must be seen.
     if (entry.arch === null || entry.head === null) await openHandles(checkout, entry)
     send([...compare(checkout, before, next, renames), ...collectionsChanged(checkout, before, next)])
@@ -272,10 +293,12 @@ export function createWatcher(deps: {
       if (wanted.includes(checkout)) continue
       closeHandles(entry)
       watched.delete(checkout)
+      wroteAt.delete(checkout)
       dirty.delete(checkout)
     }
 
     const added = wanted.filter((checkout) => !watched.has(checkout))
+    const readAt = began()
     const reads = await Promise.all(
       added.map(async (checkout) => {
         try {
@@ -288,7 +311,13 @@ export function createWatcher(deps: {
     if (stopped) return
     const unreadable: { reason: string; checkout: string }[] = []
     for (const { checkout, snapshot, reason } of reads) {
-      watched.set(checkout, { snapshot: snapshot ?? emptySnapshot(), stale: snapshot === null, arch: null, head: null })
+      watched.set(checkout, {
+        snapshot: snapshot ?? emptySnapshot(),
+        readAt,
+        stale: snapshot === null,
+        arch: null,
+        head: null,
+      })
       if (reason !== null) unreadable.push({ reason, checkout })
     }
     await Promise.all([...watched].map(([checkout, entry]) => openHandles(checkout, entry)))
@@ -311,6 +340,20 @@ export function createWatcher(deps: {
     for (const { reason, checkout } of unreadable) setImmediate(() => sendStale(reason, checkout))
   }
 
+  const held = (checkout: string): Snapshot | null => {
+    const entry = watched.get(resolve(checkout))
+    if (stopped || entry === undefined || entry.stale) return null
+    // A question is open and the plan CLI gave no queue: a read now would ask it again, and this read never will.
+    if (entry.snapshot.asked !== '' && entry.snapshot.queue === null) return null
+    return entry.readAt > (wroteAt.get(resolve(checkout)) ?? 0) ? entry.snapshot : null
+  }
+
+  const wrote = (checkout: string): void => {
+    const at = resolve(checkout)
+    wroteAt.set(at, began())
+    markDirty(at)
+  }
+
   const stop = (): void => {
     stopped = true
     if (debounce !== null) timers.clearTimeout(debounce)
@@ -322,5 +365,5 @@ export function createWatcher(deps: {
     dirty.clear()
   }
 
-  return { set, stop }
+  return { set, held, wrote, stop }
 }

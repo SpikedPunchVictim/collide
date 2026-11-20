@@ -1,14 +1,17 @@
-import { isAbsolute, resolve } from 'node:path'
+import { lstat } from 'node:fs/promises'
+import { isAbsolute, join, resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { defineProvider } from '@collide/pack-sdk'
 import type { GetResultInput, ListResultInput, ProviderHandlers } from '@collide/pack-sdk'
 import { INITIALIZE_RESULT } from './declaration.ts'
 import { isFolder } from './files.ts'
-import { findTask, scan } from './scan.ts'
-import type { Scan } from './scan.ts'
+import { readCorpusFile } from './read-file.ts'
+import { findTask, isNamed, scan } from './scan.ts'
+import type { FoundTask, Scan } from './scan.ts'
 import { applyOp, previewOp } from './write.ts'
 import { createWatcher } from './watcher.ts'
 import type { Watcher, WatchOptions } from './watcher.ts'
+import type { Snapshot } from './changes.ts'
 import type { WriteContext } from './write.ts'
 
 /** A page of `list` is this many tasks. The corpus has about 1,600, so a full list is a few pages. */
@@ -18,6 +21,24 @@ export const PAGE_SIZE = 500
 export const WRITE_TIMEOUT_MS = 120_000
 
 const CURSOR = /^p(\d+)$/
+
+/**
+ * The task that `id` names as the watcher's last read of the checkout has it, with its body read from its file. It is
+ * given only when that one file is still what the read saw (its version is the hash of its whole content), and is
+ * undefined when the read has no such task, the file is gone or is no longer a plain file, or its content differs.
+ */
+async function fromRead(read: Snapshot | null, checkout: string, id: string): Promise<FoundTask | undefined> {
+  const held = read === null ? undefined : [...read.tasks.values()].find((task) => isNamed(task, id))
+  if (held?.path === undefined || held.path === null) return undefined
+  const path = join(checkout, held.path)
+  try {
+    if (!(await lstat(path)).isFile()) return undefined
+    const file = await readCorpusFile(path)
+    return file.ok && file.version === held.version ? { task: held, body: file.body } : undefined
+  } catch {
+    return undefined
+  }
+}
 
 export interface ServeOptions {
   input?: Readable
@@ -42,9 +63,11 @@ export interface PlanHandlers extends ProviderHandlers {
  * `initialize`, `list`, `get`, `apply`, `preview` and `watch` for the checkouts of one repository. The root comes from
  * `initialize`: it is the checkout that a call without `checkout` means, and nothing is read from the working
  * directory. Until `initialize` has run, every other call fails. A call that names a checkout means that folder, which
- * must exist. The tree is read again on each call, so a reply is never older than the request. A write runs the
- * checkout's own `./plan`; the SDK answers one request at a time, in the order they came, so two writes in this
- * process never overlap. `list` and `get` run `./plan status` too when a question is open, for the human queue.
+ * must exist. The tree is read again on each `list`, so its reply is never older than the request. So is each `get`,
+ * except for a checkout that `watch` holds: that `get` is answered from the watcher's last read when the task's own
+ * file is what the read saw (see `fromRead` and `Watcher.held`). A write runs the checkout's own `./plan`; the SDK
+ * answers one request at a time, in the order they came, so two writes in this process never overlap. `list` and
+ * `get` run `./plan status` too when a question is open, for the human queue.
  */
 export function planHandlers(options: {
   log: (message: string) => void
@@ -105,10 +128,20 @@ export function planHandlers(options: {
       }
     },
     get: async ({ id, checkout }): Promise<GetResultInput> => {
-      const found = findTask((await read(checkout ?? undefined)).tasks, id)
+      const dir = await checkoutFor(checkout ?? undefined)
+      const held = await fromRead(watcher?.held(dir) ?? null, dir, id)
+      const found = held ?? findTask((await read(checkout ?? undefined)).tasks, id)
       return found === undefined ? {} : { task: { ...found.task, body: found.body } }
     },
-    apply: async (params) => applyOp(await writing(params.checkout ?? undefined), params),
+    apply: async (params) => {
+      const ctx = await writing(params.checkout ?? undefined)
+      try {
+        return await applyOp(ctx, params)
+      } finally {
+        // Whatever the write did, a read that began before it is not a read of the checkout now.
+        watcher?.wrote(ctx.root)
+      }
+    },
     preview: async (params) => previewOp(await writing(params.checkout ?? undefined), params),
     watch: async ({ checkouts }, notify) => {
       await checkoutFor(undefined)
