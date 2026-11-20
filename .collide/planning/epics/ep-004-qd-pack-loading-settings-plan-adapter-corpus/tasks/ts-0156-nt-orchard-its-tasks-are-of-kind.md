@@ -1,7 +1,7 @@
 ---
 id: ts-0156-nt
 kind: task
-status: ready
+status: done
 title: "Orchard: its tasks are of kind task"
 owners: []
 links:
