@@ -1,0 +1,43 @@
+{
+  "case": "set-dry-run",
+  "args": [
+    "set",
+    "<task>",
+    "status=doing",
+    "--dry-run"
+  ],
+  "source": "real",
+  "recorded": "2026-11-20",
+  "shape": {
+    "exit": 0,
+    "stdout_empty": false,
+    "stdout_json": true,
+    "stderr_empty": true,
+    "stderr_lines": 0,
+    "envelope": {
+      "command": "=set",
+      "corpus": "string",
+      "data": {
+        "dryRun": "boolean",
+        "errors": [],
+        "regenerated": [
+          "string"
+        ],
+        "results": [
+          {
+            "changes": [
+              {
+                "field": "string",
+                "newValue": "=doing",
+                "oldValue": "=ready"
+              }
+            ],
+            "relPath": "string",
+            "written": "boolean"
+          }
+        ]
+      },
+      "schema_version": "=1"
+    }
+  }
+}

@@ -16,6 +16,9 @@
 // `status` follows the same copy: the envelope's data has the keys `proposals`, `epics`, `blockedTasks`, `queue`,
 // `evidence`, `velocity` and `suppressed`. Only `queue` is filled here: the open questions that need a person
 // (`needs` is human or either), in id order, each `{ question, file, needs, blocks }` with the question's id and slug.
+// `evidence` is `{ inferred, measured, unmeasured }`, three zeros here.
+// `set` on a task that is not there and `new task` on a proposal that is not are refused as the recorded CLI refuses
+// them (fixtures/orchard-arch/contract): a message that ends in the id, then one indented hint that names a command.
 //
 // The root is an `arch/` folder. A write changes the task file and refreshes the generated table (the region between
 // `<!-- BEGIN GENERATED tasks -->` and `<!-- END GENERATED -->`) of each epic whose rows change.
@@ -23,7 +26,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-class UsageError extends Error {}
+/** A refusal the CLI words as a message and, for a thing that is not there, an indented hint on a second line. */
+class UsageError extends Error {
+  constructor(message, hint = null) {
+    super(message)
+    this.hint = hint
+  }
+}
 
 const STATUSES = ['specified', 'ready', 'doing', 'in_review', 'done', 'dropped']
 // The lifecycle of docs/research/planning.md, one step at a time, with a reopen and a drop from any live status.
@@ -246,7 +255,7 @@ function commandSet(context, positionals) {
   const task = corpus.tasks.find(
     (candidate) => candidate.shortId === idMatch[1] && (id === idMatch[1] || candidate.file === `${id}.md`),
   )
-  if (task === undefined) throw new UsageError(`there is no task ${id}`)
+  if (task === undefined) throw new UsageError(`no such task: ${id}`, 'Check the ids with plan status.')
 
   const text = readText(context.root, task.relPath)
   const current = frontmatterOf(text)
@@ -308,7 +317,9 @@ function commandNewTask(context, flags, positionals) {
   const corpus = readCorpus(context.root)
   const scope = /^P?(\d{2})$/.exec(proposalArg)?.[1]
   const proposal = corpus.proposals.find((candidate) => candidate.num === scope)
-  if (proposal === undefined) throw new UsageError(`there is no proposal ${proposalArg}`)
+  if (proposal === undefined) {
+    throw new UsageError(`no such proposal: ${proposalArg}`, 'Check the proposals with plan status.')
+  }
 
   const taken = corpus.tasks.filter((task) => task.scope === scope).map((task) => Number(task.num))
   const mapped = fs.existsSync(path.join(context.root, 'ID-MAP.md')) ? readText(context.root, 'ID-MAP.md') : ''
@@ -562,7 +573,15 @@ function commandStatus(context, positionals) {
   return {
     command: 'status',
     read: true,
-    data: { proposals: [], epics: [], blockedTasks: [], queue, evidence: [], velocity: {}, suppressed: [] },
+    data: {
+      proposals: [],
+      epics: [],
+      blockedTasks: [],
+      queue,
+      evidence: { inferred: 0, measured: 0, unmeasured: 0 },
+      velocity: {},
+      suppressed: [],
+    },
     lines: queue.map((entry) => `${entry.question}  needs ${entry.needs}`),
     files: [],
     done: { errors: [], regenerated: [], written: false },
@@ -613,7 +632,7 @@ function main(argv) {
     }
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
-    process.stderr.write(`${error.message}\n`)
+    process.stderr.write(`${error.message}\n${error.hint === null ? '' : `  ${error.hint}\n`}`)
     process.exitCode = 2
     return
   }

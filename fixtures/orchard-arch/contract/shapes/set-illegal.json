@@ -1,0 +1,18 @@
+{
+  "case": "set-illegal",
+  "args": [
+    "set",
+    "<task>",
+    "status=specified"
+  ],
+  "source": "real",
+  "recorded": "2026-11-20",
+  "shape": {
+    "exit": 2,
+    "stdout_empty": true,
+    "stdout_json": false,
+    "stderr_empty": false,
+    "stderr_lines": 2,
+    "envelope": null
+  }
+}

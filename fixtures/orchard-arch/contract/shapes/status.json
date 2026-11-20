@@ -1,0 +1,76 @@
+{
+  "case": "status",
+  "args": [
+    "status"
+  ],
+  "source": "real",
+  "recorded": "2026-11-20",
+  "shape": {
+    "exit": 0,
+    "stdout_empty": false,
+    "stdout_json": true,
+    "stderr_empty": true,
+    "stderr_lines": 0,
+    "envelope": {
+      "command": "=status",
+      "corpus": "string",
+      "data": {
+        "blockedTasks": [
+          {
+            "blockedBy": [
+              "string"
+            ],
+            "file": "string",
+            "task": "task-id"
+          }
+        ],
+        "epics": [
+          {
+            "file": "string",
+            "key": "string",
+            "status": "string",
+            "tasksByStatus": {
+              "doing?": "number",
+              "done?": "number",
+              "dropped?": "number",
+              "in_review?": "number",
+              "ready?": "number",
+              "specified?": "number"
+            },
+            "totalTasks": "number"
+          }
+        ],
+        "evidence": {
+          "inferred": "number",
+          "measured": "number",
+          "unmeasured": "number"
+        },
+        "proposals": [
+          {
+            "file": "string",
+            "key": "string",
+            "openObligations": "number",
+            "status": "string",
+            "totalObligations": "number"
+          }
+        ],
+        "queue": [
+          {
+            "blocks": [],
+            "file": "string",
+            "needs": "string",
+            "question": "id"
+          }
+        ],
+        "suppressed": [],
+        "velocity": {
+          "<string>": {
+            "adrs": "number",
+            "spikes": "number"
+          }
+        }
+      },
+      "schema_version": "=1"
+    }
+  }
+}

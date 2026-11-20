@@ -4570,6 +4570,11 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   plan provider reads ADRs, spikes and questions, as the kinds `adr`, `spike` and `question` (a task has no kind),
   and puts the questions that `plan status --format json` queues in the collection `plan:queue`, which its
   `decisions-needed` view lists; a write on those kinds is refused, since the plan CLI changes them (`ts-0137-pg`).
+- **Fake plan CLI** (`ts-0153-kp`): the Orchard fixtures' stand-in plan CLI is held to the real one.
+  `fixtures/orchard-arch/contract` records the shape of each call the pack makes (exit code, which streams are empty,
+  standard error's line count, the JSON envelope as its key tree with leaf types and ids named by pattern, no other
+  text), and a test runs the stand-in through the same calls. The real CLI is recorded again by hand, in a throw-away
+  clone, when it changes.
 - **Feature ops** (revision 14): `addFeature {section, title, summary}` on a proposal, whose `section` is required
   and may be empty (owner, 2026-11-14), takes the next `F<n>` and writes under that section's heading, or under
   `### Unsorted`, made at the end of the part when it is missing; `moveFeature {feature, section}`; and

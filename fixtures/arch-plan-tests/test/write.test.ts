@@ -473,10 +473,11 @@ describe('create', () => {
         args: { ...CHART.args, proposal: 'P99' },
       }),
     )
-    expect(reply.result).toMatchObject({
-      outcome: 'refused',
-      message: expect.stringContaining('P99'),
-    })
+    const own = plan(makeRepo(), ['new', 'task', 'P99', 'Chart', '--epic', 'E-07', '--root', 'arch'])
+    // The CLI's refusal is two lines, the message and an indented hint: the reply keeps both.
+    expect(own.stderr.trim().split('\n')).toHaveLength(2)
+    expect(reply.result).toEqual({ outcome: 'refused', message: own.stderr.trim() })
+    expect(reply.result?.message).toContain('P99')
   })
 
   const BAD_CALLS: Array<[string, Message, RegExp]> = [

@@ -72,6 +72,13 @@ describe('the table of legal moves', () => {
   })
 })
 
+describe('status', () => {
+  test('counts the evidence as an object of three numbers, as the real CLI does', () => {
+    const run = plan(makeRepo(), ['status', '--format', 'json', ...ARCH])
+    expect(json(run).data.evidence).toEqual({ inferred: 0, measured: 0, unmeasured: 0 })
+  })
+})
+
 describe('exit codes', () => {
   const bad: Array<[string, string[]]> = [
     ['no command', []],
@@ -102,6 +109,21 @@ describe('exit codes', () => {
     expect(run.stderr.trim()).not.toBe('')
     expect(run.stdout).toBe('')
     expect(repo.snapshot()).toEqual(before)
+  })
+
+  // As in the real CLI, as recorded in fixtures/orchard-arch/contract: a thing that is not there is a message that
+  // ends in its id, then one indented hint line that names a plan command.
+  test.each([
+    ['a task that is not there', ['set', 'T-99-999', 'status=doing', ...ARCH], 'T-99-999'],
+    ['a proposal that is not there', ['new', 'task', 'P99', 'Title', '--epic', 'E-07', ...ARCH], 'P99'],
+  ])('refuses %s with its id and a hint', (_name, args, id) => {
+    const run = plan(makeRepo(), args)
+    expect(run.code).toBe(2)
+    expect(run.stdout).toBe('')
+    const lines = run.stderr.trimEnd().split('\n')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatch(new RegExp(`^[a-z][a-z ]*: ${id}$`))
+    expect(lines[1]).toMatch(/^ {2}\S.*\bplan [a-z]+/)
   })
 
   test('exit 1 when the write gate refuses, with the reasons in the envelope and nothing written', () => {

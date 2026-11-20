@@ -1,0 +1,44 @@
+{
+  "case": "new-task-dry-run",
+  "args": [
+    "new",
+    "task",
+    "<proposal>",
+    "<title>",
+    "--epic",
+    "<epic>",
+    "--dry-run"
+  ],
+  "source": "real",
+  "recorded": "2026-11-20",
+  "shape": {
+    "exit": 0,
+    "stdout_empty": false,
+    "stdout_json": true,
+    "stderr_empty": true,
+    "stderr_lines": 0,
+    "envelope": {
+      "command": "=new-task",
+      "corpus": "string",
+      "data": {
+        "dryRun": "boolean",
+        "errors": [],
+        "frontmatter": {
+          "blocked_by": [],
+          "depends_on": [],
+          "epic": "epic-id",
+          "status": "=specified",
+          "title": "string"
+        },
+        "id": "task-id",
+        "kind": "string",
+        "regenerated": [
+          "string"
+        ],
+        "relPath": "string",
+        "written": "boolean"
+      },
+      "schema_version": "=1"
+    }
+  }
+}

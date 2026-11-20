@@ -1,0 +1,21 @@
+{
+  "case": "new-task-no-proposal",
+  "args": [
+    "new",
+    "task",
+    "P99",
+    "<title>",
+    "--epic",
+    "<epic>"
+  ],
+  "source": "real",
+  "recorded": "2026-11-20",
+  "shape": {
+    "exit": 2,
+    "stdout_empty": true,
+    "stdout_json": false,
+    "stderr_empty": false,
+    "stderr_lines": 2,
+    "envelope": null
+  }
+}
