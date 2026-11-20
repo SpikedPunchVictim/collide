@@ -3,7 +3,7 @@
 //! unless a source was given. The registry is a recorded-shape response served on a loopback address by this file's own
 //! server: no test reaches a network. Every curl runs with an empty environment, and every server is stopped on drop.
 
-use super::common::TempRoot;
+use super::common::{Grandchild, TempRoot};
 use collide_host::adapters::claude::version::{ClaudeVersion, PUBLISHED_URL};
 use collide_host::claude_versions::{
     ClaudeVersions, FETCH_TIMEOUT, PublishedSource, REFRESH_EVERY, RegistrySource, VersionsOptions,
@@ -380,4 +380,23 @@ fn the_published_versions_are_fetched_at_start_and_again_on_the_timer_until_stop
     let after_stop = server.requests().len();
     std::thread::sleep(Duration::from_millis(400));
     assert_eq!(server.requests().len(), after_stop, "no fetch after stop");
+}
+
+#[test]
+fn a_curl_whose_stdout_a_grandchild_holds_open_is_an_error_not_an_empty_body() {
+    let root = TempRoot::new();
+    let pid_file = root.join("pid");
+    let mut sleeper = Grandchild::new(pid_file.clone());
+    let curl = root.script(
+        "curl",
+        &format!(
+            "#!/bin/sh\n/bin/sleep 30 2>/dev/null &\necho $! > {}\necho '{{}}'\n",
+            pid_file.display()
+        ),
+    );
+    let result = CurlGet::new(curl.to_str().unwrap(), Box::new(NoProxy))
+        .get("http://127.0.0.1:9/x", Duration::from_secs(5));
+    sleeper.pid(Duration::from_secs(10));
+    let error = result.unwrap_err();
+    assert!(error.contains("not read in time"), "{error}");
 }

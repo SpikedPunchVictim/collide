@@ -16,11 +16,22 @@ pub fn tail(bytes: &[u8]) -> String {
 /// How long a run waits for its pipes to close once the process itself has ended.
 const PIPE_GRACE: Duration = Duration::from_secs(2);
 
-/// What a bounded run left.
+/// What a bounded run left. A pipe that was not read to its end within [`PIPE_GRACE`] of the process ending (a
+/// grandchild still holds it, or its reader was not scheduled in time on a busy machine) is flagged cut, and its bytes
+/// are empty: empty output with a cut flag is not an empty reply, and a caller that reads that pipe must say so.
 pub struct Captured {
     pub code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+    pub stdout_cut: bool,
+    pub stderr_cut: bool,
+}
+
+/// What a caller says when the output it needs was cut: `what` is the pipe, such as "stdout".
+pub fn cut_message(what: &str) -> String {
+    format!(
+        "its {what} was not read in time: a process it started may still hold it open, or the machine was too busy"
+    )
 }
 
 /// Runs `command` with `stdin` written to it and closed, reading stdout and stderr, and ends it if it is not done
@@ -72,15 +83,17 @@ pub fn run_bounded(
             Err(error) => break Err(error.to_string()),
         }
     };
-    // A grandchild that kept the pipes open (a hook still running) must not hold the daemon: what was read is what
-    // there is, and the reader ends when the grandchild does.
+    // A grandchild that kept the pipes open (a hook still running) must not hold the daemon: a pipe not read to its
+    // end by then is given up on and flagged cut, and its reader ends when the grandchild does.
     let grace_ends = Instant::now() + PIPE_GRACE;
     let left = || grace_ends.saturating_duration_since(Instant::now());
-    let stdout = stdout.recv_timeout(left()).unwrap_or_default();
-    let stderr = stderr.recv_timeout(left()).unwrap_or_default();
+    let stdout = stdout.recv_timeout(left()).ok();
+    let stderr = stderr.recv_timeout(left()).ok();
     status.map(|status| Captured {
         code: status.code(),
-        stdout,
-        stderr,
+        stdout_cut: stdout.is_none(),
+        stderr_cut: stderr.is_none(),
+        stdout: stdout.unwrap_or_default(),
+        stderr: stderr.unwrap_or_default(),
     })
 }

@@ -279,6 +279,48 @@ pub fn pid_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
+/// A grandchild a test's child starts in the background and writes the pid of to `pid_file` (`sleep 30 & echo $! >
+/// file`). It stops the grandchild when the test ends, also on a panic, so no pipe it holds outlives the test.
+pub struct Grandchild {
+    pid_file: PathBuf,
+    started: Option<(u32, u64)>,
+}
+
+impl Grandchild {
+    pub fn new(pid_file: PathBuf) -> Grandchild {
+        Grandchild {
+            pid_file,
+            started: None,
+        }
+    }
+
+    /// The pid the child wrote, waited for up to `within`; its start time is kept for the stop.
+    pub fn pid(&mut self, within: std::time::Duration) -> u32 {
+        let file = self.pid_file.clone();
+        let read = move || fs::read_to_string(&file).ok()?.trim().parse::<u32>().ok();
+        wait_until("the grandchild's pid file", within, || read().is_some());
+        let pid = read().expect("the pid file was read just above");
+        let started = collide_host::sysproc::start_time_us(pid).expect("the grandchild is running");
+        self.started = Some((pid, started));
+        pid
+    }
+}
+
+impl Drop for Grandchild {
+    fn drop(&mut self) {
+        if let Some((pid, started)) = self.started {
+            signal_if_same(pid, started, libc::SIGKILL);
+        } else if let Some(pid) = fs::read_to_string(&self.pid_file)
+            .ok()
+            .and_then(|text| text.trim().parse::<u32>().ok())
+        {
+            // The test ended before it read the pid: the file is its own child's, written a moment ago.
+            // SAFETY: `kill` takes two integers; the pid is the one this test's own child wrote for its sleeper.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        }
+    }
+}
+
 /// Sends `signal` to `pid` only when the process there started at `started_us`, so a pid that was reused is never hit.
 pub fn signal_if_same(pid: u32, started_us: u64, signal: i32) {
     if collide_host::sysproc::start_time_us(pid) == Some(started_us) {

@@ -25,7 +25,7 @@
 //!
 //! Left to later items: the settings layers (`ts-0098-nx`) and the daemon's use of all this (`ts-0102-vu`).
 
-use crate::bounded_run::{run_bounded, tail};
+use crate::bounded_run::{cut_message, run_bounded, tail};
 use crate::builtin_packs::{BuiltinPacks, Environment, is_plain_file_name};
 use crate::git_fetch::{FetchError, GitFetch, mirror_path};
 use crate::git_objects::{GitObjects, ObjectKind, TreeEntry};
@@ -1529,10 +1529,20 @@ impl Load<'_> {
                 tail(&captured.stderr)
             ));
         }
+        if captured.stdout_cut {
+            return Err(format!(
+                "`{name} --version` ran, but {}",
+                cut_message("stdout")
+            ));
+        }
         let mut text = String::from_utf8_lossy(&captured.stdout).to_string();
         text.push('\n');
         text.push_str(&String::from_utf8_lossy(&captured.stderr));
         Version::find_in(&text).ok_or_else(|| {
+            // The version may be on the pipe that was cut, so an empty answer is not "printed no version".
+            if captured.stderr_cut {
+                return format!("`{name} --version` ran, but {}", cut_message("stderr"));
+            }
             format!(
                 "`{name} --version` printed no version (it printed: {})",
                 tail(text.as_bytes())

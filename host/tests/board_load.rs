@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 mod common;
 use common::git_repo::GitRepo;
 use common::remote::Remote;
-use common::{TempRoot, repo_root};
+use common::{Grandchild, TempRoot, repo_root};
 
 /// A line's repository with the cache, an SDK stand-in and a `bin` folder for fake tools beside it.
 struct Line {
@@ -1595,6 +1595,23 @@ fn a_tool_that_hangs_fails_within_the_timeout_naming_the_tool() {
     let problems = texts(&load_line(&line.repo.git_dir(), "main", &context).unwrap_err());
     assert!(started.elapsed() < Duration::from_secs(10));
     assert_problem(&problems, &["ferry", "slow", "did not end"]);
+}
+
+#[test]
+fn a_tool_whose_stdout_a_grandchild_holds_open_is_a_problem_not_a_missing_version() {
+    let line = requires_line("  tools:\n    - { name: odd, version: \">=1.0\" }\n");
+    let pid_file = line.repo.root().join("sleeper.pid");
+    let mut sleeper = Grandchild::new(pid_file.clone());
+    line.tool(
+        "odd",
+        &format!(
+            "/bin/sleep 30 2>/dev/null &\necho $! > {}\necho v1.2.0",
+            pid_file.display()
+        ),
+    );
+    let problems = line.problems();
+    sleeper.pid(Duration::from_secs(10));
+    assert_problem(&problems, &["ferry", "odd", "not read in time"]);
 }
 
 #[test]

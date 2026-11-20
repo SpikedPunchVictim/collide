@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 mod common;
 use common::git_repo::{GitRepo, git_bytes};
-use common::{TempRoot, find_on_path};
+use common::{Grandchild, TempRoot, find_on_path};
 
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -944,6 +944,82 @@ fn a_git_that_hangs_fails_within_the_timeout_naming_the_command() {
         started.elapsed()
     );
     assert!(error.contains("git rev-parse"), "{error}");
+}
+
+#[test]
+fn a_git_whose_stdout_a_grandchild_holds_open_fails_saying_the_output_was_not_read_in_time() {
+    let repo = nested();
+    let pid_file = repo.root().join("sleeper.pid");
+    let mut sleeper = Grandchild::new(pid_file.clone());
+    // The sleeper is this test's own: it keeps git's stdout open past the grace, and its stderr goes nowhere.
+    let body = format!(
+        "/bin/sleep 30 2>/dev/null &\necho $! > {}\nexit 0",
+        pid_file.display()
+    );
+    let fake = fake_git(repo.root(), &body);
+    let started = Instant::now();
+    let error = text(
+        reader()
+            .with_path(fake.0.clone())
+            .tree_at(&repo.git_dir(), "main", "a")
+            .unwrap_err(),
+    );
+    sleeper.pid(Duration::from_secs(10));
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(error.contains("git rev-parse"), "{error}");
+    assert!(error.contains("not read in time"), "{error}");
+    assert!(!error.contains("expected a commit id"), "{error}");
+}
+
+#[test]
+fn a_git_add_whose_stdout_a_grandchild_holds_open_still_hashes_the_folder() {
+    let repo = nested();
+    let pid_file = repo.root().join("sleeper.pid");
+    let mut sleeper = Grandchild::new(pid_file.clone());
+    // `add` prints nothing that is read, so its cut stdout changes nothing; `write-tree` answers with a tree id.
+    let body = format!(
+        "case \"$*\" in\n*\" add \"*) /bin/sleep 30 2>/dev/null &\necho $! > {}\n;;\n\
+         *write-tree*) echo {EMPTY_TREE};;\nesac\nexit 0",
+        pid_file.display()
+    );
+    let fake = fake_git(repo.root(), &body);
+    let scratch = repo.root().join("scratch");
+    fs::create_dir(&scratch).unwrap();
+    let id = reader()
+        .with_path(fake.0.clone())
+        .with_scratch_dir(&scratch)
+        .tree_of_folder(repo.work());
+    sleeper.pid(Duration::from_secs(10));
+    assert_eq!(id.unwrap(), EMPTY_TREE);
+}
+
+#[test]
+fn a_git_write_tree_whose_stdout_a_grandchild_holds_open_fails_saying_so_not_with_a_bad_tree_id() {
+    let repo = nested();
+    let pid_file = repo.root().join("sleeper.pid");
+    let mut sleeper = Grandchild::new(pid_file.clone());
+    // `write-tree`'s answer is read: a cut one must not reach the tree id check as an empty reply.
+    let body = format!(
+        "case \"$*\" in\n*write-tree*) echo {EMPTY_TREE}\n/bin/sleep 30 2>/dev/null &\necho $! > {}\n;;\nesac\nexit 0",
+        pid_file.display()
+    );
+    let fake = fake_git(repo.root(), &body);
+    let scratch = repo.root().join("scratch");
+    fs::create_dir(&scratch).unwrap();
+    let error = text(
+        reader()
+            .with_path(fake.0.clone())
+            .with_scratch_dir(&scratch)
+            .tree_of_folder(repo.work())
+            .unwrap_err(),
+    );
+    sleeper.pid(Duration::from_secs(10));
+    assert!(error.contains("git write-tree"), "{error}");
+    assert!(error.contains("not read in time"), "{error}");
 }
 
 #[test]

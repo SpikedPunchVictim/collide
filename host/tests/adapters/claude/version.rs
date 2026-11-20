@@ -2,7 +2,7 @@
 //! version range). Each test runs its processes with an environment of its own (`env_clear()`, then what the test
 //! sets), in a temp root, and never reads the owner's files.
 
-use super::common::TempRoot;
+use super::common::{Grandchild, TempRoot};
 use super::fake::{BinarySpec, ClaudeBinary, recording};
 use collide_host::adapters::claude::version::{
     ClaudeVersion, SmokeOutcome, VersionCache, VersionError, binary_key, read_version, smoke_check,
@@ -403,4 +403,44 @@ mod gate {
         assert_eq!(status.tested.through, "2.1.325");
         assert_eq!(status.published, None, "no source, no chip");
     }
+}
+
+#[test]
+fn a_version_whose_stdout_a_grandchild_holds_open_is_not_read_as_empty() {
+    let root = TempRoot::new();
+    let pid_file = root.join("pid");
+    let mut sleeper = Grandchild::new(pid_file.clone());
+    let path = root.script(
+        "claude",
+        &format!(
+            "#!/bin/sh\n/bin/sleep 30 2>/dev/null &\necho $! > {}\necho '2.1.324 (Claude Code)'\n",
+            pid_file.display()
+        ),
+    );
+    let result = read_version(&path, &env(&root));
+    sleeper.pid(Duration::from_secs(10));
+    let Err(VersionError::NotRun { message }) = result else {
+        panic!("expected NotRun, got {result:?}")
+    };
+    assert!(message.contains("not read in time"), "{message}");
+}
+
+#[test]
+fn a_smoke_check_whose_stdout_a_grandchild_holds_open_says_so() {
+    let root = TempRoot::new();
+    let pid_file = root.join("pid");
+    let mut sleeper = Grandchild::new(pid_file.clone());
+    let path = root.script(
+        "claude",
+        &format!(
+            "#!/bin/sh\n/bin/sleep 30 2>/dev/null &\necho $! > {}\n",
+            pid_file.display()
+        ),
+    );
+    let outcome = smoke_check_within(&path, root.path(), &env(&root), Duration::from_secs(20));
+    sleeper.pid(Duration::from_secs(10));
+    let SmokeOutcome::Failed { reason } = outcome else {
+        panic!("expected a failure")
+    };
+    assert!(reason.contains("not read in time"), "{reason}");
 }

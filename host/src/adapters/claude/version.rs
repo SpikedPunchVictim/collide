@@ -15,7 +15,7 @@
 
 use super::launch::FIXED_ARGV;
 use super::session::ClaudeSession;
-use crate::bounded_run::{run_bounded, tail};
+use crate::bounded_run::{cut_message, run_bounded, tail};
 use collide_core::adapter::{AgentSession, StampedEvent};
 use collide_core::agent::{AgentEvent, SessionStart, TurnEndReason, UsageScope};
 use serde_json::Value;
@@ -161,6 +161,11 @@ pub fn read_version_within(
             ),
         });
     }
+    if run.stdout_cut {
+        return Err(VersionError::NotRun {
+            message: format!("{}: {}", binary.display(), cut_message("stdout")),
+        });
+    }
     parse_version(&String::from_utf8_lossy(&run.stdout))
 }
 
@@ -268,6 +273,12 @@ pub fn smoke_check_within(
             };
         }
     };
+    if run.stdout_cut {
+        // The stream is what is judged: a cut one would read as "no `result` line", which says nothing of why.
+        return SmokeOutcome::Failed {
+            reason: cut_message("stdout"),
+        };
+    }
     let mut events = Vec::new();
     for line in run.stdout.split(|byte| *byte == b'\n') {
         if !line.is_empty() {

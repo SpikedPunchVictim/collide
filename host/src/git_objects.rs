@@ -20,7 +20,7 @@
 //! This is not for fetching. A `git:` fetch needs the user's credentials (ts-0100-pu) and builds its own
 //! environment.
 
-use crate::bounded_run::{Captured, run_bounded, tail};
+use crate::bounded_run::{Captured, cut_message, run_bounded, tail};
 use collide_core::yaml::MAX_YAML_BYTES;
 use std::ffi::OsString;
 use std::fmt;
@@ -125,7 +125,7 @@ pub enum GitError {
         value: String,
         reason: &'static str,
     },
-    /// `git` did not start, or did not end within the timeout. `detail` says which.
+    /// `git` did not start, did not end within the timeout, or its output was not read in time. `detail` says which.
     Run {
         command: String,
         detail: String,
@@ -193,7 +193,7 @@ impl fmt::Display for GitError {
                 reason,
             } => write!(f, "refused the {what} {value:?}: {reason}"),
             GitError::Run { command, detail } => {
-                write!(f, "`{command}` did not run to its end: {detail}")
+                write!(f, "`{command}` could not be run to a result: {detail}")
             }
             GitError::Failed {
                 command,
@@ -521,7 +521,7 @@ impl GitObjects {
             "--template=",
         ])
         .arg(bare);
-        self.run_ok(init, "git init", None).map(|_| ())
+        self.run_ok_unread(init, "git init", None)
     }
 
     /// Adds every file of `folder` to a throwaway index and writes the tree into `bare`.
@@ -554,7 +554,7 @@ impl GitObjects {
                 "--all",
                 "--force",
             ]);
-        self.run_ok(add, "git add", None)?;
+        self.run_ok_unread(add, "git add", None)?;
 
         let mut write_tree = self.command(bare);
         write_tree.env("GIT_INDEX_FILE", index).arg("write-tree");
@@ -733,7 +733,8 @@ impl GitObjects {
         })
     }
 
-    /// Like [`GitObjects::run`], and an exit code other than 0 is a [`GitError::Failed`].
+    /// Like [`GitObjects::run`], and an exit code other than 0 is a [`GitError::Failed`]. The caller reads what git
+    /// printed, so a stdout that was not read in time is a [`GitError::Run`], never an empty reply.
     fn run_ok(
         &self,
         command: Command,
@@ -741,8 +742,23 @@ impl GitObjects {
         stdin: Option<&[u8]>,
     ) -> Result<Vec<u8>, GitError> {
         let captured = self.run(command, name, stdin)?;
+        if captured.code != Some(0) {
+            return Err(failed(name, &captured));
+        }
+        stdout_read(name, captured)
+    }
+
+    /// Like [`GitObjects::run_ok`] for a command whose output is not read (`init`, `add`): a stdout that was not read
+    /// in time changes nothing there.
+    fn run_ok_unread(
+        &self,
+        command: Command,
+        name: &str,
+        stdin: Option<&[u8]>,
+    ) -> Result<(), GitError> {
+        let captured = self.run(command, name, stdin)?;
         if captured.code == Some(0) {
-            Ok(captured.stdout)
+            Ok(())
         } else {
             Err(failed(name, &captured))
         }
@@ -757,7 +773,8 @@ impl GitObjects {
         let captured = self.run(command, "git rev-parse", None)?;
         match captured.code {
             Some(0) => {
-                let id = String::from_utf8_lossy(&captured.stdout).trim().to_string();
+                let stdout = stdout_read("git rev-parse", captured)?;
+                let id = String::from_utf8_lossy(&stdout).trim().to_string();
                 check_id("commit id", &id).map_err(|_| GitError::BadReply {
                     command: "git rev-parse".to_string(),
                     detail: format!("expected a commit id, got {id:?}"),
@@ -814,6 +831,17 @@ struct Resolved {
     id: String,
     kind: ObjectKind,
     size: u64,
+}
+
+/// What git printed, or a [`GitError::Run`] when the pipe was not read to its end in time.
+fn stdout_read(name: &str, captured: Captured) -> Result<Vec<u8>, GitError> {
+    if captured.stdout_cut {
+        return Err(GitError::Run {
+            command: name.to_string(),
+            detail: cut_message("stdout"),
+        });
+    }
+    Ok(captured.stdout)
 }
 
 fn failed(name: &str, captured: &Captured) -> GitError {

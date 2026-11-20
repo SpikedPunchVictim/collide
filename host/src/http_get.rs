@@ -15,7 +15,7 @@
 //! (`HTTPSEnable`, `HTTPSProxy`, `HTTPSPort`, then the SOCKS entries). `NO_PROXY` / `no_proxy` is passed on. The system's
 //! exceptions list is not read: a host listed there is still fetched through the proxy.
 
-use crate::bounded_run::{run_bounded, tail};
+use crate::bounded_run::{cut_message, run_bounded, tail};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -226,6 +226,9 @@ impl HttpGet for CurlGet {
         let run = run_bounded(command, None, timeout + Duration::from_secs(3))
             .map_err(|error| format!("curl did not run: {error}"))?;
         if run.code == Some(0) {
+            if run.stdout_cut {
+                return Err(format!("curl ended well, but {}", cut_message("stdout")));
+            }
             Ok(run.stdout)
         } else {
             Err(format!(
