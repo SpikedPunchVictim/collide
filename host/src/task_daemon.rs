@@ -178,16 +178,15 @@ impl Session {
 }
 
 /// An error of a call: a thing the daemon does not have is an id that names nothing (3), a `--kind` the board's
-/// sources do not declare is a wrong command line (2, the refusal carries the kind in its data), anything else
-/// failed (1).
+/// sources do not declare is a wrong command line (2, the refusal carries the kind in its data), and so is a `create`
+/// argument the source does not declare (the data names it); anything else failed (1).
 fn rpc_failed(error: ClientError) -> CliError {
     match error {
         ClientError::Rpc(rpc)
             if rpc.code == code::INVALID_PARAMS
-                && rpc
-                    .data
-                    .as_ref()
-                    .is_some_and(|data| data.get("unknown_kind").is_some()) =>
+                && rpc.data.as_ref().is_some_and(|data| {
+                    data.get("unknown_kind").is_some() || data.get("bad_argument").is_some()
+                }) =>
         {
             CliError::usage(rpc.message)
         }
@@ -793,6 +792,11 @@ fn create(
             epic,
             seed: options.seed,
             root: options.root.clone(),
+            args: options
+                .args
+                .iter()
+                .map(|(name, text)| (name.clone(), json!(text)))
+                .collect(),
             checkout: session.checkout_arg(),
         },
     )?;
@@ -989,10 +993,32 @@ fn rename_section(
     ))
 }
 
-/// The id of the epic that `given` names: a full id or a short form, which must fit one epic. A short form is read
+/// How many collection ids an unknown `epic=` names before it says how many more there are.
+const COLLECTIONS_NAMED: usize = 20;
+
+/// What `epic=<given>` passes to the planning source's `create`. While the source lists items of kind `epic`, it is
+/// the id of the epic that `given` names: a full id or a short form, which must fit one epic. A short form is read
 /// among the epics, so `2` is `ep-002-..` and not `ts-0002-..`. What is no epic, or is none of them, is told apart: an
-/// item that is not an epic is a usage error, and one that is no item at all is an unknown id.
+/// item that is not an epic is a usage error, and one that is no item at all is an unknown id. A source that lists no
+/// epic but has collections (0.10) has its own groupings in their place: `given` must be the id of one of them, by key
+/// or by the part after the source name, and that part is what `create` takes.
 fn resolve_epic(session: &mut Session, given: &str) -> Result<String, CliError> {
+    let mut params = session.list_params();
+    params.checkout = None;
+    let listed = session.settled_list(&params)?;
+    let prefix = format!("{PLANNING_SOURCE}:");
+    let has_epics = listed
+        .tasks
+        .iter()
+        .any(|task| task.key.starts_with(&prefix) && task.kind.as_deref() == Some("epic"));
+    let groupings: Vec<&str> = listed
+        .collections
+        .iter()
+        .filter_map(|collection| collection.id.strip_prefix(&prefix))
+        .collect();
+    if !has_epics && !groupings.is_empty() {
+        return epic_collection(given, &prefix, &groupings);
+    }
     match name_in_board(session, given, Some("epic")) {
         Ok(Named::One(epic)) => Ok(epic.id),
         Ok(Named::Several(_, message)) => Err(CliError::new(exit::ID, message)),
@@ -1006,6 +1032,25 @@ fn resolve_epic(session: &mut Session, given: &str) -> Result<String, CliError> 
         },
         Err(other) => Err(other),
     }
+}
+
+/// The collection of the planning source that `given` is the id of, as the part after the source name.
+fn epic_collection(given: &str, prefix: &str, ids: &[&str]) -> Result<String, CliError> {
+    let wanted = given.strip_prefix(prefix).unwrap_or(given);
+    if ids.contains(&wanted) {
+        return Ok(wanted.to_string());
+    }
+    let named: Vec<&str> = ids.iter().take(COLLECTIONS_NAMED).copied().collect();
+    let mut list = named.join(", ");
+    if ids.len() > named.len() {
+        list.push_str(&format!(", and {} more", ids.len() - named.len()));
+    }
+    Err(CliError::new(
+        exit::ID,
+        format!(
+            "`{given}` is not the id of a collection of the planning source; its collections are: {list}"
+        ),
+    ))
 }
 
 // ---- sections ------------------------------------------------------------------------------------------------------

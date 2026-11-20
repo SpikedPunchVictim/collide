@@ -3,7 +3,7 @@
   collide task new <prompt> [--json]
   collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
   collide task create <title> [epic=<epic>] [kind=task|epic|proposal|spike|question] [seed=<number>]
-    [root=shared|private] [--checkout <path>] [--commit] [--json]
+    [root=shared|private] [name=value ...] [--checkout <path>] [--commit] [--json]
   collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]
   a write (an op, create, reid) also takes [--wait <seconds> | --no-wait]
   collide task renameSection <from> <to> [--checkout <path>] [--commit] [--json]

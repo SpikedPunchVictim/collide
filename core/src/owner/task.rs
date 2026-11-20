@@ -14,6 +14,7 @@ use crate::ready::UnknownTarget;
 use crate::view::View;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// A view named in a request: one the board holds, or an ad-hoc one the filter bar made (0.11, Filter bar).
@@ -328,9 +329,11 @@ pub struct TaskSaveViewResult {
 }
 
 /// `task.create` params (`collide task create`): the planning source's `create`, with the new item's title and the
-/// epic and kind it is made in. `epic` is a full epic id. `seed` makes the id's suffix repeatable, `root` names the
-/// private root, and `checkout` names the checkout to write in (the board's main one when left out). The answer is a
-/// [`TaskApplyResult`]: the write is queued when its checkout is busy, as any write is.
+/// epic and kind it is made in. `epic` is the id the source's `create` takes. `seed` makes the id's suffix repeatable,
+/// `root` names the private root, and `checkout` names the checkout to write in (the board's main one when left out).
+/// `args` holds the other arguments the source's `create` declares, each as the text typed: the daemon checks every
+/// name against the declaration and reads the text as the type it declares. The answer is a [`TaskApplyResult`]: the
+/// write is queued when its checkout is busy, as any write is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskCreateParams {
@@ -344,6 +347,8 @@ pub struct TaskCreateParams {
     pub seed: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub args: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkout: Option<String>,
 }

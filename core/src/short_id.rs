@@ -1,6 +1,8 @@
 //! Short ids (0.10, ids): `12` or `12-ua` name the item `ts-0012-ua` when exactly one item matches. The number is
 //! compared as a number, so zero padding does not matter, and a prefix (`ts-12`) narrows the match to one kind of
-//! item. The epic of an item is part of what a person needs to tell two matches apart, so the epic helpers live here.
+//! item. An id that is exactly an item's id, or the short id in its key, comes first and has any shape: the ids of a
+//! source that is not Collide's are not read as Collide's. The epic of an item is part of what a person needs to tell
+//! two matches apart, so the epic helpers live here.
 
 use crate::provider::Task;
 
@@ -68,19 +70,28 @@ pub enum Lookup<'a> {
     Malformed,
 }
 
-/// Finds the item `query` names: a full id first, then a short form. A short form that fits several items is
-/// `Many`, never a guess.
+/// The part of a key after the source's name: `plan:WORK-12` is `WORK-12`.
+fn short_of(key: &str) -> &str {
+    key.split_once(':').map_or(key, |(_, short)| short)
+}
+
+/// Finds the item `query` names: an item whose id, or whose short id (the part of its key after the source), is
+/// exactly `query`, whatever shape a source gives its ids; then a short form of Collide's own (`12`, `12-ua`). Two
+/// items that fit at either step are `Many`, never a guess. Only a query of no known shape is `Malformed`.
 pub fn resolve<'a>(tasks: &'a [Task], query: &str) -> Lookup<'a> {
-    if let Some(task) = tasks.iter().find(|task| task.id == query) {
-        return Lookup::One(task);
-    }
-    let Some(query) = parse(query) else {
-        return Lookup::Malformed;
-    };
     let mut found: Vec<&Task> = tasks
         .iter()
-        .filter(|task| parse(&task.id).is_some_and(|item| matches(&query, &item)))
+        .filter(|task| task.id == query || short_of(&task.key) == query)
         .collect();
+    if found.is_empty() {
+        let Some(query) = parse(query) else {
+            return Lookup::Malformed;
+        };
+        found = tasks
+            .iter()
+            .filter(|task| parse(&task.id).is_some_and(|item| matches(&query, &item)))
+            .collect();
+    }
     found.sort_by(|a, b| a.id.cmp(&b.id));
     match found.as_slice() {
         [] => Lookup::None,

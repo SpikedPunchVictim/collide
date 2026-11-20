@@ -137,3 +137,61 @@ fn matching_ids_reads_a_short_form_over_bare_ids() {
     assert!(matching_ids(ids, "99").is_empty());
     assert!(matching_ids(ids, "T-01-042").is_empty(), "not a short form");
 }
+
+// ---- a source whose ids are not Collide's (ts-0149-kq) ----
+
+/// An item of another source: `key` is `source:short`, `id` is the long form the source gives it.
+fn foreign(key: &str, id: &str) -> Task {
+    let mut item = task(id, None);
+    item.key = key.to_string();
+    item
+}
+
+fn mixed() -> Vec<Task> {
+    let mut items = corpus();
+    items.push(foreign("plan:WORK-12", "WORK-12-mend-the-door"));
+    items.push(foreign("plan:WORK-13", "WORK-13-paint-it"));
+    items
+}
+
+#[test]
+fn a_bare_id_that_is_the_short_id_of_one_item_names_it_whatever_its_shape() {
+    assert_eq!(one(&mixed(), "WORK-12"), "WORK-12-mend-the-door");
+}
+
+#[test]
+fn a_bare_id_that_is_the_whole_id_of_one_item_names_it() {
+    assert_eq!(
+        one(&mixed(), "WORK-13-paint-it"),
+        "WORK-13-paint-it",
+        "the long form"
+    );
+}
+
+#[test]
+fn two_sources_with_one_short_id_are_ambiguous_and_listed_in_id_order() {
+    let mut items = mixed();
+    items.push(foreign("other:WORK-12", "WORK-12-other"));
+
+    let found = resolve(&items, "WORK-12");
+
+    assert_eq!(ids(&found), ["WORK-12-mend-the-door", "WORK-12-other"]);
+}
+
+#[test]
+fn an_exact_match_is_taken_before_collides_short_forms() {
+    let mut items = mixed();
+    items.push(foreign("other:12", "12"));
+
+    assert_eq!(one(&items, "12"), "12");
+}
+
+#[test]
+fn a_short_form_still_reads_when_no_item_has_that_id_exactly() {
+    assert_eq!(one(&mixed(), "7"), "ts-0007-ga");
+}
+
+#[test]
+fn a_query_that_names_no_item_and_is_no_form_is_malformed_even_with_foreign_items() {
+    assert!(matches!(resolve(&mixed(), "WORK-99"), Lookup::Malformed));
+}

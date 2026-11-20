@@ -2,11 +2,16 @@
 
 /**
  * `task.create` params (`collide task create`): the planning source's `create`, with the new item's title and the
- * epic and kind it is made in. `epic` is a full epic id. `seed` makes the id's suffix repeatable, `root` names the
- * private root, and `checkout` names the checkout to write in (the board's main one when left out). The answer is a
- * [`TaskApplyResult`]: the write is queued when its checkout is busy, as any write is.
+ * epic and kind it is made in. `epic` is the id the source's `create` takes. `seed` makes the id's suffix repeatable,
+ * `root` names the private root, and `checkout` names the checkout to write in (the board's main one when left out).
+ * `args` holds the other arguments the source's `create` declares, each as the text typed: the daemon checks every
+ * name against the declaration and reads the text as the type it declares. The answer is a [`TaskApplyResult`]: the
+ * write is queued when its checkout is busy, as any write is.
  */
 export interface TaskCreateParams {
+  args?: {
+    [k: string]: unknown
+  }
   board: string
   checkout?: string | null
   epic?: string | null

@@ -209,3 +209,186 @@ fn describe_gives_the_op_its_words_and_its_bare_value() {
         "{text}"
     );
 }
+
+// ---- `create`'s arguments, as `task.create` admits them (ts-0149-kq) ----
+
+use collide_host::task_args::admit_create_args;
+
+/// The `create` that Collide's own plan declares, as far as its argument names and types go.
+fn collides_create() -> OpDecl {
+    op(
+        "create",
+        json!({
+            "type": "object",
+            "properties": {
+                "kind": { "enum": ["task", "epic"] },
+                "epic": { "type": "string" },
+                "title": { "type": "string" },
+                "seed": { "type": "integer" },
+                "root": { "enum": ["shared", "private"] },
+                "raisedBy": { "type": "string" }
+            },
+            "required": ["title"],
+            "additionalProperties": false
+        }),
+    )
+}
+
+/// A `create` of another source: a list, an integer and a boolean that Collide's plan does not have.
+fn foreign_create() -> OpDecl {
+    op(
+        "create",
+        json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "numbers": { "type": "array", "items": { "type": "integer" } },
+                "points": { "type": "integer" },
+                "flag": { "type": "boolean" },
+                "note": {}
+            },
+            "additionalProperties": false
+        }),
+    )
+}
+
+fn fields(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
+    pairs
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.clone()))
+        .collect()
+}
+
+fn admitted(
+    op: &OpDecl,
+    own: &[(&str, Value)],
+    extra: &[(&str, Value)],
+) -> Result<BTreeMap<String, Value>, String> {
+    let mut args = fields(own);
+    admit_create_args(Some(op), &mut args, fields(extra))
+        .map(|()| args)
+        .map_err(|refused| refused.message)
+}
+
+#[test]
+fn the_fields_collides_own_create_has_pass_through_unchanged() {
+    let own = [
+        ("title", json!("A title")),
+        ("kind", json!("task")),
+        ("epic", json!("ep-001-aa")),
+        ("seed", json!(7)),
+        ("root", json!("private")),
+    ];
+
+    let args = admitted(&collides_create(), &own, &[]).unwrap();
+
+    assert_eq!(args, fields(&own));
+}
+
+#[test]
+fn an_undeclared_name_is_refused_as_a_field_or_an_extra_and_the_declared_ones_are_listed() {
+    let in_extra = admitted(
+        &collides_create(),
+        &[("title", json!("T"))],
+        &[("colour", json!("red"))],
+    )
+    .unwrap_err();
+    let as_field = admitted(
+        &foreign_create(),
+        &[("title", json!("T")), ("kind", json!("spike"))],
+        &[],
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        in_extra,
+        "op `create` has no argument `colour`; its arguments are: epic, kind, raisedBy, root, seed, title"
+    );
+    assert_eq!(
+        as_field,
+        "op `create` has no argument `kind`; its arguments are: flag, note, numbers, points, tags, title"
+    );
+}
+
+#[test]
+fn text_is_read_as_the_declared_type_as_the_words_of_an_op_are() {
+    let args = admitted(
+        &foreign_create(),
+        &[("title", json!("T"))],
+        &[
+            ("tags", json!("[\"a\",\"b\"]")),
+            ("points", json!("-3")),
+            ("flag", json!("true")),
+            ("note", json!("1,2")),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(
+        args,
+        fields(&[
+            ("title", json!("T")),
+            ("tags", json!(["a", "b"])),
+            ("points", json!(-3)),
+            ("flag", json!(true)),
+            ("note", json!("1,2")),
+        ])
+    );
+}
+
+#[test]
+fn text_that_is_not_its_declared_type_is_refused_naming_the_argument() {
+    for (name, text, said) in [
+        ("flag", "yes", "`flag` must be true or false, not `yes`"),
+        ("numbers", "1,2", "`numbers` must be JSON, not `1,2`"),
+        ("points", "3x", "`points` must be a whole number, not `3x`"),
+        ("tags", "a,b", "`tags` must be JSON, not `a,b`"),
+    ] {
+        let refused = admitted(&foreign_create(), &[], &[(name, json!(text))]).unwrap_err();
+
+        assert!(refused.contains(said), "{name}={text}: {refused}");
+    }
+}
+
+#[test]
+fn a_value_that_is_not_text_is_the_sources_to_check() {
+    let args = admitted(
+        &foreign_create(),
+        &[],
+        &[("flag", json!(true)), ("tags", json!([1]))],
+    )
+    .unwrap();
+
+    assert_eq!(args, fields(&[("flag", json!(true)), ("tags", json!([1]))]));
+}
+
+#[test]
+fn a_name_that_is_a_field_and_an_extra_is_refused() {
+    let refused = admitted(
+        &collides_create(),
+        &[("title", json!("T"))],
+        &[("title", json!("U"))],
+    )
+    .unwrap_err();
+
+    assert_eq!(refused, "`title` is given twice");
+}
+
+#[test]
+fn an_op_that_declares_no_properties_is_not_checked_and_the_source_answers() {
+    let bare: OpDecl = serde_json::from_value(json!({ "name": "create" })).unwrap();
+    let mut args = fields(&[("title", json!("T"))]);
+
+    admit_create_args(Some(&bare), &mut args, fields(&[("anything", json!("x"))])).unwrap();
+    admit_create_args(None, &mut args, fields(&[("other", json!("y"))])).unwrap();
+
+    assert_eq!(
+        args,
+        fields(&[
+            ("title", json!("T")),
+            ("anything", json!("x")),
+            ("other", json!("y"))
+        ])
+    );
+}

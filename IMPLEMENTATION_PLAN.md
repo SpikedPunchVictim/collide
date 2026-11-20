@@ -4498,16 +4498,20 @@ combined into a corpus, and filtered by views.
   no `--no-daemon` (owner, 2026-11-18; `ts-0136-rr`): `tasks`, `tasks --ready` (the built-in `ready` view, with its
   cycle and unknown blockers on stderr), `task <id>`, `task create`, `task reid`, `task renameSection`, `sections`, and
   a write by key or by bare id. A short id resolves in the daemon, and `epic=` names an epic before any other item. A
-  `--kind` that no source of the board declares is refused, naming the kinds they declare (exit 2). A daemon that is not
-  running is started on use and says so once; one that cannot start makes the command exit 1. Exit 10: a view with an
-  error of its own. Exit 11: a write still queued behind a busy checkout. Exit 12: a person-only op, by key or by bare
-  id, waiting as a confirmation in the app (`ts-0128-bb`). A listing names on stderr each source of the board that could
-  not start, with its reason, and lists the others; it exits 1 when no source of the line started (`ts-0141-sn`). A
-  queued write is reported applied only when the daemon says it applied it (`ts-0142-ua`): a Retry of a write that left
-  the Queue answers once the drain that took it has ended, done or refused with the reason; one that was dismissed, or
-  that the daemon has no record of (the record is in memory, for the last 128 writes), exits 5. `task reid` commits
-  nothing itself; its `--commit` commits the files it reports. `collide init`, `collide config get|set` and `collide
-  pack …` were built in 4a.
+  bare id that is exactly an item's id, or the short id in its key, names that item whatever shape its source gives ids,
+  before Collide's short forms are tried; two such items are ambiguous. For a planning source that lists no epic,
+  `epic=` is the id of one of its collections. `task create` passes any other `name=value` to the source's `create` when
+  that op declares the name, read as an op's value is (a list or an object as JSON), and refuses one it does not
+  declare, naming those it does (exit 2) (`ts-0149-kq`). A `--kind` that no source of the board declares is refused,
+  naming the kinds they declare (exit 2). A daemon that is not running is started on use and says so once; one that
+  cannot start makes the command exit 1. Exit 10: a view with an error of its own. Exit 11: a write still queued behind
+  a busy checkout. Exit 12: a person-only op, by key or by bare id, waiting as a confirmation in the app (`ts-0128-bb`).
+  A listing names on stderr each source of the board that could not start, with its reason, and lists the others; it
+  exits 1 when no source of the line started (`ts-0141-sn`). A queued write is reported applied only when the daemon
+  says it applied it (`ts-0142-ua`): a Retry of a write that left the Queue answers once the drain that took it has
+  ended, done or refused with the reason; one that was dismissed, or that the daemon has no record of (the record is in
+  memory, for the last 128 writes), exits 5. `task reid` commits nothing itself; its `--commit` commits the files it
+  reports. `collide init`, `collide config get|set` and `collide pack …` were built in 4a.
 
 **Success Criteria**: On the Orchard repo:
 - A task shows `doing` in one worktree and `ready` at the board root, with the divergence reported.

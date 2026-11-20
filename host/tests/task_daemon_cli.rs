@@ -190,12 +190,38 @@ fn task_create_refuses_a_missing_title_a_second_value_and_a_seed_that_is_no_numb
         (vec!["task", "create"], "needs title"),
         (vec!["task", "create", "a", "b"], "second bare value"),
         (vec!["task", "create", "a", "seed=x"], "seed"),
-        (vec!["task", "create", "a", "speed=3"], "speed"),
         (vec!["task", "create", "a", "epic=1", "epic=2"], "twice"),
     ] {
         let message = error_of(&words);
         assert!(message.contains(named), "{words:?}: {message}");
     }
+}
+
+#[test]
+fn task_create_sends_every_word_it_does_not_know_as_an_argument_for_the_daemon_to_check() {
+    let Command::Create(options) = parsed(&[
+        "task",
+        "create",
+        "A title",
+        "proposal=P-9",
+        "tags=a,b",
+        "epic=1",
+    ]) else {
+        panic!("a task create command")
+    };
+    assert_eq!(
+        options.args,
+        BTreeMap::from([
+            ("proposal".to_string(), "P-9".to_string()),
+            ("tags".to_string(), "a,b".to_string()),
+        ])
+    );
+    assert_eq!(options.epic.as_deref(), Some("1"));
+}
+
+#[test]
+fn task_create_refuses_an_argument_given_twice() {
+    assert!(error_of(&["task", "create", "a", "points=1", "points=2"]).contains("twice"));
 }
 
 #[test]
@@ -1982,4 +2008,288 @@ fn json_carries_the_unstarted_source_on_the_wire() {
             .is_empty()
     );
     assert_eq!(listed["sources_started"], 1);
+}
+
+// ---- a board whose plan is not Collide's (ts-0149-kq) --------------------------------------------------------------
+
+const FOREIGN_PROVIDER: &str = include_str!("fixtures/fake_foreign_plan_provider.mjs");
+
+/// A repo pack whose provider takes the place of the built-in plan source: ids, groupings and a `create` that are not
+/// Collide's. See the fixture for what it lists and declares.
+fn foreign_rig() -> Rig {
+    if let Some(message) =
+        common::node_missing_message(&std::env::var_os("PATH").unwrap_or_default())
+    {
+        panic!("{message}");
+    }
+    Rig::with_files(&[
+        (
+            ".collide/board.yaml",
+            "packs:\n  - source: repo:.collide/packs/foreign\n".to_string(),
+        ),
+        (
+            ".collide/packs/foreign/pack.yaml",
+            "apiVersion: collide/v0\nname: foreign\nversion: 1.0.0\nproviders:\n  \
+             plan: { script: providers/plan.mjs }\n"
+                .to_string(),
+        ),
+        (
+            ".collide/packs/foreign/providers/plan.mjs",
+            FOREIGN_PROVIDER.to_string(),
+        ),
+    ])
+}
+
+/// The `args` each `create` the source was given, in order.
+fn created_by(rig: &Rig) -> Vec<Value> {
+    match fs::read_to_string(rig.repo.work().join("created.jsonl")) {
+        Ok(text) => text.lines().map(json).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+#[test]
+fn a_bare_short_id_names_the_item_of_a_source_whose_ids_are_not_collides() {
+    let rig = foreign_rig();
+
+    let (code, out, err) = rig.cli(&["task", "WORK-12", "--json"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(json(&out)["task"]["key"], "plan:WORK-12");
+}
+
+#[test]
+fn a_bare_id_that_no_item_has_and_that_is_no_form_is_a_usage_error() {
+    let rig = foreign_rig();
+
+    let (code, _, err) = rig.cli(&["task", "WORK-99"]);
+
+    assert_eq!(code, exit::USAGE, "{err}");
+}
+
+#[test]
+fn epic_names_a_collection_of_the_planning_source_when_it_lists_no_epic() {
+    let rig = foreign_rig();
+
+    let (code, _, err) = rig.cli(&[
+        "task",
+        "create",
+        "Hang it",
+        "epic=AREA-3",
+        "proposal=P-9",
+        "--no-wait",
+    ]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    let made = created_by(&rig);
+    assert_eq!(made.len(), 1, "{made:?}");
+    assert_eq!(made[0]["epic"], "AREA-3");
+    assert_eq!(made[0]["title"], "Hang it");
+}
+
+#[test]
+fn epic_may_be_the_key_of_the_collection_and_the_source_gets_the_id_without_its_name() {
+    let rig = foreign_rig();
+
+    let (code, _, err) = rig.cli(&[
+        "task",
+        "create",
+        "Hang it",
+        "epic=plan:AREA-4",
+        "proposal=P-9",
+        "--no-wait",
+    ]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(created_by(&rig)[0]["epic"], "AREA-4");
+}
+
+#[test]
+fn an_epic_that_is_no_collection_is_refused_before_any_write_and_the_message_lists_them_capped() {
+    let rig = foreign_rig();
+
+    let (code, _, err) = rig.cli(&[
+        "task",
+        "create",
+        "Hang it",
+        "epic=AREA-99",
+        "proposal=P-9",
+        "--no-wait",
+    ]);
+
+    assert_eq!(code, exit::ID, "{err}");
+    assert!(err.contains("`AREA-99`"), "{err}");
+    assert!(err.contains("AREA-1, AREA-2,"), "{err}");
+    assert!(err.contains("AREA-20, and 5 more"), "{err}");
+    assert!(!err.contains("AREA-21"), "{err}");
+    assert_eq!(created_by(&rig), Vec::<Value>::new());
+}
+
+#[test]
+fn the_source_gets_the_arguments_it_declares_as_the_types_it_declares() {
+    let rig = foreign_rig();
+
+    let (code, _, err) = rig.cli(&[
+        "task",
+        "create",
+        "Hang it",
+        "epic=AREA-3",
+        "proposal=P-9",
+        "tags=[\"a\",\"b\"]",
+        "points=3",
+        "--no-wait",
+    ]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(
+        created_by(&rig),
+        vec![json!({
+            "title": "Hang it",
+            "epic": "AREA-3",
+            "proposal": "P-9",
+            "tags": ["a", "b"],
+            "points": 3
+        })]
+    );
+}
+
+#[test]
+fn an_argument_the_create_does_not_declare_is_refused_with_the_declared_ones_and_nothing_is_written()
+ {
+    let rig = foreign_rig();
+
+    for undeclared in ["kind=spike", "colour=red"] {
+        let (code, _, err) = rig.cli(&[
+            "task",
+            "create",
+            "Hang it",
+            "epic=AREA-3",
+            "proposal=P-9",
+            undeclared,
+            "--no-wait",
+        ]);
+
+        assert_eq!(code, exit::USAGE, "{undeclared}: {err}");
+        let name = undeclared.split('=').next().unwrap();
+        assert!(err.contains(&format!("no argument `{name}`")), "{err}");
+        for declared in ["proposal", "title", "epic", "tags", "points", "flag"] {
+            assert!(err.contains(declared), "{declared} in {err}");
+        }
+    }
+    assert_eq!(created_by(&rig), Vec::<Value>::new());
+}
+
+#[test]
+fn an_argument_the_daemon_cannot_read_as_its_declared_type_is_refused_by_name() {
+    let rig = foreign_rig();
+
+    for (word, named, said) in [
+        ("points=x", "points", "whole number"),
+        ("tags=a,b", "tags", "JSON"),
+        ("flag=maybe", "flag", "true or false"),
+    ] {
+        let (code, _, err) = rig.cli(&[
+            "task",
+            "create",
+            "Hang it",
+            "epic=AREA-3",
+            "proposal=P-9",
+            word,
+            "--no-wait",
+        ]);
+
+        assert_eq!(code, exit::USAGE, "{word}: {err}");
+        assert!(err.contains(&format!("`{named}`")), "{word}: {err}");
+        assert!(err.contains(said), "{word}: {err}");
+    }
+    assert_eq!(created_by(&rig), Vec::<Value>::new());
+}
+
+#[test]
+fn a_missing_required_argument_is_left_to_the_source() {
+    let rig = foreign_rig();
+
+    let (code, _, err) = rig.cli(&["task", "create", "Hang it", "epic=AREA-3", "--no-wait"]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    assert_eq!(
+        created_by(&rig),
+        vec![json!({ "title": "Hang it", "epic": "AREA-3" })]
+    );
+}
+
+#[test]
+fn collides_own_create_with_its_own_arguments_makes_the_same_file_as_before() {
+    let rig = Rig::new();
+
+    let (code, _, err) = rig.cli(&[
+        "task",
+        "create",
+        "Made as before",
+        "epic=ep-001-aa",
+        "seed=1",
+        "--no-wait",
+    ]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    let text = fs::read_to_string(
+        rig.repo
+            .work()
+            .join(EPIC)
+            .join("ts-0013-ra-made-as-before.md"),
+    )
+    .unwrap();
+    assert!(text.contains("title: \"Made as before\""), "{text}");
+}
+
+#[test]
+fn collides_own_create_takes_an_argument_it_declares_that_the_command_does_not_know() {
+    let rig = Rig::new();
+
+    let (code, _, err) = rig.cli(&[
+        "task",
+        "create",
+        "Raised by one",
+        "epic=ep-001-aa",
+        "seed=1",
+        "raisedBy=ts-0001-aa",
+        "--no-wait",
+    ]);
+
+    assert_eq!(code, exit::OK, "{err}");
+    let text = fs::read_to_string(
+        rig.repo
+            .work()
+            .join(EPIC)
+            .join("ts-0013-ra-raised-by-one.md"),
+    )
+    .unwrap();
+    assert!(text.contains("raised-by"), "{text}");
+}
+
+#[test]
+fn collides_own_create_refuses_an_argument_it_does_not_declare_and_lists_the_ones_it_does() {
+    let rig = Rig::new();
+
+    let (code, _, err) = rig.cli(&[
+        "task",
+        "create",
+        "Never made",
+        "epic=ep-001-aa",
+        "colour=red",
+        "--no-wait",
+    ]);
+
+    assert_eq!(code, exit::USAGE, "{err}");
+    assert!(err.contains("no argument `colour`"), "{err}");
+    for declared in ["epic", "kind", "raisedBy", "root", "run", "seed", "title"] {
+        assert!(err.contains(declared), "{declared} in {err}");
+    }
+    assert!(
+        !rig.repo
+            .work()
+            .join(EPIC)
+            .join("ts-0013-ra-never-made.md")
+            .exists()
+    );
 }

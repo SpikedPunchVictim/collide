@@ -260,3 +260,66 @@ fn check(op: &OpDecl, schema: &Value, args: &BTreeMap<String, Value>) -> Result<
     }
     Ok(())
 }
+
+/// An argument of `create` that was refused before anything was written: its name and the reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgRefused {
+    pub name: String,
+    pub message: String,
+}
+
+/// Adds the arguments in `extra` to the `args` of a `create`, and checks them all against the op's declaration.
+///
+/// Every name in `args` (the fields `task.create` has of its own) and in `extra` must be a property the op declares;
+/// the refusal lists the ones it declares. A value in `extra` that is text is read as the type the op declares for its
+/// name, as a word after `collide task <id> <op>` is ([`convert`]: a list or an object is JSON), so the CLI has one way
+/// to give a value. What the op requires is not checked: the source refuses a missing argument in its own words.
+/// An op that declares no properties (or no op at all) gives nothing to check against, so the arguments go through
+/// as they are and the source answers.
+pub fn admit_create_args(
+    op: Option<&OpDecl>,
+    args: &mut BTreeMap<String, Value>,
+    extra: BTreeMap<String, Value>,
+) -> Result<(), ArgRefused> {
+    let Some(declared) = op.and_then(|op| op.args.as_ref()).and_then(properties) else {
+        args.extend(extra);
+        return Ok(());
+    };
+    if let Some(name) = args
+        .keys()
+        .chain(extra.keys())
+        .find(|name| !declared.contains_key(*name))
+    {
+        let known: Vec<&str> = declared.keys().map(String::as_str).collect();
+        return Err(ArgRefused {
+            name: name.clone(),
+            message: format!(
+                "op `create` has no argument `{name}`; its arguments are: {}",
+                if known.is_empty() {
+                    "none".to_string()
+                } else {
+                    known.join(", ")
+                }
+            ),
+        });
+    }
+    for (name, value) in extra {
+        if args.contains_key(&name) {
+            return Err(ArgRefused {
+                message: format!("`{name}` is given twice"),
+                name,
+            });
+        }
+        let value = match value {
+            Value::String(text) => {
+                convert(&name, declared.get(&name), &text).map_err(|message| ArgRefused {
+                    name: name.clone(),
+                    message,
+                })?
+            }
+            other => other,
+        };
+        args.insert(name, value);
+    }
+    Ok(())
+}

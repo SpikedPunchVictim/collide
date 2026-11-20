@@ -265,6 +265,7 @@ fn task_create_from_a_runs_agent_is_shaped_the_same_way() {
             epic: Some("ep-001-aa".to_string()),
             seed: Some(1),
             root: Some("shared".to_string()),
+            args: BTreeMap::new(),
             checkout: None,
         },
     )

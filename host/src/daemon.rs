@@ -3625,6 +3625,18 @@ fn task_create(
             args.insert(name.to_string(), value);
         }
     }
+    let source = source_of(shared, &params.board, &root, PLANNING_SOURCE).map_err(source_failed)?;
+    let declared = source.declared().ok().and_then(|init| {
+        crate::task_args::declared_ops(&init, None)
+            .into_iter()
+            .find(|op| op.name == "create")
+    });
+    crate::task_args::admit_create_args(declared.as_ref(), &mut args, params.args).map_err(
+        |refused| {
+            RpcError::new(code::INVALID_PARAMS, refused.message)
+                .with_data(serde_json::json!({ "bad_argument": refused.name }))
+        },
+    )?;
     let apply = ApplyParams {
         actor: None,
         op: "create".to_string(),
@@ -3633,7 +3645,6 @@ fn task_create(
         version: None,
         checkout: params.checkout,
     };
-    let source = source_of(shared, &params.board, &root, PLANNING_SOURCE).map_err(source_failed)?;
     let answer = judged_write(shared, session, &params.board, &root, &source, apply)?;
     Ok(serde_json::to_value(answer).expect("a result is JSON"))
 }

@@ -53,6 +53,7 @@ fn create(title: &str, epic: Option<&str>, board: &str) -> TaskCreateParams {
         epic: epic.map(str::to_string),
         seed: Some(1),
         root: None,
+        args: Default::default(),
         checkout: None,
     }
 }

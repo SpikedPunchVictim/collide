@@ -53,7 +53,7 @@ usage:
   collide task new <prompt> [--json]
   collide task <id> <op> [<value>] [name=value ...] [--checkout <path>] [--commit] [--json]
   collide task create <title> [epic=<epic>] [kind=task|epic|proposal|spike|question] [seed=<number>]
-    [root=shared|private] [--checkout <path>] [--commit] [--json]
+    [root=shared|private] [name=value ...] [--checkout <path>] [--commit] [--json]
   collide task reid <id> [seed=<number>] [--checkout <path>] [--commit] [--json]
   a write (an op, create, reid) also takes [--wait <seconds> | --no-wait]
   collide task renameSection <from> <to> [--checkout <path>] [--commit] [--json]
@@ -112,7 +112,9 @@ collide task create <title>: make an item in an epic (epic=ep-002-va, or a short
   kind=question make those records; root=private makes it in the private root). The id is the next free number for
   the kind across every local branch, every fetched remote branch and the working tree, with a two-letter suffix
   drawn from a seeded generator (seed=, random when left out). The new file is written; without --commit nothing is
-  committed.
+  committed. Any other name=value goes to the source's create if it declares that name (a source whose plan is not
+  Collide's has its own), read as an op's value is (a list or an object as JSON); one it does not declare is refused
+  with the names it does. A source with no epic items takes epic=<id> of one of its own collections.
 collide task reid <id>: give an item a new suffix and rewrite every link that names the old id, in every item file.
   Where two files share one id, the second (the one `collide tasks` reports as skipped) is the one renamed; links meant
   for the other file are rewritten too. It prints the old and the new id and each file touched. Nothing is committed
@@ -250,6 +252,8 @@ pub struct CreateOptions {
     pub kind: Option<String>,
     pub seed: Option<u64>,
     pub root: Option<String>,
+    /// The other `name=value` words, as typed: the planning source's `create` says which it declares.
+    pub args: BTreeMap<String, String>,
     pub write: WriteOptions,
     pub json: bool,
 }
@@ -482,22 +486,15 @@ pub fn parse_task(args: &[String]) -> Result<Command, CliError> {
 /// The words of `collide task create`: one bare value, the title, and `name=value` for `title`, `epic`, `kind`, `seed`
 /// and `root`. The provider checks what a value may be (the kinds, the epic, the lengths).
 fn parse_create(words: Vec<String>, write: WriteOptions, json: bool) -> Result<Command, CliError> {
-    const NAMES: [&str; 5] = ["title", "epic", "kind", "seed", "root"];
     let mut given: BTreeMap<&str, String> = BTreeMap::new();
     for word in &words {
         let (name, value) = match word.split_once('=') {
             Some((name, value)) if !name.is_empty() => (name, value),
             _ => ("title", word.as_str()),
         };
-        let Some(name) = NAMES.iter().find(|known| **known == name) else {
-            return Err(CliError::usage(format!(
-                "op `create` has no argument `{name}`; its arguments are: {}",
-                NAMES.join(", ")
-            )));
-        };
         if given.insert(name, value.to_string()).is_some() {
             return Err(CliError::usage(
-                if *name == "title" && !word.starts_with("title=") {
+                if name == "title" && !word.starts_with("title=") {
                     format!("`{word}` is a second bare value; name each value as name=value")
                 } else {
                     format!("`{name}` is given twice")
@@ -514,12 +511,21 @@ fn parse_create(words: Vec<String>, write: WriteOptions, json: bool) -> Result<C
         .remove("seed")
         .map(|text| parse_seed(&text))
         .transpose()?;
+    let epic = given.remove("epic");
+    let kind = given.remove("kind");
+    let root = given.remove("root");
+    // What is left is for the source: the daemon knows which names its `create` declares.
+    let args = given
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value))
+        .collect();
     Ok(Command::Create(CreateOptions {
         title,
-        epic: given.remove("epic"),
-        kind: given.remove("kind"),
+        epic,
+        kind,
         seed,
-        root: given.remove("root"),
+        root,
+        args,
         write,
         json,
     }))
