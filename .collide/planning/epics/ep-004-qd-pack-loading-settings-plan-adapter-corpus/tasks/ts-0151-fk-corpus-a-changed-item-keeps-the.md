@@ -1,7 +1,7 @@
 ---
 id: ts-0151-fk
 kind: task
-status: ready
+status: done
 title: "Corpus: a changed item keeps the collections of its last listing"
 owners: []
 links:
