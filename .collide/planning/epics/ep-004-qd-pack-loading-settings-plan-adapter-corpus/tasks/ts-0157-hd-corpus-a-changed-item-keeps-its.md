@@ -1,7 +1,7 @@
 ---
 id: ts-0157-hd
 kind: task
-status: ready
+status: done
 title: "Corpus: a changed item keeps its old title, fields and links"
 owners: []
 links:
