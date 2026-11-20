@@ -1,7 +1,7 @@
 ---
 id: ts-0150-dj
 kind: task
-status: ready
+status: done
 title: "Orchard check: the minor differences"
 owners: []
 links: []
