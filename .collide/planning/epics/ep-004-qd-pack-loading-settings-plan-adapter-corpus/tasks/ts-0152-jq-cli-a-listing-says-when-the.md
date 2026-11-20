@@ -1,7 +1,7 @@
 ---
 id: ts-0152-jq
 kind: task
-status: ready
+status: done
 title: "CLI: a listing says when the board's line cannot be read"
 owners: []
 links:
