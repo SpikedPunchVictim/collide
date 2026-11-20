@@ -1,7 +1,7 @@
 ---
 id: ts-0149-kq
 kind: task
-status: ready
+status: done
 title: "CLI: short ids, epic= and task create on a board whose plan is not Collide's"
 owners: []
 links:
