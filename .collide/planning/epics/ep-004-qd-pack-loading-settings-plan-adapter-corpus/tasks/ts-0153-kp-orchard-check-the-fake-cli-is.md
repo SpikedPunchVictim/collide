@@ -1,7 +1,7 @@
 ---
 id: ts-0153-kp
 kind: task
-status: ready
+status: done
 title: "Orchard check: the fake CLI is held to the real one's envelopes"
 owners: []
 links:
