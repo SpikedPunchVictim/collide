@@ -63,8 +63,8 @@ pub struct NotStartedSource {
 }
 
 /// `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
-/// lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`) and `sources_started`
-/// come with the first page only. They are additive: a reader that does not know them reads the rest.
+/// lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`), `sources_started` and
+/// `sources_unread` come with the first page only. They are additive: a reader that does not know them reads the rest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskListResult {
@@ -89,6 +89,9 @@ pub struct TaskListResult {
     /// How many of the board's sources are running, the scratch source apart.
     #[serde(default)]
     pub sources_started: u32,
+    /// Why the board's line or its checkouts could not be read at the last look, so its sources are not known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources_unread: Option<String>,
     /// The first listing of a source is still running, so the tasks are what the last run cached, or fewer.
     #[serde(default)]
     pub refreshing: bool,

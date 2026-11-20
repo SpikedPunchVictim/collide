@@ -47,3 +47,4 @@ applied yet, 12 a person-only op: a confirmation waits in the app
 
   A source of the board that could not start is named on stderr with the reason; the others are still listed. When
   none started, the command exits 1.
+  A board whose line or checkouts cannot be read says why on stderr, lists what it holds, and exits 1.

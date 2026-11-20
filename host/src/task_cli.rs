@@ -69,6 +69,7 @@ collide tasks: list the board's items (epics, tasks, proposals, spikes and quest
   private root's. --kind keeps only items of that kind. --json prints the daemon's answer.
   A source of the board that could not start is named on stderr with the reason; the others are still listed. When
   none started, the command exits 1.
+  A board whose line or checkouts cannot be read says why on stderr, lists what it holds, and exits 1.
 collide tasks --ready: the members of the built-in `ready` view: the items that can be started now. A blocked-by cycle
   and a blocked-by target that is no item keep their items from being ready and are reported on stderr.
 collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a

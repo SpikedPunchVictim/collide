@@ -317,6 +317,7 @@ fn empty_list() -> TaskListResult {
         stale_sources: Vec::new(),
         not_started: Vec::new(),
         sources_started: 0,
+        sources_unread: None,
         refreshing: false,
         view: None,
     }
@@ -958,6 +959,7 @@ impl Corpus {
             stale_sources: Vec::new(),
             not_started: Vec::new(),
             sources_started: 0,
+            sources_unread: None,
             refreshing: false,
             view: None,
         }
@@ -966,7 +968,7 @@ impl Corpus {
     /// `task.list`: the rows that pass `filter`, in key then path order, one page of them. The cursor names the last
     /// row of the page before, so a change to that row, or its removal, moves no other row. The board-wide lists
     /// (collections, invalid items, divergent keys, collisions, stale sources) come with the first page only.
-    /// `refreshing`, `not_started` and `sources_started` are the caller's to set.
+    /// `refreshing`, `not_started`, `sources_started` and `sources_unread` are the caller's to set.
     pub fn list(&self, filter: &ListFilter<'_>, page: &Page<'_>) -> TaskListResult {
         let ready = filter.ready.then(|| self.ready_ids());
         let mut rows: Vec<Row<'_>> = self

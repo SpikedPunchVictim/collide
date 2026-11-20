@@ -196,6 +196,9 @@ struct State {
     failing: BTreeMap<String, Failing>,
     /// Sources to list again at the next look, for a `task.collision` hint.
     wanted: BTreeSet<String>,
+    /// Why the last look could not read the board's line or list its checkouts, so its sources are not known. A look
+    /// that reads both clears it.
+    unread: Option<String>,
 }
 
 struct Inner {
@@ -271,6 +274,7 @@ impl BoardCorpus {
                 .keys()
                 .filter(|name| name.as_str() != scratch::SOURCE)
                 .count() as u32;
+            result.sources_unread = state.unread.clone();
         }
         result
     }
@@ -515,10 +519,12 @@ impl Inner {
             .config
             .sources
             .board_plan(self.board_ref(), &(self.config.tools)());
+        let mut unread = None;
         let (names, exclude) = match &plan {
             Ok(plan) => (plan.sources.clone(), plan.checkout_filter.exclude.clone()),
             Err(error) => {
                 self.log(&format!("its sources are not read: {error:?}"));
+                unread = Some(source_text(error));
                 (Vec::new(), Vec::new())
             }
         };
@@ -526,12 +532,17 @@ impl Inner {
             Ok(found) => found,
             Err(error) => {
                 self.log(&error);
+                unread.get_or_insert(error);
                 Vec::new()
             }
         };
         let cache = locked(&self.cache).take().unwrap_or_default();
         let mut inits: BTreeMap<String, InitializeResult> = cache.sources.iter().cloned().collect();
-        locked(&self.state).checkouts = checkouts.clone();
+        {
+            let mut state = locked(&self.state);
+            state.checkouts = checkouts.clone();
+            state.unread = unread;
+        }
 
         let mut up: Vec<(String, Source, InitializeResult)> = Vec::new();
         let mut not_up: Vec<(String, String)> = Vec::new();
@@ -821,6 +832,7 @@ impl Inner {
             Ok(plan) => plan,
             Err(error) => {
                 self.log(&format!("its sources are not read: {error:?}"));
+                locked(&self.state).unread = Some(source_text(&error));
                 return;
             }
         };
@@ -828,9 +840,11 @@ impl Inner {
             Ok(found) => found,
             Err(error) => {
                 self.log(&error);
+                locked(&self.state).unread = Some(error);
                 return;
             }
         };
+        locked(&self.state).unread = None;
         let changed = {
             let state = locked(&self.state);
             state.checkouts != checkouts

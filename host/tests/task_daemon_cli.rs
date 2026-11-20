@@ -2010,6 +2010,119 @@ fn json_carries_the_unstarted_source_on_the_wire() {
     assert_eq!(listed["sources_started"], 1);
 }
 
+// ---- a board whose line cannot be read (ts-0152-jq) -----------------------------------------------------------------
+
+const UNREAD_LINE: &str = "collide: the board's sources could not be read: ";
+
+/// Commits a `board.yaml` that does not parse, so the daemon cannot read the line at its next look.
+fn break_the_line(rig: &Rig) {
+    rig.repo.write(".collide/board.yaml", b"packs: [\n");
+    rig.repo.commit_all("a line that does not load");
+}
+
+/// `collide <words>` until it says the line is unread (`true`) or says nothing of it (`false`).
+fn cli_until_unread(rig: &Rig, words: &[&str], unread: bool) -> (u8, String, String) {
+    let mut last = (0, String::new(), String::new());
+    wait_until(
+        "the listing says whether the line is read",
+        DEADLINE,
+        || {
+            last = rig.cli(words);
+            last.2.contains(UNREAD_LINE) == unread
+        },
+    );
+    last
+}
+
+/// `collide <words>` until it says nothing at all on standard error.
+fn cli_until_quiet(rig: &Rig, words: &[&str]) -> (u8, String, String) {
+    let mut last = (0, String::new(), String::new());
+    wait_until("the listing says nothing", DEADLINE, || {
+        last = rig.cli(words);
+        last.2.is_empty()
+    });
+    last
+}
+
+#[test]
+fn a_listing_says_why_the_line_cannot_be_read_still_lists_what_it_holds_and_exits_1() {
+    let rig = Rig::new();
+    let (_, made, _) = rig.cli(&["task", "new", "try the cache"]);
+    let key = made.trim_end().to_string();
+    wait_until("the plan source lists", DEADLINE, || {
+        rig.cli(&["tasks"]).1.contains("plan:ts-0001-aa")
+    });
+    break_the_line(&rig);
+
+    let (code, out, err) = cli_until_unread(&rig, &["tasks"], true);
+
+    assert_eq!(code, exit::FAILED, "{err}");
+    assert!(
+        out.lines().any(|line| line.starts_with(&key)),
+        "the scratch task is still listed: {out}"
+    );
+    assert!(
+        out.contains("plan:ts-0001-aa"),
+        "so is what the plan source last listed: {out}"
+    );
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.len() > UNREAD_LINE.len() + 1, "{err}");
+}
+
+#[test]
+fn a_view_or_ready_over_a_line_that_cannot_be_read_is_refused_with_the_lines_problem_and_exits_1() {
+    // A view comes from the line, so the daemon refuses the listing itself (not through `sources_unread`).
+    let rig = Rig::new();
+    break_the_line(&rig);
+
+    for words in [
+        vec!["tasks", "--view", "ready-now"],
+        vec!["tasks", "--ready"],
+    ] {
+        let (code, out, err) = rig.cli(&words);
+
+        assert_eq!(code, exit::FAILED, "{words:?}: {err}");
+        assert_eq!(out, "", "{words:?}");
+        assert!(err.contains("board.yaml"), "{words:?}: {err}");
+        assert_eq!(err.lines().count(), 1, "{words:?}: {err}");
+    }
+}
+
+#[test]
+fn a_line_that_is_fixed_or_gone_says_nothing_at_the_next_look() {
+    let rig = Rig::new();
+    break_the_line(&rig);
+    cli_until_unread(&rig, &["tasks"], true);
+
+    rig.repo.write(".collide/board.yaml", b"packs: []\n");
+    rig.repo.commit_all("the line, fixed");
+    rig.trust(&rig.board);
+    let (code, _, err) = cli_until_quiet(&rig, &["tasks"]);
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+
+    break_the_line(&rig);
+    cli_until_unread(&rig, &["tasks"], true);
+    rig.repo.remove(".collide/board.yaml");
+    rig.repo.commit_all("the line, gone");
+    let (code, _, err) = cli_until_quiet(&rig, &["tasks"]);
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+}
+
+#[test]
+fn json_carries_the_reason_the_line_is_unread_and_a_board_that_reads_has_none() {
+    let rig = Rig::new();
+    let (_, out, _) = rig.cli(&["tasks", "--json"]);
+    assert!(json(&out).get("sources_unread").is_none(), "{out}");
+    break_the_line(&rig);
+    cli_until_unread(&rig, &["tasks"], true);
+
+    let (code, out, _) = rig.cli(&["tasks", "--json"]);
+
+    assert_eq!(code, exit::FAILED);
+    let reason = json(&out)["sources_unread"].as_str().unwrap().to_string();
+    assert!(reason.contains("line does not load"), "{reason}");
+}
+
 // ---- a board whose plan is not Collide's (ts-0149-kq) --------------------------------------------------------------
 
 const FOREIGN_PROVIDER: &str = include_str!("fixtures/fake_foreign_plan_provider.mjs");

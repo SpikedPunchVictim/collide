@@ -15,8 +15,8 @@ export type Category = 'backlog' | 'ready' | 'active' | 'review' | 'done' | 'dro
 
 /**
  * `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
- * lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`) and `sources_started`
- * come with the first page only. They are additive: a reader that does not know them reads the rest.
+ * lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`), `sources_started` and
+ * `sources_unread` come with the first page only. They are additive: a reader that does not know them reads the rest.
  */
 export interface TaskListResult {
   collections: Collection[]
@@ -42,6 +42,10 @@ export interface TaskListResult {
    * How many of the board's sources are running, the scratch source apart.
    */
   sources_started: number
+  /**
+   * Why the board's line or its checkouts could not be read at the last look, so its sources are not known.
+   */
+  sources_unread?: string | null
   stale_sources: StaleSource[]
   tasks: Task[]
   /**

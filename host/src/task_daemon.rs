@@ -338,8 +338,15 @@ fn tasks(
             stale.source, stale.reason
         );
     }
-    // Sources that failed and none that run: the empty list is not an honestly empty board.
-    let listed_ok = if !listed.not_started.is_empty() && listed.sources_started == 0 {
+    if let Some(reason) = &listed.sources_unread {
+        let _ = writeln!(
+            err,
+            "collide: the board's sources could not be read: {reason}"
+        );
+    }
+    // The board's sources are not known, or sources failed and none that run: the list is not an honest one.
+    let none_started = !listed.not_started.is_empty() && listed.sources_started == 0;
+    let listed_ok = if none_started || listed.sources_unread.is_some() {
         exit::FAILED
     } else {
         exit::OK

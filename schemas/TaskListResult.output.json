@@ -956,7 +956,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`) and `sources_started`\ncome with the first page only. They are additive: a reader that does not know them reads the rest.",
+  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`), `sources_started` and\n`sources_unread` come with the first page only. They are additive: a reader that does not know them reads the rest.",
   "properties": {
     "collections": {
       "default": [],
@@ -1013,6 +1013,13 @@
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "sources_unread": {
+      "description": "Why the board's line or its checkouts could not be read at the last look, so its sources are not known.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "stale_sources": {
       "default": [],

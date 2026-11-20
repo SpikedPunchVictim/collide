@@ -1469,6 +1469,54 @@ fn a_source_that_failed_after_it_declared_is_stale_and_not_in_the_list_of_those_
 }
 
 #[test]
+fn a_line_that_does_not_load_says_why_in_the_listing_until_it_loads_again() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    let list = rig.list_until(&board, "the source lists", |list| !list.tasks.is_empty());
+    assert_eq!(list.sources_unread, None);
+
+    rig.f().write(".collide/board.yaml", "packs: [\n");
+    rig.f().commit();
+
+    let list = rig.list_until(&board, "the line is named as unread", |list| {
+        list.sources_unread.is_some()
+    });
+    let reason = list.sources_unread.clone().unwrap();
+    assert!(reason.contains("line does not load"), "{reason}");
+    assert_eq!(
+        Rig::keys(&list),
+        ["files:1"],
+        "it keeps what it last listed"
+    );
+
+    rig.board_yaml(&["quay"], "");
+    rig.f().commit();
+
+    rig.list_until(&board, "the line reads again and says nothing", |list| {
+        list.sources_unread.is_none()
+    });
+}
+
+#[test]
+fn a_line_that_does_not_load_at_the_start_says_why_before_any_look() {
+    // A look every 30 s: only the start's own reading of the line can name the reason inside the deadline.
+    let mut rig = rig_with(|options| options.corpus_recheck = Duration::from_secs(30));
+    let board = rig.board_with(&[&FILES], "");
+    rig.f().write(".collide/board.yaml", "packs: [\n");
+    rig.f().commit();
+    rig.restart();
+
+    let list = rig.settled(&board);
+
+    let reason = list
+        .sources_unread
+        .expect("the start names the line as unread");
+    assert!(reason.contains("line does not load"), "{reason}");
+}
+
+#[test]
 fn a_config_set_of_a_packs_key_stops_that_packs_providers_on_every_board_and_no_other_pack() {
     let rig = rig();
     let quay = Src {
