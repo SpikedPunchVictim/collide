@@ -3,10 +3,12 @@ import { adrRef, obligationRef, spikeRef } from './ids.ts'
 import type { NameIds } from './ids.ts'
 
 /**
- * The kinds the provider reads besides tasks (0.10, Planning sources): an ADR, a spike and a question, each with the
+ * The kinds the provider reads (0.10, Planning sources): a task, an ADR, a spike and a question, each with the
  * statuses the plan CLI gives it, and the category each status is in. Statuses of one kind are not those of another:
- * a spike is `running` where a task is `doing`, and an ADR is `proposed` where a task is `in_review`.
+ * a spike is `running` where a task is `doing`, and an ADR is `proposed` where a task is `in_review`. A task's
+ * statuses are the source's own (`STATUSES` in `declaration.ts`), so its declaration is made there.
  */
+export const TASK = 'task'
 export const ADR = 'adr'
 export const SPIKE = 'spike'
 export const QUESTION = 'question'
@@ -42,7 +44,7 @@ const QUESTION_STATUSES: Statuses = [
  * source's (`setStatus` and `create`), which is why a write on it is refused by the provider and not by an argument
  * schema.
  */
-const declare = (name: string, statuses: Statuses): KindDeclInput => ({
+export const declareKind = (name: string, statuses: Statuses): KindDeclInput => ({
   name,
   statuses,
   transitions: [],
@@ -50,11 +52,11 @@ const declare = (name: string, statuses: Statuses): KindDeclInput => ({
   roles: [],
 })
 
-/** What `initialize` declares as `kinds`. A task is not here: it is what the source's own statuses are for. */
+/** The kinds besides a task that `initialize` declares as `kinds`. */
 export const KINDS: KindDeclInput[] = [
-  declare(ADR, ADR_STATUSES),
-  declare(SPIKE, SPIKE_STATUSES),
-  declare(QUESTION, QUESTION_STATUSES),
+  declareKind(ADR, ADR_STATUSES),
+  declareKind(SPIKE, SPIKE_STATUSES),
+  declareKind(QUESTION, QUESTION_STATUSES),
 ]
 
 const STATUSES_OF: Record<KindName, Statuses> = {

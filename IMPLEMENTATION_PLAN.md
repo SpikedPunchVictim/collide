@@ -4567,9 +4567,9 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   root and the layout setting; kinds, op effects and links in the corpus; `collide/plan`'s record parser (claim
   blocks) and `roles` mapping; pack views, with the slice's `--ready` as a built-in view. The slice's CLI moves
   behind the provider supervisor; every task command goes through the daemon (`ts-0136-rr`). The Orchard pack's
-  plan provider reads ADRs, spikes and questions, as the kinds `adr`, `spike` and `question` (a task has no kind),
-  and puts the questions that `plan status --format json` queues in the collection `plan:queue`, which its
-  `decisions-needed` view lists; a write on those kinds is refused, since the plan CLI changes them (`ts-0137-pg`).
+  plan provider reads tasks, ADRs, spikes and questions, as the kinds `task`, `adr`, `spike` and `question`, and puts
+  the questions that `plan status --format json` queues in the collection `plan:queue`, which its `decisions-needed`
+  view lists; a write on the last three is refused, since the plan CLI changes them (`ts-0137-pg`, `ts-0156-nt`).
 - **Fake plan CLI** (`ts-0153-kp`): the Orchard fixtures' stand-in plan CLI is held to the real one.
   `fixtures/orchard-arch/contract` records the shape of each call the pack makes (exit code, which streams are empty,
   standard error's line count, the JSON envelope as its key tree with leaf types and ids named by pattern, no other

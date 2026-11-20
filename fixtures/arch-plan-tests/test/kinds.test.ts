@@ -45,9 +45,23 @@ const initialize = async (root = ROOT): Promise<Message> => {
 }
 
 describe('initialize declares the kinds', () => {
-  test('adr, spike and question, each with its own statuses and their categories', async () => {
+  test('task, adr, spike and question, each with its own statuses and their categories', async () => {
     const { kinds } = await initialize()
     expect(kinds).toEqual([
+      {
+        name: 'task',
+        transitions: [],
+        ops: [],
+        roles: [],
+        statuses: [
+          { name: 'specified', category: 'backlog' },
+          { name: 'ready', category: 'ready' },
+          { name: 'doing', category: 'active' },
+          { name: 'in_review', category: 'review' },
+          { name: 'done', category: 'done' },
+          { name: 'dropped', category: 'dropped' },
+        ],
+      },
       {
         name: 'adr',
         transitions: [],
@@ -132,14 +146,14 @@ describe('list over the kinds tree', () => {
     expect(result.invalid).toEqual([])
   })
 
-  test('an item that is not a task names its kind, and a task names none', async () => {
+  test('every item names its kind, and a task names `task`', async () => {
     const result = await listAll(ROOT)
     const kindOf = (id: string) => taskOf(result, id).kind
     expect(kindOf('ADR-001')).toBe('adr')
     expect(kindOf('S2a')).toBe('spike')
     expect(kindOf('S4d-dock')).toBe('spike')
     expect(kindOf('Q-03-01')).toBe('question')
-    expect(kindOf('T-03-001')).toBeUndefined()
+    expect(kindOf('T-03-001')).toBe('task')
   })
 
   test('an ADR has its key, long id, title, path and checkout', async () => {
@@ -199,6 +213,7 @@ describe('list over the kinds tree', () => {
       }
       expect((await client.request('get', { id: 'S4d-dock-crane-limits' })).result?.task.key).toBe('plan:S4d-dock')
       expect((await client.request('get', { id: 'Q-03-03' })).result?.task.key).toBe('plan:Q-03-03')
+      expect((await client.request('get', { id: 'T-03-001' })).result?.task).toMatchObject({ kind: 'task' })
     } finally {
       await client.close()
     }
@@ -397,10 +412,10 @@ describe('invalid files and files that are not items', () => {
     expect(result.invalid).toEqual([])
   })
 
-  test('the tasks of the basic tree list as they did, with no kind', async () => {
+  test('the tasks of the basic tree list as they did, each of kind task', async () => {
     const result = await listAll(tree('basic'))
     expect(keysOf(result)).toHaveLength(8)
-    expect(result.tasks.every((task: Message) => task.kind === undefined)).toBe(true)
+    expect(result.tasks.every((task: Message) => task.kind === 'task')).toBe(true)
     expect(result.invalid).toEqual([])
   })
 })

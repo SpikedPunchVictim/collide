@@ -2,6 +2,7 @@ import type { TaskInput } from '@collide/pack-sdk'
 import { BLOCKED_BY, STATUSES } from './declaration.ts'
 import { epicRef, labelId, taskRef } from './ids.ts'
 import type { TaskFile } from './ids.ts'
+import { TASK } from './kinds.ts'
 
 const KNOWN_STATUSES = STATUSES.map((status) => status.name)
 
@@ -80,6 +81,7 @@ export function toTask(source: TaskSource, proposal: string): TaskResult {
       task: {
         key: `plan:${file.shortId}`,
         id: file.id,
+        kind: TASK,
         title,
         state: { status: declared.name, category: declared.category },
         version: source.version,

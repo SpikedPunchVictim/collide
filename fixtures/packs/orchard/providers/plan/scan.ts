@@ -5,7 +5,7 @@ import type { Collection, Listed } from './collections.ts'
 import { filesIn, foldersIn, inBatches } from './files.ts'
 import { adrFile, proposalDir, questionFile, spikeDir, taskFile } from './ids.ts'
 import type { NameIds, TaskFile } from './ids.ts'
-import { ADR, QUESTION, SPIKE, toKindTask } from './kinds.ts'
+import { ADR, QUESTION, SPIKE, TASK, toKindTask } from './kinds.ts'
 import type { KindName } from './kinds.ts'
 import { QUEUE_ID, readQueue } from './queue.ts'
 import type { Queue } from './queue.ts'
@@ -33,7 +33,7 @@ export interface Scan {
 }
 
 interface Candidate {
-  kind: 'task' | KindName
+  kind: typeof TASK | KindName
   /** The two digits of the proposal whose folder holds the file, for a task and for a question. */
   proposal: string | null
   /** The file's path from the checkout, with `/` separators: a spike's is its PLAN.md. */
@@ -54,7 +54,7 @@ async function candidates(root: string): Promise<Candidate[]> {
     if (proposal === null) continue
     for (const name of await filesIn(join(root, PROPOSALS, folder, 'tasks'))) {
       const named = taskFile(name)
-      if (named !== null) found.push({ kind: 'task', proposal, named, path: `${PROPOSALS}/${folder}/tasks/${name}` })
+      if (named !== null) found.push({ kind: TASK, proposal, named, path: `${PROPOSALS}/${folder}/tasks/${name}` })
     }
     for (const name of await filesIn(join(root, PROPOSALS, folder, 'questions'))) {
       const named = questionFile(name)
@@ -116,7 +116,7 @@ export async function scan(root: string, log: (message: string) => void, queue?:
     }
     const { kind, named, path, proposal } = candidate
     const result =
-      kind === 'task'
+      kind === TASK
         ? toTask({ file: named as TaskFile, path, checkout: root, ...file }, proposal as string)
         : toItem({ kind, named, path, root, proposal, file }, spikes)
     if (!result.ok) {

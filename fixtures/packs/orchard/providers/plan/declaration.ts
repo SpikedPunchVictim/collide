@@ -1,5 +1,5 @@
 import type { InitializeResultInput } from '@collide/pack-sdk'
-import { KIND_LINK_TYPES, KINDS } from './kinds.ts'
+import { declareKind, KIND_LINK_TYPES, KINDS, TASK } from './kinds.ts'
 import {
   ANY_ID_PATTERN,
   ANY_SHORT_ID_PATTERN,
@@ -70,8 +70,9 @@ const OPS: NonNullable<InitializeResultInput['ops']> = [
 
 /**
  * What `initialize` answers. A category is written as the one status that has it, which is what `categoryStatus` says.
- * The statuses at the top are a task's, and the kinds are the ones that are not tasks: an ADR, a spike and a question.
- * The ops are a task's too: `setStatus` and `create` on another kind are refused (`write.ts`).
+ * The statuses at the top are a task's, and the first kind is the task, with the same statuses (every item names its
+ * kind, a task `task`). The others are an ADR, a spike and a question. The ops are a task's: `setStatus` and `create`
+ * on another kind are refused (`write.ts`).
  */
 export const INITIALIZE_RESULT: InitializeResultInput = {
   scope: 'ref',
@@ -84,7 +85,7 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
     { id: 'proposal', type: 'string', filterable: true },
     { id: 'epic', type: 'string', filterable: true },
   ],
-  kinds: KINDS,
+  kinds: [declareKind(TASK, STATUSES.map((status) => ({ ...status }))), ...KINDS],
   ops: OPS,
   links: [{ name: BLOCKED_BY, dir: 'out', blocking: true }, ...KIND_LINK_TYPES],
   capabilities: { watch: true, create: true, collections: true, preview: true },

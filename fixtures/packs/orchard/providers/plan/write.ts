@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import type { ApplyParamsOutput, ApplyResultInput, PreviewResultInput, TaskInput } from '@collide/pack-sdk'
 import { CATEGORY_STATUS, STATUSES, TITLE_MAX } from './declaration.ts'
 import { EPIC_ARG, ID_PATTERN, PROPOSAL_ARG, SHORT_ID_PATTERN } from './ids.ts'
+import { TASK } from './kinds.ts'
 import { runPlan } from './run-plan.ts'
 import type { PlanRun } from './run-plan.ts'
 import { findTask, scan } from './scan.ts'
@@ -256,7 +257,7 @@ async function setStatus(ctx: WriteContext, call: SetStatusCall, dryRun: boolean
   const found = findTask((await scan(ctx.root, ctx.log)).tasks, call.id)
   if (found === undefined) return refused(`there is no task ${call.id} in this checkout`)
   // An ADR, a spike and a question have statuses of their own. This source does not call the plan CLI for them.
-  if (found.task.kind !== undefined && found.task.kind !== null) {
+  if (found.task.kind !== TASK) {
     return refused(`${found.task.key} is ${found.task.kind === 'adr' ? 'an' : 'a'} ${found.task.kind}: ${CLI_CHANGES}`)
   }
   if (call.version !== found.task.version) return { kind: 'conflict', current: withBody(found) }

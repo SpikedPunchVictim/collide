@@ -18,7 +18,7 @@ mod common;
 
 use collide_core::item::LinkDir;
 use collide_core::owner::{
-    BoardListParams, BoardListResult, TaskGetParams, TaskGetResult, TaskListResult,
+    BoardListParams, BoardListResult, RpcError, TaskGetParams, TaskGetResult, TaskListResult,
     TaskViewsParams, TaskViewsResult, ViewSource,
 };
 use collide_core::provider::ApplyResult;
@@ -313,6 +313,42 @@ fn a_link_to_a_spike_the_tree_lacks_is_missing_and_the_item_still_gets() {
     assert!(
         broken.iter().all(|link| link.missing),
         "a link to S9 has nothing at its far end: {broken:?}"
+    );
+}
+
+/// `task.list` with a kind, as `collide tasks --kind <kind>` sends it.
+fn of_kind(rig: &Rig, board: &str, kind: &str) -> Result<TaskListResult, RpcError> {
+    rpc(rig, "task.list", &json!({ "board": board, "kind": kind }))
+}
+
+#[test]
+fn kind_task_lists_the_packs_task_on_a_board_whose_only_source_is_the_pack() {
+    let (rig, board) = board();
+
+    let listed = of_kind(&rig, &board, "task").expect("`task` is a kind the source declares");
+
+    assert_eq!(keys(&listed), ["plan:T-03-001"]);
+    assert_eq!(
+        listed.tasks[0].kind.as_deref(),
+        Some("task"),
+        "the listing carries the kind"
+    );
+}
+
+#[test]
+fn a_task_gets_with_the_kind_task_and_the_other_kinds_are_still_listed_by_their_own_name() {
+    let (rig, board) = board();
+
+    let task = get(&rig, &board, "plan:T-03-001").task.expect("the task");
+    let spikes = of_kind(&rig, &board, "spike").unwrap();
+
+    assert_eq!(task.kind.as_deref(), Some("task"));
+    assert_eq!(keys(&spikes).len(), 4);
+    assert!(
+        spikes
+            .tasks
+            .iter()
+            .all(|spike| spike.key != "plan:T-03-001")
     );
 }
 

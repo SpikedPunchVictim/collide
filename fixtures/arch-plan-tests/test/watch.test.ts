@@ -178,6 +178,9 @@ describe('watch: task.changed', () => {
       cause: 'worktree',
       checkout: main.root,
     })
+    // A task's kind is the folder its file is in, so a file never changes kind: the diff does not name it, and core is
+    // not asked to read the task again for it.
+    expect(Object.keys(changed?.params.diff)).not.toContain('kind')
   })
 
   test('an edit of the body is a change with an empty diff, and a rewrite with the same bytes is none', async () => {

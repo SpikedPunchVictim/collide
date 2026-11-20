@@ -61,6 +61,7 @@ describe('setStatus', () => {
       version,
       task: {
         key: 'plan:T-03-003',
+        kind: 'task',
         state: state('doing', 'active'),
         version,
         path,
@@ -371,6 +372,7 @@ describe('create', () => {
       task: {
         key: 'plan:T-03-006',
         id: 'T-03-006-chart-the-tides',
+        kind: 'task',
         title: 'Chart the tides',
         state: state('specified', 'backlog'),
         version,
