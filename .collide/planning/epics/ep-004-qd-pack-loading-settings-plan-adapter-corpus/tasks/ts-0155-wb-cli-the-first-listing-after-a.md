@@ -1,7 +1,7 @@
 ---
 id: ts-0155-wb
 kind: task
-status: ready
+status: done
 title: "CLI: the first listing after a daemon restart waits for the whole relist"
 owners: []
 links: []
