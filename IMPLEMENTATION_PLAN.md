@@ -2320,9 +2320,13 @@ Why the plan adapter parses files itself:
   task, or no task when no item has that id: a missing id is an answer, not an error (owner, 2026-11-14).
 - `watch({ checkouts })` sends notifications: `task.collision`, `source.stale`, and (owner, 2026-11-13; S11):
   - `task.changed {key, version, from, to, diff, cause, actor?, automated?, checkout?}`, where `cause` is
-    `head | worktree | remote | journal | startup`, `actor` is the source's own when it is known (GitHub events,
-    the beads journal), `automated` is GitHub's `wasAutomated`, and `checkout` names the checkout whose copy
-    changed, absent for a global source (owner, 2026-11-14);
+    `head | worktree | remote | journal | startup`, `actor` is the source's own when it is known (GitHub events, the
+    beads journal), `automated` is GitHub's `wasAutomated`, and `checkout` names the checkout whose copy changed, absent
+    for a global source (owner, 2026-11-14). `diff` names each field of the copy that changed: status and category,
+    title, each field, and each link type as `{added, removed}`. Core takes a notice that names only status and
+    category, or nothing, from the notice alone; for any other it fetches the task with `get` and replaces its copy,
+    keeping the copy's collections, and when the fetch fails it takes state and version alone. A field left out of
+    `diff` stays stale until the source is listed (`ts-0157-hd`);
   - `task.renamed {from, to, checkout}`, with history, runs and `latestRun` following the key;
   - `task.removed {key, cause, checkout?}`, where `cause` is `deleted | transferred | unknown` and `checkout` is as
     in `task.changed`;

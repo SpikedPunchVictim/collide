@@ -42,12 +42,13 @@ type Diff = NonNullable<TaskChangedOutput['diff']>
 const keyOf = (shortId: string): string => `plan:${shortId}`
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
-const dependsOn = (task: TaskInput | null): string[] =>
-  (task?.links ?? []).filter((link) => link.type === BLOCKED_BY).map((link) => link.to)
+const linksOf = (task: TaskInput | null, type: string): string[] =>
+  (task?.links ?? []).filter((link) => link.type === type).map((link) => link.to)
 
 /**
  * The fields that differ between two reads of a task, or between nothing and its first read. The status, the title,
- * each of the task's own fields and its path are `{from, to}`; its dependencies are `{added, removed}`.
+ * each of the task's own fields and its path are `{from, to}`. Each type of link is `{added, removed}` by the ids it
+ * points to, named by its type, except that `blocked-by` is `depends_on`, the name of its field in the file.
  */
 export function diffOf(before: TaskInput | null, after: TaskInput): Diff {
   const diff: Diff = {}
@@ -58,11 +59,14 @@ export function diffOf(before: TaskInput | null, after: TaskInput): Diff {
   field('title', before?.title ?? null, after.title)
   const names = new Set([...Object.keys(before?.fields ?? {}), ...Object.keys(after.fields ?? {})])
   for (const name of [...names].sort()) field(name, before?.fields?.[name] ?? null, after.fields?.[name] ?? null)
-  const was = dependsOn(before)
-  const now = dependsOn(after)
-  const added = now.filter((id) => !was.includes(id))
-  const removed = was.filter((id) => !now.includes(id))
-  if (added.length > 0 || removed.length > 0) diff.depends_on = { added, removed }
+  const types = new Set([...(before?.links ?? []), ...(after.links ?? [])].map((link) => link.type))
+  for (const type of [...types].sort()) {
+    const was = linksOf(before, type)
+    const now = linksOf(after, type)
+    const added = now.filter((id) => !was.includes(id))
+    const removed = was.filter((id) => !now.includes(id))
+    if (added.length > 0 || removed.length > 0) diff[type === BLOCKED_BY ? 'depends_on' : type] = { added, removed }
+  }
   field('path', before?.path ?? null, after.path ?? null)
   return diff
 }

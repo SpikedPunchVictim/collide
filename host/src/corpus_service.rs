@@ -1137,15 +1137,29 @@ impl Inner {
         match applied {
             Ok(collide_core::corpus::Applied::Done) => {}
             Ok(collide_core::corpus::Applied::NeedsTask) => {
-                let Some(task) = self.fetch(name, &changed.key, changed.checkout.as_deref()) else {
+                let fetched = self.fetch(name, &changed.key, changed.checkout.as_deref());
+                if fetched.is_none() {
                     self.log(&format!(
-                        "{} changed but the source does not have it",
+                        "{} changed but the source did not give it",
                         changed.key
                     ));
-                    return;
-                };
+                }
                 let mut state = locked(&self.state);
-                let _ = state.corpus.apply_changed(name, &changed, Some(task));
+                match fetched {
+                    Some(task) => {
+                        let task = keeping_collections(&state.corpus, &changed, task);
+                        let _ = state.corpus.apply_changed(name, &changed, Some(task));
+                    }
+                    None => {
+                        // A copy that is held still takes the new state and version; the rest waits for a listing.
+                        if !matches!(
+                            state.corpus.apply_state(name, &changed),
+                            Ok(collide_core::corpus::Applied::Done)
+                        ) {
+                            return;
+                        }
+                    }
+                }
             }
             Err(error) => {
                 self.log(&format!(
@@ -1310,6 +1324,19 @@ impl Inner {
             }
         }
     }
+}
+
+/// The fetched task of a changed item, with the collections the corpus holds for that copy. A task's collections come
+/// from `collections.changed` and not from `task.changed`, so a copy that is held keeps them; a task that is new to
+/// the corpus has the ones the source gave with it.
+fn keeping_collections(corpus: &Corpus, changed: &TaskChanged, mut task: Task) -> Task {
+    let held = corpus
+        .resolve_key(&changed.key)
+        .and_then(|key| corpus.copy(&key, changed.checkout.as_deref()));
+    if let Some(held) = held {
+        task.collections = held.collections.clone();
+    }
+    task
 }
 
 /// What the cache holds of one source in one checkout, as a complete `list`.

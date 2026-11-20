@@ -483,16 +483,37 @@ impl Corpus {
         }
     }
 
-    /// `task.changed`. The notification carries the new state and version and not the task, so a copy the corpus
-    /// holds is updated from it; a task the corpus does not hold needs the task itself, and `task` is it (the caller
-    /// asks for [`Applied::NeedsTask`] first, and fetches that one task). A `task` that is given replaces the copy.
-    /// With no new state (`to` is null) the copy is removed. A status the source did not declare makes the item an
-    /// invalid entry, and a change that is declared brings the path back.
+    /// `task.changed`. The notification carries the new state, the version and a `diff`, and not the task. A copy the
+    /// corpus holds is updated from it when the `diff` names no field but the status (see
+    /// [`names_only_the_status`]); a `diff` that names any other field, and a task the corpus does not hold, need the
+    /// task itself, and `task` is it (the caller asks for [`Applied::NeedsTask`] first, and fetches that one task). A
+    /// `task` that is given replaces the copy. With no new state (`to` is null) the copy is removed. A status the
+    /// source did not declare makes the item an invalid entry, and a change that is declared brings the path back.
     pub fn apply_changed(
         &mut self,
         source: &str,
         event: &TaskChanged,
         task: Option<Task>,
+    ) -> Result<Applied, CorpusError> {
+        self.apply(source, event, task, false)
+    }
+
+    /// `task.changed` for a held copy, taking only the new state and version from it, whatever its `diff` names. For
+    /// a caller whose fetch of the task failed.
+    pub fn apply_state(
+        &mut self,
+        source: &str,
+        event: &TaskChanged,
+    ) -> Result<Applied, CorpusError> {
+        self.apply(source, event, None, true)
+    }
+
+    fn apply(
+        &mut self,
+        source: &str,
+        event: &TaskChanged,
+        task: Option<Task>,
+        state_only: bool,
     ) -> Result<Applied, CorpusError> {
         self.source(source)?;
         self.touch();
@@ -516,6 +537,9 @@ impl Corpus {
                 let Some(held) = held else {
                     return Ok(Applied::NeedsTask);
                 };
+                if !state_only && !names_only_the_status(event) {
+                    return Ok(Applied::NeedsTask);
+                }
                 let mut task = held.clone();
                 task.state = to.clone();
                 task.version = event.version.clone();
@@ -1397,6 +1421,16 @@ fn json_text(text: &str) -> Value {
 
 fn json_option(text: &Option<String>) -> Value {
     text.as_deref().map_or(Value::Null, json_text)
+}
+
+/// Whether a notice's `diff` names no field but the state: the status, and the category that moves with it (the
+/// notice's `to` carries both). A provider names every field a copy holds that changed, so a notice that names none
+/// changed only what the notice itself carries: the version.
+fn names_only_the_status(event: &TaskChanged) -> bool {
+    event
+        .diff
+        .keys()
+        .all(|name| name == "status" || name == "category")
 }
 
 fn set_diff(old: &[String], new: &[String]) -> Option<FieldDiff> {

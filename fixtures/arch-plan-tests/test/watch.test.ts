@@ -2,7 +2,7 @@ import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import type { TaskInput } from '@collide/pack-sdk'
-import { compare, emptySnapshot } from '../../../fixtures/packs/orchard/providers/plan/changes.ts'
+import { compare, diffOf, emptySnapshot } from '../../../fixtures/packs/orchard/providers/plan/changes.ts'
 import { DEBOUNCE_MS, RECHECK_MS } from '../../../fixtures/packs/orchard/providers/plan/watcher.ts'
 import { fakeClock, fakeFs, noFs } from './fakes.ts'
 import { DEADLINE_MS } from './helpers.ts'
@@ -193,6 +193,32 @@ describe('watch: task.changed', () => {
     watch.settle()
     const [changed] = await watch.client.notifications('task.changed')
     expect(changed?.params).toMatchObject({ key: 'plan:T-03-003', diff: {}, from: state('ready'), to: state('ready') })
+  })
+
+  test('a change of any link is named in the diff, by the type of the link, so that core reads the task again', () => {
+    const task = (links: Array<{ type: string; to: string }>): TaskInput => ({
+      key: 'plan:ADR-0007',
+      id: 'ADR-0007',
+      title: 'Keep the ledger',
+      state: { status: 'ready', category: 'ready' },
+      version: 'a',
+      links,
+    })
+    const before = task([
+      { type: 'evidence', to: 'SP-0001' },
+      { type: 'supersedes', to: 'ADR-0003' },
+    ])
+    const after = task([
+      { type: 'evidence', to: 'SP-0001' },
+      { type: 'evidence', to: 'SP-0002' },
+      { type: 'blocks', to: 'OB-0001' },
+    ])
+    expect(diffOf(before, after)).toEqual({
+      evidence: { added: ['SP-0002'], removed: [] },
+      supersedes: { added: [], removed: ['ADR-0003'] },
+      blocks: { added: ['OB-0001'], removed: [] },
+    })
+    expect(diffOf(before, before)).toEqual({})
   })
 
   test('a file that is moved to another name keeps its short id: one change, the path in the diff', async () => {

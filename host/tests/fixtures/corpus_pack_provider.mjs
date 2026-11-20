@@ -17,10 +17,12 @@
 // The data folder (`COLLIDE_PACK_DATA`) is the test's way in and out:
 //   started       a line with the pid for each `initialize`
 //   init.json     the params of the last `initialize` (the settings the provider was started with)
-//   calls.log     a line for each `list` (`list <checkout> <cursor>`) and `watch` (`watch <json>`)
+//   calls.log     a line for each `list` (`list <checkout> <cursor>`), `get` (`get <checkout> <id>`) and `watch`
+//                 (`watch <json>`)
 //   notify.jsonl  each line a test appends is sent to the daemon as a notification, `{ "method", "params" }`
 //   fail-list     when it exists, `list` answers a JSON-RPC error
 //   die-on-list   when it exists, `list` ends the process with no reply
+//   fail-get      when it exists, `get` answers a JSON-RPC error
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -105,7 +107,10 @@ const list = (params) => {
 }
 
 const get = (params) => {
-  const found = find(params.checkout ?? init.root, params.id)
+  const checkout = params.checkout ?? init.root
+  log(`get ${checkout} ${params.id}`)
+  if (existsSync(join(DATA, 'fail-get'))) return [null, { code: -32000, message: 'the get was refused' }]
+  const found = find(checkout, params.id)
   if (!found) return [{}, null]
   return [{ task: { ...found.task, body: `body of ${params.id}` } }, null]
 }

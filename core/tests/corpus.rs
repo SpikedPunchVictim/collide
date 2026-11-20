@@ -1405,6 +1405,137 @@ fn a_changed_notification_for_a_held_copy_updates_its_state_without_the_task() {
     assert_eq!(task.version, "v2");
 }
 
+/// A notice for `plan:T-01` in `ROOT` from `ready` to `doing`, with a `diff` that names `names` (each as a changed
+/// field, or as a set for the sets).
+fn changed_with(names: &[&str]) -> TaskChanged {
+    let mut event = changed_to("plan:T-01", ROOT, "doing", "v2");
+    event.from = Some(state("ready"));
+    for name in names {
+        let diff = match *name {
+            "labels" | "owners" | "collections" | "depends_on" => FieldDiff::Set {
+                added: vec![json!("x")],
+                removed: vec![],
+            },
+            _ => FieldDiff::Changed {
+                from: json!("old"),
+                to: json!("new"),
+            },
+        };
+        event.diff.insert((*name).into(), diff);
+    }
+    event
+}
+
+#[test]
+fn a_changed_notification_that_names_a_field_besides_the_status_asks_for_the_task() {
+    for names in [
+        vec!["title"],
+        vec!["status", "title"],
+        vec!["fields.epic"],
+        vec!["epic"],
+        vec!["depends_on"],
+        vec!["labels"],
+        vec!["owners"],
+        vec!["path"],
+        vec!["kind"],
+    ] {
+        let mut corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+        let event = changed_with(&names);
+        assert_eq!(
+            corpus.apply_changed("plan", &event, None).unwrap(),
+            Applied::NeedsTask,
+            "a diff that names {names:?}"
+        );
+        let held = corpus.rows()[0].task;
+        assert_eq!(
+            held.state,
+            state("ready"),
+            "nothing is applied from {names:?}"
+        );
+        assert_eq!(held.version, "v1");
+    }
+}
+
+#[test]
+fn a_changed_notification_that_names_only_the_status_updates_the_copy_without_the_task() {
+    let mut corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    for names in [vec!["status"], vec!["status", "category"]] {
+        let event = changed_with(&names);
+        assert_eq!(
+            corpus.apply_changed("plan", &event, None).unwrap(),
+            Applied::Done,
+            "a diff that names {names:?}"
+        );
+        assert_eq!(corpus.rows()[0].task.state, state("doing"));
+        corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    }
+}
+
+#[test]
+fn a_changed_notification_that_names_nothing_takes_the_version_and_asks_for_no_task() {
+    let mut corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    let mut event = changed_with(&[]);
+    event.to = Some(state("ready"));
+    assert_eq!(
+        corpus.apply_changed("plan", &event, None).unwrap(),
+        Applied::Done,
+        "a body edit moves the version and nothing the corpus holds"
+    );
+    assert_eq!(corpus.rows()[0].task.version, "v2");
+}
+
+#[test]
+fn apply_state_takes_the_state_and_version_whatever_the_diff_names() {
+    let mut corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    let event = changed_with(&["title", "depends_on"]);
+    assert_eq!(corpus.apply_state("plan", &event).unwrap(), Applied::Done);
+    let held = corpus.rows()[0].task;
+    assert_eq!(held.state, state("doing"));
+    assert_eq!(held.version, "v2");
+    assert_eq!(held.title, "title of T-01", "nothing else moves");
+}
+
+#[test]
+fn apply_state_for_a_task_the_corpus_does_not_hold_asks_for_the_task() {
+    let mut corpus = plan_corpus(&[], &[ROOT]);
+    let event = changed_with(&["title"]);
+    assert_eq!(
+        corpus.apply_state("plan", &event).unwrap(),
+        Applied::NeedsTask
+    );
+}
+
+#[test]
+fn a_task_given_for_a_changed_notification_brings_its_title_and_links_so_readiness_follows() {
+    let tasks = [at("T-01", "doing", ROOT), at("T-02", "ready", ROOT)];
+    let mut corpus = plan_corpus(&tasks, &[ROOT]);
+    let ready = |corpus: &Corpus| {
+        keys_of(&corpus.list(
+            &ListFilter {
+                ready: true,
+                ..Default::default()
+            },
+            &Page::default(),
+        ))
+    };
+    assert_eq!(ready(&corpus), ["plan:T-02"]);
+
+    let mut event = changed_with(&["title", "depends_on"]);
+    event.key = "plan:T-02".into();
+    event.from = Some(state("ready"));
+    event.to = Some(state("ready"));
+    assert_eq!(
+        corpus.apply_changed("plan", &event, None).unwrap(),
+        Applied::NeedsTask
+    );
+    let mut fetched = with_link(at("T-02", "ready", ROOT), "blocked-by", "T-01");
+    fetched.title = "a new title".into();
+    corpus.apply_changed("plan", &event, Some(fetched)).unwrap();
+
+    assert!(ready(&corpus).is_empty(), "T-02 waits for T-01 now");
+    assert_eq!(corpus.get("plan:T-02").task.unwrap().title, "a new title");
+}
+
 #[test]
 fn a_changed_notification_for_a_task_the_corpus_does_not_hold_asks_for_the_task() {
     let mut corpus = plan_corpus(&[], &[ROOT]);

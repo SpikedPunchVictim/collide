@@ -2676,3 +2676,200 @@ fn save_view_refuses_an_invalid_view_an_unsafe_name_and_an_overwrite_with_no_fla
         assert_ne!(fs::read_to_string(&first.path).unwrap(), before);
     }
 }
+
+// ---- a changed item brings its whole copy (ts-0157-hd) --------------------------------------------------------------
+
+/// A `task.changed` whose `diff` names `diff`, for a task that stays in `status`.
+fn changed_naming(key: &str, version: &str, status: &str, diff: Value, checkout: &Path) -> Value {
+    json!({
+        "key": key, "version": version, "diff": diff, "cause": "worktree",
+        "from": state_json(status), "to": state_json(status),
+        "checkout": checkout.display().to_string(),
+    })
+}
+
+/// A task file with a title and `blocked-by` links to the short ids in `blocked_by`.
+fn task_with(
+    rig: &Rig,
+    checkout: &Path,
+    short: &str,
+    title: &str,
+    version: &str,
+    blocked_by: &[&str],
+) {
+    let links: Vec<Value> = blocked_by
+        .iter()
+        .map(|to| json!({ "type": "blocked-by", "to": to }))
+        .collect();
+    let data = json!({
+        "short": short, "title": title, "status": "todo", "version": version, "links": links,
+    });
+    rig.file(checkout, &format!("{short}.json"), &format!("{data}\n"));
+}
+
+fn gets(rig: &Rig, board: &str) -> usize {
+    rig.calls(board, &FILES)
+        .iter()
+        .filter(|line| line.starts_with("get "))
+        .count()
+}
+
+#[test]
+fn a_title_changed_on_disk_lists_with_the_new_title_and_the_cache_keeps_it() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    task_with(&rig, &root, "1", "The old title", "v1", &[]);
+    rig.settled(&board);
+    rig.wait_watched(&board, &FILES);
+
+    task_with(&rig, &root, "1", "The new title", "v2", &[]);
+    let diff = json!({ "title": { "from": "The old title", "to": "The new title" } });
+    rig.notify(
+        &board,
+        &FILES,
+        "task.changed",
+        changed_naming("files:1", "v2", "todo", diff, &root),
+    );
+    let list = rig.list_until(&board, "the new title is listed", |list| {
+        list.tasks
+            .first()
+            .is_some_and(|task| task.title == "The new title")
+    });
+
+    assert_eq!(list.tasks[0].version, "v2");
+    assert_eq!(rig.cache(&board).tasks[0].task.title, "The new title");
+    assert_eq!(gets(&rig, &board), 1, "the one task was fetched");
+}
+
+#[test]
+fn a_blocked_by_link_added_on_disk_leaves_ready_and_one_removed_brings_the_task_back() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    task_with(&rig, &root, "1", "First", "v1", &[]);
+    task_with(&rig, &root, "2", "Second", "v1", &[]);
+    rig.settled(&board);
+    rig.wait_watched(&board, &FILES);
+    let ready = |rig: &Rig| Rig::keys(&rig.list(&board, json!({ "ready": true })));
+    assert_eq!(ready(&rig), ["files:1", "files:2"]);
+
+    task_with(&rig, &root, "2", "Second", "v2", &["1"]);
+    let added = json!({ "depends_on": { "added": ["1"], "removed": [] } });
+    rig.notify(
+        &board,
+        &FILES,
+        "task.changed",
+        changed_naming("files:2", "v2", "todo", added, &root),
+    );
+    wait_until("the blocked task leaves ready", DEADLINE, || {
+        ready(&rig) == ["files:1"]
+    });
+
+    task_with(&rig, &root, "2", "Second", "v3", &[]);
+    let removed = json!({ "depends_on": { "added": [], "removed": ["1"] } });
+    rig.notify(
+        &board,
+        &FILES,
+        "task.changed",
+        changed_naming("files:2", "v3", "todo", removed, &root),
+    );
+    wait_until("the task is ready again", DEADLINE, || {
+        ready(&rig) == ["files:1", "files:2"]
+    });
+}
+
+#[test]
+fn a_change_of_the_status_alone_fetches_nothing() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.settled(&board);
+    rig.wait_watched(&board, &FILES);
+
+    rig.task(&root, "1.json", "1", "doing", "v2");
+    let mut event = changed("files:1", "v2", Some("todo"), Some("doing"), &root);
+    event["diff"] = json!({ "status": { "from": "todo", "to": "doing" } });
+    rig.notify(&board, &FILES, "task.changed", event);
+    rig.list_until(&board, "the status is listed", |list| {
+        list.tasks
+            .first()
+            .is_some_and(|task| task.state.status == "doing")
+    });
+
+    assert_eq!(gets(&rig, &board), 0);
+}
+
+#[test]
+fn a_change_whose_task_cannot_be_fetched_still_moves_the_state_and_the_version() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    task_with(&rig, &root, "1", "The old title", "v1", &[]);
+    rig.settled(&board);
+    rig.wait_watched(&board, &FILES);
+    fs::write(rig.data(&board, &FILES).join("fail-get"), "").unwrap();
+
+    let mut event = changed("files:1", "v2", Some("todo"), Some("doing"), &root);
+    event["diff"] = json!({
+        "status": { "from": "todo", "to": "doing" },
+        "title": { "from": "The old title", "to": "The new title" },
+    });
+    rig.notify(&board, &FILES, "task.changed", event);
+    let list = rig.list_until(&board, "the status is listed", |list| {
+        list.tasks
+            .first()
+            .is_some_and(|task| task.state.status == "doing")
+    });
+
+    assert_eq!(list.tasks[0].version, "v2");
+    assert_eq!(
+        list.tasks[0].title, "The old title",
+        "the title waits for a listing"
+    );
+    assert_eq!(gets(&rig, &board), 1);
+}
+
+#[test]
+fn a_changed_item_keeps_the_collections_that_collections_changed_gave_it() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    task_with(&rig, &root, "1", "The old title", "v1", &[]);
+    rig.settled(&board);
+    rig.wait_watched(&board, &FILES);
+    rig.notify(
+        &board,
+        &FILES,
+        "collections.changed",
+        json!({
+            "collections": [],
+            "members": [{ "key": "files:1", "collections": ["epic-a"] }],
+            "checkout": root.display().to_string(),
+        }),
+    );
+    rig.list_until(&board, "the task is in its collection", |list| {
+        list.tasks
+            .first()
+            .is_some_and(|task| task.collections == ["epic-a"])
+    });
+
+    // The fetched task has no collections: the source says them in `collections.changed`, and said them.
+    task_with(&rig, &root, "1", "The new title", "v2", &[]);
+    let diff = json!({ "title": { "from": "The old title", "to": "The new title" } });
+    rig.notify(
+        &board,
+        &FILES,
+        "task.changed",
+        changed_naming("files:1", "v2", "todo", diff, &root),
+    );
+    let list = rig.list_until(&board, "the new title is listed", |list| {
+        list.tasks
+            .first()
+            .is_some_and(|task| task.title == "The new title")
+    });
+
+    assert_eq!(list.tasks[0].collections, ["epic-a"]);
+    assert_eq!(rig.cache(&board).tasks[0].task.collections, ["epic-a"]);
+}
