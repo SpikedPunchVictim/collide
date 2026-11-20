@@ -34,6 +34,9 @@ pub const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 pub const REFRESH_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// The agent the entry is for.
 pub const AGENT: &str = "claude";
+/// What the published chip says when the daemon was given no source of published versions (a test's or a developer's,
+/// under `COLLIDE_DAEMON_ROOT`, which reaches no network): it is not that a look-up failed or has not ended.
+pub const NO_SOURCE: &str = "this daemon does not look it up";
 
 /// Where the newest published versions come from.
 pub trait PublishedSource: Send + Sync {
@@ -418,6 +421,11 @@ impl ClaudeVersions {
 
     /// The answer of `daemon.agent_versions`.
     pub fn status(&self) -> DaemonAgentVersionsResult {
+        // With no source the chip says so, unless the setting hides it. The setting's file is read with the state not
+        // held.
+        let no_source = locked(&self.state).source.is_none();
+        let not_looked_up =
+            no_source && check_published(self.options.home.as_deref(), &*self.options.log);
         let state = locked(&self.state);
         let in_use = state.in_use.as_ref().map(|(version, _)| *version);
         let smoke = state
@@ -425,13 +433,21 @@ impl ClaudeVersions {
             .as_ref()
             .filter(|(version, _)| Some(*version) == in_use)
             .map(|(_, result)| result.clone());
-        let published =
+        let published = if not_looked_up {
+            Some(PublishedVersions {
+                latest: None,
+                stable: None,
+                fetched_ms: None,
+                error: Some(NO_SOURCE.to_string()),
+            })
+        } else {
             (state.source.is_some() && state.published.enabled).then(|| PublishedVersions {
                 latest: state.published.latest.map(|version| version.to_string()),
                 stable: state.published.stable.map(|version| version.to_string()),
                 fetched_ms: state.published.fetched_ms,
                 error: state.published.error.clone(),
-            });
+            })
+        };
         DaemonAgentVersionsResult {
             agents: vec![AgentVersions {
                 agent: AGENT.to_string(),

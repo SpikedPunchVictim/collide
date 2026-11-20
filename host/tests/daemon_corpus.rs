@@ -1385,6 +1385,39 @@ fn a_source_that_never_started_is_named_with_its_reason_until_it_starts() {
 }
 
 #[test]
+fn a_retrust_lists_the_source_at_once_and_the_first_listing_after_it_is_not_stale() {
+    // A look every 30 s: after a failed start the next try waits 60 s. Only a trust that wakes the corpus and ends
+    // that wait lists the source inside the deadline.
+    let mut rig = rig_with(|options| options.corpus_recheck = Duration::from_secs(30));
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.list_until(&board, "the source lists", |list| !list.tasks.is_empty());
+
+    // A committed change to what runs makes the line untrusted; the restart cannot start the source again.
+    rig.f().write(".collide/packs/quay/README", "changed\n");
+    rig.f().commit();
+    rig.restart();
+    let list = rig.list_until(&board, "the source is stale", |list| {
+        !list.refreshing && !list.stale_sources.is_empty()
+    });
+    assert_eq!(list.stale_sources[0].source, "files");
+    assert!(
+        list.stale_sources[0].reason.contains("not trusted"),
+        "{:?}",
+        list.stale_sources
+    );
+
+    rig.trust(&board);
+    let list = rig.list_until(
+        &board,
+        "the first listing after the trust is fresh",
+        |list| !list.refreshing && list.stale_sources.is_empty(),
+    );
+    assert_eq!(Rig::keys(&list), ["files:1"]);
+}
+
+#[test]
 fn a_source_the_line_no_longer_names_is_not_listed_as_unstarted() {
     let rig = rig();
     rig.pack(&FILES);

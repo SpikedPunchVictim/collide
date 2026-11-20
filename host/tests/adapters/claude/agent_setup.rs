@@ -12,7 +12,7 @@ use collide_core::owner::{
 };
 use collide_core::state::PhaseState;
 use collide_host::adapters::claude::version::CANARY_FAILURE;
-use collide_host::claude_versions::PublishedChoice;
+use collide_host::claude_versions::{NO_SOURCE, PublishedChoice};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -225,10 +225,12 @@ fn the_rpc_gives_both_versions_and_the_published_ones_come_from_the_source_the_d
 }
 
 #[test]
-fn a_daemon_given_no_source_makes_no_fetch_and_shows_no_published_chip() {
+fn a_daemon_given_no_source_makes_no_fetch_and_the_published_chip_says_so() {
     let mut fx = Fixture::new(&recording("report"), Setup::default());
     let chip = versions(&mut fx);
-    assert_eq!(chip.published, None);
+    let published = chip.published.expect("the chip says it is not looked up");
+    assert_eq!(published.latest, None);
+    assert_eq!(published.error.as_deref(), Some(NO_SOURCE));
     assert_eq!(chip.in_use.as_deref(), Some("2.1.325"));
 }
 

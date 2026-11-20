@@ -290,8 +290,13 @@ impl BoardCorpus {
         locked(&self.inner.gate)
     }
 
-    /// Looks at the sources now and not at the next recheck: the line was trusted, for one.
+    /// Looks at the sources now and not at the next recheck: the line was trusted, for one. A source that did not
+    /// start is tried at once as well, not after the wait its failures earned, which a trust may have ended.
     pub fn wake(&self) {
+        let now = Instant::now();
+        for failing in locked(&self.inner.state).failing.values_mut() {
+            failing.next = now;
+        }
         self.inner.nudged.store(true, Ordering::SeqCst);
     }
 

@@ -252,8 +252,10 @@ function commandSet(context, positionals) {
   const current = frontmatterOf(text)
   if (!STATUSES.includes(value)) throw new UsageError(`${value} is not a status`)
   if (current.status !== value && !(LEGAL[current.status] ?? []).includes(value)) {
-    const next = (LEGAL[current.status] ?? []).join(', ') || 'nowhere, it is final'
-    throw new UsageError(`${task.relPath}: ${current.status} cannot move to ${value}; it can move to ${next}`)
+    const steps = (LEGAL[current.status] ?? []).join(', ') || 'none, it is final'
+    // Two lines, as the real CLI's refusal has: the step, then the legal ones. The words are made up.
+    const step = `${task.relPath}: ${current.status} -> ${value} is not a legal step`
+    throw new UsageError(`${step}\nlegal steps from ${current.status}: ${steps}`)
   }
   if (value === 'done' && current.status !== 'done' && !current.reviewed_by && current.self_review !== 'true') {
     throw new UsageError(`${task.relPath}: done needs reviewed_by or self_review: true on the task`)

@@ -235,12 +235,15 @@ fn a_task_file_run_prints_both_versions_then_follows_the_phase_and_prints_its_re
 }
 
 #[test]
-fn with_no_published_source_only_the_version_in_use_is_printed() {
+fn with_no_published_source_the_published_line_says_the_daemon_does_not_look_it_up() {
     let fx = Fixture::new(&recording("report"), Setup::default());
     let outcome = Cli::of(&fx).run(&[&task_arg(&fx)], "");
     assert_eq!(outcome.code, 0, "{outcome:?}");
     line_with(&outcome.out, "claude in use: 2.1.325");
-    assert!(!outcome.out.contains("published"), "{}", outcome.out);
+    assert_eq!(
+        line_with(&outcome.out, "claude published"),
+        "claude published: not known (this daemon does not look it up)"
+    );
 }
 
 #[test]

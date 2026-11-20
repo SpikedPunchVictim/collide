@@ -4882,6 +4882,10 @@ Queue.
   - output schemas and the 64 KB cap.
 - Lifecycle steps 1, 2, 6 and 7 (0.4): points `run.before_start`, `workspace.after_create` and `run.after_end`, and
   `workspace.before_remove` on removal.
+- A worktree holds only what is committed, so a repo's own tools that are not (installed packages, a build folder) are
+  missing there, and a write queued into a run's worktree through such a tool fails. A `workspace.after_create` hook
+  that installs and builds them fixes it; until then the Queue item says the tool could not run in that checkout
+  (`ts-0150-dj`).
 - Report files per 0.5, for hooks and gates:
   - a required `t` on every line;
   - generated `<pid>-<counter>` span ids and `COLLIDE_REPORT_PARENT`;

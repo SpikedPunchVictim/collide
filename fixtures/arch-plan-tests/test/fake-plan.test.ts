@@ -38,160 +38,30 @@ describe('the table of legal moves', () => {
       expect(statusLine(repo, path)).toBe(to)
     } else {
       expect(run.code).toBe(2)
-      expect(run.stderr).toContain(`${from} cannot move to ${to}`)
+      expect(run.stderr).toContain(`${from} -> ${to} is not a legal step`)
       expect(statusLine(repo, path)).toBe(from)
     }
   })
 
-  test('a refusal says where the task can go', () => {
+  test('a refusal names the step and then the legal ones, on two lines, with nothing on standard output', () => {
     repo.write(path, repo.read(path).replace(/^status: .*$/m, 'status: ready'))
-    expect(set(repo, 'T-03-002', 'done').stderr).toContain('it can move to doing, dropped')
+    const run = set(repo, 'T-03-002', 'done')
+    expect(run.code).toBe(2)
+    expect(run.stdout).toBe('')
+    const lines = run.stderr.trim().split('\n')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toContain('ready -> done is not a legal step')
+    expect(lines[1]).toBe('legal steps from ready: doing, dropped')
     repo.write(path, repo.read(path).replace(/^status: .*$/m, 'status: dropped'))
-    expect(set(repo, 'T-03-002', 'ready').stderr).toContain('it is final')
-  })
-})
-
-describe('set', () => {
-  test('changes the status line of the task file and nothing else in it', () => {
-    const repo = makeRepo()
-    const path = repo.taskPath('T-03-003')
-    const before = repo.read(path)
-    expect(set(repo, 'T-03-003', 'doing').code).toBe(0)
-    expect(repo.read(path)).toBe(before.replace('status: ready', 'status: doing'))
-  })
-
-  test('takes the file stem as the id as well as the short id', () => {
-    const repo = makeRepo()
-    expect(set(repo, 'T-03-003-price-the-berths', 'doing').code).toBe(0)
-    expect(statusLine(repo, repo.taskPath('T-03-003'))).toBe('doing')
-    expect(set(repo, 'T-03-002-price-the-berths', 'in_review').code).toBe(2)
-  })
-
-  test('refreshes the generated table of the epic that holds the task, and no other file', () => {
-    const repo = makeRepo()
-    const before = repo.snapshot()
-    expect(set(repo, 'T-03-003', 'doing').code).toBe(0)
-    const after = repo.snapshot()
-    const changed = Object.keys(after).filter((path) => after[path] !== before[path])
-    expect(changed.sort()).toEqual([repo.taskPath('T-03-003'), 'arch/work/epics/E-07-harbor-plan.md'].sort())
-    const table = repo.read('arch/work/epics/E-07-harbor-plan.md')
-    expect(table).toContain('proposals/03-harbor-index/tasks/T-03-003-price-the-berths.md) | doing |')
-    expect(table).toContain('T-03-002-map-the-moorings.md) | doing |')
-  })
-
-  test('refreshes a table that is out of step, but leaves the prose and the other tables of the file', () => {
-    const repo = makeRepo()
-    const epic = 'arch/work/epics/E-07-harbor-plan.md'
-    const original = repo.read(epic)
-    repo.write(epic, original.replace('| ready |', '| specified |'))
-    expect(set(repo, 'T-03-003', 'doing').code).toBe(0)
-    expect(repo.read(epic)).toBe(
-      original.replace('T-03-003-price-the-berths.md) | ready |', 'T-03-003-price-the-berths.md) | doing |'),
-    )
-  })
-
-  test('a move to the status the task has changes nothing and refreshes nothing', () => {
-    const repo = makeRepo()
-    const before = repo.snapshot()
-    const run = set(repo, 'T-03-003', 'ready', '--format', 'json')
-    expect(run.code).toBe(0)
-    expect(json(run).data.regenerated).toEqual([])
-    expect(repo.snapshot()).toEqual(before)
-  })
-
-  test('a task goes to done only with a review on record', () => {
-    const repo = makeRepo()
-    const path = repo.taskPath('T-05-001')
-    const before = repo.snapshot()
-    const refused = set(repo, 'T-05-001', 'done')
-    expect(refused.code).toBe(2)
-    expect(refused.stderr).toContain('reviewed_by or self_review')
-    expect(repo.snapshot()).toEqual(before)
-    repo.write(path, repo.read(path).replace('status: in_review', 'status: in_review\nreviewed_by: "a made-up person"'))
-    expect(set(repo, 'T-05-001', 'done').code).toBe(0)
-    expect(statusLine(repo, path)).toBe('done')
-  })
-
-  test('says what it did in text: the changes on stdout, which files on stderr', () => {
-    const repo = makeRepo()
-    const run = plan(repo, ['set', 'T-03-003', 'status=doing', ...ARCH])
-    expect(run.code).toBe(0)
-    expect(run.stdout).toBe(
-      'proposals/03-harbor-index/tasks/T-03-003-price-the-berths.md  status: "ready" -> "doing"\n',
-    )
-    expect(run.stderr).toContain(
-      'wrote: proposals/03-harbor-index/tasks/T-03-003-price-the-berths.md, work/epics/E-07-harbor-plan.md',
-    )
-  })
-})
-
-describe('the JSON envelope', () => {
-  test('is schema_version 1 with the command, the corpus and the data, as the only thing on stdout', () => {
-    const repo = makeRepo()
-    const run = set(repo, 'T-03-003', 'doing', '--format', 'json')
-    expect(run.code).toBe(0)
-    expect(Object.keys(json(run))).toEqual(['schema_version', 'command', 'corpus', 'data'])
-    expect(json(run)).toMatchObject({
-      schema_version: 1,
-      command: 'set',
-      corpus: 'arch',
-    })
-    expect(json(run).data).toEqual({
-      results: [
-        {
-          relPath: 'proposals/03-harbor-index/tasks/T-03-003-price-the-berths.md',
-          changes: [{ field: 'status', oldValue: 'ready', newValue: 'doing' }],
-          written: true,
-        },
-      ],
-      dryRun: false,
-      errors: [],
-      regenerated: ['work/epics/E-07-harbor-plan.md'],
-    })
-  })
-
-  test('PLAN_FORMAT and PLAN_ROOT stand in for the flags', () => {
-    const repo = makeRepo()
-    const run = plan(repo, ['set', 'T-03-003', 'status=doing'], {
-      PLAN_FORMAT: 'json',
-      PLAN_ROOT: join(repo.root, 'arch'),
-    })
-    expect(run.code, run.stderr).toBe(0)
-    expect(json(run).command).toBe('set')
-  })
-})
-
-describe('--dry-run', () => {
-  test('writes nothing, says written is false, and lists the files the write changes', () => {
-    const repo = makeRepo()
-    const before = repo.snapshot()
-    const run = set(repo, 'T-03-003', 'doing', '--format', 'json', '--dry-run')
-    expect(run.code).toBe(0)
-    expect(repo.snapshot()).toEqual(before)
-    expect(json(run).data).toMatchObject({
-      dryRun: true,
-      results: [{ written: false }],
-    })
-    expect(json(run).data.regenerated).toEqual(['work/epics/E-07-harbor-plan.md'])
-  })
-
-  test('reports what the real write reports, but for written and dryRun', () => {
-    const real = makeRepo()
-    const dry = makeRepo()
-    const written = json(set(real, 'T-03-003', 'doing', '--format', 'json')).data
-    const reported = json(set(dry, 'T-03-003', 'doing', '--format', 'json', '--dry-run')).data
-    expect({
-      ...reported,
-      dryRun: false,
-      results: [{ ...reported.results[0], written: true }],
-    }).toEqual(written)
+    const final = set(repo, 'T-03-002', 'ready').stderr.trim().split('\n')
+    expect(final[1]).toBe('legal steps from dropped: none, it is final')
   })
 
   test('refuses a move the real write would refuse, in the same way', () => {
     const repo = makeRepo()
     const run = set(repo, 'T-03-003', 'done', '--dry-run')
     expect(run.code).toBe(2)
-    expect(run.stderr).toContain('ready cannot move to done')
+    expect(run.stderr).toContain('ready -> done is not a legal step')
   })
 
   test('says in text that nothing was written', () => {

@@ -184,7 +184,7 @@ describe('setStatus', () => {
       outcome: 'refused',
       message: own.stderr.trim(),
     })
-    expect(reply.result?.message).toContain('ready cannot move to done')
+    expect(reply.result?.message).toContain('ready -> done is not a legal step')
     expect(repo.snapshot()).toEqual(before)
     expect(repo.head()).toBe(head)
   })
@@ -201,7 +201,7 @@ describe('setStatus', () => {
     )
     expect(reply.result).toMatchObject({
       outcome: 'refused',
-      message: expect.stringContaining('ready cannot move to specified'),
+      message: expect.stringContaining('ready -> specified is not a legal step'),
     })
     expect(repo.snapshot()).toEqual(before)
   })
@@ -585,6 +585,26 @@ describe('when the plan CLI misbehaves', () => {
     const reply = await using(repo, (client) => apply(client, repo, SET))
     expect(reply.result).toBeUndefined()
     expect(reply.error?.message).toContain('made-up trouble')
+  })
+
+  test.each([
+    [
+      'a module of its own',
+      "node:internal/modules/cjs/loader:1\nError: Cannot find module './dist/index.js'\n  code: 'MODULE_NOT_FOUND'",
+      "Cannot find module './dist/index.js'",
+    ],
+    [
+      'a package',
+      "node:internal/modules/esm/resolve:1\nError [ERR_MODULE_NOT_FOUND]: Cannot find package 'made-up' imported",
+      "Cannot find package 'made-up'",
+    ],
+  ])('exit 1 over node not finding %s says the plan CLI could not run here', async (_name, stderr, line) => {
+    const repo = makeRepo('basic', script(`cat >&2 <<'EOF'\n${stderr}\nEOF\nexit 1`))
+    const reply = await using(repo, (client) => apply(client, repo, SET))
+    expect(reply.result).toBeUndefined()
+    expect(reply.error?.message).toContain('./plan could not run in this checkout')
+    expect(reply.error?.message).toContain('its packages or its build are missing here')
+    expect(reply.error?.message).toContain(line)
   })
 
   test('exit 2 with a message on stderr is a refusal with it', async () => {

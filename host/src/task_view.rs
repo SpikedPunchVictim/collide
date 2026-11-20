@@ -173,7 +173,10 @@ fn field_text(value: &Value) -> String {
 pub fn show_text(got: &TaskGetResult, task: &Task) -> String {
     let mut lines: Vec<(String, String)> = vec![
         ("title".to_string(), task.title.clone()),
-        ("kind".to_string(), task.kind.clone().unwrap_or_default()),
+        (
+            "kind".to_string(),
+            task.kind.clone().unwrap_or_else(|| "-".to_string()),
+        ),
         ("status".to_string(), task.state.status.clone()),
         ("ready".to_string(), ready_note(task, &got.links)),
     ];
@@ -248,4 +251,38 @@ pub fn show_text(got: &TaskGetResult, task: &Task) -> String {
         text.push('\n');
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The text of an item with the given `kind` member (`null` for none), as the daemon answers.
+    fn shown(kind: Value) -> String {
+        let task: Task = serde_json::from_value(json!({
+            "key": "plan:T-01-001",
+            "id": "T-01-001",
+            "title": "An item",
+            "state": { "status": "ready", "category": "ready" },
+            "version": "v1",
+            "kind": kind,
+            "links": [],
+            "owners": [],
+        }))
+        .expect("a task");
+        let got: TaskGetResult =
+            serde_json::from_value(json!({ "task": task })).expect("an answer");
+        show_text(&got, &task)
+    }
+
+    #[test]
+    fn an_item_with_no_kind_shows_a_dash_as_the_listing_does() {
+        assert!(shown(Value::Null).contains("  kind    -\n"));
+    }
+
+    #[test]
+    fn an_item_with_a_kind_shows_it() {
+        assert!(shown(json!("spike")).contains("  kind    spike\n"));
+    }
 }

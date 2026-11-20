@@ -150,8 +150,8 @@ fn a_run_through_a_daemon_the_command_starts_prints_the_version_and_the_record_a
     assert_eq!(output.status.code(), Some(0), "{out}\n{err}");
     assert!(out.contains("claude in use: 2.1.325"), "{out}");
     assert!(
-        !out.contains("published"),
-        "a daemon under COLLIDE_DAEMON_ROOT fetches no published version: {out}"
+        out.contains("claude published: not known (this daemon does not look it up)\n"),
+        "a daemon under COLLIDE_DAEMON_ROOT fetches no published version and says so: {out}"
     );
     assert!(out.contains(": ended\n"), "{out}");
     assert!(

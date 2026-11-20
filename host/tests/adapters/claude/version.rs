@@ -303,7 +303,7 @@ fn a_grandchild_that_holds_the_pipes_does_not_hold_the_check() {
 
 mod gate {
     use super::*;
-    use collide_host::claude_versions::{ClaudeVersions, Gate, VersionsOptions};
+    use collide_host::claude_versions::{ClaudeVersions, Gate, NO_SOURCE, VersionsOptions};
 
     fn versions(root: &TempRoot) -> std::sync::Arc<ClaudeVersions> {
         ClaudeVersions::new(VersionsOptions::new(
@@ -401,7 +401,9 @@ mod gate {
         assert_eq!(status.agent, "claude");
         assert_eq!(status.tested.from, "2.1.323");
         assert_eq!(status.tested.through, "2.1.325");
-        assert_eq!(status.published, None, "no source, no chip");
+        let published = status.published.expect("no source: the chip says so");
+        assert_eq!(published.latest, None);
+        assert_eq!(published.error.as_deref(), Some(NO_SOURCE));
     }
 }
 

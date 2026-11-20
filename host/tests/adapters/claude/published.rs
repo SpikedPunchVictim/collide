@@ -6,7 +6,8 @@
 use super::common::{Grandchild, TempRoot};
 use collide_host::adapters::claude::version::{ClaudeVersion, PUBLISHED_URL};
 use collide_host::claude_versions::{
-    ClaudeVersions, FETCH_TIMEOUT, PublishedSource, REFRESH_EVERY, RegistrySource, VersionsOptions,
+    ClaudeVersions, FETCH_TIMEOUT, NO_SOURCE, PublishedSource, REFRESH_EVERY, RegistrySource,
+    VersionsOptions,
 };
 use collide_host::http_get::{CURL, CurlGet, FixedProxy, HttpGet, NoProxy};
 use std::fs;
@@ -355,10 +356,21 @@ fn a_config_file_that_cannot_be_read_leaves_the_fetch_on_and_says_so() {
 }
 
 #[test]
-fn with_no_source_nothing_is_fetched_and_the_chip_is_hidden() {
+fn with_no_source_nothing_is_fetched_and_the_chip_says_it_is_not_looked_up() {
     let root = TempRoot::new();
     let versions = versions(None, Some(root.path()));
     versions.refresh_published();
+    let published = published_of(&versions).expect("the chip is shown");
+    assert_eq!(published.latest, None);
+    assert_eq!(published.fetched_ms, None);
+    assert_eq!(published.error.as_deref(), Some(NO_SOURCE));
+}
+
+#[test]
+fn with_no_source_and_check_published_false_the_chip_is_hidden() {
+    let root = TempRoot::new();
+    write_config(&root, "claude:\n  check_published: false\n");
+    let versions = versions(None, Some(root.path()));
     assert_eq!(published_of(&versions), None);
 }
 

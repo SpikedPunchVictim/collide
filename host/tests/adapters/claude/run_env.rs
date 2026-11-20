@@ -52,7 +52,7 @@ fn passes_inside_a_phase(name: &str) {
 #[test]
 fn a_run_started_through_a_daemon_in_the_tests_process_works_inside_a_phase() {
     passes_inside_a_phase(
-        "run_command::with_no_published_source_only_the_version_in_use_is_printed",
+        "run_command::with_no_published_source_the_published_line_says_the_daemon_does_not_look_it_up",
     );
 }
 

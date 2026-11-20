@@ -130,6 +130,13 @@ type Executed = { kind: 'done'; data: Json; files: string[] } | { kind: 'refused
 
 const firstLine = (stderr: string): string => stderr.trim().split('\n')[0] ?? ''
 
+/**
+ * The line of node's own error for a module or package it could not find, which is what the plan CLI says when its
+ * packages are not installed or it is not built: a checkout of a worktree has neither unless they are committed.
+ */
+const missingModule = (stderr: string): string | undefined =>
+  stderr.split('\n').find((line) => /Cannot find (module|package)\b/.test(line))?.trim()
+
 function parseEnvelope(stdout: string, command: string): Json {
   let envelope: unknown
   try {
@@ -218,6 +225,10 @@ async function execute(ctx: WriteContext, args: string[], command: string, dryRu
   if (run.code === 2) return { kind: 'refused', message: run.stderr.trim() || './plan exited with 2 and said nothing' }
   const gate = run.code === 1 ? gateRefusal(run, command) : undefined
   if (gate !== undefined) return { kind: 'refused', message: gate }
+  const missing = missingModule(run.stderr)
+  if (missing !== undefined) {
+    return badCall(`./plan could not run in this checkout: its packages or its build are missing here (${missing})`)
+  }
   const how = run.code === null ? `ended by ${run.signal}` : `exited with ${run.code}`
   return badCall(`./plan ${how}: ${firstLine(run.stderr)}`)
 }
