@@ -33,5 +33,4 @@ wait is unexplained.
 
 - Found by `ts-0150-dj` (Decision 5), measured through `host/tests/daemon_corpus.rs` with temp roots: cold 3.79 s; after
   a restart the first answer in 65 to 73 ms with all 1,600 tasks, the settled one after 1.24 to 1.37 s.
-- Owner decisions: none recorded yet. The recommendation (keep waiting, explain the wait) stands until the owner
-  answers.
+- Owner decisions: 2026-11-19, the recommendation (keep waiting, explain the wait on standard error).
