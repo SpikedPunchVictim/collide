@@ -1,7 +1,7 @@
 ---
 id: ts-0154-gr
 kind: task
-status: ready
+status: done
 title: "Bounded runs: output not read in time is never taken as empty output"
 owners: []
 links: []
