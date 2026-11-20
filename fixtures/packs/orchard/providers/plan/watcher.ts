@@ -1,12 +1,13 @@
 import { watch as fsWatch } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Notify } from '@collide/pack-sdk'
-import { collisionsOf, compare, emptySnapshot, idsChanged } from './changes.ts'
+import { collectionsChanged, collisionsOf, compare, emptySnapshot, idsChanged } from './changes.ts'
 import type { Notification, Snapshot } from './changes.ts'
 import { isFolder } from './files.ts'
 import { gitDir, gitHead, gitRenames } from './git.ts'
 import { readIdMap } from './id-map.ts'
-import { scan } from './scan.ts'
+import { QUEUE_TIMEOUT_MS } from './queue.ts'
+import { queueSignature, readQueueOf, scan, withQueue } from './scan.ts'
 
 /** Changes that come close together are read once, this long after the last of them. */
 export const DEBOUNCE_MS = 300
@@ -86,9 +87,11 @@ export function createWatcher(deps: {
   env: NodeJS.ProcessEnv
   log: (message: string) => void
   notify: Notify
+  /** How long the plan CLI has to answer for the human queue. */
+  timeoutMs?: number
   options?: WatchOptions
 }): Watcher {
-  const { env, log, notify } = deps
+  const { env, log, notify, timeoutMs = QUEUE_TIMEOUT_MS } = deps
   const options = deps.options ?? {}
   const { debounceMs = DEBOUNCE_MS, recheckMs = RECHECK_MS } = options
   const { timers = nodeTimers, watchFs = nodeWatchFs } = options
@@ -180,17 +183,29 @@ export function createWatcher(deps: {
     if (stopped || watched.get(checkout) !== entry) closeHandles(entry)
   }
 
-  /** Reads a checkout. HEAD is read on both sides of the files, so a snapshot never mixes two commits for long. */
-  const takeSnapshot = async (checkout: string): Promise<Snapshot> => {
+  /**
+   * Reads a checkout. HEAD is read on both sides of the files, so a snapshot never mixes two commits for long.
+   * The human queue is read when a question is open and the questions are not the ones `before` was read for: the
+   * plan CLI is not run for a change that touches no question.
+   */
+  const takeSnapshot = async (checkout: string, before?: Snapshot): Promise<Snapshot> => {
     if (!(await isFolder(checkout))) throw new Error('it is not a folder')
     for (let attempt = 0; ; attempt++) {
       const head = await gitHead(checkout, env)
       const found = await scan(checkout, logOnce)
       const idMap = await readIdMap(checkout, logOnce)
       if (attempt >= 2 || (await gitHead(checkout, env)) === head) {
-        const tasks = new Map(found.tasks.map(({ task }) => [task.key.slice('plan:'.length), task]))
+        const asked = queueSignature(found.tasks)
+        const queue =
+          asked === ''
+            ? null
+            : before !== undefined && before.asked === asked
+              ? before.queue
+              : await readQueueOf(checkout, found.tasks, log, { env, timeoutMs })
+        const whole = withQueue(found, queue)
+        const tasks = new Map(whole.tasks.map(({ task }) => [task.key.slice('plan:'.length), task]))
         const invalid = new Map(found.invalid.map((item) => [item.path, item.reason]))
-        return { head, tasks, invalid, idMap }
+        return { head, tasks, invalid, idMap, collections: whole.collections, asked, queue }
       }
     }
   }
@@ -200,7 +215,7 @@ export function createWatcher(deps: {
     if (entry === undefined) return
     let next: Snapshot
     try {
-      next = await takeSnapshot(checkout)
+      next = await takeSnapshot(checkout, entry.snapshot)
     } catch (error) {
       if (!entry.stale && !stopped && watched.get(checkout) === entry) {
         entry.stale = true
@@ -224,7 +239,7 @@ export function createWatcher(deps: {
     entry.snapshot = next
     // Watchers first: whoever hears of the change may write at once, and that write must be seen.
     if (entry.arch === null || entry.head === null) await openHandles(checkout, entry)
-    send(compare(checkout, before, next, renames))
+    send([...compare(checkout, before, next, renames), ...collectionsChanged(checkout, before, next)])
   }
 
   const announceCollisions = (): void => {

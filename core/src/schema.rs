@@ -30,9 +30,9 @@ use crate::pack::{PackManifest, RunBudget};
 use crate::points::Point;
 use crate::profile::Profile;
 use crate::provider::{
-    ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult, ListParams,
-    ListResult, PreviewResult, SourceStale, Task, TaskChanged, TaskCollision, TaskInvalid,
-    TaskRemoved, WatchParams, WatchResult,
+    ApplyParams, ApplyResult, CollectionsChanged, GetParams, GetResult, InitializeParams,
+    InitializeResult, ListParams, ListResult, PreviewResult, SourceStale, Task, TaskChanged,
+    TaskCollision, TaskInvalid, TaskRemoved, WatchParams, WatchResult,
 };
 use crate::report::ReportLine;
 use crate::section::{NearDuplicateGroup, SectionUse, Sections};
@@ -112,6 +112,7 @@ pub fn registry() -> Registry {
     registry.add::<Capabilities>();
     registry.add::<Change>();
     registry.add::<Claim>();
+    registry.add::<CollectionsChanged>();
     registry.add::<CollidePointer>();
     registry.add::<ConfigFile>();
     registry.add::<ContextRecord>();

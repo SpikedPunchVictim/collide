@@ -2,6 +2,7 @@ import type { Readable, Writable } from 'node:stream'
 import type {
   ApplyParamsOutput,
   ApplyResultInput,
+  CollectionsChangedInput,
   GetParamsOutput,
   GetResultInput,
   InitializeParamsOutput,
@@ -21,7 +22,10 @@ import type {
 
 type Awaitable<T> = T | Promise<T>
 
-/** The `watch` notifications and their params (provider protocol v0). */
+/**
+ * The `watch` notifications and their params (provider protocol v0). `collections.changed` is for a source that
+ * declares `collections`: it says what its collections, or what a task is in, changed to with no change to the task.
+ */
 export interface ProviderNotifications {
   'task.collision': TaskCollisionOutput
   'source.stale': SourceStaleOutput
@@ -29,6 +33,7 @@ export interface ProviderNotifications {
   'task.renamed': RenameOutput
   'task.removed': TaskRemovedOutput
   'task.invalid': TaskInvalidOutput
+  'collections.changed': CollectionsChangedInput
 }
 
 /** Sends one notification to Collide. */

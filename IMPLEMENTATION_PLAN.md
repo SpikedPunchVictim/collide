@@ -2327,6 +2327,11 @@ Why the plan adapter parses files itself:
   - `task.removed {key, cause, checkout?}`, where `cause` is `deleted | transferred | unknown` and `checkout` is as
     in `task.changed`;
   - `task.invalid {path, checkout, reason}`, which core turns into a Queue item.
+  - `collections.changed {collections, members, checkout?}`, from a source that declares `collections`, whenever its
+    collections or what a task is in change, since `task.changed` carries neither (an epic file, a task's own epic, a
+    queue that follows another item): `collections` is the checkout's whole list as `list` gives it, and `members` each
+    held task now in other collections, with their ids. It changes no item's state or version and records no event
+    (`ts-0151-fk`).
 - On start, core reconciles each source against its persisted cache and emits one change per item, with
   `cause: startup`.
 - `apply({ op, id?, args, version, checkout? })` returns one of:

@@ -141,17 +141,27 @@ export async function scan(root: string, log: (message: string) => void, queue?:
   listed.sort((a, b) => (a.shortId < b.shortId ? -1 : 1))
 
   const { collections, membership } = await readCollections(root, listed, log)
-  const asked = queue === undefined ? null : await readQueueOf(root, listed, log, queue)
-  if (asked !== null) {
-    collections.push(asked.collection)
-    for (const key of asked.keys) membership.set(key, [...(membership.get(key) ?? []), QUEUE_ID])
-  }
   invalid.sort((a, b) => (a.path < b.path ? -1 : 1))
   const tasks = listed.map(({ task, body }) => ({
     task: { ...task, collections: membership.get(task.key) ?? [] },
     body,
   }))
-  return { tasks, collections, invalid }
+  const asked = queue === undefined ? null : await readQueueOf(root, listed, log, queue)
+  return { ...withQueue({ tasks, collections }, asked), invalid }
+}
+
+type Found = Pick<Scan, 'tasks' | 'collections'>
+
+/** What a scan found, and with `asked` the human queue as a collection and a place in each question's `collections`. */
+export function withQueue(found: Found, asked: Queue | null): Found {
+  if (asked === null) return found
+  const queued = new Set(asked.keys)
+  const placed = (one: FoundTask): FoundTask => {
+    const { task, body } = one
+    if (!queued.has(task.key)) return one
+    return { task: { ...task, collections: [...(task.collections ?? []), QUEUE_ID] }, body }
+  }
+  return { tasks: found.tasks.map(placed), collections: [...found.collections, asked.collection] }
 }
 
 /** An ADR, a spike or a question read from its file, as the `Listed` that a task is. */
@@ -182,15 +192,28 @@ function toItem(
   return read.ok ? { ok: true, value: { task: read.task, epic: null } } : read
 }
 
+/** The questions that are open: the ones whose answer decides what the plan CLI says is queued. */
+const openQuestions = (listed: Array<{ task: TaskInput }>) =>
+  listed.filter(({ task }) => task.kind === QUESTION && task.state.status === 'open')
+
+/**
+ * What the human queue was read for: each open question and its version. The same signature is the same answer, so
+ * the plan CLI need not be asked again. It is empty when no question is open.
+ */
+export const queueSignature = (listed: Array<{ task: TaskInput }>): string =>
+  openQuestions(listed)
+    .map(({ task }) => `${task.key}@${task.version}`)
+    .join('\n')
+
 /** The queue of the checkout, when a question is open and the CLI can say; null otherwise. */
-async function readQueueOf(
+export async function readQueueOf(
   root: string,
-  listed: Parsed[],
+  listed: Array<{ task: TaskInput }>,
   log: (message: string) => void,
   queue: QueueRun,
 ): Promise<Queue | null> {
+  if (openQuestions(listed).length === 0) return null
   const questions = listed.filter(({ task }) => task.kind === QUESTION)
-  if (!questions.some(({ task }) => task.state.status === 'open')) return null
   return readQueue(root, new Set(questions.map(({ task }) => task.key)), { ...queue, log })
 }
 

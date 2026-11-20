@@ -35,8 +35,8 @@ use crate::hook::HookLink;
 use crate::item::{Category, KindDecl, Link, LinkDir, LinkTarget, LinkTypeDecl, StatusDecl};
 use crate::owner::task::{StaleSource, TaskCopy, TaskGetResult, TaskListResult};
 use crate::provider::{
-    ChangeCause, Collection, InitializeResult, ListResult, ProviderEvent, RemovedCause, Task,
-    TaskChanged, TaskCollision, TaskInvalid, TaskRemoved,
+    ChangeCause, Collection, CollectionsChanged, InitializeResult, ListResult, ProviderEvent,
+    RemovedCause, Task, TaskChanged, TaskCollision, TaskInvalid, TaskRemoved,
 };
 use crate::ready::UnknownTarget;
 use crate::short_id;
@@ -524,6 +524,44 @@ impl Corpus {
         };
         self.insert(source, task);
         Ok(Applied::Done)
+    }
+
+    /// `collections.changed`: the checkout's collections are the ones in the notification, and each task it names is
+    /// in the collections it says. Only a copy the corpus holds is changed: a key it does not hold, and a checkout it
+    /// was never listed for, are left to the list that brings them. Returns the keys of the copies that changed.
+    pub fn apply_collections(
+        &mut self,
+        source: &str,
+        change: &CollectionsChanged,
+    ) -> Result<Vec<String>, CorpusError> {
+        self.source(source)?;
+        self.touch();
+        let checkout = change.checkout.clone();
+        let state = self.source_mut(source)?;
+        if !state.listed.contains(&checkout) {
+            return Ok(Vec::new());
+        }
+        state
+            .collections
+            .insert(checkout.clone(), change.collections.clone());
+        let mut moved = Vec::new();
+        for member in &change.members {
+            let key = self
+                .resolve_key(&member.key)
+                .unwrap_or_else(|| member.key.clone());
+            let held = self
+                .entries
+                .get_mut(&key)
+                .filter(|entry| entry.source == source)
+                .and_then(|entry| entry.copies.get_mut(&checkout));
+            if let Some(copy) = held
+                && copy.collections != member.collections
+            {
+                copy.collections = member.collections.clone();
+                moved.push(key);
+            }
+        }
+        Ok(moved)
     }
 
     /// `task.renamed`. Both are keys. With a `checkout`, only that checkout's copy moves, and the old key goes on

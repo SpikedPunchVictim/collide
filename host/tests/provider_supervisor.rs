@@ -172,6 +172,7 @@ fn kinds(events: &[ProviderEvent]) -> Vec<&'static str> {
             ProviderEvent::Invalid(_) => "invalid",
             ProviderEvent::Collision(_) => "collision",
             ProviderEvent::Stale(_) => "stale",
+            ProviderEvent::Collections(_) => "collections",
             ProviderEvent::Unreadable { .. } => "unreadable",
         })
         .collect()

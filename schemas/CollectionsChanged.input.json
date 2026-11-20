@@ -1,0 +1,99 @@
+{
+  "$defs": {
+    "Collection": {
+      "additionalProperties": false,
+      "description": "A grouping the source holds itself, such as an epic or a milestone (0.10). Each task names the collections it\nbelongs to in `Task.collections`.",
+      "properties": {
+        "groups": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CollectionGroup"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "CollectionGroup": {
+      "additionalProperties": false,
+      "description": "One ordered group of a collection, such as a slice of an epic: the keys of its tasks, in order.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "CollectionMember": {
+      "additionalProperties": false,
+      "description": "What one task is now in: the ids of its collections, as `list` gives them in `Task.collections`.",
+      "properties": {
+        "collections": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "collections"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`collections.changed`: collections, or what a task is in, changed with no change to the task's file.",
+  "properties": {
+    "checkout": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collections": {
+      "description": "Every collection of the checkout now, as `list` gives them. It replaces what core holds.",
+      "items": {
+        "$ref": "#/$defs/Collection"
+      },
+      "type": "array"
+    },
+    "members": {
+      "default": [],
+      "description": "Each task whose collections differ from the last time the source said.",
+      "items": {
+        "$ref": "#/$defs/CollectionMember"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "collections"
+  ],
+  "title": "CollectionsChanged",
+  "type": "object"
+}

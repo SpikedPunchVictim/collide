@@ -11,8 +11,9 @@ use collide_core::item::{Category, KindDecl, LinkDir, LinkTarget, LinkTypeDecl, 
 use collide_core::owner::task::{TaskGetResult, TaskListResult};
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{
-    ChangeCause, ListParams, ListResult, ProviderEvent, RemovedCause, Scope, SourceStale, Task,
-    TaskChanged, TaskInvalid, TaskRemoved,
+    ChangeCause, Collection, CollectionGroup, CollectionMember, CollectionsChanged, ListParams,
+    ListResult, ProviderEvent, RemovedCause, Scope, SourceStale, Task, TaskChanged, TaskInvalid,
+    TaskRemoved,
 };
 use collide_core::ready::UnknownTarget;
 use collide_core::testing::{FakeProvider, default_initialize, fake_task};
@@ -1477,6 +1478,218 @@ fn a_load_replaces_the_checkouts_earlier_list_and_leaves_the_other_checkouts() {
     assert_eq!(keys, ["plan:T-02", "plan:T-03"]);
 }
 
+// --- collections that change with no change to the member ---
+
+fn collection(id: &str, title: &str, keys: &[&str]) -> Collection {
+    Collection {
+        id: id.into(),
+        title: title.into(),
+        groups: vec![CollectionGroup {
+            name: "all".into(),
+            tasks: keys.iter().map(|key| (*key).into()).collect(),
+        }],
+    }
+}
+
+fn in_collections(mut task: Task, ids: &[&str]) -> Task {
+    task.collections = ids.iter().map(|id| (*id).into()).collect();
+    task
+}
+
+/// A corpus whose `plan` listed `tasks` and `collections` for each of the `listed` checkouts.
+fn collected(tasks: &[Task], collections: &[Collection], listed: &[&str]) -> Corpus {
+    let mut corpus = Corpus::default();
+    corpus.set_checkouts(checkouts());
+    corpus.declare_source("plan", &plan_init());
+    for checkout in listed {
+        let mut list = list_of(tasks, checkout);
+        list.collections = collections.to_vec();
+        corpus.load("plan", Some(checkout), list).unwrap();
+    }
+    corpus
+}
+
+fn member(key: &str, ids: &[&str]) -> CollectionMember {
+    CollectionMember {
+        key: key.into(),
+        collections: ids.iter().map(|id| (*id).into()).collect(),
+    }
+}
+
+fn collections_changed(
+    checkout: &str,
+    collections: Vec<Collection>,
+    members: Vec<CollectionMember>,
+) -> CollectionsChanged {
+    CollectionsChanged {
+        collections,
+        members,
+        checkout: Some(checkout.into()),
+    }
+}
+
+fn held_in(corpus: &Corpus, key: &str, checkout: &str) -> Vec<String> {
+    corpus
+        .copy(key, Some(checkout))
+        .unwrap_or_else(|| panic!("{key} is not held in {checkout}"))
+        .collections
+        .clone()
+}
+
+#[test]
+fn a_collections_notification_moves_the_members_that_left_and_the_ones_that_joined() {
+    let queue = collection("plan:queue", "Waiting", &["plan:Q-01"]);
+    let tasks = [
+        in_collections(at("Q-01", "ready", ROOT), &["plan:queue"]),
+        at("Q-02", "ready", ROOT),
+        in_collections(at("Q-03", "ready", ROOT), &["plan:queue", "plan:E-01"]),
+    ];
+    let mut corpus = collected(&tasks, &[queue], &[ROOT]);
+    let now = collection("plan:queue", "Waiting", &["plan:Q-02", "plan:Q-03"]);
+
+    let moved = corpus
+        .apply_collections(
+            "plan",
+            &collections_changed(
+                ROOT,
+                vec![now.clone()],
+                vec![
+                    member("plan:Q-01", &[]),
+                    member("plan:Q-02", &["plan:queue"]),
+                    member("plan:Q-03", &["plan:queue", "plan:E-01"]),
+                ],
+            ),
+        )
+        .unwrap();
+
+    assert_eq!(held_in(&corpus, "plan:Q-01", ROOT), Vec::<String>::new());
+    assert_eq!(held_in(&corpus, "plan:Q-02", ROOT), ["plan:queue"]);
+    assert_eq!(
+        held_in(&corpus, "plan:Q-03", ROOT),
+        ["plan:queue", "plan:E-01"]
+    );
+    assert_eq!(corpus.list_result().collections, [now]);
+    assert_eq!(moved, ["plan:Q-01", "plan:Q-02"], "the copies that differ");
+}
+
+#[test]
+fn a_collections_notification_changes_no_state_and_no_version() {
+    let tasks = [in_collections(at("Q-01", "ready", ROOT), &["plan:queue"])];
+    let mut corpus = collected(&tasks, &[], &[ROOT]);
+    let before = corpus.copy("plan:Q-01", Some(ROOT)).unwrap().clone();
+
+    corpus
+        .apply_collections(
+            "plan",
+            &collections_changed(ROOT, Vec::new(), vec![member("plan:Q-01", &[])]),
+        )
+        .unwrap();
+
+    let after = corpus.copy("plan:Q-01", Some(ROOT)).unwrap();
+    assert_eq!(
+        (&after.state, &after.version),
+        (&before.state, &before.version)
+    );
+}
+
+#[test]
+fn a_collections_notification_changes_the_copy_of_its_checkout_and_no_other() {
+    let tasks = [
+        in_collections(at("Q-01", "ready", ROOT), &["plan:queue"]),
+        in_collections(at("Q-01", "ready", WS_A), &["plan:queue"]),
+    ];
+    let mut corpus = collected(&tasks, &[], &[ROOT, WS_A]);
+
+    corpus
+        .apply_collections(
+            "plan",
+            &collections_changed(WS_A, Vec::new(), vec![member("plan:Q-01", &[])]),
+        )
+        .unwrap();
+
+    assert_eq!(held_in(&corpus, "plan:Q-01", WS_A), Vec::<String>::new());
+    assert_eq!(held_in(&corpus, "plan:Q-01", ROOT), ["plan:queue"]);
+}
+
+#[test]
+fn a_collections_notification_alone_moves_the_stamp_that_keys_a_cached_view() {
+    let tasks = [in_collections(at("Q-01", "ready", ROOT), &["plan:queue"])];
+    let mut corpus = collected(&tasks, &[], &[ROOT]);
+    let before = corpus.stamp();
+
+    corpus
+        .apply_collections(
+            "plan",
+            &collections_changed(ROOT, Vec::new(), vec![member("plan:Q-01", &[])]),
+        )
+        .unwrap();
+
+    assert_ne!(corpus.stamp(), before);
+}
+
+#[test]
+fn a_collections_notification_leaves_a_task_it_does_not_hold_and_a_checkout_never_listed() {
+    let mut corpus = collected(&[at("Q-01", "ready", ROOT)], &[], &[ROOT]);
+    let before = snapshot(&corpus);
+
+    let nobody = corpus
+        .apply_collections(
+            "plan",
+            &collections_changed(ROOT, Vec::new(), vec![member("plan:Q-99", &["plan:queue"])]),
+        )
+        .unwrap();
+    let elsewhere = corpus
+        .apply_collections(
+            "plan",
+            &collections_changed(
+                WS_B,
+                vec![collection("plan:queue", "Waiting", &[])],
+                vec![member("plan:Q-01", &["plan:queue"])],
+            ),
+        )
+        .unwrap();
+
+    assert_eq!(
+        (nobody, elsewhere),
+        (Vec::<String>::new(), Vec::<String>::new())
+    );
+    assert_eq!(snapshot(&corpus), before);
+    assert!(corpus.list_result().collections.is_empty());
+}
+
+#[test]
+fn a_collections_notification_changes_no_task_of_another_source() {
+    let mut corpus = plan_corpus(&[at("Q-01", "ready", ROOT)], &[ROOT]);
+    corpus.declare_source("gh", &gh_init());
+    let issue = in_collections(gh_task(1, "open"), &["gh:mine"]);
+    let list = ListResult {
+        tasks: vec![issue],
+        collections: Vec::new(),
+        invalid: Vec::new(),
+        next_cursor: None,
+    };
+    corpus.load("gh", Some(ROOT), list).unwrap();
+
+    let moved = corpus
+        .apply_collections(
+            "plan",
+            &collections_changed(ROOT, Vec::new(), vec![member("gh:acme/edge#1", &[])]),
+        )
+        .unwrap();
+
+    assert_eq!(moved, Vec::<String>::new());
+    assert_eq!(held_in(&corpus, "gh:acme/edge#1", ROOT), ["gh:mine"]);
+}
+
+#[test]
+fn a_collections_notification_for_a_source_never_declared_is_refused_by_name() {
+    let mut corpus = Corpus::default();
+    let error = corpus
+        .apply_collections("nope", &collections_changed(ROOT, Vec::new(), Vec::new()))
+        .unwrap_err();
+    assert_eq!(error, CorpusError::UnknownSource("nope".into()));
+}
+
 // --- idempotence ---
 
 fn assert_twice_is_once(base: &[Task], apply: impl Fn(&mut Corpus) -> Result<(), CorpusError>) {
@@ -1503,6 +1716,22 @@ fn applying_a_changed_notification_twice_is_the_same_as_once() {
         let event = changed_to("plan:T-02", ROOT, "doing", "v1");
         let task = at("T-02", "doing", ROOT);
         corpus.apply_changed("plan", &event, Some(task)).map(|_| ())
+    });
+}
+
+#[test]
+fn applying_a_collections_notification_twice_is_the_same_as_once() {
+    let base = [
+        in_collections(at("Q-01", "ready", ROOT), &["plan:queue"]),
+        at("Q-01", "ready", WS_A),
+    ];
+    assert_twice_is_once(&base, |corpus| {
+        let change = collections_changed(
+            ROOT,
+            vec![collection("plan:queue", "Waiting", &[])],
+            vec![member("plan:Q-01", &[])],
+        );
+        corpus.apply_collections("plan", &change).map(|_| ())
     });
 }
 

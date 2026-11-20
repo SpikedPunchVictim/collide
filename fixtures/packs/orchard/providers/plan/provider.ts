@@ -115,7 +115,7 @@ export function planHandlers(options: {
       if (!Array.isArray(checkouts) || checkouts.some((one) => typeof one !== 'string' || !isAbsolute(one))) {
         throw new Error(`watch needs checkouts, a list of absolute paths; got ${JSON.stringify(checkouts)}`)
       }
-      watcher ??= createWatcher({ env, log, notify, options: options.watch })
+      watcher ??= createWatcher({ env, log, notify, timeoutMs, options: options.watch })
       await watcher.set(checkouts)
       return {}
     },

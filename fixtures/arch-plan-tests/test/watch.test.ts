@@ -314,6 +314,8 @@ describe('watch: task.invalid', () => {
     watch.touch(main)
     watch.settle()
     await watch.client.notifications('task.invalid')
+    // The task is out of the epics' groups too: the collections are said once, with the invalid file.
+    await watch.client.notifications('collections.changed')
     watch.touch(main)
     watch.settle()
     expect(await inbox(watch)).toEqual([])
@@ -322,6 +324,7 @@ describe('watch: task.invalid', () => {
     watch.settle()
     const [fixed] = await watch.client.notifications('task.changed')
     expect(fixed?.params).toMatchObject({ key: 'plan:T-03-003', from: null, to: state('ready') })
+    await watch.client.notifications('collections.changed')
     expect(await inbox(watch)).toEqual([])
   })
 
@@ -334,6 +337,8 @@ describe('watch: task.invalid', () => {
     watch.settle()
     const invalid = await watch.client.notifications('task.invalid', 2)
     expect(invalid.map((event) => event.params.checkout)).toEqual([main.root, main.root])
+    // The task is out of the epics' groups: the one other thing said.
+    await watch.client.notifications('collections.changed')
     expect(await inbox(watch)).toEqual([])
   })
 })
@@ -348,7 +353,11 @@ describe('watch: renames', () => {
     watch.settle()
     const [renamed] = await watch.client.notifications('task.renamed')
     expect(renamed?.params).toEqual({ from: 'plan:T-03-003', to: 'plan:T-03-050', checkout: other.root })
-    // Nothing else changed in any task: the renumber moved the file and rewrote a citation in an epic.
+    // No task changed: the renumber moved the file and rewrote a citation in an epic, so the epic's groups name the new
+    // key, and that is the one other thing said.
+    const [collections] = await watch.client.notifications('collections.changed')
+    expect(collections?.params.checkout).toBe(other.root)
+    expect(collections?.params.members).toEqual([])
     expect(await inbox(watch)).toEqual([])
     const listed = (await watch.client.request('list', { checkout: other.root })).result as any
     const keys = listed.tasks.map((task: any) => task.key)

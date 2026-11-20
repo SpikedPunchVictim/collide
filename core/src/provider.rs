@@ -27,6 +27,11 @@
 //! | `task.renamed` | [`Rename`](crate::change::Rename) |
 //! | `task.removed` | [`TaskRemoved`] |
 //! | `task.invalid` | [`TaskInvalid`] |
+//! | `collections.changed` (if `collections`) | [`CollectionsChanged`] |
+//!
+//! `collections.changed` is for a collection that changes while its member's file does not: an epic file, or a queue
+//! that follows another item. `members` names the tasks core holds that are now in other collections; a task that is
+//! new or renamed is left to its own notification. It records no event and changes no item's state or version.
 
 use crate::change::{Effect, FieldDiff, ItemState, Rename};
 use crate::item::{
@@ -408,6 +413,27 @@ pub struct TaskChanged {
     pub checkout: Option<String>,
 }
 
+/// What one task is now in: the ids of its collections, as `list` gives them in `Task.collections`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionMember {
+    pub key: String,
+    pub collections: Vec<String>,
+}
+
+/// `collections.changed`: collections, or what a task is in, changed with no change to the task's file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionsChanged {
+    /// Every collection of the checkout now, as `list` gives them. It replaces what core holds.
+    pub collections: Vec<Collection>,
+    /// Each task whose collections differ from the last time the source said.
+    #[serde(default)]
+    pub members: Vec<CollectionMember>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
+}
+
 /// Why a task is gone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -447,7 +473,8 @@ pub enum ProviderEvent {
     Invalid(TaskInvalid),
     Collision(TaskCollision),
     Stale(SourceStale),
-    /// A notification of a method that is not one of the six, or whose params do not read as that method's type. It
+    Collections(CollectionsChanged),
+    /// A notification of a method that is not one of the seven, or whose params do not read as that method's type. It
     /// is kept, with what was wrong, and never dropped.
     Unreadable {
         method: String,
@@ -464,6 +491,7 @@ impl ProviderEvent {
             "task.removed" => read(params, ProviderEvent::Removed),
             "task.invalid" => read(params, ProviderEvent::Invalid),
             "task.collision" => read(params, ProviderEvent::Collision),
+            "collections.changed" => read(params, ProviderEvent::Collections),
             "source.stale" => read(params, ProviderEvent::Stale),
             _ => Err(format!("`{method}` is not a notification of protocol v0")),
         };

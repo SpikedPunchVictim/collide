@@ -6,6 +6,10 @@
 //! not an error, the roles check passes for the pack's mapping, and a write on a question is refused with no call to
 //! the plan CLI.
 //!
+//! A change on disk reaches the collections too (ts-0151-fk): a question resolved or set to need a person leaves or
+//! joins `decisions-needed`, and a task's epic, or the epic's file, moves the task between epics, with no restart and
+//! no relisting asked for.
+//!
 //! The fake plan CLI is `fixtures/<name>-arch/plan`, run by `node`; the repository's own `plan` is a shell script that
 //! records its arguments in the test's home and runs it. Every path is below the test's own root under `/tmp`, which is
 //! also the home. Nothing here touches the user's home, keychain or a real daemon.
@@ -18,11 +22,13 @@ use collide_core::owner::{
     TaskViewsParams, TaskViewsResult, ViewSource,
 };
 use collide_core::provider::ApplyResult;
-use common::plan_rig::{Rig, list_until, rig, rpc, trust};
+use common::plan_rig::{DEADLINE, Rig, list_until, rig, rpc, trust};
+use common::wait_until;
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 /// The pack's folder name, written so that the no-names check does not see it in this file.
 fn name() -> String {
@@ -67,6 +73,11 @@ fn board() -> (Rig, String) {
 
 /// As [`board`]; with `answer`, the plan CLI prints that and not what the fake makes of the tree.
 fn board_with(answer: Option<&str>) -> (Rig, String) {
+    board_over(answer, &[])
+}
+
+/// As [`board_with`], with `files` (a path from the root, and its text) written over the tree before it is committed.
+fn board_over(answer: Option<&str>, files: &[(&str, &str)]) -> (Rig, String) {
     let rig = rig("daemon-reference-kinds");
     let home = rig.home().to_path_buf();
     let fake = home.join("fake-plan");
@@ -89,6 +100,9 @@ fn board_with(answer: Option<&str>) -> (Rig, String) {
         &rig,
         &format!("{pack}/providers"),
     );
+    for (path, text) in files {
+        rig.repo.write(path, text.as_bytes());
+    }
     rig.repo
         .write(&format!("{pack}/pack.yaml"), manifest().as_bytes());
     rig.repo.write(
@@ -371,4 +385,188 @@ fn only_status_calls_reach_the_plan_cli_for_the_queue() {
         made.iter().all(|call| call.starts_with("status ")),
         "{made:?}"
     );
+}
+
+// ---- a change on disk reaches the collections (ts-0151-fk) ----------------------------------------------------------
+
+const QUESTIONS: &str = "arch/proposals/03-harbor-index/questions";
+const SURVEY: &str = "arch/proposals/03-harbor-index/tasks/T-03-001-survey-the-quay.md";
+const HARBOR_EPIC: &str = "arch/work/epics/E-07-harbor-plan.md";
+const LAMPS_EPIC: &str = "arch/work/epics/E-08-signal-lamps.md";
+
+fn survey(epic: &str) -> String {
+    format!(
+        "---\ntitle: \"Survey the quay\"\nstatus: ready\nepic: {epic}\ndepends_on: []\nblocked_by: []\n---\n\n## Task\n"
+    )
+}
+
+fn epic_file(title: &str) -> String {
+    format!(
+        "---\ntitle: \"{title}\"\nstatus: active\n---\n\nMade-up epic.\n\n### Slice 1: first berths\n\n\
+         | Lane | Tasks, in order | Waits on another lane |\n|---|---|---|\n| North | T-03-001 | none |\n"
+    )
+}
+
+/// The kinds tree with two epics, and the survey task in the first.
+fn epic_board() -> (Rig, String) {
+    board_over(
+        None,
+        &[
+            (SURVEY, &survey("E-07-harbor-plan")),
+            (HARBOR_EPIC, &epic_file("Harbor plan")),
+            (LAMPS_EPIC, &epic_file("Signal lamps")),
+        ],
+    )
+}
+
+/// Changes the first `from` in the file to `to`, as an editor would: on disk, in the working tree.
+fn edit(rig: &Rig, rel: &str, from: &str, to: &str) {
+    let text = fs::read_to_string(rig.repo.work().join(rel)).unwrap();
+    assert!(text.contains(from), "{rel} has no {from:?}");
+    rig.repo.write(rel, text.replacen(from, to, 1).as_bytes());
+}
+
+/// Whether `held` came true within `within`. `wait_until` fails the test when it does not; this says.
+fn holds_within(within: Duration, mut held: impl FnMut() -> bool) -> bool {
+    let until = std::time::Instant::now() + within;
+    while std::time::Instant::now() < until {
+        if held() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    held()
+}
+
+fn all(rig: &Rig, board: &str) -> TaskListResult {
+    rpc(rig, "task.list", &json!({ "board": board })).unwrap()
+}
+
+fn status_of(rig: &Rig, board: &str, key: &str) -> Option<String> {
+    let list = all(rig, board);
+    let task = list.tasks.iter().find(|task| task.key == key)?;
+    Some(task.state.status.clone())
+}
+
+fn collections_of(rig: &Rig, board: &str, key: &str) -> Vec<String> {
+    let list = all(rig, board);
+    let task = list.tasks.iter().find(|task| task.key == key).unwrap();
+    task.collections.clone()
+}
+
+fn decisions(rig: &Rig, board: &str) -> Vec<String> {
+    keys(&named(rig, board, "decisions-needed"))
+}
+
+/// Returns once the provider's watcher reports a change made after this call began. The watcher reads its first
+/// snapshot some time after the board lists, and a file changed before that read is never reported, so the survey
+/// task's status is changed, each time to the other value, until one change is listed.
+fn watching(rig: &Rig, board: &str) {
+    let mut now = "ready";
+    for _ in 0..30 {
+        let next = if now == "ready" { "doing" } else { "ready" };
+        edit(
+            rig,
+            SURVEY,
+            &format!("status: {now}"),
+            &format!("status: {next}"),
+        );
+        now = next;
+        if holds_within(Duration::from_secs(3), || {
+            status_of(rig, board, "plan:T-03-001").as_deref() == Some(now)
+        }) {
+            return;
+        }
+    }
+    panic!("the watcher reported none of the changes made to the survey task");
+}
+
+#[test]
+fn a_question_resolved_on_disk_leaves_decisions_needed_with_no_relisting_asked_for() {
+    let (rig, board) = board();
+    watching(&rig, &board);
+    assert_eq!(
+        decisions(&rig, &board),
+        ["plan:Q-03-01", "plan:Q-03-03", "plan:Q-05-01"]
+    );
+
+    edit(
+        &rig,
+        &format!("{QUESTIONS}/Q-03-03-who-rings-the-bell.md"),
+        "status: open",
+        "status: resolved",
+    );
+
+    wait_until("the resolved question leaves the view", DEADLINE, || {
+        decisions(&rig, &board) == ["plan:Q-03-01", "plan:Q-05-01"]
+    });
+}
+
+#[test]
+fn a_question_set_to_need_a_person_on_disk_joins_decisions_needed_with_no_relisting_asked_for() {
+    let (rig, board) = board();
+    watching(&rig, &board);
+
+    edit(
+        &rig,
+        &format!("{QUESTIONS}/Q-03-02-how-deep-is-the-quay.md"),
+        "needs: evidence",
+        "needs: human",
+    );
+
+    wait_until("the question joins the view", DEADLINE, || {
+        decisions(&rig, &board)
+            == [
+                "plan:Q-03-01",
+                "plan:Q-03-02",
+                "plan:Q-03-03",
+                "plan:Q-05-01",
+            ]
+    });
+}
+
+#[test]
+fn a_task_whose_epic_line_changes_leaves_the_old_epic_and_joins_the_new_one() {
+    let (rig, board) = epic_board();
+    watching(&rig, &board);
+    assert_eq!(collections_of(&rig, &board, "plan:T-03-001"), ["plan:E-07"]);
+
+    edit(
+        &rig,
+        SURVEY,
+        "epic: E-07-harbor-plan",
+        "epic: E-08-signal-lamps",
+    );
+
+    wait_until("the task is in the new epic only", DEADLINE, || {
+        collections_of(&rig, &board, "plan:T-03-001") == ["plan:E-08"]
+    });
+}
+
+#[test]
+fn an_epic_file_that_changes_is_the_epic_as_listed_and_one_that_goes_takes_its_tasks_out() {
+    let (rig, board) = epic_board();
+    watching(&rig, &board);
+    let title = |collection: &str| {
+        all(&rig, &board)
+            .collections
+            .iter()
+            .find(|held| held.id == collection)
+            .map(|held| held.title.clone())
+    };
+
+    edit(
+        &rig,
+        LAMPS_EPIC,
+        "title: \"Signal lamps\"",
+        "title: \"Signal lamps, renamed\"",
+    );
+    wait_until("the epic has its new title", DEADLINE, || {
+        title("plan:E-08").as_deref() == Some("Signal lamps, renamed")
+    });
+
+    rig.repo.remove(HARBOR_EPIC);
+    wait_until("the epic is gone, with its member", DEADLINE, || {
+        title("plan:E-07").is_none() && collections_of(&rig, &board, "plan:T-03-001").is_empty()
+    });
 }

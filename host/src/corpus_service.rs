@@ -46,8 +46,8 @@ use collide_core::corpus::{
 use collide_core::events::EventBody;
 use collide_core::owner::task::{NotStartedSource, TaskListResult};
 use collide_core::provider::{
-    ChangeCause, GetParams, InitializeResult, ListParams, ListResult, ProviderEvent, Scope,
-    SourceStale, Task, TaskChanged, WatchParams,
+    ChangeCause, CollectionsChanged, GetParams, InitializeResult, ListParams, ListResult,
+    ProviderEvent, Scope, SourceStale, Task, TaskChanged, WatchParams,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
@@ -1096,6 +1096,7 @@ impl Inner {
             ProviderEvent::Collision(_) => {
                 locked(&self.state).wanted.insert(name.to_string());
             }
+            ProviderEvent::Collections(change) => self.collections_changed(name, &change),
             ProviderEvent::Stale(SourceStale { reason, checkout }) => {
                 let mut state = locked(&self.state);
                 let _ = state.corpus.mark_stale(name, &reason);
@@ -1160,6 +1161,20 @@ impl Inner {
             self.keep_copy(name, &changed.key, changed.checkout.as_deref());
         }
         self.record(name, ProviderEvent::Changed(changed), None);
+    }
+
+    /// `collections.changed`: the corpus takes the collections and the members' places, and the cache the copies that
+    /// moved. No event is recorded: no item changed, and the item's own change, if there was one, has its own.
+    fn collections_changed(&self, name: &str, change: &CollectionsChanged) {
+        let moved = locked(&self.state).corpus.apply_collections(name, change);
+        match moved {
+            Ok(keys) => {
+                for key in keys {
+                    self.keep_copy(name, &key, change.checkout.as_deref());
+                }
+            }
+            Err(error) => self.log(&format!("a change of collections was not applied: {error}")),
+        }
     }
 
     fn renamed(&self, name: &str, rename: collide_core::change::Rename) {

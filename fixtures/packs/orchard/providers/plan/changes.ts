@@ -1,8 +1,10 @@
 import type { ProviderNotifications, TaskChangedOutput, TaskInput } from '@collide/pack-sdk'
+import type { Collection } from './collections.ts'
 import { BLOCKED_BY } from './declaration.ts'
 import type { GitRename } from './git.ts'
 import { renamedTo as renamedByMap } from './id-map.ts'
 import type { IdMapRow } from './id-map.ts'
+import type { Queue } from './queue.ts'
 
 /** What one scan of a checkout found: its tasks by short id, its invalid files by path, and where git had HEAD. */
 export interface Snapshot {
@@ -12,9 +14,23 @@ export interface Snapshot {
   /** The reason for each file that is not a task, by its path from the checkout. */
   invalid: Map<string, string>
   idMap: IdMapRow[]
+  /** The collections as `list` gives them: the epics, and the human queue when it could be read. */
+  collections: Collection[]
+  /** What the human queue was read for (see `queueSignature`), so that the same questions are not asked about twice. */
+  asked: string
+  /** What the plan CLI said the queue was, or null when no question was open or it could not say. */
+  queue: Queue | null
 }
 
-export const emptySnapshot = (): Snapshot => ({ head: null, tasks: new Map(), invalid: new Map(), idMap: [] })
+export const emptySnapshot = (): Snapshot => ({
+  head: null,
+  tasks: new Map(),
+  invalid: new Map(),
+  idMap: [],
+  collections: [],
+  asked: '',
+  queue: null,
+})
 
 /** One notification of `watch`, with its method. */
 export type Notification = {
@@ -131,6 +147,23 @@ export function compare(
     if (before.invalid.get(path) !== reason) out.push({ method: 'task.invalid', params: { path, checkout, reason } })
   }
   return out
+}
+
+/**
+ * What the checkout's collections, and the places of its tasks in them, changed to between two snapshots, as one
+ * notification; none when they did not change. A task is named when it is in both snapshots and its places differ. A
+ * task that is new or renamed is left to its own notification, which makes core read it.
+ */
+export function collectionsChanged(checkout: string, before: Snapshot, after: Snapshot): Notification[] {
+  const members: Array<{ key: string; collections: string[] }> = []
+  for (const [id, task] of after.tasks) {
+    const was = before.tasks.get(id)
+    if (was !== undefined && !same(was.collections ?? [], task.collections ?? [])) {
+      members.push({ key: task.key, collections: task.collections ?? [] })
+    }
+  }
+  if (members.length === 0 && same(before.collections, after.collections)) return []
+  return [{ method: 'collections.changed', params: { collections: after.collections, members, checkout } }]
 }
 
 /** One short id found at more than one path across checkouts. */

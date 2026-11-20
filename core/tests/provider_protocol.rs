@@ -4,9 +4,9 @@
 use collide_core::item::{Category, LinkTarget};
 use collide_core::observer::{ObserverAck, ObserverEvent};
 use collide_core::provider::{
-    self, ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult,
-    ListParams, ListResult, PreviewResult, ProviderEvent, SourceStale, Task, TaskChanged,
-    TaskCollision, TaskInvalid, TaskRemoved, WatchParams, WatchResult,
+    self, ApplyParams, ApplyResult, CollectionsChanged, GetParams, GetResult, InitializeParams,
+    InitializeResult, ListParams, ListResult, PreviewResult, ProviderEvent, SourceStale, Task,
+    TaskChanged, TaskCollision, TaskInvalid, TaskRemoved, WatchParams, WatchResult,
 };
 use collide_core::schema;
 use serde::Serialize;
@@ -770,6 +770,25 @@ fn notifications() -> Vec<(&'static str, Value)> {
             "source.stale with checkout",
             json!({ "reason": "the checkout could not be read", "checkout": "wt-1" }),
         ),
+        (
+            "collections.changed",
+            json!({
+                "collections": [{
+                    "id": "plan:queue",
+                    "title": "Waiting for a person",
+                    "groups": [{ "name": "Needs a decision", "tasks": ["plan:Q-03-01"] }]
+                }],
+                "members": [{ "key": "plan:Q-03-01", "collections": ["plan:queue"] }]
+            }),
+        ),
+        (
+            "collections.changed with checkout",
+            json!({
+                "collections": [],
+                "members": [{ "key": "plan:Q-03-01", "collections": [] }],
+                "checkout": "wt-1"
+            }),
+        ),
     ]
 }
 
@@ -784,6 +803,7 @@ fn every_watch_notification_round_trips() {
             "task.renamed" => drop(round_trip::<collide_core::change::Rename>(doc)),
             "task.removed" => drop(round_trip::<TaskRemoved>(doc)),
             "task.invalid" => drop(round_trip::<TaskInvalid>(doc)),
+            "collections.changed" => drop(round_trip::<CollectionsChanged>(doc)),
             other => panic!("no type for {other}"),
         }
     }
@@ -800,6 +820,7 @@ fn a_notification_with_an_unknown_key_is_refused() {
             "task.renamed" => refused::<collide_core::change::Rename>(doc),
             "task.removed" => refused::<TaskRemoved>(doc),
             "task.invalid" => refused::<TaskInvalid>(doc),
+            "collections.changed" => refused::<CollectionsChanged>(doc),
             other => panic!("no type for {other}"),
         }
     }
@@ -817,6 +838,7 @@ fn every_watch_notification_reads_into_the_event_of_its_method() {
             ("task.renamed", ProviderEvent::Renamed(body)) => serde_json::to_value(body),
             ("task.removed", ProviderEvent::Removed(body)) => serde_json::to_value(body),
             ("task.invalid", ProviderEvent::Invalid(body)) => serde_json::to_value(body),
+            ("collections.changed", ProviderEvent::Collections(body)) => serde_json::to_value(body),
             _ => panic!("{name} read as {event:?}"),
         };
         assert_eq!(read.unwrap(), doc, "{name}");
@@ -892,6 +914,15 @@ fn task_changed_and_task_removed_name_the_checkout_only_when_ref_scoped() {
 fn task_invalid_without_a_reason_or_a_path_is_refused() {
     refused::<TaskInvalid>(json!({ "path": "a.md", "checkout": "main" }));
     refused::<TaskInvalid>(json!({ "checkout": "main", "reason": "r" }));
+}
+
+#[test]
+fn collections_changed_without_its_collections_or_with_a_member_lacking_a_key_is_refused() {
+    refused::<CollectionsChanged>(json!({ "members": [] }));
+    refused::<CollectionsChanged>(json!({
+        "collections": [],
+        "members": [{ "collections": ["plan:queue"] }]
+    }));
 }
 
 #[test]
