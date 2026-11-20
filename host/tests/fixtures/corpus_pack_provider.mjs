@@ -20,6 +20,7 @@
 //   calls.log     a line for each `list` (`list <checkout> <cursor>`), `get` (`get <checkout> <id>`) and `watch`
 //                 (`watch <json>`)
 //   notify.jsonl  each line a test appends is sent to the daemon as a notification, `{ "method", "params" }`
+//   hold-list     while it exists, `list` waits (30 s at most) before it answers
 //   fail-list     when it exists, `list` answers a JSON-RPC error
 //   die-on-list   when it exists, `list` ends the process with no reply
 //   fail-get      when it exists, `get` answers a JSON-RPC error
@@ -89,9 +90,17 @@ const read = (checkout, file) => {
 
 const find = (checkout, id) => files(checkout).map((file) => read(checkout, file)).find((got) => got.task?.id === id)
 
+// Blocks until `hold-list` is gone or 30 s have passed: the provider answers one line at a time, so this holds all.
+const holdList = () => {
+  const until = Date.now() + 30000
+  const tick = new Int32Array(new SharedArrayBuffer(4))
+  while (existsSync(join(DATA, 'hold-list')) && Date.now() < until) Atomics.wait(tick, 0, 0, 20)
+}
+
 const list = (params) => {
   const checkout = params.checkout ?? init.root
   log(`list ${checkout} ${params.cursor ?? ''}`)
+  holdList()
   if (existsSync(join(DATA, 'die-on-list'))) process.exit(3)
   if (existsSync(join(DATA, 'fail-list'))) return [null, { code: -32000, message: 'the list was refused' }]
   const all = files(checkout)

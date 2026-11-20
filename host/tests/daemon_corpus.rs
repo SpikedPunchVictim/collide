@@ -32,6 +32,8 @@ use collide_host::run_store::RunLaunch;
 use collide_host::secret_store::MemorySecretStore;
 use collide_host::store::Store;
 use collide_host::supervisor::{BackoffPolicy, SupervisorPolicy};
+use collide_host::task_cli::{parse_task, parse_tasks};
+use collide_host::task_daemon::{WAIT_NOTICE_AFTER, run_noticing_after};
 use common::config_fixture::{CapturedLog, Fixture};
 use common::git_repo::{GitRepo, git_command};
 use common::{node_missing_message, wait_until};
@@ -43,7 +45,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::time::Duration;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 const WAIT: Option<Duration> = Some(Duration::from_secs(60));
 const DEADLINE: Duration = Duration::from_secs(30);
@@ -751,6 +754,129 @@ fn the_list_a_restart_serves_while_it_refreshes_is_the_cached_one() {
         "refreshing: {}",
         list.refreshing
     );
+}
+
+// ---- the command that waits for the relist (ts-0155-wb) ------------------------------------------------------------
+
+const WAITING_LINE: &str =
+    "collide: the daemon is still listing the board's sources; waiting for the full list\n";
+
+/// What a command wrote to standard error, less the line about the built-in `plan` source: this rig has no bundle, so
+/// that source never starts.
+fn without_plan_line(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.starts_with("collide: source plan could not start"))
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+/// How long a test lets a command that waits on a held listing go on asking, so that it asks more than once.
+const SEVERAL_POLLS: Duration = Duration::from_millis(500);
+
+/// `collide <words>` from the board's folder, on a thread of its own: it ends with its exit code and standard output.
+/// What it wrote to standard error is read through the second value while it runs.
+fn start_cli(
+    rig: &Rig,
+    words: &[&str],
+    notice_after: Duration,
+) -> (JoinHandle<(u8, String)>, CapturedLog) {
+    let (paths, cwd) = (rig.f().daemon.paths().clone(), rig.root());
+    let words: Vec<String> = words.iter().map(|word| word.to_string()).collect();
+    let err = CapturedLog::default();
+    let handle = {
+        let mut err = err.clone();
+        std::thread::spawn(move || {
+            let rest = &words[1..];
+            let command = match words[0].as_str() {
+                "tasks" => parse_tasks(rest),
+                _ => parse_task(rest),
+            }
+            .unwrap_or_else(|error| panic!("{words:?}: {}", error.message));
+            let mut out = Vec::new();
+            let code = run_noticing_after(&paths, &command, &cwd, &mut out, &mut err, notice_after);
+            (code, String::from_utf8(out).unwrap())
+        })
+    };
+    (handle, err)
+}
+
+/// A board with two tasks whose list the daemon has cached. Returns the rig, the board and the hold-back file.
+fn board_with_a_cached_list() -> (Rig, String, PathBuf) {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.task(&root, "2.json", "2", "todo", "v1");
+    rig.settled(&board);
+    let hold = rig.data(&board, &FILES).join("hold-list");
+    (rig, board, hold)
+}
+
+/// Restarts the daemon with its first listing held back by the file `hold`.
+fn restart_with_the_list_held(rig: &mut Rig, board: &str, hold: &Path) {
+    fs::write(hold, "").unwrap();
+    rig.restart();
+    assert!(
+        rig.list(board, json!({})).refreshing,
+        "a held listing is refreshing"
+    );
+}
+
+#[test]
+fn a_command_waiting_for_the_relist_after_a_restart_says_so_once_and_prints_what_it_would_have() {
+    let (mut rig, board, hold) = board_with_a_cached_list();
+    for words in [
+        vec!["tasks"],
+        vec!["tasks", "--json"],
+        vec!["task", "files:1"],
+        vec!["task", "1"],
+    ] {
+        restart_with_the_list_held(&mut rig, &board, &hold);
+        // A notice time of zero: the line comes with the first answer that says `refreshing`, whatever the clock.
+        let (waiting, err) = start_cli(&rig, &words, Duration::ZERO);
+        wait_until("the command says it waits", DEADLINE, || {
+            err.text().contains("still listing")
+        });
+        let said = Instant::now();
+        wait_until("the command has asked again", DEADLINE, || {
+            said.elapsed() >= SEVERAL_POLLS
+        });
+        assert!(!waiting.is_finished(), "{words:?} waits for the list");
+
+        fs::remove_file(&hold).unwrap();
+        let (code, out) = waiting.join().unwrap();
+
+        assert_eq!(code, 0, "{words:?}: {}", err.text());
+        assert_eq!(without_plan_line(&err.text()), WAITING_LINE, "{words:?}");
+        let (settled, quiet) = start_cli(&rig, &words, Duration::ZERO);
+        let (settled_code, settled_out) = settled.join().unwrap();
+        assert_eq!(settled_code, 0, "{words:?}");
+        assert_eq!(without_plan_line(&quiet.text()), "", "{words:?}");
+        assert_eq!(out, settled_out, "{words:?}: standard output is the same");
+    }
+}
+
+#[test]
+fn a_listing_that_settles_before_the_notice_time_says_nothing() {
+    let (mut rig, board, hold) = board_with_a_cached_list();
+    restart_with_the_list_held(&mut rig, &board, &hold);
+    let (waiting, err) = start_cli(&rig, &["tasks"], Duration::from_secs(3600));
+    let started = Instant::now();
+    wait_until("the command has asked again", DEADLINE, || {
+        started.elapsed() >= SEVERAL_POLLS
+    });
+
+    fs::remove_file(&hold).unwrap();
+    let (code, out) = waiting.join().unwrap();
+
+    assert_eq!(code, 0);
+    assert_eq!(without_plan_line(&err.text()), "");
+    assert_eq!(out.lines().count(), 2, "{out}");
+}
+
+#[test]
+fn the_notice_comes_after_half_a_second() {
+    assert_eq!(WAIT_NOTICE_AFTER, Duration::from_millis(500));
 }
 
 // ---- notifications ------------------------------------------------------------------------------------------------

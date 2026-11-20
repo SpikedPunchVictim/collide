@@ -11,6 +11,8 @@
 
 Every one of these goes through the daemon, which is started when none runs (and says so, once). If it cannot start,
 the command exits 1 and reads nothing itself.
+Each waits for the daemon's full listing of the board. After a restart that can take seconds, and a wait of more than
+half a second is said once on stderr.
 
 collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a
   pack's), in the order the daemon lists them. --ready and --kind apply on top. A view with an error of its own lists

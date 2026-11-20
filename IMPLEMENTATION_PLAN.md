@@ -4518,11 +4518,13 @@ combined into a corpus, and filtered by views.
   A listing names on stderr each source of the board that could not start, with its reason, and lists the others; it
   exits 1 when no source of the line started (`ts-0141-sn`). A board whose line or checkouts the daemon could not read
   at its last look says so on stderr with the reason, lists what the corpus holds and exits 1; a look that reads clears
-  it, and a view on such a board is refused with the line's problem (`ts-0152-jq`). A queued write is reported applied
-  only when the daemon says it applied it (`ts-0142-ua`): a Retry of a write that left the Queue answers once the drain
-  that took it has ended, done or refused with the reason; one that was dismissed, or that the daemon has no record of
-  (the record is in memory, for the last 128 writes), exits 5. `task reid` commits nothing itself; its `--commit`
-  commits the files it reports. `collide init`, `collide config get|set` and `collide pack …` were built in 4a.
+  it, and a view on such a board is refused with the line's problem (`ts-0152-jq`). A command that lists waits for the
+  daemon's settled listing, its first after a start, and says once on stderr that it is waiting when the wait passes
+  0.5 s; standard output and the exit code are unchanged (`ts-0155-wb`). A queued write is reported applied only when
+  the daemon says it applied it (`ts-0142-ua`): a Retry of a write that left the Queue answers once the drain that took
+  it has ended, done or refused with the reason; one that was dismissed, or that the daemon has no record of (the record
+  is in memory, for the last 128 writes), exits 5. `task reid` commits nothing itself; its `--commit` commits the files
+  it reports. `collide init`, `collide config get|set` and `collide pack …` were built in 4a.
 
 **Success Criteria**: On the Orchard repo:
 - A task shows `doing` in one worktree and `ready` at the board root, with the divergence reported.

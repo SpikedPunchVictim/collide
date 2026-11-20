@@ -63,6 +63,8 @@ usage:
 pub const HELP: &str = "\
 Every one of these goes through the daemon, which is started when none runs (and says so, once). If it cannot start,
 the command exits 1 and reads nothing itself.
+Each waits for the daemon's full listing of the board. After a restart that can take seconds, and a wait of more than
+half a second is said once on stderr.
 
 collide tasks: list the board's items (epics, tasks, proposals, spikes and questions), one line each: key, status,
   kind, title, in the order the daemon lists them. The folders it reads are the board's: the layout setting's, and the

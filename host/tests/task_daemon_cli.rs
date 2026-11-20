@@ -26,7 +26,7 @@ use collide_host::pack_cache::ensure_sdk;
 use collide_host::pack_location::bundle_sdk;
 use collide_host::run_store::RunLaunch;
 use collide_host::task_cli::{Command, exit, parse_sections, parse_task, parse_tasks};
-use collide_host::task_daemon::run_with;
+use collide_host::task_daemon::run_noticing_after;
 use common::git_repo::{GitRepo, git_command};
 use common::{Bundle, repo_root, wait_until};
 use serde::Serialize;
@@ -43,6 +43,19 @@ const DEADLINE: Duration = Duration::from_secs(30);
 
 /// How often the daemon's writer looks at a checkout that stayed busy, and how often it reads the checkouts again.
 const POLL: Duration = Duration::from_millis(100);
+
+/// The commands here start on a daemon that has not listed yet and compare standard error with what they expect, so the
+/// line about waiting for the listing (ts-0155-wb) must not depend on how long that takes: it is put out of reach. The
+/// line is tested in `daemon_corpus.rs`.
+fn run_with(
+    paths: &DaemonPaths,
+    command: &Command,
+    cwd: &Path,
+    out: &mut dyn std::io::Write,
+    err: &mut dyn std::io::Write,
+) -> u8 {
+    run_noticing_after(paths, command, cwd, out, err, Duration::from_secs(3600))
+}
 
 const EPIC: &str = ".collide/planning/epics/ep-001-aa-alpha/tasks";
 const SECOND_FILE: &str = "ts-0002-bb-second.md";
@@ -2065,8 +2078,13 @@ fn a_listing_says_why_the_line_cannot_be_read_still_lists_what_it_holds_and_exit
         out.contains("plan:ts-0001-aa"),
         "so is what the plan source last listed: {out}"
     );
-    assert_eq!(err.lines().count(), 1, "{err}");
-    assert!(err.len() > UNREAD_LINE.len() + 1, "{err}");
+    // With the line broken, the plan source may also fail to refresh and be named out of date; that line is its own.
+    let unread: Vec<&str> = err
+        .lines()
+        .filter(|line| !line.starts_with("collide: source plan may be out of date: "))
+        .collect();
+    assert_eq!(unread.len(), 1, "{err}");
+    assert!(unread[0].len() > UNREAD_LINE.len() + 1, "{err}");
 }
 
 #[test]

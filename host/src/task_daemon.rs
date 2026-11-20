@@ -21,6 +21,10 @@
 //! command fails and reads nothing itself. A command line that is wrong, and a `--checkout` that is not an entry of
 //! `git worktree list`, are refused before that.
 //!
+//! `tasks`, `task <id>` with or without an op, `task create` with an `epic`, `task reid` and `sections` wait for the
+//! daemon's full listing of the board ([`Session::settled_list`]). When that wait passes [`WAIT_NOTICE_AFTER`], one
+//! line on stderr says so. `task new` and `task renameSection` do not list, so they do not wait.
+//!
 //! The board is the one of the repository's main checkout ([`crate::checkout::main_checkout`]), whatever worktree the
 //! command runs in, so a linked worktree and the main checkout name one board.
 
@@ -64,6 +68,14 @@ const SETTLE: Duration = Duration::from_secs(60);
 /// How often it asks again.
 const SETTLE_POLL: Duration = Duration::from_millis(100);
 
+/// How long a command waits on a listing that is still `refreshing` before it says so on standard error, once.
+pub const WAIT_NOTICE_AFTER: Duration = Duration::from_millis(500);
+
+/// What it says. After a restart the daemon serves its cache at once and lists every source again, so the settled list
+/// comes later; the first start, with no cache, waits the same way.
+const WAIT_NOTICE: &str =
+    "collide: the daemon is still listing the board's sources; waiting for the full list";
+
 /// How often a queued write is looked at again while the command waits for it.
 const QUEUE_POLL: Duration = Duration::from_millis(500);
 
@@ -89,6 +101,19 @@ pub fn run_with(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> u8 {
+    run_noticing_after(paths, command, cwd, out, err, WAIT_NOTICE_AFTER)
+}
+
+/// [`run_with`], saying that it is waiting on the daemon's listing once the wait has passed `notice_after`. A test sets
+/// it, so that the line does not depend on how long a listing really takes.
+pub fn run_noticing_after(
+    paths: &DaemonPaths,
+    command: &Command,
+    cwd: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+    notice_after: Duration,
+) -> u8 {
     let checkout = match command {
         Command::Tasks(options) => options.checkout.as_deref(),
         Command::Task(options) => options.write.checkout.as_deref(),
@@ -97,15 +122,16 @@ pub fn run_with(
         Command::New(_) | Command::Sections(_) => None,
         Command::RenameSection(options) => options.write.checkout.as_deref(),
     };
-    let result = open(paths, checkout, cwd, err).and_then(|mut session| match command {
-        Command::New(options) => new_task(&mut session, options, out, err),
-        Command::Tasks(options) => tasks(&mut session, options, out, err),
-        Command::Task(options) => task(&mut session, options, out, err),
-        Command::Create(options) => create(&mut session, options, out, err),
-        Command::Reid(options) => reid(&mut session, options, out, err),
-        Command::Sections(options) => sections(&mut session, options, out, err),
-        Command::RenameSection(options) => rename_section(&mut session, options, out, err),
-    });
+    let result =
+        open(paths, checkout, cwd, notice_after, err).and_then(|mut session| match command {
+            Command::New(options) => new_task(&mut session, options, out, err),
+            Command::Tasks(options) => tasks(&mut session, options, out, err),
+            Command::Task(options) => task(&mut session, options, out, err),
+            Command::Create(options) => create(&mut session, options, out, err),
+            Command::Reid(options) => reid(&mut session, options, out, err),
+            Command::Sections(options) => sections(&mut session, options, out, err),
+            Command::RenameSection(options) => rename_section(&mut session, options, out, err),
+        });
     match result {
         Ok(code) => code,
         Err(error) => {
@@ -123,6 +149,10 @@ struct Session {
     root: PathBuf,
     /// The checkout that `--checkout` named, as git lists it.
     checkout: Option<PathBuf>,
+    /// How long a listing may be waited on before the command says so.
+    notice_after: Duration,
+    /// Whether it has said so: it does, once per command.
+    said_waiting: bool,
 }
 
 impl Session {
@@ -146,13 +176,22 @@ impl Session {
     }
 
     /// `task.list`, asked again until the daemon has finished the first listing of the board's sources: before that the
-    /// answer is what the last run cached, or less.
-    fn settled_list(&mut self, params: &TaskListParams) -> Result<TaskListResult, CliError> {
+    /// answer is what the last run cached, or less. Once the wait has passed `notice_after`, one line on `err` says why
+    /// the command is still waiting.
+    fn settled_list(
+        &mut self,
+        params: &TaskListParams,
+        err: &mut dyn Write,
+    ) -> Result<TaskListResult, CliError> {
         let started = Instant::now();
         loop {
             let listed: TaskListResult = self.call("task.list", params)?;
             if !listed.refreshing {
                 return Ok(listed);
+            }
+            if !self.said_waiting && started.elapsed() >= self.notice_after {
+                let _ = writeln!(err, "{WAIT_NOTICE}");
+                self.said_waiting = true;
             }
             if started.elapsed() >= SETTLE {
                 return Err(CliError::failed(format!(
@@ -203,6 +242,7 @@ fn open(
     paths: &DaemonPaths,
     checkout: Option<&str>,
     cwd: &Path,
+    notice_after: Duration,
     err: &mut dyn Write,
 ) -> Result<Session, CliError> {
     let root = main_checkout(cwd).map_err(CliError::failed)?;
@@ -219,6 +259,8 @@ fn open(
         board,
         root,
         checkout,
+        notice_after,
+        said_waiting: false,
     })
 }
 
@@ -320,7 +362,7 @@ fn tasks(
     };
     params.ready = options.ready;
     params.kind = options.kind.clone();
-    let listed = session.settled_list(&params)?;
+    let listed = session.settled_list(&params, err)?;
     for item in &listed.invalid {
         let _ = writeln!(err, "collide: skipped {}: {}", item.path, item.reason);
     }
@@ -480,7 +522,7 @@ fn read_one(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<Option<(TaskGetResult, Task)>, CliError> {
-    let key = match key_of(session, id)? {
+    let key = match key_of(session, id, err)? {
         Keyed::One(key) => key,
         Keyed::Several(keys, message) => {
             let _ = writeln!(err, "collide: {message}");
@@ -539,10 +581,15 @@ enum Named {
 /// The task a bare id names among the tasks the board lists, by [`resolve`]: a full id, or a short form that must fit
 /// one item. The listing is the board's own, whichever checkout the copies are in. `kind` keeps only items of that kind
 /// from the candidates.
-fn name_in_board(session: &mut Session, id: &str, kind: Option<&str>) -> Result<Named, CliError> {
+fn name_in_board(
+    session: &mut Session,
+    id: &str,
+    kind: Option<&str>,
+    err: &mut dyn Write,
+) -> Result<Named, CliError> {
     let mut params = session.list_params();
     params.checkout = None;
-    let listed = session.settled_list(&params)?;
+    let listed = session.settled_list(&params, err)?;
     let candidates: Vec<Task> = listed
         .tasks
         .into_iter()
@@ -571,16 +618,16 @@ fn name_in_board(session: &mut Session, id: &str, kind: Option<&str>) -> Result<
 
 /// The key of the item `id` names. A key (it has a source in front of it) is its own. A bare id is a full id, or a
 /// short form that must fit one item, among the tasks the board lists.
-fn key_of(session: &mut Session, id: &str) -> Result<Keyed, CliError> {
+fn key_of(session: &mut Session, id: &str, err: &mut dyn Write) -> Result<Keyed, CliError> {
     if id.contains(':') {
         // The board's first listing has to be done before the daemon is asked for a key it may not hold yet.
         let mut params = session.list_params();
         params.checkout = None;
         params.limit = Some(1);
-        session.settled_list(&params)?;
+        session.settled_list(&params, err)?;
         return Ok(Keyed::One(id.to_string()));
     }
-    Ok(match name_in_board(session, id, None)? {
+    Ok(match name_in_board(session, id, None, err)? {
         Named::One(task) => Keyed::One(task.key),
         Named::Several(keys, message) => Keyed::Several(keys, message),
     })
@@ -788,7 +835,7 @@ fn create(
     let epic = options
         .epic
         .as_deref()
-        .map(|given| resolve_epic(session, given))
+        .map(|given| resolve_epic(session, given, err))
         .transpose()?;
     let answer: TaskApplyResult = session.call(
         "task.create",
@@ -1009,10 +1056,14 @@ const COLLECTIONS_NAMED: usize = 20;
 /// item that is not an epic is a usage error, and one that is no item at all is an unknown id. A source that lists no
 /// epic but has collections (0.10) has its own groupings in their place: `given` must be the id of one of them, by key
 /// or by the part after the source name, and that part is what `create` takes.
-fn resolve_epic(session: &mut Session, given: &str) -> Result<String, CliError> {
+fn resolve_epic(
+    session: &mut Session,
+    given: &str,
+    err: &mut dyn Write,
+) -> Result<String, CliError> {
     let mut params = session.list_params();
     params.checkout = None;
-    let listed = session.settled_list(&params)?;
+    let listed = session.settled_list(&params, err)?;
     let prefix = format!("{PLANNING_SOURCE}:");
     let has_epics = listed
         .tasks
@@ -1026,17 +1077,19 @@ fn resolve_epic(session: &mut Session, given: &str) -> Result<String, CliError> 
     if !has_epics && !groupings.is_empty() {
         return epic_collection(given, &prefix, &groupings);
     }
-    match name_in_board(session, given, Some("epic")) {
+    match name_in_board(session, given, Some("epic"), err) {
         Ok(Named::One(epic)) => Ok(epic.id),
         Ok(Named::Several(_, message)) => Err(CliError::new(exit::ID, message)),
-        Err(missing) if missing.code == exit::ID => match name_in_board(session, given, None) {
-            Ok(Named::One(other)) => Err(CliError::usage(format!(
-                "`{given}` names {}, which is a {}, not an epic",
-                other.key,
-                other.kind.as_deref().unwrap_or("item")
-            ))),
-            _ => Err(missing),
-        },
+        Err(missing) if missing.code == exit::ID => {
+            match name_in_board(session, given, None, err) {
+                Ok(Named::One(other)) => Err(CliError::usage(format!(
+                    "`{given}` names {}, which is a {}, not an epic",
+                    other.key,
+                    other.kind.as_deref().unwrap_or("item")
+                ))),
+                _ => Err(missing),
+            }
+        }
         Err(other) => Err(other),
     }
 }
@@ -1074,7 +1127,7 @@ fn sections(
     let mut params = session.list_params();
     params.checkout = None;
     params.limit = Some(1);
-    let listed = session.settled_list(&params)?;
+    let listed = session.settled_list(&params, err)?;
     for item in &listed.invalid {
         let _ = writeln!(err, "collide: skipped {}: {}", item.path, item.reason);
     }
