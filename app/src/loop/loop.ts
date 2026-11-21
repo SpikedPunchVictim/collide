@@ -11,6 +11,7 @@ import { type ChannelEvent, CONNECTION_EVENT, type OwnerClient, toOwnerError } f
 import { type LoopAction, type LoopState, initialLoopState, loopReducer } from './state.ts'
 import type {
   AgentVersions,
+  AnsweredResult,
   BoardSummary,
   DiffResult,
   Followed,
@@ -68,6 +69,8 @@ export interface Loop {
   discard(item: string): Promise<void>
   /** Keeps the work after the first press of discard. */
   keep(): void
+  /** Drops the words of a refused answer, which stay until then. */
+  dismissRefusal(): void
   /** Shows one file's patch, or no patch for `null`. */
   pickFile(path: string | null): Promise<void>
   /** Follows the run of another item of the Queue. */
@@ -104,6 +107,7 @@ class LoopController implements Loop {
     this.reprompt = this.reprompt.bind(this)
     this.discard = this.discard.bind(this)
     this.keep = this.keep.bind(this)
+    this.dismissRefusal = this.dismissRefusal.bind(this)
     this.pickFile = this.pickFile.bind(this)
     this.openItem = this.openItem.bind(this)
   }
@@ -202,7 +206,8 @@ class LoopController implements Loop {
     const takesCard = followed === null || (newest !== this.newestSeen && !held)
     const runId = takesCard ? (newest ?? followed?.run ?? null) : followed.run
     const target = runId === null ? null : await this.targetOf(runId, boards ?? this.state.boards, followed)
-    const diff = target === null ? null : await this.diffOf(target.run.id, items)
+    const { diff, problem: diffProblem } =
+      target === null ? { diff: null, problem: null } : await this.diffOf(target.run.id, items)
     // A run held back stays unseen, so it takes the card once the item is gone.
     if (runId === newest) this.newestSeen = newest
     this.dispatch({
@@ -213,6 +218,7 @@ class LoopController implements Loop {
       followed: target?.followed ?? null,
       run: target?.run ?? null,
       diff,
+      diffProblem,
     })
   }
 
@@ -258,9 +264,21 @@ class LoopController implements Loop {
     return { board: null, task: key, prompt: null }
   }
 
-  private async diffOf(runId: string, items: readonly QueueItem[]): Promise<DiffResult | null> {
+  /**
+   * The changes of a run whose review waits. A run whose branch is gone (its repository was deleted) has none to read,
+   * and that must not stop the page: its item is still there to answer, and the reason is said on the card.
+   */
+  private async diffOf(
+    runId: string,
+    items: readonly QueueItem[],
+  ): Promise<{ diff: DiffResult | null; problem: string | null }> {
     const waiting = items.some((i) => i.run === runId && i.kind === 'review')
-    return waiting ? await this.owner.rpc('run.diff', { run: runId }) : null
+    if (!waiting) return { diff: null, problem: null }
+    try {
+      return { diff: await this.owner.rpc('run.diff', { run: runId }), problem: null }
+    } catch (failure) {
+      return { diff: null, problem: toOwnerError(failure).message }
+    }
   }
 
   // ---- what the person does -------------------------------------------------------------------------------------
@@ -367,6 +385,10 @@ class LoopController implements Loop {
     this.dispatch({ type: 'discard_kept' })
   }
 
+  dismissRefusal(): void {
+    this.dispatch({ type: 'refusal_dismissed' })
+  }
+
   private async answer(item: string, answer: ItemAnswer): Promise<void> {
     if (this.state.sending) return
     this.dispatch({ type: 'sending' })
@@ -376,7 +398,7 @@ class LoopController implements Loop {
       else
         this.dispatch({
           type: 'answered',
-          notice: noticeFor(answer, result.outcome),
+          notice: noticeFor(answer, result),
           sentBack: answer.type === 'reprompt' && result.outcome === 'done',
         })
     } catch (failure) {
@@ -414,14 +436,16 @@ class LoopController implements Loop {
   }
 }
 
-function noticeFor(answer: ItemAnswer, outcome: 'done' | 'merged' | 'integrating' | 'queued'): string | null {
-  switch (outcome) {
+function noticeFor(answer: ItemAnswer, result: AnsweredResult): string | null {
+  switch (result.outcome) {
     case 'merged':
       return ACCEPTED_WORDS
     case 'integrating':
       return INTEGRATING_WORDS
     case 'queued':
       return QUEUED_WORDS
+    case 'discarded':
+      return `${DISCARDED_WORDS} ${result.note}`
     case 'done':
       return answer.type === 'accept'
         ? 'Accepted.'
@@ -434,4 +458,3 @@ function noticeFor(answer: ItemAnswer, outcome: 'done' | 'merged' | 'integrating
               : null
   }
 }
-

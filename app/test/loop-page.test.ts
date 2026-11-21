@@ -477,6 +477,117 @@ describe('the review item', () => {
   })
 })
 
+describe('discard (ts-0160-th)', () => {
+  const refusal = 'Git could not read the branch `collide/r-1`: could not run `git`: No such file or directory'
+
+  /** r-1 has its review item and r-2, a newer run, has one too: the owner's two stale items. */
+  async function twoReviews(): Promise<{ world: World; loop: Loop }> {
+    const world = oneBoard()
+    world.seed('b-1', 'scratch:1', 'First prompt', run('r-1', 'scratch:1', { started_ms: 1_000 }))
+    world.addRun('b-1', run('r-2', 'scratch:1', { started_ms: 2_000 }))
+    world.setRun('r-1', { state: { state: 'ended', outcome: 'done' } })
+    world.setRun('r-2', { state: { state: 'ended', outcome: 'done' } })
+    world.items = [reviewItem('q-1', 'r-1', 'scratch:1'), reviewItem('q-2', 'r-2', 'scratch:1')]
+    world.diffs.set('r-1', diff())
+    world.diffs.set('r-2', diff())
+    const loop = await pageOf(world)
+    return { world, loop }
+  }
+
+  test('answers the item of the run on the card, not the first item of the Queue', async () => {
+    const { world, loop } = await twoReviews()
+    expect(loop.getState().run?.id).toBe('r-2')
+    await loop.discard('q-2')
+    await loop.discard('q-2')
+    expect(world.callsTo('queue.answer')).toEqual([{ item: 'q-2', answer: { type: 'discard' } }])
+  })
+
+  test('a question about discarding does not carry over to the item that is opened next', async () => {
+    const { world, loop } = await twoReviews()
+    await loop.discard('q-2')
+    expect(loop.getState().confirmingDiscard).toBe(true)
+    await loop.openItem('q-1')
+    expect(loop.getState().run?.id).toBe('r-1')
+    expect(loop.getState().confirmingDiscard).toBe(false)
+    await loop.discard('q-1')
+    expect(world.callsTo('queue.answer')).toEqual([])
+  })
+
+  test('a refused discard keeps its words through the reload that follows it', async () => {
+    const { world, loop } = await twoReviews()
+    world.answerResult = () => ({ outcome: 'refused', message: refusal })
+    await loop.discard('q-2')
+    await loop.discard('q-2')
+    await loop.idle()
+    expect(world.callsTo('queue.list').length).toBeGreaterThan(1)
+    expect(loop.getState().refusal).toBe(refusal)
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-1', 'q-2'])
+  })
+
+  test('a refused discard keeps its words when the card moves to another run', async () => {
+    const { world, loop } = await twoReviews()
+    world.answerResult = () => ({ outcome: 'refused', message: refusal })
+    await loop.discard('q-2')
+    await loop.discard('q-2')
+    await loop.openItem('q-1')
+    expect(loop.getState().run?.id).toBe('r-1')
+    expect(loop.getState().refusal).toBe(refusal)
+  })
+
+  test('a refused discard keeps its words when a newer run takes the card', async () => {
+    const { world, loop } = await twoReviews()
+    world.answerResult = () => ({ outcome: 'refused', message: refusal })
+    await loop.discard('q-2')
+    await loop.discard('q-2')
+    // The refused item is answered by someone else, so nothing holds the card on r-2 any more.
+    world.items = [reviewItem('q-1', 'r-1', 'scratch:1')]
+    world.addRun('b-1', run('r-3', 'scratch:1', { started_ms: 3_000 }))
+    world.announce('r-3')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-3')
+    expect(loop.getState().refusal).toBe(refusal)
+  })
+
+  test('the person dismisses the words of a refusal, and they stay until then', async () => {
+    const { world, loop } = await twoReviews()
+    world.answerResult = () => ({ outcome: 'refused', message: refusal })
+    await loop.discard('q-2')
+    await loop.discard('q-2')
+    world.announce('r-2')
+    await loop.idle()
+    expect(loop.getState().refusal).toBe(refusal)
+    loop.dismissRefusal()
+    expect(loop.getState().refusal).toBeNull()
+  })
+
+  test('a review whose changes cannot be read still shows, and can be discarded', async () => {
+    const { world, loop } = await twoReviews()
+    world.diffs.delete('r-2')
+    world.announce('r-2')
+    await loop.idle()
+    expect(loop.getState().problem).toBeNull()
+    expect(loop.getState().run?.id).toBe('r-2')
+    expect(loop.getState().diff).toBeNull()
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-1', 'q-2'])
+    await loop.discard('q-2')
+    await loop.discard('q-2')
+    expect(world.callsTo('queue.answer')).toEqual([{ item: 'q-2', answer: { type: 'discard' } }])
+  })
+
+  test('a discard that went through with a note says the note', async () => {
+    const { world, loop } = await twoReviews()
+    const note = 'The repository /work/repo is gone, so the branch collide/r-2 went with it.'
+    world.answerResult = () => ({ outcome: 'discarded', note })
+    world.onAnswer = () => {
+      world.items = world.items.filter((i) => i.id !== 'q-2')
+    }
+    await loop.discard('q-2')
+    await loop.discard('q-2')
+    expect(loop.getState().notice).toBe(`Discarded. The work and its copy of the project are deleted. ${note}`)
+    expect(loop.getState().refusal).toBeNull()
+  })
+})
+
 describe('the notice after a re-prompt', () => {
   const sentBack = 'Sent back. The agent is working on it again.'
 

@@ -3,11 +3,16 @@
 /**
  * What the answer did. An accept that cannot merge answers `queued` with the new item (a conflict goes to the Queue
  * and no checkout changes, 9a), `integrating` is a pull request that is not merged yet (0.4), and `refused` is an
- * answer the owner declined, in Collide's words.
+ * answer the owner declined, in Collide's words. A discard that went through is `done`, or `discarded` when there is
+ * something to tell the person (ts-0160-th: the repository was gone, so the branch went with it).
  */
 export type QueueAnswerResult =
   | {
       outcome: 'done'
+    }
+  | {
+      note: string
+      outcome: 'discarded'
     }
   | {
       commit: string

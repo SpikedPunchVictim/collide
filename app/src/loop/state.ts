@@ -29,11 +29,16 @@ export interface LoopState {
   readonly run: RunSummary | null
   readonly items: readonly QueueItem[]
   readonly diff: DiffResult | null
+  /** Why the followed run's changes could not be read, when its Review item waits and they could not be. */
+  readonly diffProblem: string | null
   readonly picked: string | null
   readonly patch: FilePatch | null
   /** A start or an answer is on its way. */
   readonly sending: boolean
-  /** The daemon's reason for an answer it declined, or the failure of a call. The item stays. */
+  /**
+   * The daemon's reason for an answer it declined, or the failure of a call. The item stays. The words stay too,
+   * through reloads and a change of run, until the person dismisses them or sends another answer.
+   */
   readonly refusal: string | null
   /** What the last answer did, in words. */
   readonly notice: string | null
@@ -59,6 +64,7 @@ export function initialLoopState(): LoopState {
     run: null,
     items: [],
     diff: null,
+    diffProblem: null,
     picked: null,
     patch: null,
     sending: false,
@@ -79,6 +85,7 @@ export type LoopAction =
       followed: Followed | null
       run: RunSummary | null
       diff: DiffResult | null
+      diffProblem: string | null
     }
   | { type: 'sync_failed'; problem: string }
   | { type: 'connection'; state: 'live' | 'lost' }
@@ -93,6 +100,7 @@ export type LoopAction =
   | { type: 'patch_loaded'; patch: FilePatch }
   | { type: 'discard_asked' }
   | { type: 'discard_kept' }
+  | { type: 'refusal_dismissed' }
 
 export function loopReducer(state: LoopState, action: LoopAction): LoopState {
   switch (action.type) {
@@ -142,12 +150,14 @@ export function loopReducer(state: LoopState, action: LoopAction): LoopState {
       return { ...state, confirmingDiscard: true }
     case 'discard_kept':
       return { ...state, confirmingDiscard: false }
+    case 'refusal_dismissed':
+      return { ...state, refusal: null }
   }
 }
 
 /**
  * What belongs to one run, which another run does not share. A re-prompt's notice is kept: the new run is still
- * working.
+ * working. So are the words of a refusal: they say which run they are about, and the person dismisses them.
  */
 function afterRunChange(state: LoopState): LoopState {
   return {
@@ -155,10 +165,10 @@ function afterRunChange(state: LoopState): LoopState {
     run: null,
     items: [],
     diff: null,
+    diffProblem: null,
     picked: null,
     patch: null,
     notice: state.sentBack === null ? null : state.notice,
-    refusal: null,
     confirmingDiscard: false,
   }
 }
@@ -183,6 +193,7 @@ function synced(state: LoopState, action: Extract<LoopAction, { type: 'synced' }
     followed: action.followed,
     run: action.run,
     diff: action.diff,
+    diffProblem: action.diffProblem,
     picked,
     patch: picked === null ? null : base.patch,
     // A reload that leaves the run as it was leaves what the person was told about it.

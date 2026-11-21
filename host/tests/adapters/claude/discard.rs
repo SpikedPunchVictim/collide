@@ -598,3 +598,265 @@ fn an_item_given_back_still_discards_when_the_task_is_already_dropped() {
     run.assert_removed();
     assert_eq!(run.category(), Category::Dropped);
 }
+
+// ---- a repository that is gone, and a run of an earlier daemon (ts-0160-th) ----------------------------------------
+
+impl Reviewed {
+    /// What the owner's check left: the repository's folder deleted, and the run's worktree under the daemon's own
+    /// `workspaces` folder as it was.
+    fn delete_the_repository(&self) {
+        fs::remove_dir_all(&self.fx.repo).unwrap();
+    }
+
+    /// Stops the daemon and starts it again, as a run of an earlier daemon process meets the next one.
+    fn restart(&mut self) {
+        self.fx.stop_daemon();
+        self.fx.start_daemon();
+    }
+
+    /// Stops the daemon, changes the folder its store records for the run's worktree, and starts it again.
+    fn record_the_folder_as(&mut self, folder: &Path) {
+        self.fx.stop_daemon();
+        let store = Store::open(&self.fx.paths().store_dir).unwrap();
+        let (name, json) = store.run_contexts().unwrap().remove(0);
+        let mut context: serde_json::Value = serde_json::from_str(&json).unwrap();
+        context["workspace_path"] = folder.to_str().unwrap().into();
+        store.set_run_context(&name, &context.to_string()).unwrap();
+        self.fx.start_daemon();
+    }
+
+    /// The refusal of a discard, with the item still in the Queue and no step written.
+    fn refused_at_the_door(&mut self) -> String {
+        let QueueAnswerResult::Refused { message } = self.discard() else {
+            panic!("the discard should be refused");
+        };
+        assert_eq!(self.fx.queue(&self.run), std::slice::from_ref(&self.item));
+        assert!(
+            self.discard_steps().is_empty(),
+            "{:?}",
+            self.discard_steps()
+        );
+        message
+    }
+
+    /// A folder of the owner's own, outside the daemon's `workspaces` folder, with one file in it.
+    fn somewhere_else(&self) -> (PathBuf, PathBuf) {
+        let folder = self.fx.root.join("somewhere-else");
+        fs::create_dir(&folder).unwrap();
+        let file = folder.join("mine.txt");
+        fs::write(&file, "not the run's\n").unwrap();
+        (folder, file)
+    }
+}
+
+#[test]
+fn a_review_item_whose_repository_is_gone_is_discarded_and_its_folder_deleted() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    let branch = run.branch();
+    run.delete_the_repository();
+
+    let result = run.discard();
+
+    let QueueAnswerResult::Discarded { note } = result else {
+        panic!("the discard should go through with a note, and gave {result:?}");
+    };
+    assert!(
+        note.contains("repository") && note.contains(&branch),
+        "{note}"
+    );
+    assert!(!run.tree().exists());
+    assert!(run.fx.queue(&run.run).is_empty());
+    assert_eq!(run_get(&mut run.fx, &run.run).summary.workspace, None);
+    assert_eq!(run.category(), Category::Dropped);
+}
+
+#[test]
+fn a_discard_with_the_repository_gone_writes_its_intent_and_outcome() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    let folder = run.tree();
+    run.delete_the_repository();
+
+    let result = run.discard();
+
+    assert!(
+        matches!(result, QueueAnswerResult::Discarded { .. }),
+        "{result:?}"
+    );
+    match run.discard_steps().as_slice() {
+        [
+            EventBody::StepIntent { action, .. },
+            EventBody::StepOutcome { result, .. },
+        ] => {
+            assert!(action.contains(folder.to_str().unwrap()), "{action}");
+            assert!(
+                action.contains("repository") && action.contains("gone"),
+                "{action}"
+            );
+            assert_eq!(*result, StepResult::Succeeded);
+        }
+        other => panic!("an intent and an outcome were expected: {other:?}"),
+    }
+    let moves = workspace_moves(&run.fx.events());
+    assert_eq!(
+        moves[moves.len() - 2..],
+        [WorkspaceState::Removable, WorkspaceState::Removed]
+    );
+}
+
+#[test]
+fn a_run_of_an_earlier_daemon_whose_repository_is_gone_is_discarded_after_a_restart() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    run.fx.stop_daemon();
+    run.delete_the_repository();
+    run.fx.start_daemon();
+
+    let result = run.discard();
+
+    assert!(
+        matches!(result, QueueAnswerResult::Discarded { .. }),
+        "{result:?}"
+    );
+    assert!(!run.tree().exists());
+    assert!(run.fx.queue_all().is_empty());
+}
+
+#[test]
+fn a_run_of_an_earlier_daemon_is_discarded_after_a_restart_with_the_repository_in_place() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    run.restart();
+
+    run.discarded();
+
+    run.assert_removed();
+    assert_eq!(run.category(), Category::Dropped);
+    assert!(run.fx.queue_all().is_empty());
+}
+
+#[test]
+fn a_worktree_folder_that_is_gone_with_the_repository_is_discarded_all_the_same() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    fs::remove_dir_all(run.tree()).unwrap();
+    run.delete_the_repository();
+
+    let result = run.discard();
+
+    assert!(
+        matches!(result, QueueAnswerResult::Discarded { .. }),
+        "{result:?}"
+    );
+    assert!(run.fx.queue_all().is_empty());
+}
+
+// ---- deleting a folder by a recorded path -------------------------------------------------------------------------
+
+#[test]
+fn a_recorded_folder_outside_the_workspaces_folder_is_refused_by_name_and_left_alone() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    let (elsewhere, file) = run.somewhere_else();
+    run.delete_the_repository();
+    run.record_the_folder_as(&elsewhere);
+
+    let message = run.refused_at_the_door();
+
+    assert!(message.contains(elsewhere.to_str().unwrap()), "{message}");
+    assert!(message.contains("workspaces"), "{message}");
+    assert!(file.is_file(), "the folder was deleted");
+}
+
+#[test]
+fn a_recorded_folder_outside_the_workspaces_folder_is_refused_with_the_repository_in_place_too() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    let (elsewhere, file) = run.somewhere_else();
+    run.record_the_folder_as(&elsewhere);
+
+    let message = run.refused_at_the_door();
+
+    assert!(message.contains(elsewhere.to_str().unwrap()), "{message}");
+    assert!(file.is_file(), "the folder was deleted");
+    assert!(!git_out(&run.fx.repo, &["branch", "--list", &run.branch()]).is_empty());
+}
+
+#[test]
+fn the_workspaces_folder_itself_and_another_runs_folder_are_refused() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    run.delete_the_repository();
+    let workspaces = run.tree().parent().unwrap().to_path_buf();
+    let other = workspaces.join("run-not-this-one");
+    fs::create_dir(&other).unwrap();
+    fs::write(other.join("theirs.txt"), "another run's\n").unwrap();
+
+    for folder in [workspaces.clone(), other.clone()] {
+        run.record_the_folder_as(&folder);
+        let message = run.refused_at_the_door();
+        assert!(message.contains(folder.to_str().unwrap()), "{message}");
+    }
+
+    assert!(other.join("theirs.txt").is_file());
+    assert!(run.tree().is_dir());
+}
+
+#[cfg(unix)]
+fn link_the_folder_to(run: &Reviewed, target: &Path) {
+    fs::remove_dir_all(run.tree()).unwrap();
+    std::os::unix::fs::symlink(target, run.tree()).unwrap();
+}
+
+#[test]
+fn a_run_folder_that_is_a_symlink_out_of_the_workspaces_folder_is_refused_and_not_followed() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    let (elsewhere, file) = run.somewhere_else();
+    run.fx.stop_daemon();
+    link_the_folder_to(&run, &elsewhere);
+    run.delete_the_repository();
+    run.fx.start_daemon();
+
+    let message = run.refused_at_the_door();
+
+    assert!(message.contains(run.tree().to_str().unwrap()), "{message}");
+    assert!(file.is_file(), "the link was followed");
+    assert!(fs::symlink_metadata(run.tree()).unwrap().is_symlink());
+}
+
+#[test]
+fn a_run_folder_that_is_a_symlink_out_of_the_workspaces_folder_is_refused_with_the_repository_in_place_too()
+ {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    let (elsewhere, file) = run.somewhere_else();
+    run.fx.stop_daemon();
+    link_the_folder_to(&run, &elsewhere);
+    run.fx.start_daemon();
+
+    let message = run.refused_at_the_door();
+
+    assert!(message.contains(run.tree().to_str().unwrap()), "{message}");
+    assert!(file.is_file(), "the link was followed");
+    assert!(fs::symlink_metadata(run.tree()).unwrap().is_symlink());
+}
+
+#[test]
+fn a_symlink_inside_the_worktree_that_points_out_is_removed_and_not_followed() {
+    let root = TempRoot::new();
+    let mut run = reviewed(&root, &adds("a.txt"));
+    let (elsewhere, file) = run.somewhere_else();
+    std::os::unix::fs::symlink(&elsewhere, run.tree().join("out")).unwrap();
+    run.delete_the_repository();
+
+    let result = run.discard();
+
+    assert!(
+        matches!(result, QueueAnswerResult::Discarded { .. }),
+        "{result:?}"
+    );
+    assert!(!run.tree().exists());
+    assert!(file.is_file(), "the link was followed");
+}

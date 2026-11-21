@@ -21,6 +21,7 @@ const actions: LoopActions = {
   reprompt: none,
   discard: none,
   keep: () => {},
+  dismissRefusal: () => {},
   pickFile: none,
   openItem: none,
 }
@@ -215,6 +216,31 @@ describe('the review item', () => {
     expect(html).toContain('Your own checkout is not touched')
     expect(html).toMatch(/<button[^>]*>Yes, delete this work<\/button>/)
     expect(html).toMatch(/<button[^>]*>Keep it<\/button>/)
+  })
+
+  test('the question about discarding names the run it is about, not another run in the Queue', () => {
+    const other = run('r-2', 'scratch:2', { state: { state: 'ended', outcome: 'done' } })
+    const html = show(
+      reviewing({
+        confirmingDiscard: true,
+        run: other,
+        items: [reviewItem('q-other', 'r-2', 'scratch:2'), reviewItem('q-review', 'r-1', 'scratch:1')],
+      }),
+    )
+    expect(html).toMatch(/Delete this work[\s\S]*Run r-2/)
+    expect(html).not.toMatch(/Run r-1/)
+  })
+
+  test('a review whose changes could not be read says so, and does not count them as none', () => {
+    const html = show(reviewing({ confirmingDiscard: true, diff: null, diffProblem: 'the run\'s branch is gone' }))
+    expect(html).toContain('could not read what changed: the run&#x27;s branch is gone')
+    expect(html).not.toContain('0 changed files')
+    expect(html).toMatch(/<button[^>]*>Yes, delete this work<\/button>/)
+  })
+
+  test('a refusal has a button that dismisses it', () => {
+    const html = show(reviewing({ refusal: 'Git could not read the branch.' }))
+    expect(html).toMatch(/role="alert"[^>]*>Git could not read the branch\.<\/p><button[^>]*>Dismiss<\/button>/)
   })
 
   test('with no confirmation asked the first discard button is plain', () => {

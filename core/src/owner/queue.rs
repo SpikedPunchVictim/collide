@@ -184,15 +184,29 @@ pub struct QueueAnswerParams {
 
 /// What the answer did. An accept that cannot merge answers `queued` with the new item (a conflict goes to the Queue
 /// and no checkout changes, 9a), `integrating` is a pull request that is not merged yet (0.4), and `refused` is an
-/// answer the owner declined, in Collide's words.
+/// answer the owner declined, in Collide's words. A discard that went through is `done`, or `discarded` when there is
+/// something to tell the person (ts-0160-th: the repository was gone, so the branch went with it).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum QueueAnswerResult {
     Done {},
-    Merged { commit: String },
-    Integrating { url: String, head: String },
-    Queued { item: String },
-    Refused { message: String },
+    /// A discard that deleted the work and has a `note` for the person, in Collide's words.
+    Discarded {
+        note: String,
+    },
+    Merged {
+        commit: String,
+    },
+    Integrating {
+        url: String,
+        head: String,
+    },
+    Queued {
+        item: String,
+    },
+    Refused {
+        message: String,
+    },
 }
 
 /// The params of the `queue.changed` notification: the Queue's size after a change and the items that came and went,

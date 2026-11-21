@@ -4,6 +4,7 @@ import type {
   BoardListResultOutput,
   DaemonAgentVersionsResultOutput,
   QueueAnswerParamsInput,
+  QueueAnswerResultOutput,
   RunDiffResultOutput,
 } from '../owner/generated.ts'
 
@@ -14,6 +15,7 @@ export type DiffResult = RunDiffResultOutput
 export type DiffFile = DiffResult['files'][number]
 export type FilePatch = NonNullable<DiffResult['patch']>
 export type ItemAnswer = QueueAnswerParamsInput['answer']
+export type AnsweredResult = Exclude<QueueAnswerResultOutput, { outcome: 'refused' }>
 
 /** The run the page shows, and its task. `board` and `prompt` are null for a run whose task is not found. */
 export interface Followed {

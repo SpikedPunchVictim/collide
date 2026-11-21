@@ -44,7 +44,8 @@
 //! it could not delete (a file that is locked) would then be a worktree git no longer knows, which the same command
 //! cannot remove again. Here, the same call after the cause is gone finishes the job. The folder is deleted only for a
 //! worktree this workspace made: its git directory is one of the repository's `worktrees/<name>`. The branch's last
-//! commit is read first ([`BuiltinWorkspace::branch_head`]), so the caller can record it.
+//! commit is read first ([`BuiltinWorkspace::branch_head`]), so the caller can record it. A repository whose folder is
+//! gone ([`BuiltinWorkspace::repository_gone`]) has no branch and no record to delete, so only the folder goes.
 //!
 //! The answers come from git's machine-readable output (`status --porcelain=v1 -z`, `rev-list --count`,
 //! `rev-parse`), run with `LC_ALL=C`, never from text meant for people.
@@ -455,6 +456,10 @@ impl BuiltinWorkspace {
             _ => self.check_move(WorkspaceState::Removed)?,
         }
         self.delete_folder()?;
+        // A repository that is gone took its branch and its record of the worktree with it: nothing else to delete.
+        if self.repository_gone() {
+            return self.move_to(WorkspaceState::Removed);
+        }
         // Git forgets the worktree first: it does not delete a branch that a worktree has checked out.
         self.git.run(&self.spec.repo, &["worktree", "prune"])?;
         if self.branch_head()?.is_some() {
@@ -462,6 +467,12 @@ impl BuiltinWorkspace {
                 .run(&self.spec.repo, &["branch", "-D", "--", &self.spec.branch])?;
         }
         self.move_to(WorkspaceState::Removed)
+    }
+
+    /// Whether the repository's folder is gone, which takes the branch and git's record of the worktree with it. Only
+    /// a missing folder counts: a folder that is there and that git cannot read is git's to explain.
+    pub fn repository_gone(&self) -> bool {
+        !self.spec.repo.is_dir()
     }
 
     /// The commit the workspace's branch points at, or `None` when the branch is not there (never made, or deleted).

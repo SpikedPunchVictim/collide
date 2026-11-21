@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "What the answer did. An accept that cannot merge answers `queued` with the new item (a conflict goes to the Queue\nand no checkout changes, 9a), `integrating` is a pull request that is not merged yet (0.4), and `refused` is an\nanswer the owner declined, in Collide's words.",
+  "description": "What the answer did. An accept that cannot merge answers `queued` with the new item (a conflict goes to the Queue\nand no checkout changes, 9a), `integrating` is a pull request that is not merged yet (0.4), and `refused` is an\nanswer the owner declined, in Collide's words. A discard that went through is `done`, or `discarded` when there is\nsomething to tell the person (ts-0160-th: the repository was gone, so the branch went with it).",
   "oneOf": [
     {
       "additionalProperties": false,
@@ -12,6 +12,24 @@
       },
       "required": [
         "outcome"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A discard that deleted the work and has a `note` for the person, in Collide's words.",
+      "properties": {
+        "note": {
+          "type": "string"
+        },
+        "outcome": {
+          "const": "discarded",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "note"
       ],
       "type": "object"
     },

@@ -27,6 +27,8 @@ export interface QueueProps {
   readonly open: QueueItem | null
   readonly others: readonly QueueItem[]
   readonly diff: DiffResult | null
+  /** Why the changes could not be read, when they could not. */
+  readonly diffProblem: string | null
   readonly picked: string | null
   readonly patch: { readonly text: string; readonly truncated: boolean } | null
   readonly sending: boolean
@@ -169,10 +171,14 @@ function PermissionItem({ item, sending, actions }: QueueProps & { readonly item
 }
 
 function ReviewItem(props: QueueProps & { readonly item: QueueItem }) {
-  const { item, diff, picked, patch, sending, confirmingDiscard, actions } = props
+  const { item, diff, diffProblem, picked, patch, sending, confirmingDiscard, actions } = props
   const [words, setWords] = useState('')
   const takes = (kind: QueueItem['answers'][number]) => item.answers.includes(kind)
   const changed = diff === null ? 0 : diff.files.length + diff.more
+  const copy =
+    diff === null
+      ? 'Collide could not count the changed files.'
+      : `They hold ${changed} changed ${plural(changed, 'file')}.`
   const sendBack = (event: FormEvent) => {
     event.preventDefault()
     void actions.reprompt(item.id, words).then(() => setWords(''))
@@ -186,7 +192,11 @@ function ReviewItem(props: QueueProps & { readonly item: QueueItem }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
-        {diff === null ? null : (
+        {diff === null ? (
+          <p className="text-muted-foreground">
+            {`Collide could not read what changed${diffProblem === null ? '.' : `: ${diffProblem}`}`}
+          </p>
+        ) : (
           <div className="flex flex-col gap-2">
             <h3 className="font-medium">What changed</h3>
             {diff.files.length === 0 ? <p className="text-muted-foreground">No files changed.</p> : null}
@@ -248,9 +258,10 @@ function ReviewItem(props: QueueProps & { readonly item: QueueItem }) {
             <p>
               <strong>Delete this work?</strong>
             </p>
+            <p className="text-muted-foreground">{`Run ${item.run ?? 'unknown'}`}</p>
             <p>
-              {`This deletes the agent's copy of the project and its branch, which hold ${changed} changed ` +
-                `${plural(changed, 'file')}. Your own checkout is not touched. This cannot be undone.`}
+              {`This deletes the agent's copy of the project and its branch. ${copy} ` +
+                'Your own checkout is not touched. This cannot be undone.'}
             </p>
             <div className="flex flex-wrap gap-2">
               <Button variant="destructive" disabled={sending} onClick={() => void actions.discard(item.id)}>

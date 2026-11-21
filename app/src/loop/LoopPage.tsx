@@ -2,6 +2,7 @@
 // version chips, the run and the one-item Queue. It is a function of `LoopState`, and what a person does is a call on
 // `LoopActions`, so a test renders it for any state with no browser. Stage 6a brings the tabs, and Stage 9a replaces
 // it.
+import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Chips } from './Chips.tsx'
 import { PromptBox } from './PromptBox.tsx'
@@ -25,6 +26,7 @@ export type LoopActions = Pick<
   | 'reprompt'
   | 'discard'
   | 'keep'
+  | 'dismissRefusal'
   | 'pickFile'
   | 'openItem'
 >
@@ -59,9 +61,16 @@ export function LoopPage({ state, actions, nowMs }: LoopPageProps) {
             </p>
           )}
           {state.refusal === null ? null : (
-            <p role="alert" className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
-              {state.refusal}
-            </p>
+            <div
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 p-3"
+            >
+              <p role="alert" className="text-sm text-destructive">
+                {state.refusal}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => actions.dismissRefusal()}>
+                Dismiss
+              </Button>
+            </div>
           )}
           {state.notice === null ? null : (
             <p role="status" className="rounded-md border p-3 text-sm">
@@ -83,6 +92,7 @@ export function LoopPage({ state, actions, nowMs }: LoopPageProps) {
           open={open}
           others={others}
           diff={open?.kind === 'review' ? state.diff : null}
+          diffProblem={open?.kind === 'review' ? state.diffProblem : null}
           picked={state.picked}
           patch={state.patch}
           sending={state.sending}
