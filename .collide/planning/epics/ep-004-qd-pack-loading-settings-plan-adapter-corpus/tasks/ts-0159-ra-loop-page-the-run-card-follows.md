@@ -1,7 +1,7 @@
 ---
 id: ts-0159-ra
 kind: task
-status: ready
+status: done
 title: "Loop page: the run card follows a stale Review item, not the newest run"
 owners: []
 links: []
