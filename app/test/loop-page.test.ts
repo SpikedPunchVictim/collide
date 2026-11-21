@@ -780,9 +780,19 @@ describe('the newest run (ts-0159-ra)', () => {
     expect(loop.getState().items.map((i) => i.id)).toEqual(['q-a'])
   })
 
-  test('a file run that starts while the followed run has a Review item waiting does not take the card', async () => {
+  test('a run the page followed by itself, with its Review item waiting, does not hold the card', async () => {
     const world = oneBoard()
     const loop = await following(world, true)
+    startFileRun(world, 'r-file')
+    await loop.idle()
+    expect(loop.getState().followed).toEqual({ board: null, task: null, prompt: null, run: 'r-file' })
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-a'])
+  })
+
+  test('a file run that starts while the opened run has a Review item waiting does not take the card', async () => {
+    const world = oneBoard()
+    const loop = await following(world, true)
+    await loop.openItem('q-a')
     startFileRun(world, 'r-file')
     await loop.idle()
     expect(loop.getState().run?.id).toBe('r-a')
@@ -793,6 +803,7 @@ describe('the newest run (ts-0159-ra)', () => {
   test('the held run takes the card at the next sync after the Review item is answered', async () => {
     const world = oneBoard()
     const loop = await following(world, true)
+    await loop.openItem('q-a')
     startFileRun(world, 'r-file')
     await loop.idle()
     world.announce('r-a')
@@ -803,17 +814,31 @@ describe('the newest run (ts-0159-ra)', () => {
     expect(loop.getState().followed).toEqual({ board: null, task: null, prompt: null, run: 'r-file' })
   })
 
-  test('a permission item of the followed run holds the card the same way, and lets go when answered', async () => {
+  test('a permission item of the opened run holds the card the same way, and lets go when answered', async () => {
     const world = oneBoard()
     world.seed('b-1', 'scratch:1', 'Old words', run('r-a', 'scratch:1', { started_ms: 500 }))
     world.items = [permissionItem('q-a', 'r-a', 'scratch:1')]
     const loop = await pageOf(world)
+    await loop.openItem('q-a')
     startFileRun(world, 'r-file')
     await loop.idle()
     expect(loop.getState().run?.id).toBe('r-a')
     answered(world)
     await loop.idle()
     expect(loop.getState().run?.id).toBe('r-file')
+  })
+
+  test('a run started from the page holds the card while its own Review item waits', async () => {
+    const world = oneBoard()
+    const loop = await pageOf(world)
+    await loop.startRun('New prompt')
+    await loop.idle()
+    world.finish('r-1', 'q-1')
+    world.announce('r-1')
+    await loop.idle()
+    startFileRun(world, 'r-file', 9_000)
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-1')
   })
 
   test('opening the item of A shows A, and a later sync keeps it', async () => {

@@ -64,8 +64,10 @@ The cause was the one the item names, and a second one near it. Both were seen r
 The fix, in `sync`: `run.list` is always `{ limit: 1 }`, the newest run of all. The controller keeps `newestSeen`, the
 newest run the card has shown or passed. A newest run that is not `newestSeen` takes the card. Otherwise the run
 followed stays (a person's `openItem`, or a run started from the page). With nothing followed, the newest run is
-followed. Exception, per the Notes: a run whose own `permission` or `review` item waits holds the card, so a newer run
-does not take it yet (the Review card keeps the person's re-prompt words and the diff). `newestSeen` advances only when
+followed. Exception, per the Notes: a run the person chose (`openItem` or `startRun`, kept in `chosen`) holds the
+card while its own `permission` or `review` item waits, so a newer run does not take it yet (the Review card keeps the
+person's re-prompt words and the diff). A run the page followed by itself does not hold it: with the newest run an older
+run whose item waits, a file run that starts later still shows. `newestSeen` advances only when
 the card is on the newest run, so a held-back run is still new at the first sync after the item is gone. The Queue
 items no longer choose the run. `FOLLOWED_KINDS` now names the kinds that hold it. `targetOf`, `findTask`, `openItem`,
 `startRun` and the Queue list are unchanged. No daemon change, no wire change, no `pnpm gen`.
@@ -82,7 +84,10 @@ run, the run present at page open, the run of another task, the opened older run
 after "Open", and two existing tests whose expectation was the old rule. Second round (the hold), red at runtime on
 the first version of the fix (3 failures): "a file run that starts while the followed run has a Review item waiting does
 not take the card", "the held run takes the card at the next sync after the Review item is answered" and "a permission
-item of the followed run holds the card the same way, and lets go when answered". Green before and after, as guards:
+item of the opened run holds the card the same way, and lets go when answered". Third round (the hold is for a run
+the person chose), red at runtime on the version before it (1 failure): "a run the page followed by itself, with its
+Review item waiting, does not hold the card". The hold tests now open A first (three tests, renamed "opened run"),
+and a new one covers a run started from the page. Green before and after, as guards:
 "a run started from the page shows, and the older run stays in the Queue" (`startRun` follows its own run, so that
 sub-case was never broken), "an opened older run with no item waiting keeps the card until a newer run starts" and
 "the run followed keeps the card when its own item waits and no newer run started".
@@ -98,9 +103,10 @@ after "Open".
 - "Newer" is a run the page has not seen as the newest, not a comparison of start times. It needs no clock and no
   stored run state. Alternative: compare `started_ms` with the followed run. That moves a page that opened an older run
   back to the newest at the next sync. Recommendation: as built.
-- A newer run does not take the card while the run followed has its own Review or permission item waiting, as the
-  Notes recommend. It takes it at the first sync after the item is answered or gone. Alternative (my first choice): the
-  newer run always wins. It moves the card off a Review the person is reading. Recommendation: as built.
+- A newer run does not take the card while a run the person opened or started has its own Review or permission item
+  waiting, as the Notes recommend. It takes it at the first sync after the item is answered or gone. Alternative (my
+  first choice): the newer run always wins. It moves the card off a Review the person is reading. Recommendation: as
+  built.
 - Proposed plan text: none.
 
 ### Not done, by design

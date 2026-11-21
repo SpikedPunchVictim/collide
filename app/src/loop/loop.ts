@@ -94,6 +94,8 @@ class LoopController implements Loop {
   private unstarted: { board: string; prompt: string; key: string } | null = null
   /** The newest run the last reload saw. A run that is not this one started since, and takes the card. */
   private newestSeen: string | null = null
+  /** The run the person chose, by "Open" or by starting it. Only its own waiting item holds the card. */
+  private chosen: string | null = null
 
   constructor(private readonly owner: OwnerClient) {
     // The page hands these to components as callbacks (`LoopActions`), so each keeps its `this`.
@@ -200,9 +202,10 @@ class LoopController implements Loop {
     ])
     const items = queue.items
     const newest = listed.runs[0]?.id ?? null
-    // A run the page has not seen takes the card, unless the run followed has its own item waiting: the person is
-    // answering it. Otherwise the run followed stays, which keeps the person's choice.
-    const held = followed !== null && items.some((i) => i.run === followed.run && FOLLOWED_KINDS.has(i.kind))
+    // A run the page has not seen takes the card, unless the person chose the run followed and its own item waits: they
+    // are answering it. Otherwise the run followed stays, which keeps the person's choice.
+    const waits = followed !== null && items.some((i) => i.run === followed.run && FOLLOWED_KINDS.has(i.kind))
+    const held = waits && followed?.run === this.chosen
     const takesCard = followed === null || (newest !== this.newestSeen && !held)
     const runId = takesCard ? (newest ?? followed?.run ?? null) : followed.run
     const target = runId === null ? null : await this.targetOf(runId, boards ?? this.state.boards, followed)
@@ -324,6 +327,7 @@ class LoopController implements Loop {
         return false
       }
       this.unstarted = null
+      this.chosen = started.run
       this.dispatch({ type: 'run_started', followed: { board, task: key, prompt, run: started.run } })
     } catch (failure) {
       this.dispatch({ type: 'refused', message: toOwnerError(failure).message })
@@ -427,6 +431,7 @@ class LoopController implements Loop {
     try {
       const { summary } = await this.owner.rpc('run.get', { run })
       const found = await this.findTask(boards, summary.tasks[0]?.key ?? null, run)
+      this.chosen = run
       this.dispatch({ type: 'run_started', followed: { ...found, run } })
     } catch (failure) {
       this.dispatch({ type: 'refused', message: toOwnerError(failure).message })
