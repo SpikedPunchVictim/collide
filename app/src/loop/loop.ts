@@ -2,10 +2,11 @@
 // is plain code over an `OwnerClient`, so a test drives it with a `FakeOwner` and no browser, and the React page
 // (`useLoop.ts`) only reads its state and calls its methods.
 //
-// The page follows one run, the run of the task it started or the run a Queue item names. It reloads what it shows
-// from the daemon, never from the events themselves: an event only says that it is time to look. So a reload after the
-// event stream came back (`shell.connection`, `back`) is the same code as a reload after any event, and a gap in the
-// daemon's log never leaves the page behind.
+// The page follows one run: the newest run, the run it started, or the run of a Queue item the person opened. A run
+// that starts later takes the card, whoever started it, unless the run followed has its own item waiting. It reloads
+// what it shows from the daemon, never from the events themselves: an event only says that it is time to look. So a
+// reload after the event stream came back (`shell.connection`, `back`) is the same code as a reload after any event,
+// and a gap in the daemon's log never leaves the page behind.
 import { type ChannelEvent, CONNECTION_EVENT, type OwnerClient, toOwnerError } from '../owner/client.ts'
 import { type LoopAction, type LoopState, initialLoopState, loopReducer } from './state.ts'
 import type {
@@ -30,6 +31,9 @@ import {
 /** The workflow of a prompt: `collide/quick` (Stage 3c). */
 export const QUICK_WORKFLOW = 'collide/quick'
 
+/** The Queue kinds whose item holds the card on its run while it waits. */
+const FOLLOWED_KINDS: ReadonlySet<QueueItem['kind']> = new Set(['permission', 'review'])
+
 /** The daemon events that say a run or the Queue may have changed. The rest are not worth a reload. */
 const RELOAD_EVENTS: ReadonlySet<string> = new Set([
   'run.transition',
@@ -39,9 +43,6 @@ const RELOAD_EVENTS: ReadonlySet<string> = new Set([
   'workspace.transition',
   'task.changed',
 ])
-
-/** The Queue kinds the page can answer. An item of another kind is listed, and the page says it cannot answer. */
-const FOLLOWED_KINDS: ReadonlySet<QueueItem['kind']> = new Set(['permission', 'review'])
 
 export interface Loop {
   getState(): LoopState
@@ -88,6 +89,8 @@ class LoopController implements Loop {
   private draining: Promise<void> | null = null
   /** A task made for a prompt whose run was refused, so the same prompt again makes no second task. */
   private unstarted: { board: string; prompt: string; key: string } | null = null
+  /** The newest run the last reload saw. A run that is not this one started since, and takes the card. */
+  private newestSeen: string | null = null
 
   constructor(private readonly owner: OwnerClient) {
     // The page hands these to components as callbacks (`LoopActions`), so each keeps its `this`.
@@ -184,23 +187,24 @@ class LoopController implements Loop {
    */
   private async sync(full: boolean): Promise<void> {
     const { followed } = this.state
-    const listParams =
-      followed?.board != null && followed.task != null
-        ? { board: followed.board, task: followed.task, limit: 1 }
-        : { limit: 1 }
     const [boards, versions, queue, listed] = await Promise.all([
       full ? this.owner.rpc('board.list').then((r) => r.boards) : undefined,
       full ? this.readVersions() : undefined,
       this.owner.rpc('queue.list', {}),
-      this.owner.rpc('run.list', listParams),
+      // The newest run of all, not of the followed task: a run of another task, or of none, must be seen too.
+      this.owner.rpc('run.list', { limit: 1 }),
     ])
     const items = queue.items
-    const runId =
-      followed?.run !== undefined
-        ? (listed.runs[0]?.id ?? followed.run)
-        : (items.find((i) => i.run != null && FOLLOWED_KINDS.has(i.kind))?.run ?? listed.runs[0]?.id ?? null)
+    const newest = listed.runs[0]?.id ?? null
+    // A run the page has not seen takes the card, unless the run followed has its own item waiting: the person is
+    // answering it. Otherwise the run followed stays, which keeps the person's choice.
+    const held = followed !== null && items.some((i) => i.run === followed.run && FOLLOWED_KINDS.has(i.kind))
+    const takesCard = followed === null || (newest !== this.newestSeen && !held)
+    const runId = takesCard ? (newest ?? followed?.run ?? null) : followed.run
     const target = runId === null ? null : await this.targetOf(runId, boards ?? this.state.boards, followed)
     const diff = target === null ? null : await this.diffOf(target.run.id, items)
+    // A run held back stays unseen, so it takes the card once the item is gone.
+    if (runId === newest) this.newestSeen = newest
     this.dispatch({
       type: 'synced',
       ...(boards === undefined ? {} : { boards }),

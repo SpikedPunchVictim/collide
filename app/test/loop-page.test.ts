@@ -3,7 +3,17 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { type Loop, createLoop } from '../src/loop/index.ts'
 import { OwnerError } from '../src/owner/index.ts'
-import { World, board, claude, confirmationItem, diff, permissionItem, reviewItem, run } from './support/loop-world.ts'
+import {
+  World,
+  board,
+  claude,
+  confirmationItem,
+  diff,
+  fileRun,
+  permissionItem,
+  reviewItem,
+  run,
+} from './support/loop-world.ts'
 
 // The thin-loop page's state and its calls, over a scripted `FakeOwner` (ts-0081-wm; 0.15: a reducer for the page's
 // state, so its tests need no browser). A test says what the daemon holds, pushes the event that tells the page, and
@@ -559,13 +569,14 @@ describe('closing the window and opening it again', () => {
     expect(loop.getState().boardId).toBe('b-2')
   })
 
-  test('a waiting item is followed before a newer run that nothing waits on', async () => {
+  test('a newer run is followed before an older run that has a waiting item (ts-0159-ra)', async () => {
     const world = oneBoard()
     world.seed('b-1', 'scratch:1', 'Old', run('r-1', 'scratch:1', { started_ms: 1_000 }))
     world.seed('b-1', 'scratch:2', 'New', run('r-2', 'scratch:2', { started_ms: 9_000 }))
     world.items = [permissionItem('q-1', 'r-1', 'scratch:1')]
     const loop = await pageOf(world)
-    expect(loop.getState().followed?.run).toBe('r-1')
+    expect(loop.getState().followed?.run).toBe('r-2')
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-1'])
   })
 
   test('with no run and no item the page shows an empty loop', async () => {
@@ -583,9 +594,9 @@ describe('closing the window and opening it again', () => {
     world.items = [permissionItem('q-1', 'r-1', 'scratch:1'), reviewItem('q-2', 'r-2', 'scratch:2')]
     world.diffs.set('r-2', diff())
     const loop = await pageOf(world)
-    expect(loop.getState().followed?.run).toBe('r-1')
-    await loop.openItem('q-2')
-    expect(loop.getState().followed).toMatchObject({ run: 'r-2', prompt: 'Second' })
+    expect(loop.getState().followed?.run).toBe('r-2')
+    await loop.openItem('q-1')
+    expect(loop.getState().followed).toMatchObject({ run: 'r-1', prompt: 'First' })
   })
 
   test('a load that fails says so in words and the page can load again', async () => {
@@ -596,6 +607,160 @@ describe('closing the window and opening it again', () => {
     const loop = await pageOf(world)
     expect(loop.getState().problem).toBe('Could not reach Collide: the daemon is not running')
     expect(loop.getState().loading).toBe(false)
+  })
+})
+
+describe('the newest run (ts-0159-ra)', () => {
+  /** The page open on run A of a task. Its Review item waits when `waiting` is true, else it still runs. */
+  async function following(world: World, waiting: boolean): Promise<Loop> {
+    world.seed('b-1', 'scratch:1', 'Old words', run('r-a', 'scratch:1', { started_ms: 500 }))
+    if (waiting) world.finish('r-a', 'q-a')
+    const loop = await pageOf(world)
+    expect(loop.getState().followed?.run).toBe('r-a')
+    return loop
+  }
+
+  /** What the daemon sends when `collide run` starts a file run. */
+  function startFileRun(world: World, id: string, startedMs = 8_000): void {
+    world.addRun('b-1', fileRun(id, { started_ms: startedMs }))
+    world.announce(id)
+  }
+
+  /** The person answered A's item: the Queue no longer holds it. */
+  function answered(world: World): void {
+    world.items = []
+    world.owner.push({ method: 'queue.changed', params: { count: 0, added: [], removed: ['q-a'] } })
+  }
+
+  test('a file run that starts while the followed run runs shows on the card', async () => {
+    const world = oneBoard()
+    const loop = await following(world, false)
+    startFileRun(world, 'r-file')
+    await loop.idle()
+    expect(loop.getState().followed).toEqual({ board: null, task: null, prompt: null, run: 'r-file' })
+  })
+
+  test('a run that is there when the page opens wins over the Review item of an older run', async () => {
+    const world = oneBoard()
+    world.seed('b-1', 'scratch:1', 'Old words', run('r-a', 'scratch:1', { started_ms: 500 }))
+    world.finish('r-a', 'q-a')
+    world.addRun('b-1', fileRun('r-file', { started_ms: 8_000 }))
+    const loop = await pageOf(world)
+    expect(loop.getState().followed?.run).toBe('r-file')
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-a'])
+  })
+
+  test('a run of another task that starts while the followed run runs shows on the card', async () => {
+    const world = oneBoard()
+    const loop = await following(world, false)
+    world.seed('b-1', 'scratch:2', 'Other words', run('r-b', 'scratch:2', { started_ms: 8_000 }))
+    world.announce('r-b')
+    await loop.idle()
+    expect(loop.getState().followed).toEqual({ board: 'b-1', task: 'scratch:2', prompt: 'Other words', run: 'r-b' })
+  })
+
+  test('a run started from the page shows, and the older run stays in the Queue', async () => {
+    const world = oneBoard()
+    const loop = await following(world, true)
+    await loop.startRun('New prompt')
+    await loop.idle()
+    expect(loop.getState().followed).toMatchObject({ task: 'scratch:1', prompt: 'New prompt' })
+    expect(loop.getState().run?.id).toBe('r-1')
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-a'])
+  })
+
+  test('a file run that starts while the followed run has a Review item waiting does not take the card', async () => {
+    const world = oneBoard()
+    const loop = await following(world, true)
+    startFileRun(world, 'r-file')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-a')
+    expect(loop.getState().diff?.files).toHaveLength(1)
+    expect(loop.getState().items.map((i) => i.id)).toEqual(['q-a'])
+  })
+
+  test('the held run takes the card at the next sync after the Review item is answered', async () => {
+    const world = oneBoard()
+    const loop = await following(world, true)
+    startFileRun(world, 'r-file')
+    await loop.idle()
+    world.announce('r-a')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-a')
+    answered(world)
+    await loop.idle()
+    expect(loop.getState().followed).toEqual({ board: null, task: null, prompt: null, run: 'r-file' })
+  })
+
+  test('a permission item of the followed run holds the card the same way, and lets go when answered', async () => {
+    const world = oneBoard()
+    world.seed('b-1', 'scratch:1', 'Old words', run('r-a', 'scratch:1', { started_ms: 500 }))
+    world.items = [permissionItem('q-a', 'r-a', 'scratch:1')]
+    const loop = await pageOf(world)
+    startFileRun(world, 'r-file')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-a')
+    answered(world)
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-file')
+  })
+
+  test('opening the item of A shows A, and a later sync keeps it', async () => {
+    const world = oneBoard()
+    world.seed('b-1', 'scratch:1', 'Old words', run('r-a', 'scratch:1', { started_ms: 500 }))
+    world.finish('r-a', 'q-a')
+    world.addRun('b-1', fileRun('r-file', { started_ms: 8_000 }))
+    const loop = await pageOf(world)
+    expect(loop.getState().run?.id).toBe('r-file')
+    await loop.openItem('q-a')
+    expect(loop.getState().run?.id).toBe('r-a')
+    world.announce('r-file')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-a')
+    expect(loop.getState().followed).toMatchObject({ task: 'scratch:1', prompt: 'Old words' })
+  })
+
+  test('opening the item of a run with no task shows it, and a later sync keeps it', async () => {
+    const world = oneBoard()
+    world.addRun('b-1', fileRun('r-f1', { started_ms: 2_000 }))
+    world.items = [{ ...permissionItem('q-f1', 'r-f1', 'unused'), task: null }]
+    const loop = await pageOf(world)
+    world.items = []
+    startFileRun(world, 'r-f2')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-f2')
+    world.items = [{ ...permissionItem('q-f1', 'r-f1', 'unused'), task: null }]
+    world.owner.push({ method: 'queue.changed', params: { count: 1, added: ['q-f1'], removed: [] } })
+    await loop.idle()
+    await loop.openItem('q-f1')
+    expect(loop.getState().run?.id).toBe('r-f1')
+    world.announce('r-f2')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-f1')
+  })
+
+  test('an opened older run with no item waiting keeps the card until a newer run starts', async () => {
+    const world = oneBoard()
+    world.seed('b-1', 'scratch:1', 'Old words', run('r-a', 'scratch:1', { started_ms: 500 }))
+    world.finish('r-a', 'q-a')
+    world.addRun('b-1', fileRun('r-file', { started_ms: 8_000 }))
+    const loop = await pageOf(world)
+    await loop.openItem('q-a')
+    answered(world)
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-a')
+    startFileRun(world, 'r-later', 9_000)
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-later')
+  })
+
+  test('the run followed keeps the card when its own item waits and no newer run started', async () => {
+    const world = oneBoard()
+    const loop = await following(world, true)
+    world.announce('r-a')
+    await loop.idle()
+    expect(loop.getState().run?.id).toBe('r-a')
+    expect(loop.getState().diff?.files).toHaveLength(1)
   })
 })
 

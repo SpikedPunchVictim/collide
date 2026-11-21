@@ -57,6 +57,11 @@ export function run(id: string, task: string, over: Partial<Run> = {}): Run {
   }
 }
 
+/** A run started by `collide run` on a file: it has no task, and so no review item. */
+export function fileRun(id: string, over: Partial<Run> = {}): Run {
+  return run(id, 'unused', { tasks: [], ...over })
+}
+
 export function reviewItem(
   id: string,
   runId: string,
@@ -242,8 +247,9 @@ export class World {
 
   addRun(boardId: string, summary: Run): void {
     this.runs.set(summary.id, summary)
-    const task = this.tasksOf(boardId).get(summary.tasks[0]!.key)!
-    task.runs.unshift(summary.id)
+    const key = summary.tasks[0]?.key
+    // A run with no task is in no task's list, as `task.get` gives them.
+    if (key !== undefined) this.tasksOf(boardId).get(key)!.runs.unshift(summary.id)
   }
 
   setRun(id: string, over: Partial<Run>): void {
