@@ -648,8 +648,8 @@ claude
 
    Ask the session, in these words:
 
-   > Run `collide guide` and read it. Then start one run with `collide run follow-up-probe.md --budget 0.10` in the >
-   background, and tell me the run id it prints. Do not use sleep.
+   > Run `collide guide` and read it. Then start one run with `collide run follow-up-probe.md --budget 0.10` in the
+   > background, and tell me the run id it prints. Do not use sleep.
 
    `collide run` stays until the phase ends, and a long wait may time out in the session's shell: that is why it is
    started in the background. `--budget 0.10` is a backstop; the run is one command on the small model. Start the loop
@@ -944,7 +944,7 @@ What you will meet, and the item it is carried to or from. None of it is a failu
   call provokes it. Keys the real CLI has and the fake leaves empty (`status` proposals, epics, blocked tasks, velocity)
   pass as "empty matches any". `new task --blocked-by` is not a case.
 - **`ts-0155-wb`.** The app does not show the wait after a restart.
-- **`ts-0156-nt`.** No test, and here no way found, to put Collide's plan and Orchard's on one board (step 4e).
+- **`ts-0156-nt`.** One board cannot hold Collide's plan and Orchard's: both are the `plan` source (step 4e).
 - **`ts-0158-ow`.** A failed queue is not retried by the watcher, only by a `get`. A question's place in the queue can
   differ from a fresh `get` until a question changes.
 - **Here.** The fixtures and the fake plan CLI are made up; their headers say they follow the shapes read in your copy.
