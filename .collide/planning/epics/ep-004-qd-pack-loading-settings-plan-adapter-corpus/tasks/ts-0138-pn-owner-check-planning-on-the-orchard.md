@@ -23,6 +23,7 @@ links:
   - { type: blocked-by, to: ts-0156-nt }
   - { type: blocked-by, to: ts-0157-hd }
   - { type: blocked-by, to: ts-0158-ow }
+  - { type: blocked-by, to: ts-0159-ra }
 ---
 
 ## Goal
@@ -122,6 +123,9 @@ to `ts-0137-pg` and `ts-0139-wq` to `ts-0158-ow`. **Every command below was not 
 **(unconfirmed)** is a step or an expected output that the writer could not confirm from code; it says what was looked
 for. If a pass line does not come out, that is a result: write it in step 9.
 
+Run on 2026-11-20 and 2026-11-21, by an agent and the owner together. The text below has that run's fixes, and no
+**(unconfirmed)** line is left where the run settled it. Step 9 holds the record.
+
 Owner decisions, taken as the item recommends until you answer otherwise:
 
 - The accept step (5) uses the loop page of Stage 3c. If it shows the confirmation badly, that is a result to record.
@@ -163,9 +167,13 @@ pnpm --filter @collide/app exec tauri build --debug --no-bundle
 ls target/debug/collide target/debug/collide-daemon target/debug/collide-app
 ```
 
-   The three app lines are those of `ts-0083-uf`. That the last build puts `collide-app` in `target/debug` is
-   **(unconfirmed)**: `ts-0083-uf` says the same. If `ls` fails for `collide-app`, find it under `target/` and say so in
-   step 9; steps 5 and 6c need it.
+   The three app lines are those of `ts-0083-uf`. The last build puts `collide-app` in `target/debug` (confirmed in the
+   run). It is slow: 41 minutes on the run's machine, where `cargo build` took 7. It also rewrites
+   `app/src-tauri/Cargo.toml` (the `tauri` and `tauri-build` lines gain `features = []`); put it back after the build:
+
+```sh
+git checkout -- app/src-tauri/Cargo.toml
+```
 
 2. Make `<temp>` and the environment file. The short `/tmp` path keeps the daemon's socket path under its limit of 103
    bytes (`MAX_SOCKET_PATH_BYTES` in `host/src/daemon.rs`). Git gets an identity because the fresh `HOME` has none.
@@ -202,6 +210,7 @@ rows() { node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"))
 for(const t of d.tasks)console.log(t.key,t.state.status,t.path??"-")'; }
 EOF
 printf 'export PATH="%s"\n' "$PATH" > "$CHECK/home/.zshenv"
+cp "$CHECK/home/.zshenv" "$CHECK/home/.zprofile"
 echo "$CHECK"
 ```
 
@@ -210,7 +219,8 @@ echo "$CHECK"
 
    The `.zshenv` line is for the daemon, which captures its base environment from a login shell started with `-l -i -c`
    (`host/src/base_env.rs`). Under the temp `HOME` that shell reads none of your profile, so it may find no `node`.
-   Putting your `PATH` in `.zshenv` is the fix; that it reaches the daemon is **(unconfirmed)**, as in `ts-0121-xp`.
+   `.zshenv` alone is not enough: a login shell then runs the system's `/etc/zprofile`, whose `path_helper` puts the
+   system folders first, and the run found an older `node` there. The same line in `.zprofile`, read after it, wins.
    Check it:
 
 ```sh
@@ -299,9 +309,8 @@ collide tasks --view spikes 2>&1 >/dev/null | grep -c skipped
 
 Pass: the first three numbers are equal (ten at the writer's reading; yours is the count of records), every status is
 one of `planned`, `running`, `concluded`, `abandoned`, `superseded`, and the last two numbers are `0`. The first command
-also starts this check's daemon, and says so once on standard error. Whether a task has a `path` in the JSON is
-**(unconfirmed)**: the writer read `pathOf` in `packs/plan/src/scan.ts`, which gives one for every file item. If `rows`
-prints `-` for the path, count with `collide tasks --view spikes` alone and say so in step 9.
+also starts this check's daemon, and says so on standard error, with a line about `setsid` and, on a cold start, the
+line that it waits for the full list. Each task has a `path` in the JSON (confirmed in the run).
 
 ### 3. Private root and layout
 
@@ -326,7 +335,7 @@ git status --short
 git log --oneline -1
 ```
 
-Pass: the first create prints `ok  created plan:ts-<id>` and a `title` line, with no `file` line, and exits 0.
+Pass: the first create prints `ok  created ep-004-qd / ts-<id>` and a `title` line, with no `file` line, and exits 0.
 `git status --short` prints nothing. `collide tasks` lists the item and `find` names one file under the temp root. The
 second create exits 1 with `--commit refused:` and the private root in the words (`commit_reported` in
 `host/src/task_cli.rs`), the item is still written, and `git status --short` still prints nothing and `git log` is the
@@ -358,9 +367,11 @@ stop_daemon
 collide tasks; echo "exit $?"
 ```
 
-Pass: nothing on standard output from the plan source; a line `collide: source plan could not start: <reason>` on
-standard error naming `layout.root` and the rule (a `..` part); exit 1. The exact words of the reason are the provider's
-(`src/layout.ts`); write them in step 9. Then two more cases, each the same four lines with a new `root`:
+Pass: standard error has a line ``collide: source plan may be out of date: ... refused `initialize` ...: <reason>``
+naming `layout.root` and the rule (a `..` part), and the command exits 0. Standard output still lists the tasks the
+daemon read before, under the old layout: a source that fails to start keeps its cached tasks, marked stale
+(`corpus_service.rs`). The exact words of the reason are the provider's (`src/layout.ts`). Then two more cases, each the
+same four lines with a new `root`:
 
 ```sh
 printf 'config:\n  collide/plan:\n    layout:\n      root: .git/planning\n' > .collide/config.yaml
@@ -371,8 +382,8 @@ git add outside-link .collide/config.yaml && git commit -q -m "check: a link out
 collide tasks; echo "exit $?"
 ```
 
-Pass: each is refused with the reason (a root under `.git`; a link that leaves the repository) and exit 1. Then put the
-clone back:
+Pass: each is refused with the reason (a root under `.git/`, git's own folder; a path that goes through a symbolic link
+which leaves the repository), the same way. Then put the clone back:
 
 ```sh
 git switch -q main && git branch -q -D layout-check && stop_daemon
@@ -412,9 +423,9 @@ collide trust
 
 Pass for `trust`: `Line <the line>`, a `Trust hash`, `Changes:` listing the added files, a block `Pack reference 0.1.0`
 with `Source: repo:.collide/packs/reference` and the provider `plan`, then `Trust this? [y/N]`. Read the review; answer
-`y`. Then "Trusted line ... at <hash>." `collide init` starts the daemon and says so once. Whether the manifest above
-loads is **(unconfirmed)**: it is the test's manifest with the header written by hand; if `collide trust` or the first
-listing refuses it, write the words in step 9.
+`y`. Then "Trusted line ... at <hash>." `collide trust` asks only at a terminal: with its input piped it refuses ("no
+terminal to ask at"), exit 5; then read the review and run `collide trust --yes`. `collide init` writes the board file
+and starts no daemon; the first `collide tasks` starts it. The manifest above loads (confirmed in the run).
 
 **4b. The Decisions needed view against the human queue.** The provider runs
 `./plan status --root <root>/arch --format json` itself and puts each question the queue names in the collection
@@ -422,12 +433,13 @@ listing refuses it, write the words in step 9.
 
 ```sh
 cd "$COPY"
-time collide tasks > "$CHECK/all.txt"
+time collide tasks > "$CHECK/all.txt"   # the time shows on the terminal; standard output goes to the file
 wc -l < "$CHECK/all.txt"
 ./plan status --root "$COPY/arch" --format json > "$CHECK/status.json"
 node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))
 for(const q of s.data.queue)console.log(q.question)' "$CHECK/status.json" > "$CHECK/queue.ids"
 collide tasks --view decisions-needed | awk '{print $1}' | sed 's/^plan://' > "$CHECK/view.ids"
+sed -E -i '' 's/^(Q-[0-9]+-[0-9]+).*/\1/' "$CHECK/queue.ids"   # the queue names a question with its slug
 wc -l "$CHECK/queue.ids" "$CHECK/view.ids"
 sort "$CHECK/queue.ids" | diff - <(sort "$CHECK/view.ids") && echo "same ids"
 diff "$CHECK/queue.ids" "$CHECK/view.ids" && echo "same order"
@@ -437,7 +449,8 @@ Pass: the listing prints one line per item as `key  status  kind  title`, the ti
 it), `same ids`, and the two counts agree. `same order` should print too: the plan CLI sorts by id and the view lists by
 key. If the counts differ, write both lists' ids, never their titles. A line `collide: skipped <path>: <reason>` on
 standard error is a file the provider could not read: write each reason in step 9. `data.queue[].question` is the field
-the provider reads (`queue.ts`); that the real CLI names it the same is what the shape files of step 8 hold.
+the provider reads (`queue.ts`). The real CLI gives the full id there, slug and all, and the view's keys are the short
+id: that is why `queue.ids` is cut to the short id. If your ids have another shape, change the `sed` to fit.
 
 **4c. The evidence link from the spike's side.** An ADR's `evidence` points at a spike; the spike shows the incoming
 link by its inverse, "evidence for" (`evidence` in `fixtures/packs/orchard/providers/plan/declaration.ts`).
@@ -445,16 +458,16 @@ link by its inverse, "evidence for" (`evidence` in `fixtures/packs/orchard/provi
 ```sh
 for k in $(collide tasks --kind spike | awk '{print $1}'); do
   collide task "$k" --json | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"))
-  const e=d.links.filter(l=>l.dir==="in"&&l.link_type==="evidence"&&!l.missing).map(l=>l.key)
+  const e=d.links.filter(l=>l.dir==="in"&&l.type==="evidence"&&!l.missing).map(l=>l.key)
   if(e.length)console.log(d.task.key,"<-",e.join(" "))'
 done | head -5
 ```
 
 Pass: at least one spike line, naming one or more ADR keys. Then the text form of one of them, with a spike key from the
-output: `collide task plan:<spike id> | grep -i evidence`. Pass: the line reads "evidence for" and the ADR. The JSON
-field names (`dir`, `link_type`, `key`, `missing`) are those of the Rust fields the daemon test reads; that they
-serialize unchanged is **(unconfirmed)**: if the loop prints nothing, run `collide task plan:<spike id> --json` and look
-at `links`. If the copy has no ADR with evidence, write that in step 9.
+output: `collide task plan:<spike id> | grep -i evidence`. Pass: the line reads "evidence for" and the ADR, with the
+ADR's status. A link's JSON keys are `category`, `dir`, `key`, `kind`, `missing`, `stale`, `status` and `type`. The loop
+runs the CLI once per spike: about 100 s for a hundred spikes. If the copy has no ADR with evidence, write that in step
+9.
 
 **4d. The CLI forms on a real clone** (`ts-0149-kq`, Not done: they were never run on a real tree). Writes go through
 the real `./plan`, in `<check copy>`. Give the first `collide task create` a made-up title.
@@ -467,8 +480,9 @@ collide task create "Probe task" epic="$EPIC_ID" proposal="$PROPOSAL_ID"; echo "
 git status --short
 ```
 
-Pass: `--ready` prints tasks, or says why none is ready; the create prints `ok  created plan:<id>`; `git status` shows
-the files the real plan CLI wrote. Take the new key for `<probe key>`, then:
+Pass: `--ready` prints tasks, or says why none is ready; the create prints `ok  created <id with its slug>`, a `title`
+line and a `file` line for each file the real plan CLI wrote (the task, and the epic's file whose table it regenerates);
+`git status` shows them. Take the new id for `<probe key>`, then:
 
 ```sh
 collide task "<probe key>" | head -8
@@ -477,9 +491,8 @@ collide task "<probe key>" setStatus done; echo "exit $?"
 ```
 
 Pass: the text shows the title and its status; `setStatus ready` exits 0; the move to `done` is refused with the plan
-CLI's own words and exit 5 (that the plan CLI's lifecycle forbids `ready` to `done` is **(unconfirmed)**: if it allows
-it, write that in step 9). A bare id (`collide task <id>` with no `plan:`) may be refused as "not an item id"
-(`ts-0149-kq`): write the words either way.
+CLI's own words ("not a legal transition", and the legal moves from `ready`) and exit 5. A bare id (`collide task <id>`
+with no `plan:`) resolves to the item.
 
 **4e. Two checks of the build, apart from the Success criteria.**
 
@@ -501,12 +514,16 @@ Second, the wait after a restart (`ts-0155-wb`). After the daemon ends, the firs
 and waits for the relist; when that takes over 0.5 s it prints one line on standard error.
 
 ```sh
-time collide tasks > "$CHECK/settled.txt"
+secs() { perl -MTime::HiRes=time -e '$t=time; system @ARGV; printf STDERR "took %.2f s\n", time-$t; exit($?>>8)' "$@"; }
+secs "$COLLIDE_BIN/collide" tasks > "$CHECK/settled.txt"
 stop_daemon
-time collide tasks > "$CHECK/first.txt" 2> "$CHECK/first.err"; echo "exit $?"
+secs "$COLLIDE_BIN/collide" tasks > "$CHECK/first.txt" 2> "$CHECK/first.err"; echo "exit $?"
 cat "$CHECK/first.err"
 cmp "$CHECK/settled.txt" "$CHECK/first.txt" && echo "stdout equal"
 ```
+
+`secs` stands in for zsh's `time`, whose report does not follow a redirection of the command it times. The second
+`took` line is in `first.err`.
 
 Pass: `stdout equal`, exit 0. Standard error has `collide: the daemon was not running; started it`. When the second
 `time` is over 0.5 s it also has `collide: the daemon is still listing the board's sources; waiting for the full list`,
@@ -523,7 +540,7 @@ The ops `accept`, `defer`, `reject`, `resolve` and `reopen` are a person's (`ts-
 nothing, prints the Queue item's id and exits 12; the app's Accept applies it.
 
 1. Make a proposal that can be accepted: made up, on a branch of `<collide clone>`. A move to `proposed` needs a clean
-   Features part; whether an empty one is clean is **(unconfirmed)**, so the second line adds one feature.
+   Features part, so the second line adds one feature (the run did it this way and did not try an empty part).
 
 ```sh
 . "$CHECK/env.sh"
@@ -532,7 +549,7 @@ git switch -q -c accept-check
 collide task create "Accept probe" kind=proposal epic=ep-004-qd --commit
 ```
 
-   Copy the key it prints (`plan:pr-<id>`) into the next lines.
+   It prints `ok  created ep-004-qd / pr-<id>`. Put that id after `plan:` in the next lines.
 
 ```sh
 export PROPOSAL=plan:pr-<id>
@@ -566,7 +583,8 @@ git status --short
    folder". Look at "Needs you":
 
    - [ ] A row for the confirmation, with an Accept and a Dismiss button, and a title that names the proposal. The words
-         of the title are `waiting_title`'s in the daemon: **(unconfirmed)**; write what it says.
+         of the title are `waiting_title`'s in the daemon: **(unconfirmed)**. The CLI's reason in 5.2 reads `Confirm:
+         accept proposal ...`; the run did not write down the row's words. Write what it says.
    - [ ] Press Accept. The row goes.
 
 ```sh
@@ -580,7 +598,8 @@ collide task "$PROPOSAL" | head -4
    what the page showed.
 
 4. Put the clone back: `git switch -q main && git branch -q -D accept-check`, with the files left uncommitted removed by
-   `git checkout -- . && git clean -fd .collide` if the diff above is still there. Quit the app.
+   `git checkout -- . && git clean -fd .collide` if the diff above is still there. Quit the app, and **close the
+   terminal that started it**: that terminal holds the temp `HOME`, and step 6 must not start anything from it.
 
 ### 6. Own terminal
 
@@ -601,7 +620,10 @@ runs and worktrees in `~/Library/Application Support/Collide/`, the private root
 
 6.0. Before anything starts.
 
-1. A terminal that has **not** sourced `env.sh`; call it your own terminal. Stop an older daemon of yours: one from an
+1. A new terminal window, never one that sourced `env.sh`; call it your own terminal. Check it first: `echo $HOME`
+   prints your own home folder, and `echo $COLLIDE_DAEMON_ROOT` prints nothing. An app or `collide` started with the
+   temp `HOME` talks to a daemon of its own and never sees your runs (it happened in the run: `ts-0164-pa`). Stop an
+   older daemon of yours: one from an
    older build lacks the code of `ts-0139-wq` and `ts-0140-gk`. There is no `collide` command for it;
    `collide stop <run>` stops a run. A daemon that is not there is fine.
 
@@ -661,13 +683,11 @@ claude
 
    What to look at on the page:
 
-   - [ ] The run card shows the run id the session printed, with its state moving from running to ended. Whether the
-     page lists a file run in the card (it reads `run.list` with no board, `app/src/loop/loop.ts`, `sync`) is
-     **(unconfirmed)**: the writer read the code and never saw a file run on the page. If the card stays empty, that is
-     the result for the first criterion.
-   - [ ] "Needs you" shows no `permission` row naming the `collide` command at any time. A file run may end with no row
-         at all; whether it leaves one is **(unconfirmed)** (`quick_run.rs` makes a Review item for a quick run, and the
-         writer found none for a file run).
+   - [ ] The run card shows the run id the session printed, with its state moving from running to ended. In the run it
+     did not: the page followed an older run's waiting Review item (`ts-0159-ra`). Once that is fixed, this look is the
+     one re-check left of this step.
+   - [ ] "Needs you" shows no `permission` row naming the `collide` command at any time. A file run ends with no row at
+         all: it makes no Review item (confirmed in the run).
    - [ ] The session did run `collide guide` first, in its own transcript.
 
    Then, in your own terminal, from `<temp>/collide-clone`:
@@ -701,7 +721,9 @@ and a quick run has no cap (`ts-0083-uf`): the one-line prompt is the limit, on 
 
 2. Look at the page while it runs, as in 6b. The run card shows the run; "Needs you" shows no permission row for the
    `collide` command. When the run ends, a Review item appears with Accept, Re-prompt and Discard. Press **Discard**
-   (and confirm): it removes the run's worktree and branch (`discard` in `host/src/file_run/discard.rs`).
+   (and confirm): it removes the run's worktree and branch (`discard` in `host/src/file_run/discard.rs`). In the run
+   nothing was removed (`ts-0160-th`): check with `git worktree list` in `<collide clone>`, write what the page said,
+   and remove what is left as in "Clean up".
 
 3. Look for the item as in 6b: `collide tasks | grep 'Follow-up probe two'` from `<temp>/collide-clone`, in your own
    terminal. Pass: listed, a private item, not in `collide tasks --view follow-ups`.
@@ -727,22 +749,25 @@ collide task create "Reid probe" epic=ep-004-qd seed=7 --commit
 collide task create "Reid linker" epic=ep-004-qd seed=8 --commit
 ```
 
-Copy the two keys. `ID` is the probe's id without `plan:`.
+Each prints `ok  created ep-004-qd / ts-<id>`. `ID` is the probe's id; `LINKER` is the linker's, after `plan:`.
 
 ```sh
 export ID=ts-<probe id> LINKER=plan:ts-<linker id>
 collide task "$LINKER" link "$ID" type=blocked-by --commit
 FILE="$(find .collide/planning -name "$ID-*.md")"
 echo "$FILE"
-cp "$FILE" "${FILE%.md}-copy.md"
-sed -i '' 's/^title: .*/title: "Reid probe copy"/' "${FILE%.md}-copy.md"
+COPY_FILE="$(dirname "$FILE")/$ID-zcopy.md"   # sorts after "$FILE" (`reid-probe`), so the copy is the one set aside
+cp "$FILE" "$COPY_FILE"
+sed -i '' 's/^title: .*/title: "Reid probe copy"/' "$COPY_FILE"
 git add -A .collide && git commit -q -m "check: the same id twice"
+stop_daemon
 collide tasks 2>&1 >/dev/null | grep skipped
 ```
 
 Pass: `echo "$FILE"` prints one path; the last command prints one `collide: skipped <path>: <reason>` line for the copy,
-and the reason says the id is taken twice. The first file is the item; the second in scan order is the one set aside.
-Then:
+and the reason says the id is taken twice. The first file in scan order is the item; the second is the one set aside.
+`stop_daemon` is there because a running daemon's watcher, seeing the copy, lists two rows with the one key, and the
+reid below is then refused as "matches 2 items", exit 3 (`ts-0161-ta`); a fresh listing has one. Then:
 
 ```sh
 collide task reid "$ID" --commit; echo "exit $?"
@@ -753,7 +778,8 @@ grep -rl "$ID" .collide/planning
 
 Pass: exit 0; the output names the old and the new id and the files touched; `links   rewritten in <key>` for the
 linker; the commit touches the renamed copy (its `id:` line and name) and the linker's file; no `skipped` line is left
-(`0`); the last command lists only the first probe's own file. Open the linker's file: its `blocked-by` target is the
+(`0`; the first listing right after the reid may still print one, and the next none: `ts-0161-ta`); the last command
+lists only the first probe's own file. Open the linker's file: its `blocked-by` target is the
 **new** id. That is the documented limit: the id cannot tell the two files apart, so a link meant for the first file is
 rewritten too (`HELP`, `reidLocked` in `packs/plan/src/reid.ts`). Then put the clone back:
 
@@ -781,10 +807,11 @@ git checkout -q -- arch && git clean -fdq arch
 node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).data.id)' "$CHECK/new.json"
 ```
 
-Pass: one task id. Copy it:
+Pass: one task id, with its slug after it (`T-<nn>-<nnn>-<slug>`). Copy it **without the slug**: the recorder takes the
+short id and refuses one that does not fit.
 
 ```sh
-export TASK_ID=T-00-000    # edit: the id printed
+export TASK_ID=T-00-000    # edit: the id printed, without its slug
 ./plan set "$TASK_ID" status=ready --root "$COPY/arch" --format json > "$CHECK/set.json"; echo "exit $?"
 node "$COLLIDE_SRC/fixtures/orchard-arch/contract/record.ts" --cli "$COPY/plan" --root "$COPY" --out "$CHECK/shapes" \
   --source real --task "$TASK_ID" --proposal "$PROPOSAL_ID" --epic "$EPIC_ID"
@@ -855,21 +882,91 @@ are, by folder shape only.
 Write the result here, as owner judgement, and say what was awkward. Commit nothing from this folder: the owner's words
 go in this item.
 
-- Time taken, in total and per step: 1 ____ 2 ____ 3 ____ 4 ____ 5 ____ 6 ____ 7 ____ 8 ____
-- 1 Set up: ____ (the `npm install` pair; `collide-app` found in `target/debug`?)
-- 2 Spikes: ____ (records, listed, `skipped` lines)
-- 3 Private root and layout: ____ (3a `git status`; 3b `follow-ups`; 3c the three refusals, with their words)
-- 4 Orchard: ____ (4a trust and load; 4b the id lists, both counts, the time of the first listing; 4c; 4d; 4e
-  `--kind task`, the two times of the restart and whether the waiting line printed)
-- 5 Accept: ____ (CLI exit 12; the row on the page and its words; the diff after Accept)
-- 6 Own terminal: ____ (6a; 6b the run id, the card, any permission row, the end state and exit code; 6c the same)
-- 7 Reid: ____ (the skipped line, the commit, the linker's target)
-- 8 Fixtures: ____ (every `DIFF` file and key; every key of 8b)
-- Differences found, each one line, for a fix item: ____
-- What was awkward: ____
+Run on 2026-11-20 and 2026-11-21. An agent ran every step a build agent may run, in a temp `HOME` and root. The owner
+ran 5.3, 6b, 6c and the clean-up of their own state; the agent read the real store, transcripts and log, read-only, to
+fill in what the page did not show. Lines marked agent-run are for the owner to judge; owner-run lines are the owner's.
+
+- Time (agent-run): set up about 50 minutes, nearly all of it the builds (`cargo build` 445 s, `tauri build` 2,478 s);
+  the clones 1 s and 4 s; the plan CLI's installs 12 s. Whole-step times of the other steps were not kept; the figures
+  they measured are below.
+- 1 Set up (agent-run): pass, after one fix. The temp `.zshenv` lost to `/etc/zprofile`'s `path_helper`, and the
+  daemon's login shell found an older `node`; the same line in `.zprofile` fixed it. The `npm install` pair worked with
+  the temp `HOME`, with no registry login. `collide-app` is in `target/debug`. `tauri build` rewrote
+  `app/src-tauri/Cargo.toml`, put back by hand.
+- 2 Spikes (agent-run): pass. 10 records, 10 listed, 10 `record.md` paths, none from `work/`, `out/` or `fixture/`, no
+  `skipped` line, all `concluded`. 6 s for the first listing, with the daemon's start.
+- 3 Private root and layout (agent-run):
+  - 3a: pass. `git status` empty, the item listed, one file under the temp root's pack data. `--commit` exits 1:
+    "--commit refused: ... private root, which is in no repository; the write was made and nothing was committed".
+  - 3b: pass. The view lists only "Raised probe".
+  - 3c: the criterion passes; the output differs from the text. Each layout is refused with its reason: "a `..` part",
+    "under .git/, git's own folder", "goes through the symbolic link ... which leaves the repository". The command exits
+    0 and lists the 176 tasks of the old layout, with "source plan may be out of date: ... refused `initialize`". A
+    source that fails to start keeps its cached tasks, marked stale (`ts-0141-sn`, `ts-0152-jq`).
+- 4 Orchard (agent-run):
+  - 4a: pass. The manifest loads; the trust review reads as the text says. A piped `y` is refused, exit 5; `--yes`
+    used. `collide init` started no daemon.
+  - 4b: pass. First listing 10 s: 1,973 items (31 ADRs, 175 questions, 108 spikes, 1,659 tasks), the file counts of
+    8b, no `skipped` line. Queue 54, view 54, the same ids in the same order once the queue's ids are cut to the short
+    id (the CLI gives them with their slug).
+  - 4c: pass. Two spikes show "evidence for" an ADR, with its status; only two of the 31 ADRs name evidence. The JSON
+    key is `type`, not `link_type`. The loop took about 98 s.
+  - 4d: pass. `--ready` lists 99, open questions first. The create wrote the task and the epic's file (two `file`
+    lines). `setStatus ready` exit 0; `done` refused with the plan CLI's words, exit 5. A bare id resolves.
+  - 4e: pass. `--kind task` lists 1,660, the count of `task` lines (with the probe); the clone's are `task`. Restart:
+    0.44 s settled, 6.58 s after the stop; the started, `setsid` and wait lines once each; output equal; exit 0.
+- 5 Accept:
+  - 5.1 and 5.2 (agent-run): pass. The proposal, one feature, `proposed`. The CLI's accept exits 12: "a confirmation
+    waits in the app: Confirm: accept proposal ...; queue item confirm-...; nothing was written"; `git status` empty.
+    The confirmation is kept in the store and survives a restart.
+  - 5.3 (owner-run): "accept worked". The row's words and the diff were not written down.
+- 6 Own terminal:
+  - 6a (agent-run): pass. 34 lines, no daemon folder. It names `collide task create` for a follow-up, says a scratch
+    task is not one, and says `collide run` is refused inside a run.
+  - 6b (owner-run, three file runs: `run-1795250629470-0`, `run-1795251885848-0`, `run-1795252860346-1`): the follow-up
+    criterion passes; the loop page criterion fails. Each run used the small model in Claude's default permission mode,
+    ran `collide task create` with no permission denial and no permission line in the daemon's log, cost $0.003 to
+    $0.006, and ended with exit 0. Its item is private, with `fields` `root: private` and `run` its run id, links
+    `part-of` only, not in `follow-ups`. With the app on the real daemon before the third run started, the owner saw
+    "nothing" on the run card (`ts-0159-ra`). Only the third run is a fair look: the second's app had the temp `HOME`.
+  - 6c (owner-run): the criterion passes; Discard fails. A mistaken first try (prompt "Gg", `run-1795250812644-1`) does
+    not count. The quick run `run-1795253516592-2` ran the command with no denial, $0.0038, exit 0; its item is private,
+    with `run:` and no `raised-by`. Discard's dialog read "Delete this work? This deletes the agent's copy of the
+    project and its branch, which hold 0 changed files. ...". After Delete the worktree and branch stayed, and the store
+    kept the Review item with no discard step (`ts-0160-th`). The owner removed them by hand.
+  - `claude` 2.1.330 is outside the tested range (2.1.323 to 2.1.325); the smoke check passed and the runs went on, as
+    designed.
+- 7 Reid (agent-run): the criterion passes. The set-aside file got a new id, the linker's `blocked-by` was rewritten to
+  it (the documented limit), and the commit touched the renamed file and the linker. Two findings: a copy named
+  `-copy.md` sorts before its original, so the skip line named the original (the text now uses the test's
+  `<id>-zcopy.md`); and with the daemon running the listing held two rows of the one key, and the bare-id reid was
+  refused "matches 2 items", exit 3, until a restart. Right after the reid, one stale `skipped` line showed once
+  (`ts-0161-ta`).
+- 8 Fixtures (agent-run):
+  - 8a: pass. The nine shapes recorded from the real CLI equal the committed ones; the recorder took 21 s. `new task`'s
+    `data.id` carries the slug, and the recorder takes the short id (the text now says so).
+  - 8b: the frontmatter keys are the same for the three kinds (11, 6 and 6 keys). The headings differ: the fixtures
+    have none, and the real files share a few common ones (`ts-0162-yh`). Files: ADRs 31 real and 6 fixture, spikes 108
+    and 4, questions 175 and 5.
+- Differences found, each a fix item:
+  - The loop page does not show a file run (`ts-0159-ra`). It blocks this item.
+  - Discard from the page did not apply (`ts-0160-th`).
+  - A watch update keeps a second row of one key (`ts-0161-ta`).
+  - The fixtures have no section headings (`ts-0162-yh`).
+  - The text's own expectations, fixed in place: 1.1, 1.2, 2, 3a, 3c, 4a to 4e, 5.1, 5.4, 6.0, 6b, 6c, 7, 8a.
+- What was awkward (agent-run, for the owner to add to):
+  - The app's build: 41 minutes, and it dirties a tracked file.
+  - The app started from a terminal that held `env.sh` ran its own daemon in the deleted temp home, made the folder
+    again, and showed none of the owner's runs (`ts-0164-pa`). The text now says to check `echo $HOME`.
+  - The real daemon tries the boards of deleted check folders every 10 s and logs each time, and logs a listing failure
+    as it stops (`ts-0163-su`).
+  - The owner's queue keeps two stale Review items, and a mistaken prompt left a 20 MB worktree that the app cannot
+    remove (`ts-0160-th`).
+  - zsh's `time` report does not follow a redirection; the text uses `secs`.
+- The owner's own awkward notes: ____ (owner)
 - Step 6's follow-up is not in the `follow-ups` view (plan 0.10): whether your own-terminal runs' follow-ups should
-  show there before review shows them (Stage 9a): ____
-- Date the owner judges Stage 4c done: ____ (owner)
+  show there before review shows them (Stage 9a): ____ (owner)
+- Date the owner judges Stage 4c done: after `ts-0159-ra` and the owner's re-check of 6b's run card. ____ (owner)
 
 ### Clean up
 
@@ -881,11 +978,13 @@ git branch --list 'collide/*'
 find "$HOME/Library/Application Support/Collide/pack-data" -name '*follow-up-probe*'
 ```
 
-   Remove each run's worktree and branch the page did not (6b's run, and 6c's if Discard was not pressed), by the exact
-   path and name those commands print: `git worktree remove --force <path>` and `git branch -D collide/<run id>`. Remove
-   each private file the `find` printed with `rm <exact path>`. The run rows in the real store and the folders
-   `runs/<run id>/` stay: they are history. Remove a folder by its exact path if you do not want it. Then end the real
-   daemon, as in 6.0, and quit the app.
+   Remove each run's worktree and branch the page did not (6b's run, and 6c's if Discard did not apply), by the exact
+   path and name those commands print: `git worktree remove --force <path>` and `git branch -D collide/<run id>`. A run
+   whose clone is already gone is not in `git worktree list`: its folder stays in
+   `~/Library/Application Support/Collide/workspaces/<run id>/`; remove it by that exact path. Remove each private file
+   the `find` printed with `rm <exact path>`. The run rows in the real store and the folders `runs/<run id>/` stay: they
+   are history. Remove a folder by its exact path if you do not want it. Then end the real daemon, as in 6.0, and quit
+   the app.
 
 2. This check's daemon, from a terminal that sourced `env.sh`:
 

@@ -4652,7 +4652,8 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
 built one at a time in id order (part L). It runs after 4b. Nothing in it runs a real `claude`. The criteria over the
 Orchard repo, and the checks on a real clone, are the owner's, in `ts-0138-pn`. Revision 24 adds `ts-0139-wq` and
 `ts-0140-gk`, built after `ts-0137-pg`; `ts-0138-pn` waits for both and gains a step: start a run from the owner's
-own terminal and see it on the loop page.
+own terminal and see it on the loop page. The owner's check ran on 2026-11-20 and 2026-11-21 (`ts-0138-pn`, step 9):
+its fix items are `ts-0159-ra` to `ts-0164-pa`, and `ts-0159-ra` (the loop page does not show a file run) blocks it.
 
 ## Stage 5: GitHub adapter
 
