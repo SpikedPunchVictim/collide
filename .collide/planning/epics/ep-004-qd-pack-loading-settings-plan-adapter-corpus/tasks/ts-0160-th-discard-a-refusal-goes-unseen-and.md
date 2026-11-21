@@ -1,7 +1,7 @@
 ---
 id: ts-0160-th
 kind: task
-status: ready
+status: done
 title: "Discard: a refusal goes unseen, and a Review item whose repository is gone stays"
 owners: []
 links:
