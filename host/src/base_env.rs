@@ -6,6 +6,8 @@
 //!   `/dev/null`, in a session of its own that is killed after reading, under [`CAPTURE_TIMEOUT`], with output capped
 //!   at [`CAPTURE_CAP_BYTES`]. On failure the daemon falls back to the minimal environment and logs the shell and the
 //!   reason ([`EnvSource::Minimal`]). `LANG` is set when missing ([`FALLBACK_LANG`]).
+//! - **A capture in flight is ended when the daemon stops** (ts-0165-ab). The capture's session is not the daemon's, so
+//!   nothing else would end it: [`CaptureSessions`] holds the live ones and kills them.
 //! - **It is captured again when the app starts** (R5), and each new phase uses the newest capture. A phase already
 //!   running keeps the environment it started with, which is why [`BaseEnvironment`] is a value a phase copies and not
 //!   a view of the daemon's current one.
@@ -18,11 +20,12 @@
 use crate::clock::{Clock, Clocks, Reading, Timer};
 use crate::stop::RUNTIME_MARKER;
 use collide_core::adapter::EnvStrip;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::Duration;
 
 /// The most output the capture reads, in bytes (0.2: 1 MiB).
@@ -107,7 +110,18 @@ impl BaseEnvironment {
         clocks: &dyn Clocks,
         options: &CaptureOptions,
     ) -> BaseEnvironment {
-        let (mut vars, source) = match run_login_shell(shell, clocks, options) {
+        BaseEnvironment::capture_in(shell, clocks, options, &CaptureSessions::default())
+    }
+
+    /// [`BaseEnvironment::capture_with`] with the capture's session kept in `sessions`, so that
+    /// [`CaptureSessions::end_all`] ends it while it runs.
+    pub fn capture_in(
+        shell: &str,
+        clocks: &dyn Clocks,
+        options: &CaptureOptions,
+        sessions: &CaptureSessions,
+    ) -> BaseEnvironment {
+        let (mut vars, source) = match run_login_shell(shell, clocks, options, sessions) {
             Ok(vars) => (
                 vars,
                 EnvSource::LoginShell {
@@ -170,6 +184,61 @@ impl EnvSource {
     }
 }
 
+/// The reason a capture gives when [`CaptureSessions::end_all`] ended it, or came before it could start.
+const ENDED_REASON: &str = "the daemon is stopping, so the capture was ended";
+
+/// The sessions of the captures that are running, so that a daemon that stops ends them (ts-0165-ab). A capture runs
+/// in a session of its own, which the daemon's stop does not reach: one still in flight would outlive the daemon.
+#[derive(Default)]
+pub struct CaptureSessions {
+    state: Mutex<SessionsState>,
+}
+
+#[derive(Default)]
+struct SessionsState {
+    /// The pid of each shell that has not been waited for. It is the id of the shell's process group.
+    live: BTreeSet<libc::pid_t>,
+    /// Set by [`CaptureSessions::end_all`]; no capture starts after it.
+    ended: bool,
+}
+
+impl CaptureSessions {
+    /// Kills the session of every capture in flight, and refuses the captures that come after.
+    pub fn end_all(&self) {
+        let mut state = self.lock();
+        state.ended = true;
+        for pid in &state.live {
+            kill_session(*pid);
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, SessionsState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn is_ended(&self) -> bool {
+        self.lock().ended
+    }
+
+    /// Records a shell that was just started. False when the sessions have ended, and the shell is not recorded.
+    fn add(&self, pid: u32) -> bool {
+        let mut state = self.lock();
+        if state.ended {
+            return false;
+        }
+        state.live.insert(pid as libc::pid_t);
+        true
+    }
+
+    /// Kills the session of a shell and forgets it. This is done before the shell is waited for, under the lock that
+    /// [`CaptureSessions::end_all`] takes: a pid in `live` is therefore always one that nothing else can have taken.
+    fn release(&self, pid: u32) {
+        let mut state = self.lock();
+        kill_session(pid as libc::pid_t);
+        state.live.remove(&(pid as libc::pid_t));
+    }
+}
+
 /// How far a poll waits before the loop looks at the timer again, in milliseconds.
 const POLL_SLICE_MS: i32 = 50;
 
@@ -207,7 +276,11 @@ fn run_login_shell(
     shell: &str,
     clocks: &dyn Clocks,
     options: &CaptureOptions,
+    sessions: &CaptureSessions,
 ) -> Result<BTreeMap<String, String>, String> {
+    if sessions.is_ended() {
+        return Err(ENDED_REASON.to_string());
+    }
     let nonce = nonce();
     let (begin, end) = (marker("BEGIN", &nonce), marker("END", &nonce));
     let script = format!("printf '%s' '{begin}'; env -0; printf '%s' '{end}'");
@@ -230,6 +303,12 @@ fn run_login_shell(
     let mut child = command
         .spawn()
         .map_err(|e| format!("could not start {shell}: {e}"))?;
+    // The sessions can have ended between the check above and the start.
+    if !sessions.add(child.id()) {
+        kill_session(child.id() as libc::pid_t);
+        let _ = child.wait();
+        return Err(ENDED_REASON.to_string());
+    }
     let timer = Timer::start(Clock::Uptime, options.timeout, clocks.read(Clock::Uptime))
         .map_err(|e| e.to_string())?;
     let mut stdout = child.stdout.take().expect("stdout is piped");
@@ -239,8 +318,12 @@ fn run_login_shell(
     });
     // The session is killed after reading, whatever was read, and before the shell is waited for: the shell's pid is
     // the group's id, and while it is unreaped nothing else can take it.
-    kill_session(&child);
+    sessions.release(child.id());
     let status = child.wait();
+    // A capture that was cut short by the end of the sessions says so, not that the shell closed its output.
+    if sessions.is_ended() && !matches!(outcome, Ok(ReadEnd::Marked)) {
+        return Err(ENDED_REASON.to_string());
+    }
     match outcome {
         Err(e) => Err(format!("could not read the output of {shell}: {e}")),
         Ok(ReadEnd::TimedOut) => Err(format!(
@@ -272,11 +355,12 @@ fn describe_status(status: std::io::Result<std::process::ExitStatus>) -> String 
 }
 
 /// Kills the shell's session: its process group, which has the shell's pid as its id because the shell called `setsid`.
-fn kill_session(child: &Child) {
+/// The caller holds the pid of a shell it has not waited for.
+fn kill_session(pid: libc::pid_t) {
     // SAFETY: `killpg` takes two integers. The group is the one `setsid` made for this child, which has not been
     // waited for, so its id is still this child's.
     unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+        libc::killpg(pid, libc::SIGKILL);
     }
 }
 

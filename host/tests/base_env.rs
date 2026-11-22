@@ -6,13 +6,14 @@ mod common;
 
 use collide_core::adapter::EnvStrip;
 use collide_host::base_env::{
-    BaseEnvironment, CAPTURE_CAP_BYTES, CaptureOptions, EnvSource, FALLBACK_LANG,
+    BaseEnvironment, CAPTURE_CAP_BYTES, CaptureOptions, CaptureSessions, EnvSource, FALLBACK_LANG,
 };
 use collide_host::clock::SystemClocks;
 use common::TempRoot;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// A capture with a short timeout and a small fallback environment, so a test never waits and never depends on the
@@ -39,6 +40,29 @@ fn reason_of(env: &BaseEnvironment) -> &str {
     }
 }
 
+/// How long a test waits for a process of its own to start or to end. The gates run on a loaded machine.
+const PROCESS_WAIT: Duration = Duration::from_secs(15);
+
+/// Kills, when the test ends, the sessions of the shells whose pids their scripts wrote: a shell that was not ended
+/// does not outlive a failing test.
+struct KillSessions(Vec<PathBuf>);
+
+impl Drop for KillSessions {
+    fn drop(&mut self) {
+        for file in &self.0 {
+            let pid = fs::read_to_string(file)
+                .ok()
+                .and_then(|text| text.trim().parse::<i32>().ok());
+            if let Some(pid) = pid {
+                // SAFETY: `killpg` takes two integers; the shell made its own session, so its pid is its group's id.
+                unsafe {
+                    libc::killpg(pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+}
+
 fn alive(pid: i32) -> bool {
     // SAFETY: `kill` with signal 0 sends nothing; it only asks whether the pid exists.
     unsafe { libc::kill(pid, 0) == 0 }
@@ -46,7 +70,7 @@ fn alive(pid: i32) -> bool {
 
 /// Waits for a process this test's fake shell started to be gone.
 fn gone(pid: i32) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + PROCESS_WAIT;
     while Instant::now() < deadline {
         if !alive(pid) {
             return true;
@@ -57,7 +81,7 @@ fn gone(pid: i32) -> bool {
 }
 
 fn pid_in(path: &Path) -> i32 {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + PROCESS_WAIT;
     while Instant::now() < deadline {
         if let Ok(text) = fs::read_to_string(path)
             && let Ok(pid) = text.trim().parse()
@@ -390,4 +414,103 @@ fn a_layer_over_the_base_never_gives_a_child_the_runtime_marker() {
     );
     assert_eq!(child.get("ROLE_VAR").map(String::as_str), Some("set"));
     assert_eq!(child.get("KEEP").map(String::as_str), Some("yes"));
+}
+
+// ---- a capture in flight when the daemon stops (ts-0165-ab) -----------------------------------------------------
+
+#[test]
+fn ending_the_sessions_kills_a_capture_that_is_still_running() {
+    let dir = TempRoot::new();
+    let pid_file = dir.join("pid");
+    let child_file = dir.join("child");
+    let cleanup = KillSessions(vec![pid_file.clone()]);
+    let shell = dir.script(
+        "fake-shell",
+        &format!(
+            "#!/bin/sh\necho $$ > {}\nsleep 60 &\necho $! > {}\nsleep 60\n",
+            pid_file.display(),
+            child_file.display()
+        ),
+    );
+    let sessions = Arc::new(CaptureSessions::default());
+    let running = {
+        let sessions = sessions.clone();
+        let shell = shell.to_str().unwrap().to_string();
+        std::thread::spawn(move || {
+            BaseEnvironment::capture_in(
+                &shell,
+                &SystemClocks,
+                &options(Duration::from_secs(60)),
+                &sessions,
+            )
+        })
+    };
+    let (shell_pid, child_pid) = (pid_in(&pid_file), pid_in(&child_file));
+    sessions.end_all();
+    let shell_ended = gone(shell_pid);
+    let child_ended = gone(child_pid);
+    // A shell that was not ended is killed here, so that the capture's thread returns and the test reports.
+    drop(cleanup);
+    let env = running.join().expect("the capture's thread ends");
+    assert!(shell_ended, "the shell of the capture is still running");
+    assert!(child_ended, "what the shell started is still running");
+    assert!(reason_of(&env).contains("stopping"), "{}", reason_of(&env));
+}
+
+#[test]
+fn a_capture_that_comes_after_the_sessions_ended_starts_no_shell() {
+    let dir = TempRoot::new();
+    let started = dir.join("started");
+    let shell = dir.script(
+        "fake-shell",
+        &format!("#!/bin/sh\necho x > {}\neval \"$4\"\n", started.display()),
+    );
+    let sessions = CaptureSessions::default();
+    sessions.end_all();
+    let env = BaseEnvironment::capture_in(
+        shell.to_str().unwrap(),
+        &SystemClocks,
+        &options(Duration::from_secs(10)),
+        &sessions,
+    );
+    assert!(reason_of(&env).contains("stopping"), "{}", reason_of(&env));
+    assert!(!started.exists(), "the shell ran");
+}
+
+#[test]
+fn a_capture_that_finishes_before_the_sessions_end_is_unchanged() {
+    let dir = TempRoot::new();
+    let pid_file = dir.join("pid");
+    let child_file = dir.join("child");
+    let _cleanup = KillSessions(vec![pid_file.clone()]);
+    let shell = dir.script(
+        "fake-shell",
+        &format!(
+            "#!/bin/sh\necho $$ > {}\nexport COLLIDE_FAKE=read\nsleep 60 &\necho $! > {}\neval \"$4\"\nsleep 60\n",
+            pid_file.display(),
+            child_file.display()
+        ),
+    );
+    let sessions = CaptureSessions::default();
+    let env = BaseEnvironment::capture_in(
+        shell.to_str().unwrap(),
+        &SystemClocks,
+        &options(Duration::from_secs(10)),
+        &sessions,
+    );
+    sessions.end_all();
+    assert!(
+        matches!(env.source, EnvSource::LoginShell { .. }),
+        "{:?}",
+        env.source
+    );
+    assert_eq!(
+        env.vars.get("COLLIDE_FAKE").map(String::as_str),
+        Some("read")
+    );
+    // It was killed after reading, as before, and not left to `end_all`.
+    assert!(
+        gone(pid_in(&child_file)),
+        "the shell's child is still running"
+    );
 }

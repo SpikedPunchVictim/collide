@@ -82,7 +82,8 @@
 //!
 //! `run.stop` is [`Phases::stop_run`] ([`crate::stop`]): it answers when the stop is done, with the run's state, the
 //! number of processes signalled and the survivors. A run's agent may stop its own run and no other. When the daemon
-//! itself stops it ends its watchers and then boots out the launchd job its start recorded
+//! itself stops it first ends the environment captures in flight ([`crate::base_env::CaptureSessions`]), so no login
+//! shell outlives it, then ends its watchers and then boots out the launchd job its start recorded
 //! ([`crate::launch::boot_out_recorded_job`], through [`DaemonOptions::launchctl`]); that is the last thing it does,
 //! because booting the job out ends the process. The shims go on.
 //!
@@ -108,7 +109,7 @@
 use crate::auth::{
     self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer, Verdict,
 };
-use crate::base_env::{BaseEnvironment, CaptureOptions, EnvSource};
+use crate::base_env::{BaseEnvironment, CaptureOptions, CaptureSessions, EnvSource};
 use crate::board_lines::LineError;
 use crate::boards;
 use crate::checkout::root_busy;
@@ -671,6 +672,8 @@ struct Shared {
     file_runs: Arc<FileRuns>,
     shell: String,
     capture: CaptureOptions,
+    /// The sessions of the captures in flight; the daemon's stop ends them ([`CaptureSessions::end_all`]).
+    captures: CaptureSessions,
     tree: Arc<dyn ProcessTree + Send + Sync>,
     uid: u32,
     clocks: Arc<dyn Clocks + Send + Sync>,
@@ -724,7 +727,12 @@ impl Shared {
     /// Captures the environment now and keeps the newest good capture. A capture that fell back does not replace one
     /// the login shell gave: a failed second capture should not make the daemon forget a working `PATH`.
     fn capture_environment(&self) -> BaseEnvironment {
-        let new = BaseEnvironment::capture_with(&self.shell, self.clocks.as_ref(), &self.capture);
+        let new = BaseEnvironment::capture_in(
+            &self.shell,
+            self.clocks.as_ref(),
+            &self.capture,
+            &self.captures,
+        );
         self.log.line(&new.source.describe());
         let mut current = self.env.lock().unwrap_or_else(|e| e.into_inner());
         let keep_old = matches!(new.source, EnvSource::Minimal { .. })
@@ -1067,6 +1075,7 @@ impl Daemon {
             file_runs,
             shell,
             capture,
+            captures: CaptureSessions::default(),
             tree,
             uid,
             started_wall_ms: clocks.read(Clock::Wall).nanos / 1_000_000,
@@ -1228,6 +1237,8 @@ impl Daemon {
 impl Drop for Daemon {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
+        // A capture runs in a session of its own, which nothing else ends: the daemon would leave its shell behind.
+        self.shared.captures.end_all();
         self.join();
         // The providers of the sources end with the daemon: no child outlives it.
         self.shared.sources.stop();

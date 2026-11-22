@@ -797,6 +797,82 @@ fn the_environment_is_captured_at_start_and_again_on_request_and_a_failed_captur
     );
 }
 
+/// Kills, when the test ends, the sessions of the shells whose pids were written into `file`, one a line: a capture
+/// that the daemon did not end does not outlive a failing test.
+struct KillListed(std::path::PathBuf);
+
+impl Drop for KillListed {
+    fn drop(&mut self) {
+        for pid in pids_in(&self.0) {
+            // SAFETY: `killpg` takes two integers; each shell made its own session, so its pid is its group's id.
+            unsafe {
+                libc::killpg(pid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+fn pids_in(file: &Path) -> Vec<i32> {
+    let text = fs::read_to_string(file).unwrap_or_default();
+    text.lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect()
+}
+
+/// Polls `f` for as long as a process of the test's own may take to start or to end on a loaded machine.
+fn within_processes(mut f: impl FnMut() -> bool) -> bool {
+    let until = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < until {
+        if f() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+#[test]
+fn the_captures_in_flight_are_ended_when_the_daemon_stops() {
+    let root = TempRoot::new();
+    let pids = root.join("pids");
+    let _cleanup = KillListed(pids.clone());
+    // A login shell that never answers. The capture's timeout is far past the test, so only the stop ends it.
+    let hung = root.script(
+        "hung-shell",
+        &format!("#!/bin/sh\necho $$ >> {}\nsleep 60\n", pids.display()),
+    );
+    let mut opts = options(&root, Box::new(LogBuf::default()));
+    opts.shell = hung.to_str().unwrap().to_string();
+    opts.capture.timeout = Duration::from_secs(60);
+    let daemon = Daemon::start(opts).unwrap();
+    // The capture of the start is one; the app's request to capture again is the other.
+    let mut client = connected(&daemon);
+    let asking = std::thread::spawn(move || {
+        client.send(&json!({"jsonrpc": "2.0", "id": 2, "method": "daemon.recapture_environment", "params": {}}));
+        let _ = client.read();
+    });
+    assert!(
+        within_processes(|| pids_in(&pids).len() == 2),
+        "two captures did not start: {:?}",
+        pids_in(&pids)
+    );
+    daemon.stop();
+    let ended = pids_in(&pids)
+        .into_iter()
+        .map(|pid| (pid, within_processes(|| !process_alive(pid))))
+        .collect::<Vec<_>>();
+    assert!(
+        ended.iter().all(|(_, gone)| *gone),
+        "a capture's shell is still running: {ended:?}"
+    );
+    drop(asking);
+}
+
+fn process_alive(pid: i32) -> bool {
+    // SAFETY: `kill` with signal 0 sends nothing; it only asks whether the pid exists.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
 // ---- the log -----------------------------------------------------------------------------------------------------
 
 #[test]
