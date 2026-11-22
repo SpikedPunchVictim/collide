@@ -102,7 +102,7 @@ a guard.
 - **The app's refusal is not counted as a failed start.** The app shows it at each call and each pump retry, and
   never says "stopped trying", which would point at the log. Alternative: count it. Recommendation: as built.
 
-Proposed plan text (the plan's Starting the daemon section): "A start refuses a `HOME` that names no folder, before it
+Plan text, applied with the owner's yes (2026-11-21) to the plan's Starting the daemon section: "A start refuses a `HOME` that names no folder, before it
 makes anything, and the daemon does the same; the words name the path. `COLLIDE_DAEMON_ROOT` that names no folder is
 still made."
 

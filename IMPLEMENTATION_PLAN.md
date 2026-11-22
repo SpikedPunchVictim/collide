@@ -363,6 +363,8 @@ React UI ──one `rpc` command + one event channel──▶ Tauri shell (thin:
   2026-11-13).
   - An flock on a lock file serializes starts. The lock file holds the socket path. A start waits up to 15 s, and
     the daemon adopts existing shims before it binds the socket (herdr-core's protocol).
+  - A start refuses a `HOME` that names no folder, before it makes anything, and the daemon does the same; the words
+    name the path. `COLLIDE_DAEMON_ROOT` that names no folder is still made (owner, 2026-11-21; `ts-0164-pa`).
   - **On macOS the daemon leaves its launcher's coalition.** A setsid child stays in its launcher's coalition, the
     app's or Terminal's (measured S2). herdr-core shipped a daemon that ended with its app and fixed it with a
     one-shot launchd job (read: its `macos_launchd.rs` and changelog). Collide does the same: `launchctl bootstrap
