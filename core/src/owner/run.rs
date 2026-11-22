@@ -289,6 +289,10 @@ pub struct RunSummary {
     pub ended_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// The task file a run of a file (`collide run <file>`) was started from, as the daemon was given it. Absent for
+    /// every other run, and for a file run an older daemon recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_file: Option<String>,
     pub phases: Vec<PhaseSummary>,
     /// What the run did that the person should look at, oldest first. Empty for most runs.
     #[serde(default)]

@@ -108,6 +108,11 @@ export interface RunSummary {
   phases: PhaseSummary[]
   started_ms: number
   state: RunState
+  /**
+   * The task file a run of a file (`collide run <file>`) was started from, as the daemon was given it. Absent for
+   * every other run, and for a file run an older daemon recorded.
+   */
+  task_file?: string | null
   tasks: RunTaskRef[]
   /**
    * What the run did that the person should look at, oldest first. Empty for most runs.

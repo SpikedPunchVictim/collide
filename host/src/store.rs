@@ -70,7 +70,7 @@ pub struct Migration {
 /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
 /// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
 /// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
-pub const MIGRATIONS: [Migration; 10] = [
+pub const MIGRATIONS: [Migration; 11] = [
     Migration {
         version: 1,
         name: "events",
@@ -144,6 +144,11 @@ pub const MIGRATIONS: [Migration; 10] = [
         version: 10,
         name: "corpus_cache",
         sql: CORPUS_SQL,
+    },
+    Migration {
+        version: 11,
+        name: "run_task_file",
+        sql: "ALTER TABLE runs ADD COLUMN task_file TEXT",
     },
 ];
 
@@ -1279,6 +1284,31 @@ mod tests {
             .unwrap();
         let again = Store::open(dir.path()).unwrap();
         assert_eq!(again.events_since(0).unwrap(), vec![event(1, 10)]);
+    }
+
+    #[test]
+    fn a_store_at_version_ten_gains_the_task_file_column_and_keeps_its_runs() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 10);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        conn.execute(
+            "INSERT INTO runs (run, state, live, opened_seq, started_ms) VALUES ('r', '{}', 1, 1, 5)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(user_version(&raw(&store)), known_version());
+        assert_eq!(
+            MIGRATIONS.get(10).map(|migration| migration.name),
+            Some("run_task_file")
+        );
+        let row: Option<String> = raw(&store)
+            .query_row("SELECT task_file FROM runs WHERE run = 'r'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(row, None, "a run from before has no task file");
     }
 
     #[test]

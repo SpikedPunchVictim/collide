@@ -57,9 +57,9 @@ export function run(id: string, task: string, over: Partial<Run> = {}): Run {
   }
 }
 
-/** A run started by `collide run` on a file: it has no task, and so no review item. */
+/** A run started by `collide run` on a file: no task, no workflow and no line, as the daemon records it. */
 export function fileRun(id: string, over: Partial<Run> = {}): Run {
-  return run(id, 'unused', { tasks: [], ...over })
+  return run(id, 'unused', { tasks: [], workflow: '', line: '', ...over })
 }
 
 export function reviewItem(

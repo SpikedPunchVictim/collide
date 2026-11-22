@@ -369,6 +369,13 @@
         "state": {
           "$ref": "#/$defs/RunState"
         },
+        "task_file": {
+          "description": "The task file a run of a file (`collide run <file>`) was started from, as the daemon was given it. Absent for\nevery other run, and for a file run an older daemon recorded.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tasks": {
           "items": {
             "$ref": "#/$defs/RunTaskRef"

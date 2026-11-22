@@ -7,7 +7,7 @@
 //!   ([`Store::run_state`]) read it, so none scans the event log.
 //! - **The board and the tasks are not in the event.** `run.start` links them with [`Store::set_run_launch`] once the
 //!   run has its first event. A run started by `run.start_file` has no board, no tasks, and no line or workflow, which
-//!   read as empty text.
+//!   read as empty text. It has its task file, which [`Store::set_run_task_file`] keeps (migration 11).
 //! - **`run_tasks` holds a run's task keys in the order they were given**, each with its status when the run started,
 //!   so a read by task is an index lookup.
 //! - **Newest first** is `opened_seq` descending: the `seq` of the run's first event, which is also the cursor of a
@@ -48,6 +48,8 @@ pub struct RunRow {
     /// When the run reached a final state, or `None` while it has not.
     pub ended_ms: Option<u64>,
     pub tasks: Vec<RunTaskRef>,
+    /// The task file of a run of a file, or `None`.
+    pub task_file: Option<String>,
 }
 
 /// Which runs [`Store::runs`] reads: all that match every part that is given.
@@ -101,7 +103,8 @@ pub(crate) fn note_transition(
     Ok(())
 }
 
-const COLUMNS: &str = "run, board, line, workflow, state, opened_seq, started_ms, ended_ms";
+const COLUMNS: &str =
+    "run, board, line, workflow, state, opened_seq, started_ms, ended_ms, task_file";
 
 /// A row of [`COLUMNS`], with no tasks yet.
 fn row_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<(RunRow, String)> {
@@ -118,6 +121,7 @@ fn row_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<(RunRow, String)> {
             started_ms: row.get::<_, i64>(6)? as u64,
             ended_ms: row.get::<_, Option<i64>>(7)?.map(|ms| ms as u64),
             tasks: Vec::new(),
+            task_file: row.get(8)?,
         },
         state,
     ))
@@ -166,6 +170,18 @@ impl Store {
         }
         tx.commit().map_err(|e| sql_error(context, e))?;
         Ok(true)
+    }
+
+    /// Keeps the task file a run of a file was started from. `false` when the run has no row yet.
+    pub fn set_run_task_file(&self, run: &str, task_file: &str) -> Result<bool, StoreError> {
+        let changed = self
+            .connect()?
+            .execute(
+                "UPDATE runs SET task_file = ?2 WHERE run = ?1",
+                params![run, task_file],
+            )
+            .map_err(|e| sql_error("writing a run's task file", e))?;
+        Ok(changed > 0)
     }
 
     /// One run, or `None` for a run the store has no row of.
@@ -400,6 +416,31 @@ mod tests {
             (Some("board-1"), 1)
         );
         assert_eq!(row.state, ended());
+    }
+
+    #[test]
+    fn a_runs_task_file_is_kept_through_its_end_and_a_run_without_one_has_none() {
+        let dir = TempDir::new();
+        let store = Store::open(&dir.0).unwrap();
+        transition(&store, "a", RunState::Running {});
+        transition(&store, "b", RunState::Running {});
+        assert!(
+            store
+                .set_run_task_file("a", "/work/notes/probe.md")
+                .unwrap()
+        );
+        transition(&store, "a", ended());
+        let a = store.run("a").unwrap().unwrap();
+        assert_eq!(a.task_file.as_deref(), Some("/work/notes/probe.md"));
+        assert_eq!(store.run("b").unwrap().unwrap().task_file, None);
+    }
+
+    #[test]
+    fn a_task_file_for_a_run_that_has_no_row_writes_nothing_and_says_so() {
+        let dir = TempDir::new();
+        let store = Store::open(&dir.0).unwrap();
+        assert!(!store.set_run_task_file("ghost", "/work/probe.md").unwrap());
+        assert_eq!(store.run("ghost").unwrap(), None);
     }
 
     #[test]

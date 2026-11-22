@@ -150,6 +150,7 @@ fn run_get_and_run_list_give_a_file_runs_phase_and_end_and_the_same_after_a_rest
     let summary = &got.summary;
     assert_eq!(summary.id, run);
     assert!(summary.tasks.is_empty());
+    assert_eq!(summary.task_file.as_deref(), rig.task.to_str());
     assert!(
         summary
             .ended_ms

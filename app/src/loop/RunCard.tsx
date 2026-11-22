@@ -11,6 +11,28 @@ export interface RunCardProps {
   readonly followed: Followed
 }
 
+/** What the Task row says. A file run has no task: it says what it ran from. */
+function taskWords(run: RunSummary, followed: Followed): string {
+  if (run.tasks.length === 0) {
+    return run.task_file == null ? 'none: a task file' : `none: a task file, ${run.task_file}`
+  }
+  if (followed.task === null || followed.board === null) {
+    return `${followed.task ?? run.tasks[0]?.key}, not found on any board`
+  }
+  return followed.task
+}
+
+/** A row of the details. A row with no value is not shown, so nothing reads as a failed load. */
+function Row({ label, value }: { readonly label: string; readonly value: string }) {
+  if (value === '') return null
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd>{value}</dd>
+    </>
+  )
+}
+
 export function RunCard({ run, followed }: RunCardProps) {
   const phase = run.phases[run.phases.length - 1]
   const instance = phase?.instances[0]
@@ -35,14 +57,10 @@ export function RunCard({ run, followed }: RunCardProps) {
         <details className="text-sm">
           <summary className="cursor-pointer font-medium">Details</summary>
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <dt className="text-muted-foreground">Run</dt>
-            <dd>{run.id}</dd>
-            <dt className="text-muted-foreground">Task</dt>
-            <dd>{followed.task ?? 'unknown'}</dd>
-            <dt className="text-muted-foreground">Workflow</dt>
-            <dd>{run.workflow}</dd>
-            <dt className="text-muted-foreground">Branch the work started from</dt>
-            <dd>{run.line}</dd>
+            <Row label="Run" value={run.id} />
+            <Row label="Task" value={taskWords(run, followed)} />
+            <Row label="Workflow" value={run.workflow} />
+            <Row label="Branch the work started from" value={run.line} />
             {run.workspace == null ? null : (
               <>
                 <dt className="text-muted-foreground">Work folder</dt>

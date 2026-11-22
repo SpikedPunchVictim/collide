@@ -61,6 +61,7 @@ pub fn summarize(
         started_ms: row.started_ms,
         ended_ms: row.ended_ms,
         workspace,
+        task_file: row.task_file.clone(),
         phases: summaries,
         warnings: Vec::new(),
     };
@@ -91,6 +92,7 @@ mod tests {
                 key: "scratch:1".to_string(),
                 status: "status-a".to_string(),
             }],
+            task_file: None,
         }
     }
 

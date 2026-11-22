@@ -3,7 +3,16 @@ import { describe, expect, test } from 'vitest'
 import { LoopPage, type LoopActions } from '../src/loop/LoopPage.tsx'
 import { type LoopState, initialLoopState } from '../src/loop/index.ts'
 import { versionChips } from '../src/loop/words.ts'
-import { board, claude, confirmationItem, diff, permissionItem, reviewItem, run } from './support/loop-world.ts'
+import {
+  board,
+  claude,
+  confirmationItem,
+  diff,
+  fileRun,
+  permissionItem,
+  reviewItem,
+  run,
+} from './support/loop-world.ts'
 
 // What the page says in words, drawn with no browser (`renderToString`, as `app-shell.test.tsx` does). Clicks need a
 // browser: `ts-0082-fp` drives them. The state is built here and the page is a function of it.
@@ -107,6 +116,53 @@ describe('the run, named in words', () => {
   test('a run whose task was not found still shows, with no prompt', () => {
     const html = show({ ...running, followed: { board: null, task: 'scratch:1', prompt: null, run: 'r-1' } })
     expect(html).toContain('Working')
+  })
+})
+
+describe('the run card\'s details', () => {
+  const details = (html: string) => html.slice(html.indexOf('<details'))
+  const task = followed
+  const forFile = (over: Parameters<typeof fileRun>[1] = {}) =>
+    stateOf({
+      ...withBoard,
+      followed: { board: null, task: null, prompt: null, run: 'r-file' },
+      run: fileRun('r-file', over),
+    })
+
+  test('a run with a task, a workflow and a line shows each of them', () => {
+    const html = details(show(stateOf({ ...withBoard, followed: task, run: run('r-1', 'scratch:1') })))
+    expect(html).toContain('>Task<')
+    expect(html).toContain('scratch:1')
+    expect(html).toContain('>Workflow<')
+    expect(html).toContain('collide/quick')
+    expect(html).toContain('>Branch the work started from<')
+    expect(html).toContain('>main<')
+  })
+
+  test('a file run names its task file in the Task row', () => {
+    const html = details(show(forFile({ task_file: '/work/repo/follow-up-probe.md' })))
+    expect(html).toContain('none: a task file, /work/repo/follow-up-probe.md')
+    expect(html).not.toContain('unknown')
+  })
+
+  test('a file run shows no row for a workflow or a line it does not have', () => {
+    const html = details(show(forFile({ task_file: '/work/repo/follow-up-probe.md' })))
+    expect(html).not.toContain('Workflow')
+    expect(html).not.toContain('Branch the work started from')
+    expect(html).not.toMatch(/<dd[^>]*><\/dd>/)
+  })
+
+  test('a file run whose file the daemon did not record still says it ran from a file', () => {
+    const html = details(show(forFile()))
+    expect(html).toContain('none: a task file')
+    expect(html).not.toContain('none: a task file,')
+    expect(html).not.toContain('unknown')
+  })
+
+  test('a run whose task is on no board says so in words', () => {
+    const lost = { board: null, task: 'scratch:1', prompt: null, run: 'r-1' }
+    const html = details(show(stateOf({ ...withBoard, followed: lost, run: run('r-1', 'scratch:1') })))
+    expect(html).toContain('scratch:1, not found on any board')
   })
 })
 

@@ -549,6 +549,13 @@ impl FileRuns {
         if let Err(error) = self.record_run(phases, &run, None, RunState::Running {}) {
             return Err(vec![problem(format!("recording the run: {error}"))]);
         }
+        if let Some(task_file) = &ctx.task_file
+            && let Err(error) = self.config.store.set_run_task_file(&run, task_file)
+        {
+            self.log(&format!(
+                "run {run}: its task file was not recorded: {error}"
+            ));
+        }
         let workspace = restored_workspace(&self.config, &ctx);
         let live = Arc::new(Mutex::new(Live { workspace, ctx }));
         // In the table before the phase starts, so a phase that ends at once finds its run.
