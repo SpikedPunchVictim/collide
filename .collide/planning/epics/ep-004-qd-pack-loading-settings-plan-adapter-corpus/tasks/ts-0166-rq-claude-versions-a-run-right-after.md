@@ -40,3 +40,57 @@ window, so the test fails most runs on a slow machine.
   daemon's own environment. That changes which proxy the registry fetch uses until the capture ends.
 - Low priority: it shows only to a run in the first seconds of a daemon's life.
 - Owner decisions: none recorded yet. The recommendations stand until the owner answers.
+
+### Built
+
+Taken on the owner's delegation: the versions state knows a source is coming, so `status` tells "not known yet" from
+"not looked up". The setting `claude.check_published: false` still hides the chip.
+
+- `host/src/claude_versions.rs`: `State` has `source_coming`. `ClaudeVersions::expect_source` sets it.
+  `ClaudeVersions::status`, with no source set yet, answers `error: None` (the CLI prints "claude published: not known
+  yet") when a source is coming, and `NO_SOURCE` when none is. With the setting off it answers no chip, as before.
+- `host/src/daemon.rs`, `Daemon::start`: calls `claude.expect_source()` when `claude_published` is not
+  `PublishedChoice::Off`, before the capture thread starts.
+- `host/src/run_cli.rs` is unchanged: `print_versions` already waits up to `PUBLISHED_WAIT` while the chip is pending.
+
+What a call can see, found while writing the test: `daemon.agent_versions` waits for the start capture itself
+(`read_claude_version(capture.timeout + margin)`), so it cannot answer during a held capture. The window it sees is
+after the capture ends and before the start thread sets the source: the start thread's first `claude --version`.
+The test holds that read.
+
+Tests:
+
+- `daemon_socket::a_version_check_right_after_the_start_capture_says_the_published_version_is_not_known_yet`: a fake
+  `claude` whose first `--version` waits for a release file; a `PublishedChoice::Source`; the call says the chip is
+  shown, no versions, no error text; after the release the versions arrive. Seen red at runtime (old code answered
+  `this daemon does not look it up`), and red again with `expect_source` stubbed to a no-op.
+- `daemon_socket::a_daemon_with_no_published_source_says_it_does_not_look_it_up_right_after_the_start_capture`: the
+  same window with `PublishedChoice::Off` still says `NO_SOURCE`. A guard: it passed before the change. The daemon
+  with `Off` after the start is also covered by
+  `agent_setup::a_daemon_given_no_source_makes_no_fetch_and_the_published_chip_says_so`.
+- `published::with_a_source_coming_the_chip_says_it_is_not_known_yet_and_no_fetch_is_made`: seen red at runtime with
+  `expect_source` stubbed.
+- `published::with_a_source_coming_and_check_published_false_the_chip_is_hidden` and
+  `published::a_source_given_after_one_was_expected_is_fetched_as_before`: guards, green with the stub too.
+- `run_command::a_task_file_run_prints_both_versions_then_follows_the_phase_and_prints_its_record`: now waits, with a
+  120 s deadline, until `daemon.agent_versions` has the published versions (`wait_for_published_versions`) before it
+  runs the command. What it checks after that is unchanged. Run alone with
+  `cargo test --offline -p collide-host --test claude_adapter a_task_file_run_prints_both_versions -- --test-threads=1`
+  ten times in a row: 10 of 10 passed.
+
+### Decisions for the owner
+
+- The flag lives in `ClaudeVersions` and the daemon sets it (`expect_source`). Alternative: a field of
+  `VersionsOptions` set at construction. A method keeps `VersionsOptions::new` and its callers as they are.
+  Recommendation: the method.
+- The existing test waits for the published versions before the run. Alternative: check the version line against both
+  answers ("not known yet" or the versions). That accepts a wrong line when the fetch is merely slow, and it weakens
+  what the test shows. Recommendation: wait, as done.
+- A run that asks in the window still waits only `PUBLISHED_WAIT` (8 s) in `collide run`, then prints "not known yet"
+  and goes on. That is now true, not wrong. A longer wait is not needed. Recommendation: leave it.
+- Proposed plan text: none. The change keeps 0.3, Two version chips.
+
+### Not done, by design
+
+- No change to `collide run`'s wait (`PUBLISHED_WAIT`) or to when the source is made. The alternative in Notes,
+  making it before the capture with the daemon's own environment, would change which proxy the first fetch uses.

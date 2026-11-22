@@ -10,7 +10,9 @@
 //!   a thread of its own. A failed fetch keeps the last values and their time. `claude.check_published: false` in
 //!   `~/.config/collide/config.yaml` stops the fetch and hides the chip; the file is read at each refresh. With no source
 //!   the daemon never fetches: only the daemon's own binary names the real registry ([`registry_source`]).
-//! - [`ClaudeVersions::status`] is what `daemon.agent_versions` answers.
+//! - [`ClaudeVersions::status`] is what `daemon.agent_versions` answers. Before the source is set, it says "not known
+//!   yet" when a source is coming ([`ClaudeVersions::expect_source`]: the daemon's choice is not `Off`) and
+//!   "this daemon does not look it up" when none ever will be (ts-0166-rq).
 
 use crate::adapters::claude::version::{
     BinaryKey, ClaudeVersion, PUBLISHED_URL, PublishedTags, SmokeOutcome, TESTED, VersionCache,
@@ -184,6 +186,8 @@ struct State {
     published: Published,
     /// Where the published versions come from; `None` until a source is given, and then no fetch is ever made.
     source: Option<Arc<dyn PublishedSource>>,
+    /// A source is going to be given ([`ClaudeVersions::expect_source`]): "not known yet", not "not looked up".
+    source_coming: bool,
     stop: bool,
 }
 
@@ -349,6 +353,12 @@ impl ClaudeVersions {
         Gate::Unreadable { message }
     }
 
+    /// Notes that a source will be given: the daemon was told to look the published versions up, and waits for its
+    /// start capture to make the source. Until then [`ClaudeVersions::status`] says "not known yet".
+    pub fn expect_source(&self) {
+        locked(&self.state).source_coming = true;
+    }
+
     /// Gives the source of the published versions. Until the first fetch ends, the chip is "unknown", not hidden: only
     /// the key hides it.
     pub fn use_source(&self, source: Arc<dyn PublishedSource>) {
@@ -421,11 +431,13 @@ impl ClaudeVersions {
 
     /// The answer of `daemon.agent_versions`.
     pub fn status(&self) -> DaemonAgentVersionsResult {
-        // With no source the chip says so, unless the setting hides it. The setting's file is read with the state not
-        // held.
-        let no_source = locked(&self.state).source.is_none();
-        let not_looked_up =
-            no_source && check_published(self.options.home.as_deref(), &*self.options.log);
+        // With no source the chip says so, unless a source is coming (then it is not known yet) or the setting hides
+        // it. The setting's file is read with the state not held.
+        let (no_source, source_coming) = {
+            let state = locked(&self.state);
+            (state.source.is_none(), state.source_coming)
+        };
+        let shown = no_source && check_published(self.options.home.as_deref(), &*self.options.log);
         let state = locked(&self.state);
         let in_use = state.in_use.as_ref().map(|(version, _)| *version);
         let smoke = state
@@ -433,12 +445,12 @@ impl ClaudeVersions {
             .as_ref()
             .filter(|(version, _)| Some(*version) == in_use)
             .map(|(_, result)| result.clone());
-        let published = if not_looked_up {
+        let published = if shown {
             Some(PublishedVersions {
                 latest: None,
                 stable: None,
                 fetched_ms: None,
-                error: Some(NO_SOURCE.to_string()),
+                error: (!source_coming).then(|| NO_SOURCE.to_string()),
             })
         } else {
             (state.source.is_some() && state.published.enabled).then(|| PublishedVersions {

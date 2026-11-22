@@ -7,7 +7,9 @@
 mod common;
 
 use collide_core::owner::{MAX_MESSAGE_BYTES, OWNER_PROTOCOL, code};
+use collide_host::adapters::claude::version::{ClaudeVersion, PublishedTags};
 use collide_host::base_env::{CaptureOptions, EnvSource};
+use collide_host::claude_versions::{NO_SOURCE, PublishedChoice, PublishedSource};
 use collide_host::daemon::{Daemon, DaemonOptions, DaemonPaths, SocketError};
 use common::TempRoot;
 use serde_json::{Value, json};
@@ -696,6 +698,100 @@ fn set_user_version(db: &Path, version: u32) {
 }
 
 // ---- the base environment ----------------------------------------------------------------------------------------
+
+/// A published source that answers at once and reaches no network.
+struct FixedTags;
+
+impl PublishedSource for FixedTags {
+    fn fetch(&self) -> Result<PublishedTags, String> {
+        Ok(PublishedTags {
+            latest: ClaudeVersion::new(2, 1, 325),
+            stable: Some(ClaudeVersion::new(2, 1, 311)),
+        })
+    }
+}
+
+/// A daemon whose start capture has ended but whose first `claude --version` waits for `root`'s `release` file.
+/// That first read is the start thread's, and the thread sets the published source only after it. A later read (the
+/// one a `daemon.agent_versions` call makes) answers at once. The call waits for the capture itself, so this is the
+/// window it can see: the environment is known and the source is not set yet. The daemon's home is `root`, so no
+/// real config is read. The daemon's `Drop` ends its shell, and the fake `claude` gives up by itself after 30 s.
+fn daemon_reading_claude_slowly(root: &TempRoot, published: PublishedChoice) -> Daemon {
+    let bin = root.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let (first, release) = (root.join("first"), root.join("release"));
+    let claude = format!(
+        "#!/bin/sh\nif [ ! -f '{first}' ]; then\n  /usr/bin/touch '{first}'\n  i=0\n  \
+         while [ ! -f '{release}' ] && [ $i -lt 300 ]; do /bin/sleep 0.1; i=$((i+1)); done\nfi\n\
+         echo '2.1.324 (Claude Code)'\n",
+        first = first.display(),
+        release = release.display()
+    );
+    fs::write(bin.join("claude"), claude).unwrap();
+    fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
+    let shell = root.script(
+        "path-shell",
+        &format!(
+            "#!/bin/sh\nexport PATH='{}':/usr/bin:/bin\neval \"$4\"\n",
+            bin.display()
+        ),
+    );
+    let mut opts = options(root, Box::new(LogBuf::default()));
+    opts.shell = shell.to_str().unwrap().to_string();
+    opts.home = Some(root.path().to_str().unwrap().to_string());
+    opts.claude_published = published;
+    Daemon::start(opts).expect("the daemon starts")
+}
+
+fn wait_for_first_read(root: &TempRoot) {
+    common::wait_until(
+        "the start thread's read of the claude version",
+        Duration::from_secs(60),
+        || root.join("first").exists(),
+    );
+}
+
+/// What `daemon.agent_versions` says of the published version, as the daemon's JSON.
+fn published_chip(client: &mut Client, id: u64) -> Value {
+    let response = client.call(id, "daemon.agent_versions", json!({}));
+    assert!(response["result"].is_object(), "{response}");
+    response["result"]["agents"][0]["published"].clone()
+}
+
+#[test]
+fn a_version_check_right_after_the_start_capture_says_the_published_version_is_not_known_yet() {
+    let root = TempRoot::new();
+    let daemon = daemon_reading_claude_slowly(&root, PublishedChoice::Source(Arc::new(FixedTags)));
+    wait_for_first_read(&root);
+    let mut client = connected(&daemon);
+    let published = published_chip(&mut client, 2);
+    assert!(published.is_object(), "the chip is shown: {published}");
+    assert!(published["latest"].is_null(), "{published}");
+    assert!(published["stable"].is_null(), "{published}");
+    assert!(published["fetched_ms"].is_null(), "{published}");
+    assert!(
+        published["error"].is_null(),
+        "no error text, so the run prints 'not known yet': {published}"
+    );
+
+    // Once the start thread has read the version, the source is used and the versions come.
+    fs::write(root.join("release"), "").unwrap();
+    wait_for("the published versions", || {
+        let published = published_chip(&mut client, 3);
+        published["latest"].is_string().then_some(published)
+    });
+}
+
+#[test]
+fn a_daemon_with_no_published_source_says_it_does_not_look_it_up_right_after_the_start_capture() {
+    let root = TempRoot::new();
+    let daemon = daemon_reading_claude_slowly(&root, PublishedChoice::Off);
+    wait_for_first_read(&root);
+    let mut client = connected(&daemon);
+    let published = published_chip(&mut client, 2);
+    assert_eq!(published["error"], NO_SOURCE, "{published}");
+    assert!(published["latest"].is_null(), "{published}");
+}
 
 #[test]
 fn the_socket_answers_while_the_base_environment_is_still_being_captured() {

@@ -17,8 +17,8 @@ use super::published::{BODY, Reply, Server, source};
 use collide_core::agent::PermissionReply;
 use collide_core::events::EventBody;
 use collide_core::owner::{
-    QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueKind, RunRecordParams, RunRecordResult,
-    RunStopParams, RunStopResult,
+    DaemonAgentVersionsParams, DaemonAgentVersionsResult, QueueAnswer, QueueAnswerParams,
+    QueueAnswerResult, QueueKind, RunRecordParams, RunRecordResult, RunStopParams, RunStopResult,
 };
 use collide_core::state::RunState;
 use collide_host::claude_versions::PublishedChoice;
@@ -178,19 +178,44 @@ fn record_of(paths: &DaemonPaths, run: &str) -> RunRecordResult {
         .unwrap()
 }
 
+/// Waits until the daemon has fetched the published versions. The daemon makes its source once its start capture and
+/// its first read of the `claude` version have ended, and `collide run` waits only a few seconds for it
+/// (`print_versions`): on a machine that starts programs slowly a run can come first (ts-0166-rq).
+fn wait_for_published_versions(fx: &mut Fixture) {
+    wait_until(
+        "the daemon has the published versions",
+        Duration::from_secs(120),
+        || {
+            let result: DaemonAgentVersionsResult = fx
+                .client
+                .call(
+                    "daemon.agent_versions",
+                    &DaemonAgentVersionsParams {},
+                    Some(Duration::from_secs(60)),
+                )
+                .expect("the call is answered");
+            result.agents[0]
+                .published
+                .as_ref()
+                .is_some_and(|published| published.latest.is_some())
+        },
+    );
+}
+
 // ---- the versions and the record of an ordinary run ---------------------------------------------------------------
 
 #[test]
 fn a_task_file_run_prints_both_versions_then_follows_the_phase_and_prints_its_record() {
     let server = Server::start(vec![Reply::Body(BODY.into())]);
     let published = PublishedChoice::Source(Arc::new(source(&server.url("/dist-tags"))));
-    let fx = Fixture::new(
+    let mut fx = Fixture::new(
         &recording("report"),
         Setup {
             published: Some(published),
             ..Setup::default()
         },
     );
+    wait_for_published_versions(&mut fx);
     let cli = Cli::of(&fx);
     let outcome = cli.run(&[&task_arg(&fx)], "");
     assert_eq!(outcome.code, 0, "{outcome:?}");

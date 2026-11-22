@@ -903,6 +903,11 @@ impl Daemon {
                 Arc::new(move |text: &str| log.line(text))
             },
         });
+        // A source is made once the start capture ends: until then the published version is "not known yet"
+        // (ts-0166-rq).
+        if !matches!(claude_published, PublishedChoice::Off) {
+            claude.expect_source();
+        }
         // `config.get` reads the repo's layer through the loader. The cache is beside the runs, like the workspaces.
         let config = ConfigService::new(
             home.clone(),

@@ -367,6 +367,40 @@ fn with_no_source_nothing_is_fetched_and_the_chip_says_it_is_not_looked_up() {
 }
 
 #[test]
+fn with_a_source_coming_the_chip_says_it_is_not_known_yet_and_no_fetch_is_made() {
+    let root = TempRoot::new();
+    let versions = versions(None, Some(root.path()));
+    versions.expect_source();
+    let published = published_of(&versions).expect("the chip is shown");
+    assert_eq!(published.latest, None);
+    assert_eq!(published.stable, None);
+    assert_eq!(published.fetched_ms, None);
+    assert_eq!(published.error, None, "no error text: it is not known yet");
+}
+
+#[test]
+fn with_a_source_coming_and_check_published_false_the_chip_is_hidden() {
+    let root = TempRoot::new();
+    write_config(&root, "claude:\n  check_published: false\n");
+    let versions = versions(None, Some(root.path()));
+    versions.expect_source();
+    assert_eq!(published_of(&versions), None);
+}
+
+#[test]
+fn a_source_given_after_one_was_expected_is_fetched_as_before() {
+    let server = Server::start(vec![Reply::Body(BODY.into())]);
+    let root = TempRoot::new();
+    let versions = versions(None, Some(root.path()));
+    versions.expect_source();
+    versions.use_source(Arc::new(source(&server.url("/x"))));
+    versions.refresh_published();
+    let published = published_of(&versions).unwrap();
+    assert_eq!(published.latest.as_deref(), Some("2.1.325"));
+    assert_eq!(published.error, None);
+}
+
+#[test]
 fn with_no_source_and_check_published_false_the_chip_is_hidden() {
     let root = TempRoot::new();
     write_config(&root, "claude:\n  check_published: false\n");
