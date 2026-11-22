@@ -1,7 +1,7 @@
 ---
 id: ts-0163-su
 kind: task
-status: ready
+status: done
 title: "Daemon log: a board that cannot be read"
 owners: []
 links: []
