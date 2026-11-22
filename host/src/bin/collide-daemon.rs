@@ -10,7 +10,7 @@
 //! (`collide_host::daemon::DaemonPaths`). A start under `COLLIDE_DAEMON_ROOT` never loads a launchd job unless
 //! `COLLIDE_LAUNCHCTL` names the program to load it with (`collide_host::launch::launchctl_from_env`).
 
-use collide_host::daemon::{DaemonOptions, DaemonPaths, ROOT_ENV, run};
+use collide_host::daemon::{DaemonOptions, DaemonPaths, ROOT_ENV, check_home, run};
 use collide_host::launch::{
     FORWARDED_ENV, LAUNCHCTL_ENV, StartKind, StartRequest, ensure_daemon, launchctl_from_env,
 };
@@ -30,6 +30,10 @@ fn main() -> ExitCode {
         return fail(&format!(
             "unknown argument `{other}`: run it with no argument to serve, or with `start`"
         ));
+    }
+    // A `HOME` that names no folder is refused before any path is made, so the daemon never makes it.
+    if let Err(message) = check_home(std::env::var("HOME").ok().as_deref()) {
+        return fail(&message);
     }
     let paths = match DaemonPaths::from_env(
         std::env::var(ROOT_ENV).ok().as_deref(),

@@ -299,6 +299,20 @@ impl DaemonPaths {
     }
 }
 
+/// Refuses a `HOME` that names no folder (ts-0164-pa). A root below a deleted home would otherwise make the home again
+/// as it makes its own folders, and the daemon would run in a home nobody asked for. An unset or empty `HOME` passes:
+/// it names nothing, and [`DaemonPaths::from_env`] says when a root is needed and none is given. The check runs before
+/// anything is made, in the daemon, in the start that runs it, and in the app.
+pub fn check_home(home: Option<&str>) -> Result<(), String> {
+    match home {
+        Some(home) if !home.is_empty() && !Path::new(home).is_dir() => Err(format!(
+            "HOME names no folder: {home}. Collide does not make it, so nothing was started. \
+             Make the folder, or set HOME to one that exists"
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Why the daemon could not start or serve. Each message names the path or the limit.
 #[derive(Debug)]
 pub enum SocketError {
@@ -4140,6 +4154,20 @@ fn classify_shim(key: PhaseKey, dir: PathBuf) -> AdoptedShim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_home_that_is_unset_empty_or_a_folder_passes_the_home_check() {
+        assert!(check_home(None).is_ok());
+        assert!(check_home(Some("")).is_ok());
+        assert!(check_home(Some(std::env::temp_dir().to_str().unwrap())).is_ok());
+    }
+
+    #[test]
+    fn a_home_that_names_no_folder_is_refused_with_its_path() {
+        let message = check_home(Some("/no/such/collide-home")).unwrap_err();
+        assert!(message.contains("/no/such/collide-home"), "{message}");
+        assert!(message.contains("HOME"), "{message}");
+    }
 
     #[test]
     fn a_socket_path_error_names_the_path_and_the_limit() {

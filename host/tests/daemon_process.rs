@@ -20,11 +20,12 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 const DAEMON: &str = env!("CARGO_BIN_EXE_collide-daemon");
+const COLLIDE: &str = env!("CARGO_BIN_EXE_collide");
 const PYTHON: &str = "/usr/bin/python3";
 
 /// A login shell that prints its environment, so the daemon's capture never runs the user's own shell.
@@ -100,10 +101,12 @@ struct DaemonGuard {
 
 impl DaemonGuard {
     fn new(root: &TempRoot) -> DaemonGuard {
-        DaemonGuard {
-            paths: DaemonPaths::under(root.path()),
-            pid: None,
-        }
+        DaemonGuard::at(DaemonPaths::under(root.path()))
+    }
+
+    /// A guard for a daemon whose root is not the test's own folder, but below it.
+    fn at(paths: DaemonPaths) -> DaemonGuard {
+        DaemonGuard { paths, pid: None }
     }
 
     fn paths(&self) -> &DaemonPaths {
@@ -501,4 +504,138 @@ fn a_start_that_waited_for_the_lock_goes_ahead_when_it_is_released() {
     let error = ensure_daemon(&request).unwrap_err();
     release.join().unwrap();
     assert!(matches!(error, StartError::Exited { .. }), "{error}");
+}
+
+// ---- a HOME that names no folder (ts-0164-pa) ---------------------------------------------------------------------
+
+/// A home that was deleted: a name below the test's folder that is never made. The test's own folder is its parent, so
+/// nothing of the machine's is read or written.
+fn gone_home(root: &TempRoot) -> PathBuf {
+    root.join("gone")
+}
+
+/// `program` with a cleared environment whose `HOME` is `home` and whose daemon root is `daemon_root`.
+fn command_with_home(program: &str, root: &TempRoot, home: &Path, daemon_root: &Path) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", home)
+        .env("SHELL", fake_shell(root))
+        .env("COLLIDE_DAEMON_ROOT", daemon_root)
+        .stdin(Stdio::null());
+    command
+}
+
+/// Runs `command` and waits for it to end for up to `deadline`. A command that does not end is killed and reaped, and
+/// the test fails: a daemon that served instead of refusing would otherwise run for as long as the test run does.
+fn output_within(command: &mut Command, deadline: Duration) -> Output {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let until = Instant::now() + deadline;
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= until {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("the command did not end within {deadline:?}: it served instead of refusing");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    child.wait_with_output().unwrap()
+}
+
+fn assert_refused_for_home(output: &Output, home: &Path) {
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(home.to_str().unwrap()), "{stderr}");
+    assert!(stderr.contains("HOME"), "{stderr}");
+}
+
+#[test]
+fn a_daemon_whose_home_names_no_folder_refuses_and_makes_nothing() {
+    let root = TempRoot::new();
+    let home = gone_home(&root);
+    let output = output_within(
+        &mut command_with_home(DAEMON, &root, &home, root.path()),
+        Duration::from_secs(30),
+    );
+    assert_refused_for_home(&output, &home);
+    assert!(!home.exists(), "the refusal made HOME");
+    assert!(
+        !root.join("run").exists(),
+        "the refusal made the root's run folder"
+    );
+    assert!(
+        !root.join("data").exists(),
+        "the refusal made the root's data folder"
+    );
+}
+
+#[test]
+fn a_start_below_a_home_that_names_no_folder_refuses_and_does_not_make_it() {
+    // The owner's case: `COLLIDE_DAEMON_ROOT` is below the deleted `HOME`, so making the root makes the home.
+    let root = TempRoot::new();
+    let home = gone_home(&root);
+    let daemon_root = home.join("daemon");
+    // A daemon that did start would be below the deleted home; the guard ends it, by the pid it reports.
+    let _guard = DaemonGuard::at(DaemonPaths::under(&daemon_root));
+    let output = command_with_home(DAEMON, &root, &home, &daemon_root)
+        .arg("start")
+        .output()
+        .unwrap();
+    assert_refused_for_home(&output, &home);
+    assert!(!home.exists(), "the refusal made HOME");
+}
+
+#[test]
+fn the_cli_prints_the_refusal_when_its_home_names_no_folder() {
+    let root = TempRoot::new();
+    let home = gone_home(&root);
+    let daemon_root = home.join("daemon");
+    // A daemon that did start would be below the deleted home; the guard ends it, by the pid it reports.
+    let _guard = DaemonGuard::at(DaemonPaths::under(&daemon_root));
+    let mut command = command_with_home(COLLIDE, &root, &home, &daemon_root);
+    command.args(["stop", "no-such-run"]);
+    let output = common::detached::Detached::start(&root, &command).wait();
+    assert_refused_for_home(&output, &home);
+    assert!(!home.exists(), "the CLI made HOME");
+}
+
+#[test]
+fn a_start_that_names_a_home_in_its_request_is_refused_when_it_is_gone() {
+    let root = TempRoot::new();
+    let home = gone_home(&root);
+    let daemon_root = home.join("daemon");
+    let mut request = failing_daemon(&root);
+    let paths = DaemonPaths::under(&daemon_root);
+    request.lock_file = paths.lock_file.clone();
+    request.socket = paths.socket.clone();
+    request.log_file = paths.log_file.clone();
+    request
+        .env
+        .insert("HOME".to_string(), home.display().to_string());
+    let error = ensure_daemon(&request).unwrap_err().to_string();
+    assert!(error.contains(home.to_str().unwrap()), "{error}");
+    assert!(error.contains("HOME"), "{error}");
+    assert!(!home.exists(), "the start made HOME");
+}
+
+#[test]
+fn a_root_that_names_no_folder_is_still_made_by_a_start() {
+    let root = TempRoot::new();
+    let daemon_root = root.join("fresh").join("daemon");
+    let paths = DaemonPaths::under(&daemon_root);
+    let mut guard = DaemonGuard::at(paths.clone());
+    assert!(!daemon_root.exists());
+    let output = command_with_home(DAEMON, &root, root.path(), &daemon_root)
+        .arg("start")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout_of(&output), "started");
+    guard.pid();
+    assert!(paths.token_file.is_file());
 }

@@ -10,13 +10,15 @@
 
 mod common;
 
-use collide_app::shell::{DaemonLink, SocketLink};
+use collide_app::shell::{DaemonAccess, DaemonLink, SocketLink};
 use collide_core::owner::code;
+use collide_host::daemon::DaemonPaths;
 use common::{
     AlreadyThere, Channel, FailingStarter, FakeDaemon, InProcessStarter, PumpRun, SharedLog,
     TempRoot, TestClocks, access, append, request, result_of, start_daemon, wait_until,
 };
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -135,6 +137,34 @@ fn a_start_that_fails_says_why_and_the_call_fails() {
         "{}",
         error.message
     );
+}
+
+#[test]
+fn a_home_that_names_no_folder_is_refused_in_words_and_nothing_is_made_or_started() {
+    let root = TempRoot::new();
+    let home = root.path().join("gone");
+    // The root is below the missing home, so any folder the link made would make the home.
+    let paths = DaemonPaths::under(&home.join("daemon"));
+    let starter = FailingStarter::default();
+    let access = DaemonAccess::new(
+        paths,
+        Box::new(starter.clone()),
+        Arc::new(TestClocks::default()),
+        common::this_executable(),
+    )
+    .with_home(Some(home.display().to_string()));
+    let mut link = SocketLink::new(Arc::new(access));
+    let error = call(&mut link, 1, "daemon.status").expect_err("the home is gone");
+    assert_eq!(error.code, code::UNAVAILABLE);
+    for part in ["could not be started", "HOME", home.to_str().unwrap()] {
+        assert!(
+            error.message.contains(part),
+            "`{part}` is not in: {}",
+            error.message
+        );
+    }
+    assert_eq!(starter.asked(), 0, "the starter was asked");
+    assert!(!home.exists(), "the link made HOME");
 }
 
 #[test]

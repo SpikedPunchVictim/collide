@@ -41,7 +41,7 @@ use collide_core::ui_tools::REQUEST_EVENT;
 use collide_core::ui_tools::UiToolsRequest;
 use collide_host::auth;
 use collide_host::clock::{Clock, Clocks};
-use collide_host::daemon::DaemonPaths;
+use collide_host::daemon::{DaemonPaths, check_home};
 use collide_host::launch;
 use collide_host::owner_client::{ClientError, Incoming, OwnerClient};
 use collide_host::ui_tools::{Completed, Rpc, UiToolsEndpoint, Window};
@@ -165,6 +165,8 @@ pub struct DaemonAccess {
     app_executable: PathBuf,
     policy: launch::RestartPolicy,
     failed_starts: Mutex<Vec<FailedStart>>,
+    /// The app's `HOME`, when it has one. A `HOME` that names no folder is refused ([`check_home`]).
+    home: Option<String>,
 }
 
 impl DaemonAccess {
@@ -181,7 +183,14 @@ impl DaemonAccess {
             app_executable,
             policy: launch::RestartPolicy::default(),
             failed_starts: Mutex::new(Vec::new()),
+            home: None,
         }
+    }
+
+    /// The app's `HOME`, which every connection checks before it makes or starts anything.
+    pub fn with_home(mut self, home: Option<String>) -> Self {
+        self.home = home;
+        self
     }
 
     /// A new connection that has done `initialize`, with the token read from the token file (which is refused unless it
@@ -191,6 +200,9 @@ impl DaemonAccess {
     /// does, unless [`launch::RestartPolicy`] says the app has failed to start one too often lately: then it only
     /// connects, so a daemon someone else started is still used.
     pub fn connect(&self) -> Result<OwnerClient, RpcError> {
+        // First, before the app's file below the run folder is written: that folder can be below the home.
+        check_home(self.home.as_deref())
+            .map_err(|reason| unavailable(format!("the daemon could not be started: {reason}")))?;
         auth::write_app_executable(&self.paths, &self.app_executable).map_err(|error| {
             unavailable(format!(
                 "could not tell the daemon where the app is: {error}"

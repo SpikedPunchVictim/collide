@@ -89,12 +89,15 @@ fn daemon_access() -> Result<Arc<DaemonAccess>, String> {
     let exe = std::env::current_exe()
         .and_then(std::fs::canonicalize)
         .map_err(|error| format!("could not find the app's own executable: {error}"))?;
-    Ok(Arc::new(DaemonAccess::new(
-        paths.clone(),
-        Box::new(LaunchStarter::new(paths)),
-        Arc::new(SystemClocks),
-        exe,
-    )))
+    Ok(Arc::new(
+        DaemonAccess::new(
+            paths.clone(),
+            Box::new(LaunchStarter::new(paths)),
+            Arc::new(SystemClocks),
+            exe,
+        )
+        .with_home(home),
+    ))
 }
 
 /// How long the event pump waits before it connects again when the stream ends.

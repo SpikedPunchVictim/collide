@@ -31,7 +31,7 @@
 //! | `daemon: launchd job` | [`launchd_plist`], [`launchd_job`], [`Launchctl`] | the plist, its inputs made canonical, and the bootstrap, removed once the daemon runs |
 //! | `daemon: setsid start` | [`start_with_setsid`] | the fallback start, with its warning |
 
-use crate::daemon::{DaemonPaths, ROOT_ENV};
+use crate::daemon::{DaemonPaths, ROOT_ENV, check_home};
 use crate::stop::RUNTIME_MARKER;
 use std::collections::BTreeMap;
 use std::fs;
@@ -106,6 +106,8 @@ pub enum StartError {
         log_file: PathBuf,
         log_tail: String,
     },
+    /// `HOME` names no folder, so nothing was made and no daemon was started ([`crate::daemon::check_home`]).
+    HomeGone(String),
     Io {
         context: String,
         source: io::Error,
@@ -136,6 +138,7 @@ impl std::fmt::Display for StartError {
                 "the daemon ended ({status}) before its socket answered; its log {} ends: {log_tail}",
                 log_file.display()
             ),
+            StartError::HomeGone(message) => f.write_str(message),
             StartError::Io { context, source } => write!(f, "{context}: {source}"),
         }
     }
@@ -235,8 +238,17 @@ fn lock(lock_file: &Path, wait: Duration) -> Result<fs::File, StartError> {
 /// answer, and waits for the answer. The start is a one-shot launchd job when [`StartRequest::launchctl`] is set
 /// (`start_launchd_job`), and `setsid` ([`start_with_setsid`]) when it is not or when launchd refuses: that start is
 /// [`StartKind::SetsidFallback`], with the warning and, when launchd refused, what it said. The temporary plist is
-/// gone when this returns, whatever the outcome.
+/// gone when this returns, whatever the outcome. A `HOME` that names no folder is refused before anything is made
+/// ([`StartError::HomeGone`]).
 pub fn ensure_daemon(request: &StartRequest) -> Result<StartKind, StartError> {
+    // The home the daemon will have: the request's own, else this process's. Checked before the lock file's folder is
+    // made, because that folder can be below the home.
+    let home = request
+        .env
+        .get("HOME")
+        .cloned()
+        .or_else(|| std::env::var("HOME").ok());
+    check_home(home.as_deref()).map_err(StartError::HomeGone)?;
     let lock_file = lock(&request.lock_file, request.wait)?;
     // The lock file holds the socket path, for whoever looks at what a start is holding.
     let written = lock_file
