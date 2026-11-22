@@ -30,8 +30,17 @@ impl Checkout {
 }
 
 /// Runs `git` in `folder` and returns what it printed when it succeeded. `None` when it failed or did not run. `env` is
-/// added to the environment, as for the workspace's git ([`crate::daemon::DaemonOptions::git_env`]).
+/// added to the environment, as for the workspace's git ([`crate::daemon::DaemonOptions::git_env`]). `Err` says that
+/// the folder is gone, or that git is not installed: a spawn in a folder that is gone fails with `NotFound` too, so the
+/// folder is checked first.
 fn git(folder: &Path, env: &[(String, String)], args: &[&str]) -> Result<Option<String>, String> {
+    if !folder.is_dir() {
+        return Err(format!(
+            "`{}` is not a folder (it is gone or was moved), so `git` cannot run in it; \
+             check that the folder is still there",
+            folder.display()
+        ));
+    }
     let output = Command::new("git")
         .args(args)
         .current_dir(folder)
