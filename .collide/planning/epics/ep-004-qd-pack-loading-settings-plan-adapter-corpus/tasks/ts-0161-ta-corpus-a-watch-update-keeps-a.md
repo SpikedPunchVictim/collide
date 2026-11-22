@@ -1,7 +1,7 @@
 ---
 id: ts-0161-ta
 kind: task
-status: ready
+status: done
 title: "Corpus: a watch update keeps a stale row when another file takes an item's id"
 owners: []
 links: []
