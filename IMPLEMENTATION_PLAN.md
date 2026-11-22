@@ -4659,9 +4659,10 @@ its fix items are `ts-0159-ra` to `ts-0164-pa`, and `ts-0159-ra` (the loop page 
 
 ## Stage 5: GitHub adapter
 
-**Goal**: A global source with live updates and writes over Issues (REST), built against the same protocol before the
-UI depends on it. Projects v2 comes after the board, in Stage 6c (owner, 2026-11-14; R5 challenge 5). Stage 2 still
-freezes the provider contract in full, including the Projects keys.
+**Goal**: A global source with live updates and writes over Issues (REST), on the same protocol. It runs after the
+board (6a and 6b), which is built first on the plan source (owner, 2026-11-21: the UI first). Projects v2 comes after
+it, in Stage 6c (owner, 2026-11-14; R5 challenge 5). Stage 2 still freezes the provider contract in full, including the
+Projects keys.
 
 - `github` adapter (TypeScript, built-in pack). `board.yaml` names the repos. The `gh` account is per user, in the
   user's settings (0.7), and is read with `gh auth token --user <name>`.
@@ -4686,7 +4687,7 @@ freezes the provider contract in full, including the Projects keys.
 **Tests**: Recorded GitHub fixtures (no network in CI); scope check; per-item version conflict tests; reconcile
 removal; PR items; category mapping; mixed-source view test.
 **Status**: Not Started. Split into `ts-0168-tq` to `ts-0177-hd` (revision 24 scope, 2026-11-21), in epic `ep-005-hs`,
-built one at a time in id order (part L). It runs after Stage 4c. Nothing in it runs a real `claude`, reaches GitHub
+built one at a time in id order (part L). It runs after Stage 6b. Nothing in it runs a real `claude`, reaches GitHub
 or reads a token: its tests use recorded fixtures, a fake `gh` on the test's own `PATH` and a fake API on loopback.
 The criteria that need real GitHub (the 60 s measurement, a real close, delete, transfer, expiry and scope failure)
 are the owner's, in `ts-0177-hd`.
