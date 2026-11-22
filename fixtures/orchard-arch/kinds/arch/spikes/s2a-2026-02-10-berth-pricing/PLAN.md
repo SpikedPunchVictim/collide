@@ -10,3 +10,7 @@ tags: [berth, price]
 # Plan
 
 Made-up plan for S2a.
+
+## Question
+
+Which berth price do boats accept? We offer three prices and count who stays.

@@ -9,3 +9,7 @@ blocks: [O-03-01-berth-count]
 # Which berth first
 
 Made-up body for Q-03-01.
+
+## Question
+
+Which berth should we list first? The first berth sets the order for the rest.

@@ -11,3 +11,7 @@ blocks:
 # Who rings the bell
 
 Made-up body for Q-03-03.
+
+## Question
+
+Who rings the bell each evening? A person or a clock could do it.
