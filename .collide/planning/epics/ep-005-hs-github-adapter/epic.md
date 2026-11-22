@@ -18,4 +18,7 @@ A global source with live updates and writes over Issues (REST), on the same pro
 
 ## Notes
 
-Stage 5 has no lettered sub-stages. Split it into items when Stage 4 nears done (0.10).
+Stage 5 has no lettered sub-stages. It is split (2026-11-21): `ts-0168-tq` to `ts-0176-ds` are built one at a time
+in id order, and `ts-0177-hd` is the owner's check on real GitHub. The provider contract, the per-user setting and
+the daemon's global-source paths come first, on a fake provider; then the `github` pack grows read by read (client
+and token, list, watch, writes); then the Stage 5 criteria run through the daemon on fakes.

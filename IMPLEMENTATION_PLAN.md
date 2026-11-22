@@ -4685,8 +4685,11 @@ freezes the provider contract in full, including the Projects keys.
 
 **Tests**: Recorded GitHub fixtures (no network in CI); scope check; per-item version conflict tests; reconcile
 removal; PR items; category mapping; mixed-source view test.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-005-hs` in
-`.collide/planning/epics/` (part L).
+**Status**: Not Started. Split into `ts-0168-tq` to `ts-0177-hd` (revision 24 scope, 2026-11-21), in epic `ep-005-hs`,
+built one at a time in id order (part L). It runs after Stage 4c. Nothing in it runs a real `claude`, reaches GitHub
+or reads a token: its tests use recorded fixtures, a fake `gh` on the test's own `PATH` and a fake API on loopback.
+The criteria that need real GitHub (the 60 s measurement, a real close, delete, transfer, expiry and scope failure)
+are the owner's, in `ts-0177-hd`.
 
 
 ## Stage 6: Task board (read-only desktop)
