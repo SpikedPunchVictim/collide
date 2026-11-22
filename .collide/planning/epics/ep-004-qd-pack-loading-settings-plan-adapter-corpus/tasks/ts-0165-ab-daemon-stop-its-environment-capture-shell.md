@@ -1,7 +1,7 @@
 ---
 id: ts-0165-ab
 kind: task
-status: ready
+status: done
 title: "Daemon stop: its environment capture shell outlives it"
 owners: []
 links: []
