@@ -1,7 +1,7 @@
 ---
 id: ts-0178-fw
 kind: task
-status: ready
+status: done
 title: "Loop page: a file run's card says its task is unknown"
 owners: []
 links: []
