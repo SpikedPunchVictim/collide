@@ -1,0 +1,2949 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collide Board Mock</title>
+<!--
+  Design mock of Stage 6a, the board (IMPLEMENTATION_PLAN.md, Stage 6a). One file, no build, no dependencies.
+  Open it in a browser. The "Mock" button (bottom left) switches scenarios and shows the numbered design notes.
+  The look is the approachable pass of mockups A (Field) and C (Tracks): warm neutrals, Inter, colour for state only.
+  Demo data: Collide's own planning items (statuses as of 2026-11-21, a few changed for the demo), and a made-up
+  "pantry" board. Items ts-0179 to ts-0185 and fx-0001 are demo items, not filed.
+  Round 2 (2026-11-22) adds, from the owner's notes: Comms, a Tracks preview with Optimize, a Graph layout beside
+  Run order, "Describe what to show", the drawer's Changes and pack fields, and "Plan it first" on an empty board.
+  Runs, sessions and research results are made up; the diffs of ts-0178 are its real ones (commit 660efc8).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --radius:14px;--radius-sm:10px;--radius-xs:7px;
+  --background:#f8f6f2;--foreground:#1f1b16;--card:#ffffff;--popover:#ffffff;
+  --primary:#4f46e5;--primary-foreground:#ffffff;--primary-soft:#ecebfd;
+  --secondary:#f1ede6;--secondary-foreground:#3b352d;
+  --muted:#f3efe9;--muted-foreground:#675f55;--accent:#ebe6de;
+  --destructive:#c62828;--border:#e7e1d8;--input:#d8d0c4;--ring:#4f46e5;
+  --working:#0369a1;--waiting:#b45309;--blocked:#6f675d;--failed:#c62828;--done:#15803d;--cold:#a21caf;
+  --code-bg:#f3efe8;--code-fg:#2b251e;
+  --overlay:rgb(40 30 20 / .42);
+  --shadow:0 1px 2px rgb(60 40 20 / .06);
+  --shadow-card:0 1px 2px rgb(60 40 20 / .05),0 8px 28px rgb(60 40 20 / .07);
+  --shadow-lg:0 16px 48px rgb(40 25 10 / .2);
+  --font-sans:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --font-mono:'DM Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --fs-xs:12.5px;--fs-sm:14px;--fs-base:15px;--fs-lg:17px;--fs-xl:22px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --background:#171513;--foreground:#f3efe9;--card:#211f1c;--popover:#292623;
+  --primary:#8b93f8;--primary-foreground:#14122e;--primary-soft:#2c2e5e;
+  --secondary:#2c2925;--secondary-foreground:#e8e2d8;--muted:#1d1b18;--muted-foreground:#aea699;--accent:#36322d;
+  --destructive:#f0605d;--border:#3a3631;--input:#4b463f;--ring:#8b93f8;
+  --working:#38bdf8;--waiting:#fbbf24;--blocked:#aea699;--failed:#f87171;--done:#4ade80;--cold:#e879f9;
+  --code-bg:#181614;--code-fg:#e9e4db;--overlay:rgb(0 0 0 / .62);
+  --shadow:0 1px 2px rgb(0 0 0 / .4);--shadow-card:0 1px 2px rgb(0 0 0 / .35),0 8px 28px rgb(0 0 0 / .35);
+  --shadow-lg:0 16px 48px rgb(0 0 0 / .6);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --background:#171513;--foreground:#f3efe9;--card:#211f1c;--popover:#292623;
+  --primary:#8b93f8;--primary-foreground:#14122e;--primary-soft:#2c2e5e;
+  --secondary:#2c2925;--secondary-foreground:#e8e2d8;--muted:#1d1b18;--muted-foreground:#aea699;--accent:#36322d;
+  --destructive:#f0605d;--border:#3a3631;--input:#4b463f;--ring:#8b93f8;
+  --working:#38bdf8;--waiting:#fbbf24;--blocked:#aea699;--failed:#f87171;--done:#4ade80;--cold:#e879f9;
+  --code-bg:#181614;--code-fg:#e9e4db;--overlay:rgb(0 0 0 / .62);
+  --shadow:0 1px 2px rgb(0 0 0 / .4);--shadow-card:0 1px 2px rgb(0 0 0 / .35),0 8px 28px rgb(0 0 0 / .35);
+  --shadow-lg:0 16px 48px rgb(0 0 0 / .6);color-scheme:dark}
+/* Category colours: colour is for state only, and every state is also written in words. */
+:root{--c-backlog:var(--blocked);--c-ready:var(--primary);--c-active:var(--working);--c-review:var(--waiting);
+  --c-done:var(--done);--c-dropped:var(--muted-foreground)}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--background);color:var(--foreground);font:400 var(--fs-base)/1.5 var(--font-sans);
+  font-feature-settings:"tnum" 1;display:flex;flex-direction:column}
+button,input,select,textarea{font:inherit;color:inherit}
+code,kbd,pre,.mono{font-family:var(--font-mono);font-size:.92em}
+code{background:var(--code-bg);color:var(--code-fg);padding:1px 5px;border-radius:5px}
+h1,h2,h3{margin:0;text-wrap:balance;letter-spacing:-.01em}
+a{color:var(--primary)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.muted{color:var(--muted-foreground)}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
+  stroke-linejoin:round;flex:none}
+
+/* Buttons and chips */
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--input);background:var(--card);
+  border-radius:var(--radius-xs);padding:6px 12px;font-size:var(--fs-sm);font-weight:500;cursor:pointer;
+  white-space:nowrap}
+.btn:hover{background:var(--secondary)}
+.btn.main{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground)}
+.btn.main:hover{filter:brightness(1.08)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:var(--secondary)}
+.btn.sm{padding:4px 10px;font-size:13px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn:focus-visible,.tc:focus-visible,.chipbtn:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);line-height:1.4;padding:1px 8px;
+  border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--muted-foreground);
+  white-space:nowrap}
+.chip .dot,.dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none;display:inline-block}
+.chip.warn{color:var(--waiting);border-color:color-mix(in srgb,var(--waiting) 40%,var(--border))}
+.chip.bad{color:var(--failed);border-color:color-mix(in srgb,var(--failed) 40%,var(--border))}
+.chip.info{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 35%,var(--border))}
+.st{font-weight:500}
+.cat-backlog{color:var(--c-backlog)}.cat-ready{color:var(--c-ready)}.cat-active{color:var(--c-active)}
+.cat-review{color:var(--c-review)}.cat-done{color:var(--c-done)}.cat-dropped{color:var(--c-dropped)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+
+/* Design-note markers: shown only when design notes are on */
+.nm{display:none;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;
+  border-radius:999px;background:var(--cold);color:#fff;font:600 11px/1 var(--font-sans);vertical-align:middle;
+  margin-left:4px;cursor:help;flex:none}
+body.notes .nm{display:inline-flex}
+
+/* Top bar */
+.top{display:flex;align-items:center;gap:16px;padding:10px max(16px,env(safe-area-inset-right,0px)) 10px
+  max(16px,env(safe-area-inset-left,0px));background:var(--card);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:var(--fs-lg)}
+.logo{color:var(--primary);display:inline-flex}
+.logo .ic{width:22px;height:22px}
+.crumb{display:flex;align-items:center;gap:4px;position:relative}
+.crumb .sep{color:var(--muted-foreground)}
+.crumbbtn{display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:transparent;
+  border-radius:var(--radius-xs);padding:4px 8px;cursor:pointer;font-weight:500}
+.crumbbtn:hover,.crumbbtn[aria-expanded="true"]{background:var(--secondary);border-color:var(--border)}
+.crumbbtn small{font-weight:400;color:var(--muted-foreground)}
+.tabs{display:flex;gap:4px;margin-inline:auto}
+.tab{display:flex;flex-direction:column;align-items:flex-start;border:0;background:transparent;cursor:pointer;
+  padding:5px 12px;border-radius:var(--radius-sm);line-height:1.2;font-weight:600}
+.tab small{font-weight:400;font-size:12px;color:var(--muted-foreground)}
+.tab:hover{background:var(--secondary)}
+.tab[aria-pressed="true"]{background:var(--primary-soft);color:var(--primary)}
+.tab.later{opacity:.6}
+.topr{display:flex;align-items:center;gap:8px}
+
+/* Popover menus */
+.pop{position:absolute;top:calc(100% + 6px);left:0;z-index:30;min-width:320px;background:var(--popover);
+  border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);padding:6px}
+.pop h4{margin:6px 8px 4px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted-foreground);font-weight:600}
+.opt{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;text-align:left;
+  padding:7px 8px;border-radius:var(--radius-xs);cursor:pointer}
+.opt:hover{background:var(--secondary)}
+.opt[aria-current="true"]{background:var(--primary-soft)}
+.opt .grow{flex:1;min-width:0}
+.opt .sub{display:block;font-size:12.5px;color:var(--muted-foreground)}
+.pop hr{border:0;border-top:1px solid var(--border);margin:6px 0}
+
+/* Layout */
+.stage{flex:1;display:flex;min-height:0}
+.content{flex:1;min-width:0;overflow:auto;padding:16px max(16px,env(safe-area-inset-right,0px)) 40px
+  max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.banner{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:var(--radius-sm);
+  background:var(--primary-soft);border:1px solid color-mix(in srgb,var(--primary) 25%,var(--border));flex-wrap:wrap}
+.banner.warn{background:color-mix(in srgb,var(--waiting) 10%,var(--card));
+  border-color:color-mix(in srgb,var(--waiting) 35%,var(--border))}
+.banner .grow{flex:1;min-width:220px}
+
+/* Filter bar */
+.filters{padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.frow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.fgroup{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fgroup .lbl{font-size:12.5px;color:var(--muted-foreground);font-weight:500}
+.chipbtn{display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:2px 10px;border-radius:999px;
+  border:1px solid var(--border);background:var(--card);cursor:pointer}
+.chipbtn:hover{background:var(--secondary)}
+.chipbtn[aria-pressed="true"]{background:var(--primary-soft);border-color:var(--primary);color:var(--primary)}
+.chipbtn .n{color:var(--muted-foreground);font-size:12px}
+.ftext{border:1px solid var(--input);border-radius:var(--radius-xs);padding:5px 10px;background:var(--card);
+  width:260px;max-width:100%}
+.spacer{flex:1}
+details.adv summary{cursor:pointer;font-size:13px;color:var(--muted-foreground)}
+details.adv .cel{margin-top:6px;padding:8px 10px;background:var(--code-bg);border-radius:var(--radius-xs);
+  overflow-x:auto}
+details.adv .cel code{background:none;padding:0;white-space:pre}
+
+/* View bar */
+.viewbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.viewbar h1{font-size:var(--fs-xl);font-weight:650}
+.seg{display:inline-flex;border:1px solid var(--input);border-radius:var(--radius-xs);overflow:hidden}
+.seg button{border:0;background:var(--card);padding:4px 10px;font-size:13px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--input)}
+.seg button[aria-pressed="true"]{background:var(--primary-soft);color:var(--primary);font-weight:600}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted-foreground)}
+.live .dot{color:var(--done);animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+
+/* Board */
+.cols{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:10px;min-height:0}
+.col{flex:0 0 280px;background:var(--muted);border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px;display:flex;flex-direction:column;gap:8px}
+.colh{display:flex;align-items:flex-start;gap:8px;padding:2px 4px 4px}
+.colh .grow{flex:1;min-width:0}
+.colh .name{font-weight:600;display:flex;align-items:center;gap:6px}
+.colh .name .dot{color:inherit}
+.colh .sub{font-size:12.5px;color:var(--muted-foreground)}
+.colh .count{font-size:13px;color:var(--muted-foreground);font-weight:500}
+.col.shut{flex:0 0 52px;padding:10px 4px;align-items:center;cursor:pointer}
+.col.shut .vert{writing-mode:vertical-rl;transform:rotate(180deg);display:flex;align-items:center;gap:8px;
+  font-weight:600;white-space:nowrap}
+.col .empty{font-size:13px;color:var(--muted-foreground);padding:6px 4px}
+.tc{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;background:var(--card);
+  border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;box-shadow:var(--shadow);
+  cursor:pointer}
+.tc:hover{border-color:var(--input);box-shadow:var(--shadow-card)}
+.tc.lit{border-color:var(--c-active);box-shadow:0 0 0 1px var(--c-active),var(--shadow)}
+.tc.sel{outline:2px solid var(--ring);outline-offset:1px}
+.tc.flash{animation:flash 2s ease-out}
+@keyframes flash{0%{background:var(--primary-soft);transform:scale(1.02)}100%{background:var(--card)}}
+.tc-t{font-weight:500;line-height:1.35}
+.tc-m{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted-foreground)}
+.tc-c{display:flex;gap:5px;flex-wrap:wrap}
+.tc.dropped .tc-t{text-decoration:line-through;color:var(--muted-foreground)}
+
+/* Run order */
+.steps{display:flex;flex-direction:column;gap:10px}
+.step{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:start}
+.step .lab{padding-top:8px}
+.step .lab b{display:block}
+.step .lab span{font-size:12.5px;color:var(--muted-foreground)}
+.step .row{display:flex;gap:10px;flex-wrap:wrap}
+.step .row .tc{width:280px}
+@media (max-width:640px){.step{grid-template-columns:1fr}}
+
+/* Drawer */
+.drawer{flex:0 0 460px;max-width:100%;border-left:1px solid var(--border);background:var(--card);overflow:auto;
+  display:flex;flex-direction:column}
+.drawer[hidden]{display:none}
+.dh{position:sticky;top:0;background:var(--card);padding:14px 18px 10px;border-bottom:1px solid var(--border);
+  display:flex;flex-direction:column;gap:8px;z-index:2}
+.dh .row{display:flex;align-items:center;gap:8px}
+.dh h2{font-size:19px;font-weight:650;line-height:1.3}
+.db{padding:14px 18px 40px;display:flex;flex-direction:column;gap:20px}
+.ds h3{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-foreground);
+  font-weight:600;margin-bottom:8px;display:flex;align-items:center}
+.md{line-height:1.6;max-width:65ch}
+.md p{margin:0 0 .7em}
+.md ul{margin:0 0 .7em;padding-left:1.2em}
+.md h4{margin:.9em 0 .4em;font-size:var(--fs-base)}
+.md pre{background:var(--code-bg);padding:8px 10px;border-radius:var(--radius-xs);overflow-x:auto}
+.md .gone{color:var(--muted-foreground);font-style:italic}
+.links{display:flex;flex-direction:column;gap:4px}
+.lk{display:flex;align-items:center;gap:8px;border:0;background:transparent;text-align:left;padding:5px 6px;
+  border-radius:var(--radius-xs);cursor:pointer;width:100%}
+.lk:hover{background:var(--secondary)}
+.lk .grow{flex:1;min-width:0}
+table.t{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+table.t th{text-align:left;font-weight:500;color:var(--muted-foreground);font-size:12.5px;padding:4px 8px;
+  border-bottom:1px solid var(--border)}
+table.t td{padding:7px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+table.t tr.diff td{background:color-mix(in srgb,var(--waiting) 8%,transparent)}
+table.t tr.coll td{background:color-mix(in srgb,var(--failed) 7%,transparent)}
+details.eng summary{cursor:pointer;font-size:var(--fs-sm);color:var(--muted-foreground)}
+details.eng pre{background:var(--code-bg);padding:8px 10px;border-radius:var(--radius-xs);overflow-x:auto;
+  font-size:12.5px}
+dl.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:8px 0;font-size:var(--fs-sm)}
+dl.kv dt{color:var(--muted-foreground)}
+dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+
+/* Panels: settings, welcome, empty, missing, later */
+.panel{padding:22px 24px;display:flex;flex-direction:column;gap:14px;max-width:880px}
+.panel.center{margin:24px auto;width:100%}
+.panel h1{font-size:var(--fs-xl);font-weight:650}
+.panel h2{font-size:var(--fs-lg);font-weight:600}
+.panel p{margin:0;max-width:68ch}
+.checks{display:flex;flex-direction:column;gap:2px}
+.chk{display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:start;padding:10px 4px;
+  border-bottom:1px solid var(--border)}
+.chk .ok{color:var(--done)}.chk .no{color:var(--failed)}.chk .opt{color:var(--muted-foreground)}
+.chk .fix{font-size:var(--fs-sm);color:var(--muted-foreground);margin-top:2px}
+.setgrid{display:grid;grid-template-columns:200px 1fr;gap:20px;align-items:start}
+.snav{display:flex;flex-direction:column;gap:2px;position:sticky;top:0}
+.snav button{text-align:left;border:0;background:transparent;padding:7px 10px;border-radius:var(--radius-xs);
+  cursor:pointer}
+.snav button[aria-current="true"]{background:var(--primary-soft);color:var(--primary);font-weight:600}
+.layer{font-size:12.5px;font-weight:500;padding:1px 8px;border-radius:999px;border:1px solid var(--border);
+  white-space:nowrap}
+.layer.l-default{color:var(--muted-foreground)}
+.layer.l-user{color:var(--working);border-color:color-mix(in srgb,var(--working) 35%,var(--border))}
+.layer.l-repo{color:var(--cold);border-color:color-mix(in srgb,var(--cold) 35%,var(--border))}
+.over{text-decoration:line-through;color:var(--muted-foreground)}
+@media (max-width:760px){.setgrid{grid-template-columns:1fr}.snav{flex-direction:row;flex-wrap:wrap;position:static}}
+.prompt{display:flex;flex-direction:column;gap:8px}
+.prompt textarea{border:1px solid var(--input);border-radius:var(--radius-sm);padding:10px 12px;min-height:84px;
+  resize:vertical;background:var(--card)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.tile{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);
+  display:flex;flex-direction:column;gap:6px}
+.bar{height:6px;border-radius:999px;background:var(--secondary);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--done)}
+
+/* Modal, toast, mock panel */
+.overlay{position:fixed;inset:0;background:var(--overlay);display:flex;align-items:center;justify-content:center;
+  z-index:50;padding:16px}
+.overlay[hidden]{display:none}
+.modal{width:min(520px,100%);background:var(--popover);border-radius:var(--radius);box-shadow:var(--shadow-lg);
+  padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.modal h2{font-size:var(--fs-lg);font-weight:650}
+.modal p{margin:0}
+.modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+.modal input[type=text]{border:1px solid var(--input);border-radius:var(--radius-xs);padding:7px 10px;width:100%;
+  background:var(--card)}
+.modal ul{margin:0;padding-left:1.2em}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--foreground);
+  color:var(--background);padding:9px 16px;border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);z-index:60;
+  font-size:var(--fs-sm);max-width:min(560px,calc(100% - 32px))}
+.toast[hidden]{display:none}
+.mockbtn{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:16px;z-index:40;
+  background:var(--cold);color:#fff;border:0;border-radius:999px;padding:8px 14px;font-weight:600;cursor:pointer;
+  box-shadow:var(--shadow-lg)}
+.mock{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:62px;z-index:40;width:min(440px,
+  calc(100% - 32px));max-height:calc(100% - 90px);overflow:auto;background:var(--popover);
+  border:2px solid var(--cold);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:14px 16px;
+  display:flex;flex-direction:column;gap:10px}
+.mock[hidden]{display:none}
+.mock h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--cold)}
+.mock .grid{display:flex;flex-wrap:wrap;gap:6px}
+.notes-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px;font-size:13.5px}
+.notes-list li{display:grid;grid-template-columns:24px 1fr;gap:8px}
+.notes-list .nm{display:inline-flex;margin:0}
+.notes-list b{display:block}
+.notes-list .alt{color:var(--muted-foreground)}
+.notes-list .verdict{font-size:11.5px;margin-left:6px}
+.newtag{font-size:11px;font-weight:600;color:var(--cold);border:1px solid
+  color-mix(in srgb,var(--cold) 40%,var(--border));border-radius:999px;padding:0 6px;margin-left:4px}
+
+/* Ask: describe what to show */
+.ask{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ask input{flex:1;min-width:220px;border:1px solid var(--input);border-radius:var(--radius-xs);padding:5px 10px;
+  background:var(--card)}
+.askres{border:1px solid color-mix(in srgb,var(--primary) 30%,var(--border));background:var(--primary-soft);
+  border-radius:var(--radius-sm);padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-size:var(--fs-sm)}
+.askres pre{margin:0;background:var(--code-bg);padding:6px 8px;border-radius:var(--radius-xs);overflow-x:auto;
+  font-size:12.5px}
+.askres.miss{background:color-mix(in srgb,var(--waiting) 10%,var(--card));
+  border-color:color-mix(in srgb,var(--waiting) 35%,var(--border))}
+
+/* Graph */
+.graphwrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--muted)}
+.graph{position:relative}
+.graph svg{position:absolute;inset:0;pointer-events:none}
+.graph path{fill:none;stroke:var(--input);stroke-width:1.6}
+.graph path.hot{stroke:var(--primary);stroke-width:2.4}
+.graph .lvl{position:absolute;top:8px;font-size:12px;color:var(--muted-foreground);font-weight:600}
+.gnode{position:absolute;width:200px;padding:7px 10px;gap:3px}
+.gnode .tc-t{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gnode.dim{opacity:.45}
+
+/* Changes and diffs */
+.files{display:flex;flex-direction:column;gap:2px}
+.file{display:flex;align-items:center;gap:8px;border:0;background:transparent;text-align:left;padding:4px 6px;
+  border-radius:var(--radius-xs);cursor:pointer;width:100%;font-size:13px}
+.file:hover{background:var(--secondary)}
+.file .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.add{color:var(--done)}.del{color:var(--failed)}
+.modal.wide{width:min(980px,100%);max-height:calc(100vh - 32px);overflow:auto}
+.diff{margin:0;background:var(--code-bg);border-radius:var(--radius-xs);overflow-x:auto;font-size:12.5px;
+  line-height:1.45;padding:6px 0}
+.diff span{display:block;padding:0 10px;white-space:pre}
+.diff .a{background:color-mix(in srgb,var(--done) 14%,transparent)}
+.diff .d{background:color-mix(in srgb,var(--failed) 12%,transparent)}
+.diff .h{color:var(--primary);background:var(--primary-soft)}
+
+/* Empty board: two ways in */
+.choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.choice{padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);
+  display:flex;flex-direction:column;gap:8px}
+.choice.rec{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+.choice textarea{border:1px solid var(--input);border-radius:var(--radius-sm);padding:8px 10px;min-height:70px;
+  resize:vertical;background:var(--card)}
+
+/* Tracks preview */
+.runs{display:flex;flex-direction:column;gap:6px}
+.runrow{display:grid;grid-template-columns:minmax(180px,260px) 1fr auto;gap:12px;align-items:center;
+  padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);
+  cursor:pointer;text-align:left;width:100%}
+.runrow[aria-current="true"]{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+.segs{display:flex;gap:3px;height:22px;min-width:0}
+.segs i{display:flex;align-items:center;padding:0 6px;border-radius:5px;font-size:11.5px;font-style:normal;
+  white-space:nowrap;overflow:hidden;color:var(--foreground);background:var(--secondary)}
+.segs i.done{background:color-mix(in srgb,var(--done) 22%,var(--card))}
+.segs i.run{background:color-mix(in srgb,var(--working) 25%,var(--card));box-shadow:inset 0 0 0 1px var(--working)}
+.segs i.wait{background:var(--secondary);color:var(--muted-foreground)}
+.share{display:flex;align-items:center;gap:8px;min-width:120px}
+.share .bar{flex:1}
+.share .bar i{background:var(--working)}
+.lanes{display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.lane{display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:center}
+.lane .track{position:relative;height:18px;background:var(--muted);border-radius:4px}
+.lane .track b{position:absolute;top:2px;bottom:2px;border-radius:3px;background:var(--working);min-width:2px}
+.lane .track b.m{background:var(--cold)}
+.opts{display:flex;flex-direction:column;gap:10px}
+.optc{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;display:flex;
+  flex-direction:column;gap:6px;background:var(--card)}
+.optc .facts{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Comms */
+.comms{display:grid;grid-template-columns:260px minmax(0,1fr) 290px;gap:12px;align-items:start;min-height:0}
+.slist{display:flex;flex-direction:column;gap:4px;padding:10px}
+.slist h4{margin:8px 6px 2px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted-foreground);font-weight:600}
+.srow{display:flex;flex-direction:column;gap:1px;border:0;background:transparent;text-align:left;padding:7px 8px;
+  border-radius:var(--radius-xs);cursor:pointer;width:100%}
+.srow:hover{background:var(--secondary)}
+.srow[aria-current="true"]{background:var(--primary-soft)}
+.srow .t{font-weight:500;display:flex;align-items:center;gap:6px}
+.srow .s{font-size:12.5px;color:var(--muted-foreground)}
+.livedot{width:8px;height:8px;border-radius:50%;background:var(--working);display:inline-block;flex:none}
+.convo{display:flex;flex-direction:column;min-height:0}
+.convh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid
+  var(--border)}
+.convh h1{font-size:var(--fs-lg);font-weight:650}
+.turns{display:flex;flex-direction:column;gap:16px;padding:16px}
+.turn{display:flex;flex-direction:column;gap:8px}
+.you{align-self:flex-end;max-width:85%;background:var(--primary-soft);border-radius:var(--radius-sm)
+  var(--radius-sm) 4px var(--radius-sm);padding:8px 12px}
+.stamp{font-size:12px;color:var(--muted-foreground)}
+.work{font-size:13px;color:var(--muted-foreground)}
+.work summary{cursor:pointer}
+.work ul{margin:6px 0 0;padding-left:1.2em;font-family:var(--font-mono);font-size:12px}
+.result{border-left:3px solid var(--done);padding:4px 0 4px 12px;display:flex;flex-direction:column;gap:6px}
+.result.going{border-left-color:var(--working)}
+.result .acts{display:flex;gap:6px;flex-wrap:wrap}
+.composer{border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:8px;align-items:flex-end}
+.composer textarea{flex:1;border:1px solid var(--input);border-radius:var(--radius-sm);padding:8px 10px;
+  min-height:44px;resize:vertical;background:var(--card)}
+.side{display:flex;flex-direction:column;gap:14px;padding:14px}
+.side textarea{width:100%;border:1px solid var(--input);border-radius:var(--radius-xs);padding:7px 9px;
+  background:var(--card);resize:vertical}
+.side h3{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-foreground);
+  font-weight:600;margin-bottom:6px;display:flex;align-items:center}
+@media (max-width:1100px){.comms{grid-template-columns:230px minmax(0,1fr)}.comms .sidecard{grid-column:1 / -1}}
+@media (max-width:700px){.comms{grid-template-columns:1fr}.runrow{grid-template-columns:1fr}}
+@media (max-width:900px){.drawer{position:fixed;inset:0 0 0 auto;width:min(460px,100%);z-index:35;
+  box-shadow:var(--shadow-lg)}.tabs{margin-inline:0;order:3;width:100%;overflow-x:auto}}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand"><span class="logo" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24">
+    <circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></svg></span>Collide</span>
+  <nav class="crumb" id="crumb" aria-label="Board, line and view"></nav>
+  <div class="tabs" id="tabs" role="group" aria-label="Surface"></div>
+  <div class="topr" id="topr"></div>
+</header>
+<div class="stage">
+  <main class="content" id="content"></main>
+  <aside class="drawer" id="drawer" hidden aria-label="Task"></aside>
+</div>
+<div class="overlay" id="overlay" hidden><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+<button class="mockbtn" id="mockbtn" data-act="mock" aria-expanded="false">Mock</button>
+<aside class="mock" id="mock" hidden aria-label="Mock controls"></aside>
+
+<!-- The real hunks of ts-0178-fw (commit 660efc8), shown by the drawer's Changes. -->
+<script type="text/plain" id="diffs-0178">
+### FILE core/src/owner/run.rs
+@@ -289,6 +289,10 @@ pub struct RunSummary {
+     pub ended_ms: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub workspace: Option<String>,
++    /// The task file a run of a file (`collide run <file>`) was started from, as the daemon was given it. Absent for
++    /// every other run, and for a file run an older daemon recorded.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub task_file: Option<String>,
+     pub phases: Vec<PhaseSummary>,
+     /// What the run did that the person should look at, oldest first. Empty for most runs.
+     #[serde(default)]
+### FILE host/src/store.rs
+@@ -70,7 +70,7 @@ pub struct Migration {
+ /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
+ /// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
+ /// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
+-pub const MIGRATIONS: [Migration; 10] = [
++pub const MIGRATIONS: [Migration; 11] = [
+     Migration {
+         version: 1,
+         name: "events",
+@@ -145,6 +145,11 @@ pub const MIGRATIONS: [Migration; 10] = [
+         name: "corpus_cache",
+         sql: CORPUS_SQL,
+     },
++    Migration {
++        version: 11,
++        name: "run_task_file",
++        sql: "ALTER TABLE runs ADD COLUMN task_file TEXT",
++    },
+ ];
+ 
+ /// The corpus cache (ts-0116-wh; 0.10), see [`crate::corpus_store`]. Each row is what one source last listed, or was
+@@ -1281,6 +1286,31 @@ mod tests {
+         assert_eq!(again.events_since(0).unwrap(), vec![event(1, 10)]);
+     }
+ 
++    #[test]
++    fn a_store_at_version_ten_gains_the_task_file_column_and_keeps_its_runs() {
++        let dir = TempDir::new();
++        store_at_version(dir.path(), 10);
++        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
++        conn.execute(
++            "INSERT INTO runs (run, state, live, opened_seq, started_ms) VALUES ('r', '{}', 1, 1, 5)",
++            [],
++        )
++        .unwrap();
++        drop(conn);
++        let store = Store::open(dir.path()).unwrap();
++        assert_eq!(user_version(&raw(&store)), known_version());
++        assert_eq!(
++            MIGRATIONS.get(10).map(|migration| migration.name),
++            Some("run_task_file")
++        );
++        let row: Option<String> = raw(&store)
++            .query_row("SELECT task_file FROM runs WHERE run = 'r'", [], |row| {
++                row.get(0)
++            })
++            .unwrap();
++        assert_eq!(row, None, "a run from before has no task file");
++    }
++
+     #[test]
+     fn a_store_from_each_older_version_migrates_forward() {
+         for older in 0..MIGRATIONS.len() {
+### FILE host/src/run_store.rs
+@@ -7,7 +7,7 @@
+ //!   ([`Store::run_state`]) read it, so none scans the event log.
+ //! - **The board and the tasks are not in the event.** `run.start` links them with [`Store::set_run_launch`] once the
+ //!   run has its first event. A run started by `run.start_file` has no board, no tasks, and no line or workflow, which
+-//!   read as empty text.
++//!   read as empty text. It has its task file, which [`Store::set_run_task_file`] keeps (migration 11).
+ //! - **`run_tasks` holds a run's task keys in the order they were given**, each with its status when the run started,
+ //!   so a read by task is an index lookup.
+ //! - **Newest first** is `opened_seq` descending: the `seq` of the run's first event, which is also the cursor of a
+@@ -48,6 +48,8 @@ pub struct RunRow {
+     /// When the run reached a final state, or `None` while it has not.
+     pub ended_ms: Option<u64>,
+     pub tasks: Vec<RunTaskRef>,
++    /// The task file of a run of a file, or `None`.
++    pub task_file: Option<String>,
+ }
+ 
+ /// Which runs [`Store::runs`] reads: all that match every part that is given.
+@@ -101,7 +103,8 @@ pub(crate) fn note_transition(
+     Ok(())
+ }
+ 
+-const COLUMNS: &str = "run, board, line, workflow, state, opened_seq, started_ms, ended_ms";
++const COLUMNS: &str =
++    "run, board, line, workflow, state, opened_seq, started_ms, ended_ms, task_file";
+ 
+ /// A row of [`COLUMNS`], with no tasks yet.
+ fn row_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<(RunRow, String)> {
+@@ -118,6 +121,7 @@ fn row_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<(RunRow, String)> {
+             started_ms: row.get::<_, i64>(6)? as u64,
+             ended_ms: row.get::<_, Option<i64>>(7)?.map(|ms| ms as u64),
+             tasks: Vec::new(),
++            task_file: row.get(8)?,
+         },
+         state,
+     ))
+@@ -168,6 +172,18 @@ impl Store {
+         Ok(true)
+     }
+ 
++    /// Keeps the task file a run of a file was started from. `false` when the run has no row yet.
++    pub fn set_run_task_file(&self, run: &str, task_file: &str) -> Result<bool, StoreError> {
++        let changed = self
++            .connect()?
++            .execute(
++                "UPDATE runs SET task_file = ?2 WHERE run = ?1",
++                params![run, task_file],
++            )
++            .map_err(|e| sql_error("writing a run's task file", e))?;
++        Ok(changed > 0)
++    }
++
+     /// One run, or `None` for a run the store has no row of.
+     pub fn run(&self, run: &str) -> Result<Option<RunRow>, StoreError> {
+         let conn = self.connect()?;
+@@ -402,6 +418,31 @@ mod tests {
+         assert_eq!(row.state, ended());
+     }
+ 
++    #[test]
++    fn a_runs_task_file_is_kept_through_its_end_and_a_run_without_one_has_none() {
++        let dir = TempDir::new();
++        let store = Store::open(&dir.0).unwrap();
++        transition(&store, "a", RunState::Running {});
++        transition(&store, "b", RunState::Running {});
++        assert!(
++            store
++                .set_run_task_file("a", "/work/notes/probe.md")
++                .unwrap()
++        );
++        transition(&store, "a", ended());
++        let a = store.run("a").unwrap().unwrap();
++        assert_eq!(a.task_file.as_deref(), Some("/work/notes/probe.md"));
++        assert_eq!(store.run("b").unwrap().unwrap().task_file, None);
++    }
++
++    #[test]
++    fn a_task_file_for_a_run_that_has_no_row_writes_nothing_and_says_so() {
++        let dir = TempDir::new();
++        let store = Store::open(&dir.0).unwrap();
++        assert!(!store.set_run_task_file("ghost", "/work/probe.md").unwrap());
++        assert_eq!(store.run("ghost").unwrap(), None);
++    }
++
+     #[test]
+     fn a_run_that_resumes_after_it_ended_is_live_again_with_no_end() {
+         let dir = TempDir::new();
+### FILE app/src/loop/RunCard.tsx
+@@ -11,6 +11,28 @@ export interface RunCardProps {
+   readonly followed: Followed
+ }
+ 
++/** What the Task row says. A file run has no task: it says what it ran from. */
++function taskWords(run: RunSummary, followed: Followed): string {
++  if (run.tasks.length === 0) {
++    return run.task_file == null ? 'none: a task file' : `none: a task file, ${run.task_file}`
++  }
++  if (followed.task === null || followed.board === null) {
++    return `${followed.task ?? run.tasks[0]?.key}, not found on any board`
++  }
++  return followed.task
++}
++
++/** A row of the details. A row with no value is not shown, so nothing reads as a failed load. */
++function Row({ label, value }: { readonly label: string; readonly value: string }) {
++  if (value === '') return null
++  return (
++    <>
++      <dt className="text-muted-foreground">{label}</dt>
++      <dd>{value}</dd>
++    </>
++  )
++}
++
+ export function RunCard({ run, followed }: RunCardProps) {
+   const phase = run.phases[run.phases.length - 1]
+   const instance = phase?.instances[0]
+@@ -35,14 +57,10 @@ export function RunCard({ run, followed }: RunCardProps) {
+         <details className="text-sm">
+           <summary className="cursor-pointer font-medium">Details</summary>
+           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+-            <dt className="text-muted-foreground">Run</dt>
+-            <dd>{run.id}</dd>
+-            <dt className="text-muted-foreground">Task</dt>
+-            <dd>{followed.task ?? 'unknown'}</dd>
+-            <dt className="text-muted-foreground">Workflow</dt>
+-            <dd>{run.workflow}</dd>
+-            <dt className="text-muted-foreground">Branch the work started from</dt>
+-            <dd>{run.line}</dd>
++            <Row label="Run" value={run.id} />
++            <Row label="Task" value={taskWords(run, followed)} />
++            <Row label="Workflow" value={run.workflow} />
++            <Row label="Branch the work started from" value={run.line} />
+             {run.workspace == null ? null : (
+               <>
+                 <dt className="text-muted-foreground">Work folder</dt>
+### FILE host/src/file_run.rs
+@@ -549,6 +549,13 @@ impl FileRuns {
+         if let Err(error) = self.record_run(phases, &run, None, RunState::Running {}) {
+             return Err(vec![problem(format!("recording the run: {error}"))]);
+         }
++        if let Some(task_file) = &ctx.task_file
++            && let Err(error) = self.config.store.set_run_task_file(&run, task_file)
++        {
++            self.log(&format!(
++                "run {run}: its task file was not recorded: {error}"
++            ));
++        }
+         let workspace = restored_workspace(&self.config, &ctx);
+         let live = Arc::new(Mutex::new(Live { workspace, ctx }));
+         // In the table before the phase starts, so a phase that ends at once finds its run.
+### FILE host/src/run_summary.rs
+@@ -61,6 +61,7 @@ pub fn summarize(
+         started_ms: row.started_ms,
+         ended_ms: row.ended_ms,
+         workspace,
++        task_file: row.task_file.clone(),
+         phases: summaries,
+         warnings: Vec::new(),
+     };
+@@ -91,6 +92,7 @@ mod tests {
+                 key: "scratch:1".to_string(),
+                 status: "status-a".to_string(),
+             }],
++            task_file: None,
+         }
+     }
+ 
+</script>
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const shortId = (id) => id.split('-').slice(0, 2).join('-');
+const nm = (n) => `<span class="nm" title="Design note ${n}: see the Mock panel">${n}</span>`;
+const svg = {
+  close: '<svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  down: '<svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="m6 9 6 6 6-6"/></svg>',
+  gear: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 '
+    + '1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 '
+    + '0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 '
+    + '1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 '
+    + '1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 '
+    + '1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  moon: '<svg class="ic" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>',
+  ok: '<svg class="ic" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+  no: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
+  dash: '<svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
+  branch: '<svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><circle cx="6" cy="6" r="2"/>'
+    + '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10a6 6 0 0 1-6 6H8"/></svg>',
+};
+
+/* ---------- the model: categories, sources ---------- */
+const CAT_ORDER = ['backlog', 'ready', 'active', 'review', 'done', 'dropped'];
+const CATS = {
+  backlog: { word: 'Backlog', sub: 'not ready to start' },
+  ready: { word: 'Ready', sub: 'can start' },
+  active: { word: 'Active', sub: 'being worked on' },
+  review: { word: 'In review', sub: 'waiting on a review' },
+  done: { word: 'Done', sub: 'finished' },
+  dropped: { word: 'Dropped', sub: 'not doing it' },
+};
+const PLAN_STATUSES = CAT_ORDER.map((c) => ({ name: c, cat: c }));
+// scope: 'ref' sources live in the repo, so each copy can differ; 'global' ones have one copy for every checkout.
+// links: whether the source has dependencies at all. fields: what the pack declares in `initialize` (`fields`).
+const SOURCES = {
+  plan: { name: 'Collide planning', pack: 'collide/plan (built in)', where: '.collide/planning', scope: 'ref',
+    links: true, fields: [], statuses: PLAN_STATUSES },
+  scratch: { name: 'Scratch tasks', pack: 'built in', where: 'your machine only', scope: 'global', links: false,
+    fields: [], statuses: PLAN_STATUSES },
+  tracker: { name: 'Design tracker', pack: 'demo/tracker (a repo pack)', where: 'the tracker service, tracker.example',
+    scope: 'global', links: true,
+    fields: [{ id: 'priority', type: 'enum' }, { id: 'points', type: 'number' }, { id: 'component', type: 'string' }],
+    statuses: [
+      { name: 'Icebox', cat: 'backlog' }, { name: 'Triage', cat: 'backlog' }, { name: 'To do', cat: 'ready' },
+      { name: 'Doing', cat: 'active' }, { name: 'Code review', cat: 'review' }, { name: 'QA', cat: 'review' },
+      { name: 'Shipped', cat: 'done' }, { name: "Won't do", cat: 'dropped' },
+    ] },
+};
+const EPICS = {
+  'ep-004-qd': { short: 'Stage 4', name: 'Stage 4: Pack loading, settings, plan adapter, corpus and views' },
+  'ep-005-hs': { short: 'Stage 5', name: 'Stage 5: GitHub adapter' },
+  'ep-006-wq': { short: 'Stage 6', name: 'Stage 6: Task board (read-only desktop)' },
+  'E-09': { short: 'First release', name: 'Pantry tracker: the first release' },
+  'E-10': { short: 'Households', name: 'Pantry tracker: shared households' },
+};
+
+/* ---------- demo data ---------- */
+// Collide's own planning items, from .collide/planning (goal and criteria cut short for the mock).
+const TASKS = [
+  { id: "ts-0150-dj", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Orchard check: the minor differences", body: [
+    "## Goal\n\nThe small differences the agent run of `ts-0121-xp` found (2026-11-19). Each is fix",
+    "ed, or dropped with a reason in\nBuilt.\n\n## Success criteria\n\n- The Orchard plan provider ",
+    "declares no kinds, so `--kind widget` exits 0 with an empty list, and the text of `task\n  <ke",
+    "y>` has a blank `kind` line where the listing shows `-`. It declares `task`, and the text prin",
+    "ts `-`.\n- The fake's illegal-move message has other words and one line; the real CLI's names ",
+    "the transition and the legal moves\n  on two lines. Both exit 2 with nothing on standard outpu",
+    "t. The fake follows the real shape, in made-up words.\n- The first listing right after a re-tr",
+    "ust warns \"source `plan` may be out of date: the line ... is not trusted\". It\n  does not.\n",
+    "- `collide run`",
+  ].join('') },
+  { id: "ts-0151-fk", status: "done", epic: "ep-004-qd", blockedBy: ["ts-0137-pg"],
+    title: "Corpus: a changed item keeps the collections of its last listing", body: [
+    "## Goal\n\n`apply_changed` in `core/src/corpus.rs` updates a held copy from `task.changed` wit",
+    "h the new state and version and keeps\nthe rest, `collections` included. A collection can chan",
+    "ge without its member's file changing: the Orchard pack's human\nqueue (`plan:queue`, from `./",
+    "plan status --format json`, `ts-0137-pg`) and an epic's set (`ts-0148-cv`). So a question\nres",
+    "olved on disk stays in `decisions-needed` until the source is listed again, and a question tha",
+    "t comes to need a\nperson shows only then. Found at the `ts-0137-pg` build (its second decisio",
+    "n).\n\n## Success criteria\n\n- Over the fixture `kinds` tree, through the daemon: a queued qu",
+    "estion set to `resolved` on disk leaves\n  `decisions-needed` once the watcher has reported, w",
+    "ith no restart and no relisting asked for.\n- A question set to `needs: human` on disk joins t",
+    "he view the same way.\n- An epic's collection follows a change of its epic file the same way.",
+    "\n- A source with no collections makes no more provider calls per change than today.",
+  ].join('') },
+  { id: "ts-0152-jq", status: "done", epic: "ep-004-qd", blockedBy: ["ts-0141-sn"],
+    title: "CLI: a listing says when the board's line cannot be read", body: [
+    "## Goal\n\nWhen the daemon cannot read the board's line (`board_plan` fails in `look`, `host/s",
+    "rc/corpus_service.rs`) or list its\ncheckouts (`discover`), it logs the error and returns. No ",
+    "source of the line is named, so `collide tasks` lists the\nscratch source alone, prints nothin",
+    "g on stderr and exits 0: the silent empty board of `ts-0141-sn`, one step earlier.\nFound at t",
+    "he `ts-0141-sn` review (the builder's Not done).\n\n## Success criteria\n\n- `task.list` carri",
+    "es, on its first page, that the board's sources are not read and why.\n- `collide tasks`, `tas",
+    "ks --view` and `tasks --ready` print one stderr line with the reason and exit 1.\n- A board wh",
+    "ose line reads again says nothing at the next look.",
+  ].join('') },
+  { id: "ts-0153-kp", status: "done", epic: "ep-004-qd", blockedBy: ["ts-0145-cq", "ts-0148-cv", "ts-0150-dj"],
+    title: "Orchard check: the fake CLI is held to the real one's envelopes", body: [
+    "## Goal\n\nThe fake plan CLI (`fixtures/orchard-arch/plan`) drifted from the real one and ever",
+    "y test still passed: the create\nenvelope's `data.id` was an object where the real CLI prints ",
+    "a string (`ts-0145-cq`), and `ts-0150-dj` lists more. Drift\nis found only when an owner check",
+    " runs the adapter on a real clone. Record the shape of the real CLI's envelopes once,\nand tes",
+    "t the fake against those shapes, so drift fails the gates instead.\n\n## Success criteria\n\n-",
+    " A shape reader in the fixtures turns one run of the CLI into its shape: exit code, whether st",
+    "dout and stderr are\n  empty, stderr's line count, and the JSON envelope as its key tree with ",
+    "each leaf's type. A string leaf is named by the\n  reference pack's id pattern it fits (`ids.t",
+    "s`), or `string`. Values are kept only where they are the CLI's own words:\n  `command`, `sche",
+    "ma_version`, a status the pack declares.\n- A recorder script runs, against a plan CLI and a r",
+    "oot given as arguments, each command the adapter calls: `status`,\n  `set` (a legal move and a",
+    "n illegal one), and `new task`. It write",
+  ].join('') },
+  { id: "ts-0154-gr", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Bounded runs: output not read in time is never taken as empty output", body: [
+    "## Goal\n\n`run_bounded` (`host/src/bounded_run.rs`) gives each pipe's reader a grace of 2 s (",
+    "`PIPE_GRACE`) after the child ends,\nso a grandchild that keeps a pipe open (a hook, an ssh ma",
+    "ster) cannot hold the daemon. A reader that has not delivered\nby then gives empty output (`un",
+    "wrap_or_default`), with the child's real exit code. A caller that reads stdout then takes\nmis",
+    "sing output for the reply: in the gates of `ts-0148-cv` (2026-11-19, load about 28), `git rev-",
+    "parse` exited 0 and was\nread as \"expected a commit id, got \"\", failing a `task_daemon_cli`",
+    " test that passed in the round before and alone.\nOutput that was not read to its end must nev",
+    "er look like an empty reply.\n\n## Success criteria\n\n- `Captured` says which pipes were not ",
+    "read to their end within the grace.\n- Each caller that reads stdout (`git_objects`, the board",
+    "'s tool runs in `board_load`, the claude version probe,\n  `http_get`) fails on a cut stdout w",
+    "ith a message that says the output was not read in time, never as the reply it\n  would parse.",
+    " A caller that reads no stdout keeps today's behaviour.\n- The grace stays as it is: a grandch",
+    "ild that holds a pipe still does not hold the run\n  (`a_grandchild_that_keeps_the_pipe_open_d",
+    "oes_not_hold_back_the_exit_record` in `shim_child.rs` keeps passing).",
+  ].join('') },
+  { id: "ts-0155-wb", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "CLI: the first listing after a daemon restart waits for the whole relist", body: [
+    "## Goal\n\nAfter a daemon restart, the first `collide tasks` takes as long as a cold start (5.",
+    "5 s against 5.7 s on 1,659 tasks, the\nagent run of `ts-0121-xp`), though the store's corpus c",
+    "ache (`ts-0116-wh`) is served at once. `ts-0150-dj` found why:\nthe daemon answers from the ca",
+    "che with `refreshing: true` in about 0.07 s, and `Session::settled_list` in\n`host/src/task_da",
+    "emon.rs` asks again until the relist of every source for every checkout ends. Nothing is wrong",
+    "; the\nwait is unexplained.\n\n## Success criteria\n\n- Recommended: the CLI keeps waiting for",
+    " the settled list (a script never gets a list that may be stale), and while it\n  waits on a l",
+    "isting that is `refreshing` for longer than 0.5 s it prints one line on standard error saying ",
+    "the daemon\n  is listing its sources again after a restart. Standard output is unchanged; `--j",
+    "son` is unchanged.\n- Alternative, if the owner takes it: the CLI prints the cached list at on",
+    "ce with a standard error line that it is the\n  last run's list, and `--wait` keeps today's be",
+    "haviour. Faster, but a script reading the first output may act on a\n  stale list.",
+  ].join('') },
+  { id: "ts-0156-nt", status: "done", epic: "ep-004-qd", blockedBy: ["ts-0151-fk"],
+    title: "Orchard: its tasks are of kind task", body: [
+    "## Goal\n\nAn Orchard task has no kind today (`ts-0137-pg`): the provider declares `adr`, `spi",
+    "ke` and `question` only. So `collide\ntasks --kind task` is refused on a board whose only sour",
+    "ce is Orchard's, and on a mixed board it lists Collide's tasks\nand not Orchard's (`ts-0150-dj",
+    "`, Decision 1). The owner wants Orchard's tasks to count as tasks.\n\n## Success criteria\n\n-",
+    " The Orchard plan provider declares the kind `task`, with the statuses it declares for tasks t",
+    "oday, and every task it\n  lists or gets carries `kind: task`. ADRs, spikes and questions are ",
+    "unchanged.\n- `collide tasks --kind task` on a board whose only source is Orchard's lists its ",
+    "tasks and exits 0; on a board with\n  Collide's plan too, it lists the tasks of both.\n- The l",
+    "isting and the text of `task <key>` show `task` for an Orchard task.\n- What reads a task's ki",
+    "nd still works: the `ready` view, `decisions-needed`, the roles check (`ts-0135-cx`), `create`",
+    ",\n  `setStatus` by status and by categor",
+  ].join('') },
+  { id: "ts-0157-hd", status: "done", epic: "ep-004-qd", blockedBy: ["ts-0151-fk"],
+    title: "Corpus: a changed item keeps its old title, fields and links", body: [
+    "## Goal\n\n`Corpus::apply_changed` in `core/src/corpus.rs` updates a held copy from `task.chan",
+    "ged` with the new state and version\nonly. The notification's `diff` names a changed title, li",
+    "nk or field too, and the copy keeps the old one. So a title\nedited on disk lists with its old",
+    " title, and a `blocked-by` link added on disk leaves readiness (the `ready` view,\n`collide ta",
+    "sks --ready`) wrong, until the source is listed again. Found at the `ts-0151-fk` build.\n\n## ",
+    "Success criteria\n\n- Through the daemon, over a fixture tree, with no restart and no relistin",
+    "g asked for: a task whose title changes on\n  disk lists with the new title once the watcher h",
+    "as reported; a ready task that gains a `blocked-by` link to an open\n  task leaves `--ready`; ",
+    "one whose blocking link goes joins it.\n- The store's cache holds the new copy, so a restarted",
+    " daemon serves it before its relist ends.\n- A change of the status alone makes no more provid",
+    "er calls than today.\n- Every provider of the repo that sends `task.changed` (Collide's plan, ",
+    "the Orchard pack's, the others under `fixtures/`\n  and `packs",
+  ].join('') },
+  { id: "ts-0158-ow", status: "done", epic: "ep-004-qd", blockedBy: ["ts-0157-hd"],
+    title: "Orchard: fetching one changed task rescans the checkout", body: [
+    "## Goal\n\nSince `ts-0157-hd`, a `task.changed` whose `diff` names more than the status makes ",
+    "the daemon fetch that one task with\n`get`, while it holds the board's gate. The Orchard `get`",
+    " (`fixtures/packs/orchard/providers/plan/provider.ts`) scans\nthe whole checkout and, while a ",
+    "question is open, runs `./plan status` (30 s cap). A branch switch or pull that edits N\ntask ",
+    "files costs N scans and N plan CLI runs, one after another, and writes and other sources' noti",
+    "fications wait for\nall of them.\n\n## Success criteria\n\n- A `get` for a checkout the watche",
+    "r watches answers from the watcher's last read of it: no scan and no plan CLI run. A\n  `get` ",
+    "for a checkout it does not watch reads as today.\n- That answer is what a fresh `get` would gi",
+    "ve right after the read: the same task, body and collections.\n- With a question open, a burst",
+    " of N task edits in one watcher read runs the plan CLI at most once for the watcher and\n  not",
+    " once per fetch.",
+  ].join('') },
+  { id: "ts-0159-ra", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Loop page: the run card follows a stale Review item, not the newest run", body: [
+    "## Goal\n\nIn `ts-0138-pn` step 6b (owner-run, 2026-11-21) a file run started from the owner's",
+    " own Claude Code session never\nshowed on the loop page's run card, with the app connected to ",
+    "the real daemon before the run started. The run itself\npassed: it ran, filed its follow-up an",
+    "d ended with exit 0.\n\nThe likely cause is in `app/src/loop/loop.ts` `sync`. With no run foll",
+    "owed, the page follows the run of the first Queue\nitem of kind `permission` or `review`, and ",
+    "only falls back to the newest run (`run.list` with `limit: 1`) when there is\nnone. The real q",
+    "ueue held a Review item of an older quick run (run `run-1795250812644-1`, from a mistaken firs",
+    "t try of\nstep 6c, whose clone was later deleted), first in\n\n## Success criteria\n\n- A run ",
+    "that starts while the page is open shows on the card within one reload, whether it was started",
+    " from the page,\n  from `collide run` (a file run, with no task) or from a run's agent, and wi",
+    "th an older run's Review or permission item\n  still waiting.\n- An older run's waiting item s",
+    "tays in \"Needs you\", and opening it (its \"Open\" button) shows that run, as today.\n- The c",
+    "ard keeps following a run the person picked or started from the page until a newer run starts.",
+    "\n- The owner re-checks one look of `ts-0138-pn` step 6b: a file run from the owner's own term",
+    "inal shows on the card.",
+  ].join('') },
+  { id: "ts-0160-th", status: "done", epic: "ep-004-qd", blockedBy: ["ts-0159-ra"],
+    title: "Discard: a refusal goes unseen, and a Review item whose repository is gone stays", body: [
+    "## Goal\n\nIn `ts-0138-pn` step 6c (owner-run, 2026-11-21) the owner pressed Discard on a quic",
+    "k run's Review item and confirmed\n\"Delete this work? ... which hold 0 changed files ...\". N",
+    "othing was deleted: the run's worktree and branch stayed (the\nowner removed them by hand), th",
+    "e store still holds the Review item `run-1795253516592-2-review`, and the event log has\nno `s",
+    "tep.intent` of `collide/discard` for any run. The owner saw no refusal they noticed.\n\nWhat m",
+    "ost likely happened, from the store and the code:\n\n- The page followed the older run `run-17",
+    "95250812644-1` (`ts-0159-ra`), whose Review item is first in the queue, so the\n  Review card ",
+    "and its Discard were that run's. \"0 changed files\" is also what\n\n## Success criteria\n\n- ",
+    "The Review card's Discard acts on the item the card shows, and the confirmation names its run.",
+    "\n- A refused discard shows its words on the page until the person dismisses them.\n- A Review",
+    " item whose repository is gone can be cleared: Discard deletes the run's worktree folder by th",
+    "e path the run\n  recorded, drops the item, and says the branch went with the repository.\n- A",
+    " run made by an earlier daemon process can be discarded after a restart.",
+  ].join('') },
+  { id: "ts-0161-ta", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Corpus: a watch update keeps a stale row when another file takes an item's id", body: [
+    "## Goal\n\nIn `ts-0138-pn` step 7 (agent-run, 2026-11-20) a copy of a task file with the same ",
+    "`id:` was committed while the daemon\nran. The next `collide tasks` listed two rows with the o",
+    "ne key, as well as the `skipped` line for the file set aside.\n`collide task reid <id>` (bare ",
+    "id) was then refused \"matches 2 items\", exit 3. After the daemon was ended and started,\nthe",
+    " listing had one row and the reid passed. Right after the reid, the first listing still printe",
+    "d one `skipped` line\nfor a file that no longer clashed; the next listing printed none.\n\nSo ",
+    "the watcher's update path and a full listing disagree: a full listing keeps one row per key an",
+    "d sets the other file\naside, while a watch update adds the se\n\n## Success criteria\n\n- Aft",
+    "er a watch update that brings a second file with an item's id, the corpus holds one row for th",
+    "e key, the same one\n  a full listing holds, and the other file is listed as skipped with the ",
+    "same reason.\n- After the clash is resolved (reid, or the file removed), the next listing has ",
+    "no `skipped` line for it.\n- A bare-id `collide task reid` on the clash works with the daemon ",
+    "running, with no restart.",
+  ].join('') },
+  { id: "ts-0162-yh", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Orchard fixtures: the common section headings", body: [
+    "## Goal\n\nIn `ts-0138-pn` step 8b (agent-run, 2026-11-20) the frontmatter keys of the fixture",
+    " ADRs, spikes and questions in\n`fixtures/orchard-arch/kinds/arch/` matched the real files, bu",
+    "t the fixtures have no `##` headings at all. The real\nfiles share a few: an ADR has a context",
+    ", a decision, rejected alternatives and consequences; a spike and a question\nmost often have ",
+    "a question section. The provider reads sections only from epic files today, so nothing behaves",
+    "\ndifferently. The fixtures should still look like the real files, so a later reader of sectio",
+    "ns is tested on them.\n\n## Success criteria\n\n- Each fixture ADR has the four common heading",
+    "s, and most fixture spikes and questions have the question heading, with\n  made-up text. Gene",
+    "ric heading words only: no text of a real file.\n- Step 8b's heading comparison in `ts-0138-pn",
+    "` shows only headings that are rare in the real tree.",
+  ].join('') },
+  { id: "ts-0163-su", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Daemon log: a board that cannot be read", body: [
+    "## Goal\n\nTwo kinds of noise in the real daemon's log, seen in `ts-0138-pn` (2026-11-21):\n\n",
+    "- A board whose folder was deleted (two boards of earlier checks, under `/tmp`) is tried again",
+    " for ever: the corpus logs\n  \"its sources are not read\" for each, about every 10 s, as long",
+    " as the daemon runs (`corpus_service.rs`).\n- When the daemon stops, each board's plan source ",
+    "logs \"plan could not be listed: ... `list` came before `initialize`\"\n  (`supervisor.rs`): a",
+    " relist races the providers' shutdown.\n\n## Success criteria\n\n- A board whose folder is gon",
+    "e is logged once when it goes, and again only when it changes (comes back, or is removed\n  fr",
+    "om the daemon). Its retries back off.\n- A stop logs no listing failure for a source that is b",
+    "eing shut down.",
+  ].join('') },
+  { id: "ts-0164-pa", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "App and daemon: a HOME that is gone is made again", body: [
+    "## Goal\n\nIn `ts-0138-pn` step 6 (2026-11-21) the owner started the app from a terminal that ",
+    "still held the check's `env.sh`,\nwhose `HOME` and `COLLIDE_DAEMON_ROOT` named a folder alread",
+    "y deleted. The app started a daemon there, which made the\nfolder again, and ran with no word ",
+    "that its home was new. The app never saw the real daemon, so the page showed none of\nthe owne",
+    "r's runs, and it looked like a bug of the page.\n\n## Success criteria\n\n- The daemon refuses",
+    " to start when `HOME` names no folder, and says so with the path; it never makes `HOME`.\n- Th",
+    "e app shows that refusal as its words, not as an empty page.\n- `COLLIDE_DAEMON_ROOT` that nam",
+    "es no folder is still made, as today (tests and checks make it fresh).",
+  ].join('') },
+  { id: "ts-0165-ab", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Daemon stop: its environment capture shell outlives it", body: [
+    "## Goal\n\nSeen while reviewing `ts-0159-ra` (2026-11-21): the app's browser spec `app/browser",
+    "/bridge.spec.ts` \"the bridge\nrefuses a foreign Host, a foreign Origin and a call without the",
+    " token\" fails about half the time, at HEAD as well. The\nfixture's check \"nothing of the wor",
+    "ld is left running\" finds two processes of the daemon's login-shell capture\n(`base_env.rs`: ",
+    "`fake-shell -l -i -c printf ... env -0 ...`) still alive after the bridge and the daemon stopp",
+    "ed. The\ncapture runs in a session of its own (`setsid`) and is killed after reading, so a cap",
+    "ture still in flight when the\ndaemon stops outlives it. `pnpm test` is therefore red about ha",
+    "lf the time for any build.\n\n## Success criteria\n\n- When the daemon stops, every environmen",
+    "t capture in flight is ended (its session killed) before the daemon exits.\n- `bridge.spec.ts`",
+    " passes 10 runs out of 10, run alone and inside `pnpm test`.\n- A capture that finishes normal",
+    "ly is unchanged: killed after reading, under its timeout.",
+  ].join('') },
+  { id: "ts-0166-rq", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Claude versions: a run right after the daemon starts says it does not look up the published version",
+    body: [
+    "## Goal\n\nSeen while reviewing `ts-0163-su` (2026-11-21): the test\n`run_command::a_task_file",
+    "_run_prints_both_versions_then_follows_the_phase_and_prints_its_record`\n(`host/tests/adapters",
+    "/claude/run_command.rs`) fails often, at HEAD as well, with\n\"claude published: not known (th",
+    "is daemon does not look it up)\" where it expects the published versions. The daemon\nsets its",
+    " published-version source only once its start capture of the environment has ended (`Daemon::s",
+    "tart`,\n`claude_published.source(captured.vars)`), and `ClaudeVersions::status` answers \"this",
+    " daemon does not look it up\"\n(`NO_SOURCE`) whenever no source is set. A `collide run` that a",
+    "sks `daemon.agent_versions` before the capture ends\nis told the\n\n## Success criteria\n\n- W",
+    "hile the daemon's start capture is still running, `daemon.agent_versions` says the published v",
+    "ersion is not known\n  yet, not that the daemon does not look it up. `collide run` prints \"cl",
+    "aude published: not known yet\".\n- A daemon with no source at all (`PublishedChoice::Off`) st",
+    "ill says it does not look it up.\n- The test above passes 10 runs in a row, run alone.",
+  ].join('') },
+  { id: "ts-0167-jj", status: "done", epic: "ep-004-qd", blockedBy: [],
+    title: "Boards: git in a folder that is gone says to install git", body: [
+    "## Goal\n\nSeen in the real daemon's log during the owner's re-check of `ts-0138-pn` steps 6b ",
+    "and 6c (2026-11-21): for each board\nwhose folder was deleted, the corpus logged \"`git` did n",
+    "ot run (No such file or directory (os error 2)); install git\nand try again\". Git was install",
+    "ed; the folder was gone. The private `git` helper in `host/src/boards.rs` runs\n`Command::new(",
+    "\"git\").current_dir(folder)`, and a `current_dir` that does not exist fails the spawn with `N",
+    "otFound`,\nwhich the helper reports as git missing. `ts-0163-su` already makes the corpus log ",
+    "the gone folder as its reason, but\nevery other caller of the helper (quick runs, accept, the ",
+    "board lines) still gives the wrong fix.\n\n## Success criteria\n\n- Git run in a folder that d",
+    "oes not exist says the folder is gone and names it, not that git is missing.\n- Git that is tr",
+    "uly missing (not on `PATH`) still says to install git.",
+  ].join('') },
+  { id: "ts-0178-fw", status: "ready", epic: "ep-004-qd", blockedBy: [],
+    title: "Loop page: a file run's card says its task is unknown", body: [
+    "## Goal\n\nSeen in the owner's re-check of `ts-0138-pn` step 6b (2026-11-21): the run card sho",
+    "wed a file run started with\n`collide run follow-up-probe.md`, as it should, but its Details s",
+    "aid Task \"unknown\" and left Workflow and \"Branch the\nwork started from\" blank. A file run",
+    " has no task, no workflow and no line by design (`host/src/file_run.rs`: one\nphase, no workfl",
+    "ow, no board). The card reads as if something failed to load.\n\n## Success criteria\n\n- A fi",
+    "le run's Details names what it ran from: the task file's path in place of \"unknown\", and no ",
+    "blank rows.\n- A run with a task, a workflow and a line shows them as today.\n- A run whose ta",
+    "sk is not found on any board still says so in words, not \"unknown\" alone.",
+  ].join('') },
+  { id: "ts-0168-tq", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0167-jj"],
+    title: "Provider contract: the board's source block, provenance and a stale cause", body: [
+    "## Goal\n\nA provider is told which GitHub repositories its board names and which repository i",
+    "ts checkout came from. It can say who\nwrote a task and how far that author is trusted. It can",
+    " say why it is stale. The daemon and the corpus carry all three.\nNo GitHub code yet: the late",
+    "r items of Stage 5 build on this.\n\nWhat exists. `core/src/provider.rs` has `InitializeParams",
+    " { config, root }`, `SourceStale { reason, checkout }`,\n`TaskChanged.actor` and `automated`, ",
+    "`ChangeCause::Remote` and `RemovedCause::Deleted` and `Transferred`. `Task` has\n`fields`, `la",
+    "bels`, `kind` and no author. `core/src/board.rs` has `GithubSource` (`repos`), `BoardSources` ",
+    "and\n`check_board`, which validate `sources.github.repos`, a\n\n## Success criteria\n\n- A pro",
+    "vider's `initialize` params carry `board.repos` from the line's `board.yaml` and `board.origin",
+    "` from the `origin`\n  remote. A board with no `sources.github` block gets no repos. A checkou",
+    "t with no remote, or a remote on another host,\n  gets a null origin.\n- A task with `provenan",
+    "ce.association` `OWNER`, `MEMBER` or `COLLABORATOR` is trusted in a view, and one with any oth",
+    "er\n  value, or with no provenance, is untrusted. A view expression can read the author.\n- A ",
+    "`source.stale` with a cause shows in `task.list` with that cause, and a stale source keeps its",
+    " tasks and loses none.\n- A provide",
+  ].join('') },
+  { id: "ts-0169-mn", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0168-tq"],
+    title: "Settings: a per-user pack key, for the gh account", body: [
+    "## Goal\n\nA pack can declare a setting that is per user, so the `gh` account and the API addr",
+    "ess of the GitHub pack live only in\nthe person's own settings, never in the repo's. Plan sect",
+    "ion 0.7 says source accounts are per user by nature.\n\nWhat exists. `core/src/settings_regist",
+    "ry.rs` marks some of Collide's own keys `per_user`, and\n`core/src/settings_layers.rs` refuses",
+    " a per-user key in the repo's file (`repo_file_refusals`) and in a repo profile\n(`check_profi",
+    "le_key`, `ProfileSource::Repo`). A pack's setting under `config:` carries `secret`, `overridab",
+    "le` and\n`repoOnly`, read in `key_infos` and checked in `core/src/pack_check.rs` (each a boole",
+    "an, `repoOnly` excludes the other\ntwo). `key_infos` sets `p\n\n## Success criteria\n\n- A pac",
+    "k with `perUser: true` on a setting passes `check_pack`. With `perUser: \"yes\"`, or with `rep",
+    "oOnly: true` beside\n  it, it fails with a problem that names the setting and the flags.\n- Th",
+    "at setting in the repo's settings file, or in a profile of the repo, is a settings problem nam",
+    "ing the key; the\n  value is not applied. The same value in the user's file is applied and `co",
+    "llide config get` shows it and its origin.\n- Every setting of `collide/plan` is unchanged, an",
+    "d a key without the flag behaves as before.\n- The generated schema of `pack.yaml` accepts the",
+    " flag and still refuses an unknown o",
+  ].join('') },
+  { id: "ts-0170-gh", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0169-mn"],
+    title: "Daemon: a global source writes outside a checkout and restarts with its block", body: [
+    "## Goal\n\nA source whose tasks are global (GitHub) writes without waiting for a checkout, rec",
+    "ords its change as remote, and\nrestarts when the repos or settings it was started with change",
+    ".\n\nWhat exists. `host/src/sources.rs` `Source::writes_checkout()` is true for every pack, so",
+    " a write waits for a busy\ncheckout and for the line lock (`host/src/write_guard.rs`, `ts-0114",
+    "-hr`), and `Source::write_cause()` is `Worktree`\nfor every pack. `Source::declared()` gives t",
+    "he `InitializeResult`, and its `scope` is `global` or `ref`. A `Slot`'s\nidentity is its pack,",
+    " provider and folder only (`Identity` in `sources.rs`): `Sources::refresh` keeps a running\npr",
+    "ovider when the identity matches, and `Source::start` reads\n\n## Success criteria\n\n- A writ",
+    "e to a global source is applied while the checkout the board sits on is busy with a run, and w",
+    "hile the line\n  lock is held. A write to the `plan` source in the same state still waits.\n- ",
+    "The change event of a global write has cause `remote`, and the provider got no `checkout`.\n- ",
+    "Editing `sources.github.repos` in the line's `board.yaml` restarts the provider once, and the ",
+    "next list shows the new\n  repo's tasks and none of the removed repo's.\n- Changing a pack set",
+    "ting through `collide config set` restarts the provider once. A recheck with nothing changed d",
+    "oes\n  not restart it.",
+  ].join('') },
+  { id: "ts-0171-ds", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0170-gh"],
+    title: "Daemon: a source that could not check has one Queue item", body: [
+    "## Goal\n\nA source that \"could not check\" (an expired token, no network, a repository that ",
+    "moved) keeps its tasks, removes\nnothing, and raises one Queue item that names the cause and t",
+    "he fix and lets the person retry. Plan section 0.2 (\"A\ncheck that cannot finish\") describes",
+    " it.\n\nWhat exists. The corpus half is built: `Corpus::mark_stale` keeps a source's last task",
+    "s, `reconcile_by_source` skips a\nstale source so a full list never removes on its account, an",
+    "d `task.list` lists `stale_sources` with the reason. The\ndaemon marks a source stale on `sour",
+    "ce.stale` and when a start fails (`failed_to_start`, `mark_source_stale` in\n`host/src/corpus_",
+    "service.rs`), and rechecks a stale source with a backoff (`relis\n\n## Success criteria\n\n- A",
+    " fake provider's `source.stale` with cause `auth` gives exactly one Queue item in `queue.list`",
+    ", with the title above\n  and the reason as detail. A second notification does not add another",
+    ".\n- While stale, a full `list` that returns nothing removes no task, and `task.list` still sh",
+    "ows the cached ones.\n- `Retry` relists. With the provider healthy, the source is fresh and th",
+    "e item is gone. With it still failing, there is\n  still one item.\n- `Dismiss` hides the item",
+    ". After the source is fresh and stale again, it is back.\n- A source that cannot start has one",
+    " item with cause `other`, and the board",
+  ].join('') },
+  { id: "ts-0172-xc", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0171-ds"],
+    title: "GitHub pack: the pack, the gh token, the API client and the scope check", body: [
+    "## Goal\n\nThe built-in pack `collide/github` exists, starts on every board, reads the person'",
+    "s `gh` token, talks to the REST API\nthrough a small client, and checks at `initialize` that t",
+    "he token can do what Issues needs, naming the fix when it\ncannot. It lists nothing yet.\n\nWh",
+    "at exists. Nothing of the pack: `packs/` holds only `plan`, and the built-in list is fixed in",
+    "\n`host/src/builtin_packs.rs` (`BUILTIN`, `names()` returns `[&str; 2]`) and in `scripts/build",
+    "-packs.ts`. The pieces to\nbuild on do exist: `@collide/pack-sdk` (`packages/pack-sdk/src/prov",
+    "ider.ts`, `context.ts`) serves the protocol over\nstdio, and `packs/plan` (`pack.yaml`, `src/m",
+    "ain.ts`, `src/provider.ts`, `test/provider-stdio.test.ts`) is\n\n## Success criteria\n\n- `col",
+    "lide/github` is a built-in: `names()` has three, the bundle is built, and a board with no `sou",
+    "rces.github`\n  block lists it with no tasks, no stale mark and no `gh` call (the fake `gh`'s ",
+    "log is empty).\n- `initialize` returns the declared contract, which the protocol's schema acce",
+    "pts, and `collide config get\n  collide/github.account` shows it as a per-user setting.\n- Wit",
+    "h a fake `gh`, the token is read with `--user <account>`; with no account, without it. A faili",
+    "ng `gh` gives a stale\n  source with cause `auth` and the sign-in words, and the token appears",
+    " in no output of the test.\n- A clas",
+  ].join('') },
+  { id: "ts-0173-ku", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0172-xc"],
+    title: "GitHub pack: list and get issues and pull requests", body: [
+    "## Goal\n\nThe pack reads the issues and pull requests of the board's repositories into tasks:",
+    " a full `list`, a `get` by id, the\nstatus mapping, the provenance, and the reason a task cann",
+    "ot be launched.\n\nWhat exists. `ts-0172-xc` gives the pack, the token, the client (paging, ET",
+    "ag, failure classes), the declared\ncontract, the fake `gh` and fake API, and the fixtures; `l",
+    "ist` answers empty and `get` answers none. `ts-0168-tq`\ngives `board.repos`, `board.origin` a",
+    "nd `Task.provenance`. `core/src/provider.rs` has the `Task` and `ItemState`\nshapes. The corpu",
+    "s reconciles a full `list` against its cache and removes what is absent, for a source that is ",
+    "not\nstale (`reconcile_by_source`).\n\nWhat this adds.\n- `list\n\n## Success criteria\n\n- `l",
+    "ist` over two fixture repos returns each issue with the right key, id, title, labels, assignee",
+    "s, version, `fields`\n  and status: open, closed as completed, and closed as not planned map t",
+    "o `open`, `closed` and `not_planned`, and so to\n  ready, done and dropped.\n- A pull request ",
+    "in the issues list is a `pull-request` task, `launchable` false, with its reason. An issue of ",
+    "the\n  origin repo is launchable; an issue of another repo is not, and says why. A null body g",
+    "ives no body.\n- The eight `author_association` values of the fixtures reach `provenance.assoc",
+    "iation`; the daemon's view shows the",
+  ].join('') },
+  { id: "ts-0174-wf", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0173-ku"],
+    title: "GitHub pack: watch, ETags, the full reconcile and removals", body: [
+    "## Goal\n\nAn edit on GitHub reaches the corpus within a poll, a deleted or transferred issue ",
+    "leaves it within a reconcile, and a\ntoken that expires mid-run makes the source \"could not c",
+    "heck\" with nothing removed.\n\nWhat exists. `ts-0172-xc` gives the client with ETag and `If-N",
+    "one-Match` support, the cause classes and the rate-limit\nheaders. `ts-0173-ku` gives `list`, ",
+    "`get` and the task mapping. `core/src/provider.rs` has `task.changed` (with `from`,\n`to`, `di",
+    "ff`, `cause: remote`), `task.removed` (`Deleted`, `Transferred`, `Unknown`) and `source.stale`",
+    ". The daemon\napplies `task.changed` with a `get` when the diff names more than the status (`a",
+    "pply_changed` in\n`core/src/corpus.rs`), relists a stale sourc\n\n## Success criteria\n\n- A f",
+    "ixture issue edited on the fake API (title, label, close) gives one `task.changed` within one ",
+    "poll, with cause\n  `remote`, the right diff and the new version. No change gives no notificat",
+    "ion.\n- After the first poll the next one sends `If-None-Match`, the fake answers 304, and not",
+    "hing is emitted.\n- A new issue arrives with `from: null`.\n- A deleted issue, a transferred o",
+    "ne (the fake answers 301) and one that left the window give `task.removed` with\n  `Deleted`, ",
+    "`Transferred` and `Unknown`, within one `reconcileSeconds`. A repo that fails during the recon",
+    "cile\n  removes nothing.\n- A reconcil",
+  ].join('') },
+  { id: "ts-0175-gz", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0174-wf"],
+    title: "GitHub pack: setStatus, comment and the conflict before a write", body: [
+    "## Goal\n\n`setStatus` closes or reopens an issue and `comment` adds a comment. A write with a",
+    " stale version is found before the\nwrite and answered with `conflict`. A pull request is read",
+    "-only.\n\nWhat exists. `ts-0172-xc` declares the ops `setStatus` and `comment` and the statuse",
+    "s `open`, `closed` and\n`not_planned` with their categories. `ts-0173-ku` gives the task mappi",
+    "ng and the client. `ts-0174-wf` keeps the known\nversion of each issue. `core/src/provider.rs`",
+    " has `ApplyParams` (`op`, `id`, `args`, `version`, `actor`) and the three\n`ApplyResult`s, `ok",
+    "` (the task, its version, `items`), `conflict` (the current task) and `refused`. `ts-0170-gh` ",
+    "makes a\nglobal source's write skip the checkout wait and re\n\n## Success criteria\n\n- `setS",
+    "tatus` with category `done` sends a PATCH with `state: closed` and `state_reason: completed`, ",
+    "and the result's\n  version is the response's `updated_at`. `dropped` gives `not_planned`. `re",
+    "ady` reopens.\n- `backlog`, `active` and `review` are refused with the reason, and the fake sa",
+    "w no PATCH.\n- A write with a stale version answers `conflict` with the current task, and the ",
+    "fake saw no PATCH or POST. A write\n  with the current version is applied.\n- A pull request a",
+    "nd an id of an unlisted repo are refused, and the fake saw no write.\n- `comment` posts the bo",
+    "dy and answers `ok`. A deleted issu",
+  ].join('') },
+  { id: "ts-0176-ds", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0175-gz"],
+    title: "GitHub with plan: the Stage 5 criteria through the daemon on fakes", body: [
+    "## Goal\n\nThe Stage 5 success criteria that a fake can show, shown end to end: the real daemo",
+    "n, the real `collide/github` pack and\nthe `plan` pack on one temp board, with a fake `gh` and",
+    " a fake API. It also records what the builders learned in the\npack's own Built sections as on",
+    "e honest account of Stage 5.\n\nWhat exists. Every part: `ts-0168-tq` to `ts-0175-gz` build th",
+    "e contract fields, the per-user setting, the global\nwrite path, the \"could not check\" Queue",
+    " item and the whole pack, each with its own tests at the level of its own\ncode. `host/tests/d",
+    "aemon_corpus.rs`, `daemon_sources.rs` and `daemon_plan_views.rs` run a daemon over a temp boar",
+    "d with\nfake providers or the `plan` pack. The views and CEL o\n\n## Success criteria\n\n- A v",
+    "iew over plan and GitHub tasks lists both (Stage 5, fifth criterion), with the GitHub rows' tr",
+    "ust levels from\n  their association.\n- An issue edited on the fake API shows in `task.list` ",
+    "within a few seconds at `pollSeconds: 1` (the first criterion's\n  mechanism; the 60 s measure",
+    "ment is `ts-0177-hd`'s).\n- `setStatus` with category `done` through the CLI closes the fake i",
+    "ssue, and the same with an old version is a\n  conflict (the third criterion).\n- An issue del",
+    "eted on the fake API leaves the corpus within one `reconcileSeconds` (the fourth criterion), a",
+    "nd another\n  deleted while the daemon",
+  ].join('') },
+  { id: "ts-0177-hd", status: "ready", epic: "ep-005-hs", blockedBy: ["ts-0176-ds"],
+    title: "Owner check: GitHub on a throwaway repository", body: [
+    "## Goal\n\nThe Stage 5 checks that only the owner runs, against the real GitHub, on a throwawa",
+    "y repository: the 60 s edit, a real\nclose, a real delete and transfer, a real expired token a",
+    "nd a real scope failure. It is also the one place the\nhand-written fixtures of `ts-0172-xc` a",
+    "re compared with GitHub's real responses.\n\nA build agent never runs it. It never touches the",
+    " owner's real repositories, never reaches the network, never runs the\nreal `gh`, never reads ",
+    "a token, never starts a daemon against the owner's data, and never runs `claude`. It writes th",
+    "e\ncommand lines and a short checklist under `### Owner checklist`, from the code and from the",
+    " Built sections of\n`ts-0168-tq` to `ts-0176-ds`. The owner\n\n## Success criteria\n\n- An iss",
+    "ue edited on GitHub (its title, a label) appears on the board within 60 s at the default `poll",
+    "Seconds`, measured\n  with a stopwatch, three times. Owner-run.\n- `setStatus` with category `",
+    "done` through `collide task` closes the real issue, and the same with a version that\n  anothe",
+    "r edit made stale returns a conflict before the write. Owner-run.\n- An issue deleted by the r",
+    "epository's admin leaves the corpus within one reconcile interval (set `reconcileSeconds`\n  s",
+    "mall for the check, then once at the default). An issue transferred to the second throwaway al",
+    "so leaves\n  it. Owner-run.\n- A cl",
+  ].join('') },
+];
+
+const DEMO_6A = [
+  ['ts-0179-fd', "Field: board columns from each source's own statuses", ['ts-0178-fw']],
+  ['ts-0180-fb', 'Filter bar: chips that write CEL, and saving a view', ['ts-0179-fd']],
+  ['ts-0181-dr', "Task drawer: the body, links both ways, and each copy's state", ['ts-0179-fd', 'fx-0001-hb']],
+  ['ts-0182-st', "Settings: each key's value and the layer it came from", ['ts-0178-fw']],
+  ['ts-0183-ns', 'No-setup open, the first-run checks and Share with team', ['ts-0180-fb', 'ts-0182-st']],
+  ['ts-0184-ow', 'Owner check: the board walkthrough', ['ts-0181-dr', 'ts-0183-ns']],
+].map(([id, title, deps]) => ({ id, title, status: 'backlog', epic: 'ep-006-wq', src: 'plan', blockedBy: deps,
+  body: 'A demo item for the design mock. It is not filed: the real items come from the Stage 6a split, '
+    + 'after the mock settles the design.' }));
+
+const HOSTILE = {
+  id: 'fx-0001-hb', title: 'Fixture: a task body with hostile content', status: 'ready', epic: 'ep-006-wq',
+  src: 'plan', blockedBy: [],
+  body: [
+    'This body is a fixture. It holds what an untrusted source could send. The drawer shows all of it as text:',
+    'nothing runs, nothing is fetched, and links ask before they open.', '',
+    '<script>alert("hello")<\/script>',
+    '<img src="https://tracker.example/pixel.png" onerror="alert(1)">', '',
+    '- A [link that runs code](javascript:alert(1))',
+    '- A [link to a local file](file:///etc/hosts)',
+    '- An image: ![pixel](https://tracker.example/pixel.png)',
+    '- A normal link: [the example page](https://example.com/plan)',
+  ].join('\n'),
+};
+
+const COLLISION = {
+  id: 'ts-0185-kd', title: "Loop page: a paused run's card shows its cost so far", status: 'backlog',
+  epic: 'ep-004-qd', src: 'plan', blockedBy: [],
+  body: 'A demo item. In run R-121\'s copy another task was made with the same short id, at a different path.',
+  collision: { copy: 'r121', title: "Settings: a key's layer in the CLI listing",
+    path: '.collide/planning/epics/ep-006-wq-task-board/tasks/ts-0185-kd-settings-a-keys-layer.md' },
+};
+
+function collideTasks() {
+  const tasks = TASKS.map((t) => ({ ...t, src: 'plan' }));
+  for (const t of tasks) {
+    if (t.id === 'ts-0178-fw') { t.status = 'active'; t.copies = { r121: 'review' }; }
+    if (t.id === 'ts-0168-tq') t.blockedBy = ['ts-0184-ow'];
+    if (t.id === 'ts-0160-th') t.status = 'review';
+  }
+  return [...tasks, ...DEMO_6A, HOSTILE, COLLISION];
+}
+
+const PANTRY_TRACKER = [
+  ['PT-1', 'Scanning a barcode adds the item', 'Doing', 'E-09', []],
+  ['PT-2', 'A reminder the day before something expires', 'Code review', 'E-09', []],
+  ['PT-3', 'A shopping list from what is running low', 'QA', 'E-09', ['PT-12']],
+  ['PT-4', 'Share a pantry with your household', 'To do', 'E-10', ['ts-0004-hm']],
+  ['PT-5', 'Import items from a receipt photo', 'Triage', 'E-09', []],
+  ['PT-6', 'Grams and ounces', 'Shipped', 'E-09', []],
+  ['PT-7', 'A dark theme', 'Icebox', 'E-09', []],
+  ['PT-8', 'Edits made offline sync later', 'To do', 'E-10', []],
+  ['PT-9', 'Recipe ideas from what is in stock', "Won't do", 'E-09', []],
+  ['PT-10', 'Search by shelf', 'Shipped', 'E-09', []],
+  ['PT-11', 'Change many quantities at once', 'Triage', 'E-09', []],
+  ['PT-12', 'A low-stock level for each item', 'Doing', 'E-09', []],
+  ['PT-13', 'Who changed what, in a shared pantry', 'Icebox', 'E-10', ['PT-4']],
+].map(([id, title, status, epic, blockedBy], i) => ({ id, title, status, epic, blockedBy, src: 'tracker',
+  fields: { priority: ['P1', 'P2', 'P3'][i % 3], points: [3, 5, 2, 8, 1][i % 5],
+    component: ['Scanner', 'Reminders', 'Lists', 'Sharing'][i % 4] },
+  body: `A made-up tracker item for the mock. Its status, "${status}", is the tracker's own word.` }));
+const PANTRY_PLAN = [
+  ['ts-0003-bk', 'Spike: which barcode library reads damaged labels', 'done', 'E-09', []],
+  ['ts-0004-hm', 'Decide how a household shares one pantry', 'review', 'E-10', []],
+  ['ts-0005-rc', 'Proposal: importing from receipts', 'backlog', 'E-09', ['ts-0003-bk']],
+].map(([id, title, status, epic, blockedBy]) => ({ id, title, status, epic, blockedBy, src: 'plan',
+  body: 'A made-up planning item for the mock.' }));
+
+const OLD_TASKS = [
+  ['ts-0001-aa', 'Try the loop on a small repo', 'done'], ['ts-0002-bb', 'Write down what was awkward', 'ready'],
+  ['ts-0003-cc', 'A second pass on the run card', 'backlog'], ['ts-0004-dd', 'Check the cost line', 'active'],
+  ['ts-0005-ee', 'Tidy the check folder', 'ready'],
+].map(([id, title, status]) => ({ id, title, status, epic: null, blockedBy: [], src: 'plan',
+  body: 'A made-up item on the board whose folder moved.' }));
+
+// Changed files per task (owner's note, round 2). A run's changes come from its phases' recorded heads (start_head to
+// end_head, or to the working tree while it runs). Work done outside a run: the commits that name the task id.
+const fl = (rows) => rows.map(([path, add, del, diff]) => ({ path, add, del, diff }));
+const CHANGES = {
+  'ts-0178-fw': { from: 'run', run: 'r121', where: "Run R-121's worktree", how: 'since the Build phase began, '
+    + 'including edits not committed yet', files: fl([
+    ['app/src/loop/RunCard.tsx', 26, 8, true], ['app/test/loop-view.test.tsx', 57, 1],
+    ['app/test/support/loop-world.ts', 2, 2], ['core/src/owner/run.rs', 4, 0, true],
+    ['host/src/file_run.rs', 7, 0, true],
+    ['host/src/run_store.rs', 43, 2, true], ['host/src/run_summary.rs', 2, 0, true], ['host/src/store.rs', 31, 1, true],
+    ['host/tests/adapters/claude/event_stream.rs', 1, 0], ['packages/pack-sdk/src/generated/ (4 files)', 20, 0],
+    ['schemas/ (4 files)', 28, 0], ['.collide/planning/…/ts-0178-fw-loop-page-a-file-runs-card.md', 49, 0]]) },
+  'ts-0160-th': { from: 'commits', where: 'Your checkout, line main', how: '2 commits that name ts-0160: d5c9526 '
+    + 'and a4df977. No run built it.', files: fl([
+    ['app/src/loop/LoopPage.tsx', 13, 3], ['app/src/loop/Queue.tsx', 15, 4], ['app/src/loop/loop.ts', 30, 7],
+    ['app/src/loop/state.ts', 14, 3], ['app/src/loop/types.ts', 2, 0], ['app/test/loop-page.test.ts', 111, 0],
+    ['app/test/loop-view.test.tsx', 26, 0], ['core/src/owner/queue.rs', 19, 5],
+    ['host/src/file_run/discard.rs', 94, 11],
+    ['host/src/workspace.rs', 12, 1], ['host/tests/adapters/claude/discard.rs', 262, 0],
+    ['packages/pack-sdk/src/generated/ (2 files)', 12, 2], ['schemas/ (2 files)', 38, 2],
+    ['.collide/planning/…/ts-0160-th-discard-a-refusal-goes-unseen-and.md', 96, 0]]) },
+};
+
+// Tracks preview (Stage 9b). Made-up runs; the tool names are generic.
+const RUNS = [
+  { id: 'r121', label: 'Run R-121', task: 'ts-0178-fw', live: true, when: 'Today 09:20', phases: [
+    { name: 'Plan', state: 'done', mins: 3 }, { name: 'Build', state: 'run', mins: 17 },
+    { name: 'Review', state: 'wait', mins: 6 }] },
+  { id: 'r119', label: 'Run R-119', task: 'ts-0160-th', live: false, when: 'Yesterday 15:02', phases: [
+    { name: 'Plan', state: 'done', mins: 4 }, { name: 'Build', state: 'done', mins: 31 },
+    { name: 'Review', state: 'done', mins: 9 }] },
+];
+const TOOLTIME = {
+  r121: [
+    { tool: 'Bash', what: 'cargo test -p collide-host', calls: 6, secs: 468, slow: 121, opt: 'cargo' },
+    { tool: 'Model', what: 'thinking and writing', calls: 0, secs: 250, slow: 38 },
+    { tool: 'Bash', what: 'pnpm exec vitest run', calls: 3, secs: 112, slow: 51, opt: 'vitest' },
+    { tool: 'Bash', what: 'cargo build', calls: 2, secs: 80, slow: 62, opt: 'cargo' },
+    { tool: 'Read', what: '41 files', calls: 41, secs: 38, slow: 3 },
+    { tool: 'Edit', what: '9 files', calls: 17, secs: 21, slow: 2 },
+    { tool: 'Grep', what: 'searches', calls: 12, secs: 9, slow: 1 },
+  ],
+  r119: [
+    { tool: 'Bash', what: 'cargo test -p collide-host', calls: 11, secs: 1010, slow: 140, opt: 'cargo' },
+    { tool: 'Model', what: 'thinking and writing', calls: 0, secs: 520, slow: 61 },
+    { tool: 'Bash', what: 'pnpm exec vitest run', calls: 5, secs: 190, slow: 48, opt: 'vitest' },
+    { tool: 'Read', what: '63 files', calls: 63, secs: 52, slow: 4 },
+    { tool: 'Edit', what: '14 files', calls: 29, secs: 33, slow: 2 },
+  ],
+};
+// Optimize: a canned research result per kind of step.
+const OPTIMIZE = {
+  cargo: { step: 'cargo test -p collide-host', facts: '6 calls in this phase, 7 m 48 s; 11 calls in R-119, 16 m 50 s. '
+    + 'About 80 s a call, of which about 25 s is the build.', options: [
+    { title: 'Run only the test files the change touches', how: 'In Build, run `cargo test -p collide-host --test '
+      + '<name>` for the areas the diff touches, and keep the full run for Review.', saves: 'about 5 min a phase',
+      effort: 'Small: one line in the workflow', risk: 'A test outside those areas fails later, in Review.' },
+    { title: 'Run the suite with cargo-nextest', how: 'Each test runs in its own process, in parallel across test '
+      + 'binaries.', saves: 'about 2 to 3 min a phase', effort: 'Medium: a new dev tool on each machine',
+      risk: 'Tests that share a temp folder by mistake start to fail. Worth finding anyway.',
+      src: 'https://nexte.st/' },
+    { title: 'Stop rebuilding between calls', how: '2 of the 6 calls rebuilt most of the workspace after an edit to '
+      + '`core`. A shared compile cache cuts that.', saves: 'about 1 min a phase', effort: 'Medium',
+      risk: 'Low. A cache that goes stale is cleared by hand.', src: 'https://github.com/mozilla/sccache' }],
+    sources: ['https://doc.rust-lang.org/cargo/commands/cargo-test.html', 'https://nexte.st/',
+      'https://github.com/mozilla/sccache'] },
+  vitest: { step: 'pnpm exec vitest run', facts: '3 calls in this phase, 1 m 52 s. Every call ran all 31 test files.',
+    options: [
+      { title: 'Run only the files the change touches', how: 'Use `vitest related <changed files>` in Build, and the '
+        + 'full run in Review.', saves: 'about 1 min a phase', effort: 'Small', risk: 'Low.',
+        src: 'https://vitest.dev/guide/cli' }],
+    sources: ['https://vitest.dev/guide/cli'] },
+};
+
+// Comms (owner's note, round 2): sessions with an agent that are not a task or a plan. All made up.
+const tl = (at, you, secs, tools, result, cost, calls = []) => ({ at, you, secs, tools, result, cost, calls });
+const COMMS = [
+  { id: 'desk', title: 'The Desk', pinned: true, agent: 'Claude Code · sonnet',
+    where: 'main checkout · edits no code',
+    day: 'Today', start: '08:05', last: '09:41', live: true, sid: '3f9c2a71-desk',
+    purpose: 'Coordinates the work on this board. Reads the board and runs; changes nothing.', notes: '',
+    turns: [
+      tl('08:05', "What on this board can start now?", 22, [['query', 2]], 'Two tasks can start: `ts-0178-fw` (Run '
+        + 'R-121 is building it) and `fx-0001-hb`, the hostile-body fixture. The rest of Stage 6a waits on those two, '
+        + 'and Stage 5 waits on the last 6a item.', 0.04),
+      tl('09:40', 'R-121 has been in Build for 17 minutes. Is it stuck?', 31, [['query', 1], ['run.get', 1]],
+        'No. It is in its sixth `cargo test` call, and a call takes about 80 s. Tracks shows where the time went; '
+        + 'Optimize on that row looks for a faster way.', 0.06),
+    ] },
+  { id: 'flaky', title: 'Flaky daemon tests', agent: 'Claude Code · sonnet', where: '~/projects/collide',
+    day: 'Today', start: '09:12', last: '09:58', live: true, sid: '8b41d0e5-flaky',
+    purpose: 'Find out why two tests failed once in the ts-0178 run, and decide whether to file items.',
+    notes: 'Both passed on a re-run. Do not file until the 50-run numbers are in.',
+    turns: [
+      tl('09:12', 'Two tests failed once in the ts-0178 run and passed on a re-run: `daemon_process::a_daemon_started_'
+        + 'from_a_terminal_survives_the_terminal_closing`, and "bridge: a page of another origin cannot call the '
+        + 'bridge". Are they flaky, and why?', 161, [['Bash', 7], ['Read', 9], ['Grep', 4]], 'Both are bound by time. '
+        + 'The daemon test gives the daemon 2 s to outlive its terminal, and a loaded machine takes longer. The bridge '
+        + 'test races the frame\'s load against its first call. Neither points at a bug in Collide.', 0.38,
+      ['Read host/tests/daemon_process.rs · 1 s', 'Bash cargo test --test daemon_process · 58 s',
+        'Read app/browser/bridge.spec.ts · 1 s', 'Bash pnpm exec playwright test bridge.spec.ts · 21 s']),
+      tl('09:31', 'Run each 50 times under load, and give me the failure rate.', 665, [['Bash', 4], ['Read', 2]],
+        'Daemon test: 3 of 50 failed, all at the 2 s wait. Bridge test: 0 of 50 alone, and 1 of 50 with the whole '
+        + 'browser suite running beside it.', 0.71,
+      ['Bash cargo test --test daemon_process (50 times) · 4 m 10 s',
+        'Bash playwright test bridge.spec.ts (50 times) · 6 m 30 s']),
+      tl('09:52', 'Draft an item for each, with the fix you would make.', 0, [['Read', 2]], '', 0.12),
+    ] },
+  { id: 'notes', title: 'Release notes for 0.4', agent: 'Claude Code · haiku', where: '~/projects/collide',
+    day: 'Yesterday', start: '16:40', last: '17:25', live: false, sid: 'c27e9f04-notes',
+    purpose: 'Draft the 0.4 release notes from the commits since 0.3.', notes: 'Owner to trim the Stage 4 list.',
+    turns: [
+      tl('16:40', 'Draft release notes from the commits since the 0.3 tag, grouped by stage.', 74, [['Bash', 2],
+        ['Read', 3]], 'A draft with 3 groups: Stage 4 (pack loading, settings, views), the Loop page fixes, and the '
+        + 'daemon log. 41 commits, 12 items.', 0.03),
+      tl('17:20', 'Shorter: one line per item, and leave out the test-only changes.', 18, [], 'Done: 9 lines.', 0.01),
+    ] },
+  { id: 'crates', title: 'Which crates pull in openssl', agent: 'Claude Code · sonnet', where: '~/projects/collide',
+    day: 'Earlier', date: 'Thu 19 Nov', start: '11:02', last: '11:30', live: false, sid: 'e0a55b1c-crates',
+    purpose: 'Can the build drop openssl?', notes: '',
+    turns: [
+      tl('11:02', 'Which of our dependencies pull in openssl, and can we drop it?', 212, [['Bash', 5], ['Read', 4],
+        ['WebSearch', 2]], 'One path: an HTTP client\'s default features. Turning those off and choosing rustls drops '
+        + 'openssl. Nothing else needs it.', 0.29),
+    ] },
+];
+
+const isOpen = (t) => !['done', 'dropped'].includes(catOf(t));
+const COLLIDE_VIEWS = [
+  { id: 'all', name: 'All tasks', where: 'true', test: () => true },
+  { id: 'open', name: 'Open work', where: 'category in ["backlog", "ready", "active", "review"]',
+    test: (t) => isOpen(t) },
+  { id: 's6', name: 'Stage 6a: the board', where: '"plan:ep-006-wq" in collections',
+    test: (t) => t.epic === 'ep-006-wq', goal: 'ep-006-wq' },
+  { id: 's5', name: 'Stage 5: GitHub', where: '"plan:ep-005-hs" in collections',
+    test: (t) => t.epic === 'ep-005-hs', goal: 'ep-005-hs' },
+];
+
+function freshBoards() {
+  return {
+    collide: { id: 'collide', name: 'collide', folder: '~/projects/collide', line: 'main', shared: true,
+      sources: ['plan'], tasks: collideTasks(), views: COLLIDE_VIEWS.slice(),
+      copies: [
+        { id: 'main', label: 'main', kind: 'Line root', where: 'your checkout' },
+        { id: 'r121', label: 'Run R-121', kind: "A run's copy", where: 'building ts-0178' },
+        { id: 'r119', label: 'Run R-119', kind: "A run's copy", where: 'ended, kept for review' },
+      ] },
+    pantry: { id: 'pantry', name: 'pantry', folder: '~/projects/pantry', line: 'main', shared: true,
+      sources: ['tracker', 'plan'], tasks: [...PANTRY_TRACKER, ...PANTRY_PLAN],
+      views: [
+        { id: 'tracker', name: 'Tracker', where: 'source == "tracker"', test: (t) => t.src === 'tracker' },
+        { id: 'everything', name: 'Everything', where: 'true', test: () => true },
+        { id: 'release', name: 'First release', where: '"plan:E-09" in collections || "tracker:E-09" in collections',
+          test: (t) => t.epic === 'E-09', goal: 'E-09' },
+      ],
+      copies: [{ id: 'main', label: 'main', kind: 'Line root', where: 'your checkout' }] },
+    old: { id: 'old', name: 'old-check', folder: '~/scratch/old-check', line: 'main', shared: true, missing: true,
+      sources: ['plan'], tasks: OLD_TASKS, views: [{ id: 'all', name: 'All tasks', where: 'true', test: () => true }],
+      copies: [{ id: 'main', label: 'main', kind: 'Line root', where: 'your checkout' }] },
+  };
+}
+
+/* ---------- state ---------- */
+const state = {
+  boards: freshBoards(), board: 'collide', view: 'all', surface: 'field', layout: 'board', groupBy: 'auto',
+  filt: { stage: new Set(), cat: new Set(), src: new Set(), text: '', deps: false },
+  drawer: null, settings: false, stab: 'general', menu: null, open: new Set(), shut: new Set(), goal: null,
+  notes: false, mock: false, flash: new Set(), screen: 'board', updated: Date.now(),
+  welcome: { folder: '~/projects/my-app', git: true, claude: true, login: true },
+  ask: null, comms: JSON.parse(JSON.stringify(COMMS)), comm: 'flaky', cview: 'convo', saved: '09:58',
+  track: 'r121', ttab: 'table', minSecs: 0, toolType: 'all',
+};
+const board = () => state.boards[state.board];
+const view = () => board().views.find((v) => v.id === state.view) || board().views[0];
+const srcOf = (t) => SOURCES[t.src];
+function catOf(t, status = t.status) {
+  const s = srcOf(t).statuses.find((x) => x.name === status);
+  return s ? s.cat : 'backlog';
+}
+const byId = (id) => board().tasks.find((t) => t.id === id);
+const visibleTasks = () => board().tasks.filter((t) => !(board().untrusted && t.src === 'tracker'));
+const openBlockers = (t) => t.blockedBy.map(byId).filter((x) => x && isOpen(x));
+
+/* ---------- design notes ---------- */
+// [title, what the mock does, the alternative, the owner's verdict: 'kept', 'changed' (round 2) or 'new' (round 2)]
+const NOTES = [
+  ['Board, line and view live in the top-left trail', 'One menu lists every open board with its default line '
+    + '(plan 0.11); a second picks the view. Switching stops nothing.',
+    'Alternative: a left sidebar of boards and views, always visible. It costs about 220 px of width.', 'kept'],
+  ['Tabs keep their subtitles; Comms is a fifth tab', 'Field and Planning work in 6a. Queue shows what arrives in '
+    + 'Stage 9; Tracks shows a preview of its design. Comms (key 5) holds sessions with an agent that are not a task '
+    + 'or a plan.', 'Alternative: hide Tracks and Queue until Stage 9.', 'changed'],
+  ['Column headers: the status name, with its category in words beneath', 'With the tracker\'s eight statuses the '
+    + 'subtitle tells a person that "QA" counts as in review.', 'Alternative: names only, colour alone for the '
+    + 'category. That breaks the rule that every state is written in words.', 'kept'],
+  ['Done and Dropped start folded', 'They hold most items on a mature board; a folded column shows its count and '
+    + 'opens with a click. The choice is remembered per view.', 'Alternative: always open, or hidden behind a filter.',
+    'kept'],
+  ['A card says only what matters', 'Title first; then the short id and the stage. Chips appear only when they say '
+    + 'something: the status (in category columns), "Waits on N", a copy that differs, an id collision. A task being '
+    + 'worked on has a lit border.', 'Alternative: always show every field, as an IDE would.', 'kept'],
+  ['A copy that differs: "Review in Run R-121"', 'The board shows the line\'s own state (plan 0.10). The chip names '
+    + 'the other state and where it is, in words.', 'Alternative: a bare "Diverged" chip, with the detail only in the '
+    + 'drawer.', 'kept'],
+  ['A collision: "Same id in 2 copies"', 'Two tasks share a short id at different paths. Shown in red, never as a '
+    + 'difference; the drawer shows both.', 'Alternative: show both as separate cards with a link between them.',
+    'kept'],
+  ['The drawer opens beside the board', 'Order: description, waits on and unblocks, part of, changes, fields from the '
+    + 'source, each copy, then the engineer details. A section the source has no notion of is left out (a scratch '
+    + 'task has no links; a tracker outside the repo has one copy). See 17 and 18.',
+    'Alternative: a full-page task view with a back button.', 'changed'],
+  ['Filters in plain words; CEL behind "Advanced"', 'Chips by stage, where it stands, and where it comes from. The '
+    + 'expression they make is read-only under Advanced. "Describe what to show" (16) writes the chips from words.',
+    'Alternative: an editable expression box beside the chips.', 'changed'],
+  ['Saved views are yours until you share', 'A saved view is kept per user; Share with team writes it, with the '
+    + 'board settings, to .collide/ (plan 0.11).', 'Alternative: every saved view writes .collide/views/ at once.',
+    'kept'],
+  ['Run order or Graph: compare them', 'Both lay out the same open tasks toward one goal. Run order: numbered steps, '
+    + 'step 1 is what can start now; it reads the same at 10 tasks or 200. Graph: the same steps as columns, with a '
+    + 'line from each blocker to what it holds up; hover a task to light its lines. Try "Toward Stage 5", where 6a '
+    + 'branches and Stage 5 is one long chain. Recommendation: ship Run order in 6a, and Graph as the second layout '
+    + 'if you prefer it here.', 'Alternative: Graph as the default layout. The plan defers a full graph layout; this '
+    + 'is the simple layered kind, readable to about 30 tasks.', 'changed'],
+  ['Settings: one table, the layer as a badge', 'Each key shows its value and where it came from: Default, You, or '
+    + 'This repo. A value overridden by the repo is shown struck through. Secrets show "Set" or "Not set", never the '
+    + 'value.', 'Alternative: a form per section, layers in a tooltip.', 'kept'],
+  ['First run: one page of checks; an empty board offers a plan or a task', 'A failing check names the fix and a '
+    + 'copy button. A logged-out Claude Code does not block opening a board; a folder that is not a git repo does, '
+    + 'with "Make it one". An empty board offers two ways in: "Plan it first" (a planning session, Stage 9d), shown '
+    + 'first because most people start there, and "Start with a task" (a scratch task).', 'Alternative: one prompt '
+    + 'box that decides from the words whether to plan or to add a task.', 'changed'],
+  ['Live updates are quiet', 'A changed card flashes once and the "Live" stamp updates. No toast for each change.',
+    'Alternative: a toast per change, or a changes list.', 'kept'],
+  ['A missing board keeps its place', 'Its row in the board menu says "folder not found". Opening it shows why, '
+    + 'and Locate; nothing is deleted.', 'Alternative: drop it from the menu until it is located.', 'kept'],
+  ['Describe what to show: an agent writes the chips and the CEL', 'A box in the filter bar. A small model (haiku) '
+    + 'turns the words into chips, shows the expression and the count, and you Keep, Undo or Save it as a view. What '
+    + 'a view cannot express is said plainly, with the nearest it can. This is the 6b agent\'s set_view, placed where '
+    + 'filters are.', 'Alternative: only the top-bar ask box of 6b, which also answers questions about the board.',
+    'new'],
+  ['Changes: each task\'s files and diffs, wherever it was worked', 'A run\'s changes come from the heads it records '
+    + 'per phase, so a worktree, your checkout or a line all work, and an active task shows its edits as they land. '
+    + 'Work done outside a run is found by the commits that name the task id. A file opens its diff.',
+    'Alternative: changes only for runs in a worktree, and none for hand-made commits.', 'new'],
+  ['Fields from the source', 'A pack declares its own fields in `initialize` (id and type). The drawer shows them in '
+    + 'a "Fields from <source>" section, labelled from the id. Every task also has the fields every source must give '
+    + '(title, status and category, labels, collections, dependencies, author), mapped by the pack.',
+    'Alternative: a per-board mapping file, where a person maps a source field onto a Collide section.', 'new'],
+  ['Comms: a fifth tab for sessions with an agent', 'For work that is not a task or a plan: a question, a check, a '
+    + 'draft. A list of sessions by day with their times, the conversation, and notes beside it. "File as a task" '
+    + 'turns a result into a task. Not in the plan yet.', 'Alternative: no tab; sessions live in a pane that docks '
+    + 'on every page.', 'new'],
+  ['The Desk is the pinned Comms session', 'Plan 9e\'s Desk (one per board, edits no code) becomes the session '
+    + 'pinned at the top of Comms, so there is one place for every conversation.', 'Alternative: keep the Desk as a '
+    + 'pane docked on every page, as the plan says, and Comms for the other sessions.', 'new'],
+  ['Session notes are yours, per session', '"What this session is for" and free notes, kept on your machine with '
+    + 'the session, saved as you type.', 'Alternative: notes as a Markdown file in .collide/, shared with the team.',
+    'new'],
+  ['Two views of a session: the conversation, or inputs and results', 'Conversation shows each message, the work '
+    + 'folded to one line, and the result. Inputs and results is a table: when, what you asked, what came back, how '
+    + 'long, the cost.', 'Alternative: one view, with the work steps folded away.', 'new'],
+  ['Tracks: where the time went', 'Per phase, a table of tool calls (calls, total, share, slowest) with filters by '
+    + 'type and length, and a timeline. Plan 9b has this breakdown.', 'Alternative: the timeline alone.', 'new'],
+  ['Optimize: research, then options, then a task', 'On a row of the breakdown. An agent reads the timings and the '
+    + 'commands, may search the web, and comes back with options: effort, saving, risk, sources. It is read-only and '
+    + 'capped. Schedule as a task files one; Discuss opens a Comms session. Not in the plan yet.', 'Alternative: '
+    + 'Optimize files a task with the research at once, with no options step.', 'new'],
+];
+
+/* ---------- top bar ---------- */
+function crumbHtml() {
+  const b = board();
+  const boardBtn = `<button class="crumbbtn" data-act="menu" data-menu="board"
+    aria-expanded="${state.menu === 'board'}" title="Board and code line">${esc(b.name)}
+    <small>· ${esc(b.line)}</small>${svg.down}</button>`;
+  if (state.screen === 'welcome') {
+    return `<button class="crumbbtn" data-act="menu" data-menu="board" aria-expanded="${state.menu === 'board'}"
+      title="Open boards">Boards${svg.down}</button><span class="sep">/</span>
+      <span class="crumbbtn" style="cursor:default">Opening <small class="mono">${esc(state.welcome.folder)}</small>
+      </span>${popHtml()}`;
+  }
+  const viewBtn = b.missing ? '' : `<span class="sep">/</span><button class="crumbbtn" data-act="menu" data-menu="view"
+    aria-expanded="${state.menu === 'view'}" title="The saved view of this board">${esc(view().name)}${svg.down}
+    </button>`;
+  return boardBtn + viewBtn + nm(1) + popHtml();
+}
+function popHtml() {
+  if (state.menu === 'board') {
+    const rows = Object.values(state.boards).map((b) => `<button class="opt" data-act="board" data-id="${b.id}"
+      aria-current="${b.id === state.board && state.screen !== 'welcome'}"><span class="grow">${esc(b.name)}
+      <span class="sub">${b.missing ? '<span style="color:var(--failed)">folder not found</span> · '
+        : ''}line <b>${esc(b.line)}</b> · ${esc(b.folder)}</span></span></button>`).join('');
+    return `<div class="pop" role="menu"><h4>Open boards</h4>${rows}<hr>
+      <button class="opt" data-act="scn" data-v="fresh"><span class="grow">Open a folder…
+      <span class="sub">Any git repo opens as a board, with no setup</span></span></button></div>`;
+  }
+  if (state.menu === 'view') {
+    const rows = board().views.map((v) => `<button class="opt" data-act="view" data-id="${v.id}"
+      aria-current="${v.id === view().id}"><span class="grow">${esc(v.name)}<span class="sub mono">${esc(v.where)}
+      </span></span>${v.mine ? '<span class="chip">yours</span>' : ''}</button>`).join('');
+    return `<div class="pop" role="menu" style="left:auto;right:0"><h4>Views of ${esc(board().name)}</h4>${rows}</div>`;
+  }
+  return '';
+}
+function tabsHtml() {
+  const tabs = [['field', 'Field', 'the whole board'], ['tracks', 'Tracks', "what's running now"],
+    ['queue', 'Queue', 'what needs you'], ['planning', 'Planning', 'what to build next'],
+    ['comms', 'Comms', 'sessions with an agent']];
+  return tabs.map(([id, name, sub], i) => `<button class="tab ${id === 'queue' ? 'later' : ''}"
+    data-act="tab" data-id="${id}" aria-pressed="${state.surface === id && !state.settings}"
+    title="${name}: ${sub} (key ${i + 1})">${name}<small>${sub}</small></button>`).join('') + nm(2);
+}
+function topRightHtml() {
+  return `<button class="btn ghost sm" data-act="settings" aria-pressed="${state.settings}">${svg.gear}Settings
+    </button><button class="btn ghost sm" data-act="theme" aria-label="Switch light and dark">${svg.moon}</button>`;
+}
+
+/* ---------- the Field ---------- */
+function fieldHtml() {
+  const b = board();
+  const inView = visibleTasks().filter(view().test);
+  const banners = [];
+  if (!b.shared) {
+    banners.push(`<div class="banner"><span class="grow"><b>This board's settings are yours only.</b> Share with team
+      writes them to <code>.collide/</code> in the repo, so a teammate's clone opens the same board.</span>
+      <button class="btn sm main" data-act="share">Share with team</button>${nm(10)}</div>`);
+  }
+  if (b.untrusted) {
+    banners.push(`<div class="banner warn"><span class="grow"><b>demo/tracker is not trusted,</b> so its tasks are not
+      shown. It is a pack this repo brings, and packs run code on this Mac.</span>
+      <button class="btn sm" data-act="trust">Review and trust…</button></div>`);
+  }
+  if (!visibleTasks().length) return banners.join('') + emptyHtml();
+  const tasks = applyFilters(inView);
+  const body = state.layout === 'board' ? boardHtml(tasks) : state.layout === 'graph' ? graphHtml() : runOrderHtml();
+  return banners.join('') + filtersHtml(inView, tasks) + viewbarHtml(tasks) + body;
+}
+
+function groupMode(tasks) {
+  if (state.groupBy !== 'auto') return state.groupBy;
+  const srcs = new Set(visibleTasks().filter(view().test).map((t) => t.src));
+  return srcs.size <= 1 ? 'status' : 'category';
+}
+function applyFilters(tasks) {
+  const f = state.filt;
+  return tasks.filter((t) => (!f.stage.size || f.stage.has(t.epic))
+    && (!f.cat.size || f.cat.has(catOf(t)))
+    && (!f.src.size || f.src.has(t.src))
+    && (!f.text || (t.title + ' ' + t.id).toLowerCase().includes(f.text.toLowerCase()))
+    && (!f.deps || t.blockedBy.length > 0));
+}
+function celOf() {
+  const f = state.filt, parts = [];
+  if (view().where !== 'true') parts.push(`(${view().where})`);
+  if (f.stage.size) parts.push(`(${[...f.stage].map((e) => `"plan:${e}" in collections`).join(' || ')})`);
+  if (f.cat.size) parts.push(`category in [${[...f.cat].map((c) => `"${c}"`).join(', ')}]`);
+  if (f.src.size) parts.push(`source in [${[...f.src].map((s) => `"${s}"`).join(', ')}]`);
+  if (f.text) parts.push(`title.contains("${f.text.replace(/["\\]/g, '\\$&')}")`);
+  if (f.deps) parts.push('size(deps) > 0');
+  return parts.join('\n  && ') || 'true';
+}
+function filtersHtml(inView, shown) {
+  const f = state.filt;
+  const chip = (g, v, label, n) => `<button class="chipbtn" data-act="chip" data-g="${g}" data-v="${esc(v)}"
+    aria-pressed="${f[g].has(v)}">${label} <span class="n">${n}</span></button>`;
+  const epics = [...new Set(inView.map((t) => t.epic).filter(Boolean))];
+  const srcs = [...new Set(inView.map((t) => t.src))];
+  const groups = [];
+  if (epics.length > 1) {
+    groups.push(`<div class="fgroup"><span class="lbl">Stage</span>${epics.map((e) => chip('stage', e,
+      esc(EPICS[e].short), inView.filter((t) => t.epic === e).length)).join('')}</div>`);
+  }
+  groups.push(`<div class="fgroup"><span class="lbl">Where it stands</span>${CAT_ORDER.map((c) => chip('cat', c,
+    `<span class="dot cat-${c}"></span>${CATS[c].word}`, inView.filter((t) => catOf(t) === c).length)).join('')}
+    </div>`);
+  if (srcs.length > 1) {
+    groups.push(`<div class="fgroup"><span class="lbl">Comes from</span>${srcs.map((s) => chip('src', s,
+      esc(SOURCES[s].name), inView.filter((t) => t.src === s).length)).join('')}</div>`);
+  }
+  if (f.deps) {
+    groups.push(`<div class="fgroup"><span class="lbl">From your words</span><button class="chipbtn" data-act="deps-off"
+      aria-pressed="true" title="Remove">Has dependencies ×</button></div>`);
+  }
+  const any = f.stage.size || f.cat.size || f.src.size || f.text || f.deps;
+  return `<section class="filters card" aria-label="Filters">
+    ${askHtml(inView)}
+    <div class="frow">${groups.join('')}${nm(9)}</div>
+    <div class="frow"><label class="sr" for="ftext">Search tasks</label>
+      <input class="ftext" id="ftext" type="search" placeholder="Search by name or id" value="${esc(f.text)}"
+        autocomplete="off">
+      <span class="muted" style="font-size:13px">${any ? `Showing ${shown.length} of ${inView.length}` : ''}</span>
+      <span class="spacer"></span>
+      <button class="btn sm" data-act="clear" ${any ? '' : 'disabled'}>Clear filters</button>
+      <button class="btn sm" data-act="save-view" ${any ? '' : 'disabled'}>Save as a view…</button></div>
+    <details class="adv"><summary>Advanced: this view as an expression (CEL, read only)</summary>
+      <div class="cel"><code>${esc(celOf())}</code></div></details>
+  </section>`;
+}
+/* ---------- describe what to show (6b) ---------- */
+const ASK_EXAMPLES = ['open Stage 6 tasks waiting on something', 'in review or done, about the daemon',
+  'tracker items being worked on', 'what did I break yesterday'];
+function askHtml(inView) {
+  const a = state.ask;
+  const ex = ASK_EXAMPLES.map((q) => `<button class="btn ghost sm" data-act="ask-ex" data-v="${esc(q)}">${esc(q)}
+    </button>`).join('');
+  let res = '';
+  if (a && a.phase === 'asking') {
+    res = `<div class="askres" role="status">Asking Claude Code (haiku) to write this as a view…</div>`;
+  } else if (a && a.phase === 'miss') {
+    res = `<div class="askres miss" role="status"><div><b>That did not turn into a view.</b> ${esc(a.msg)}</div>
+      <div><button class="btn sm" data-act="ask-undo">Dismiss</button></div></div>`;
+  } else if (a && a.phase === 'done') {
+    const n = applyFilters(inView).length;
+    res = `<div class="askres" role="status"><div><b>Showing ${n} of ${inView.length}</b> · from "${esc(a.q)}" ·
+      written by Claude Code (haiku) in 0.6 s, under $0.01</div>
+      <div class="tc-c">${a.said.map((w) => `<span class="chip info">${esc(w)}</span>`).join('')}</div>
+      <pre class="mono">${esc(celOf())}</pre>${a.note ? `<div class="muted">${esc(a.note)}</div>` : ''}
+      <div class="frow"><button class="btn sm main" data-act="ask-keep">Keep</button>
+      <button class="btn sm" data-act="ask-undo">Undo</button>
+      <button class="btn sm" data-act="save-view">Save as a view…</button></div></div>`;
+  }
+  return `<div class="ask"><label class="sr" for="askq">Describe what to show</label>
+      <input id="askq" type="text" placeholder="Describe what to show, in your words" autocomplete="off"
+        value="${esc(a ? a.q : '')}">
+      <button class="btn sm" data-act="ask">Show it</button><span class="newtag" title="The in-app agent, Stage 6b">6b
+      </span>${nm(16)}</div>
+    ${a ? res : `<div class="fgroup"><span class="lbl">Try</span>${ex}</div>`}`;
+}
+function parseAsk(q) {
+  const s = q.toLowerCase();
+  const f = { stage: new Set(), cat: new Set(), src: new Set(), text: '', deps: false };
+  const said = [];
+  let note = '';
+  const b = board();
+  for (const [id, e] of Object.entries(EPICS)) {
+    const n = e.short.toLowerCase();
+    const hit = n.startsWith('stage ') ? new RegExp(`stage\\s*${n.slice(6)}(?!\\d)`).test(s) : s.includes(n);
+    if (hit && b.tasks.some((t) => t.epic === id)) { f.stage.add(id); said.push(e.short); }
+  }
+  const cats = [[/\bopen\b|not done|unfinished/, ['backlog', 'ready', 'active', 'review'], 'Open'],
+    [/\b(done|finished|shipped)\b/, ['done'], 'Done'], [/\breview\b/, ['review'], 'In review'],
+    [/being worked|in progress|\bactive\b/, ['active'], 'Active'], [/\bready\b|can start/, ['ready'], 'Ready'],
+    [/\bbacklog\b/, ['backlog'], 'Backlog'], [/\bdropped\b|won'?t do/, ['dropped'], 'Dropped']];
+  let open = false;
+  for (const [re, cs, word] of cats) {
+    if (open && word === 'Done') continue;
+    if (re.test(s)) { cs.forEach((c) => f.cat.add(c)); said.push(word); if (word === 'Open') open = true; }
+  }
+  if (b.sources.length > 1) {
+    if (/tracker/.test(s)) { f.src.add('tracker'); said.push('From the tracker'); }
+    if (/\bplan(ning)?\b/.test(s)) { f.src.add('plan'); said.push('From planning'); }
+  }
+  const about = s.match(/\b(?:about|mentioning|named|called)\s+"?([^",.]+?)"?\s*$/);
+  if (about) { f.text = about[1].trim(); said.push(`Search: ${f.text}`); }
+  if (/waiting on|waits on|blocked|depends on/.test(s)) {
+    f.deps = true; said.push('Has dependencies');
+    note = 'A view looks at one task at a time, so "waiting on an open task" cannot be written: the tasks it waits '
+      + 'on are not in sight. The nearest is "has dependencies". Run order and Graph show what is still open.';
+  }
+  if (/yesterday|last week|\bi\b.*\bbreak|broke/.test(s) && !said.length) {
+    return { miss: 'A view sees each task\'s fields, not its history or who changed it. Try a stage ("stage 6"), a '
+      + 'state ("open", "in review"), a source ("tracker"), or words to find ("about settings").' };
+  }
+  if (!said.length) {
+    return { miss: 'Name a stage ("stage 6"), a state ("open", "in review", "done"), a source ("tracker"), or words '
+      + 'to find ("about settings").' };
+  }
+  return { f, said, note };
+}
+function runAsk(q) {
+  if (!q.trim()) return;
+  const prev = state.ask && state.ask.prev ? state.ask.prev : state.filt;
+  state.ask = { q, phase: 'asking', prev };
+  render();
+  setTimeout(() => {
+    if (!state.ask || state.ask.q !== q) return;
+    const r = parseAsk(q);
+    if (r.miss) state.ask = { q, phase: 'miss', msg: r.miss, prev };
+    else { state.filt = r.f; state.ask = { q, phase: 'done', said: r.said, note: r.note, prev }; }
+    render();
+  }, 900);
+}
+
+function viewbarHtml(tasks) {
+  const mode = groupMode(tasks);
+  const ago = Math.max(0, Math.round((Date.now() - state.updated) / 1000));
+  return `<div class="viewbar"><h1>${esc(view().name)}</h1>
+    <span class="muted">${tasks.length} task${tasks.length === 1 ? '' : 's'}</span>
+    <span class="live" title="The board follows the files as they change"><span class="dot"></span>Live ·
+      updated ${ago < 5 ? 'just now' : ago + ' s ago'}${nm(14)}</span>
+    <span class="spacer"></span>
+    <span class="seg" role="group" aria-label="Layout"><button data-act="layout" data-v="board"
+      aria-pressed="${state.layout === 'board'}">Board</button><button data-act="layout" data-v="run"
+      aria-pressed="${state.layout === 'run'}">Run order</button><button data-act="layout" data-v="graph"
+      aria-pressed="${state.layout === 'graph'}">Graph</button></span>${nm(11)}
+    ${state.layout === 'board' ? `<span class="seg" role="group" aria-label="Columns"><button data-act="group"
+      data-v="status" aria-pressed="${mode === 'status'}">By status</button><button data-act="group"
+      data-v="category" aria-pressed="${mode === 'category'}">By stage of work</button></span>` : ''}
+  </div>`;
+}
+function columnsOf(mode, tasks) {
+  if (mode === 'category') return CAT_ORDER.map((c) => ({ key: c, label: CATS[c].word, cat: c, sub: CATS[c].sub }));
+  const src = SOURCES[[...new Set(tasks.map((t) => t.src))][0] || board().sources[0]];
+  return src.statuses.map((s) => ({ key: s.name, label: cap(s.name), cat: s.cat,
+    sub: s.name === s.cat ? CATS[s.cat].sub : `counts as ${CATS[s.cat].word.toLowerCase()}` }));
+}
+function isShut(col) {
+  if (state.shut.has(col.key)) return true;
+  return !state.open.has(col.key) && ['done', 'dropped'].includes(col.cat);
+}
+function boardHtml(tasks) {
+  const mode = groupMode(tasks);
+  const cols = columnsOf(mode, tasks);
+  return `<div class="cols">${cols.map((col, i) => {
+    const mine = tasks.filter((t) => (mode === 'category' ? catOf(t) : t.status) === col.key);
+    if (isShut(col)) {
+      return `<div class="col shut" data-act="col" data-v="${esc(col.key)}" role="button" tabindex="0"
+        title="Show ${esc(col.label)}"><span class="vert"><span class="dot cat-${col.cat}"></span>${esc(col.label)}
+        <span class="muted">${mine.length}</span></span>${i === cols.length - 2 ? nm(4) : ''}</div>`;
+    }
+    return `<section class="col" aria-label="${esc(col.label)}"><div class="colh"><div class="grow">
+      <div class="name cat-${col.cat}"><span class="dot"></span><span style="color:var(--foreground)">
+      ${esc(col.label)}</span>${i === 0 ? nm(3) : ''}</div><div class="sub">${esc(col.sub)}</div></div>
+      <span class="count">${mine.length}</span>
+      <button class="btn ghost sm" data-act="col" data-v="${esc(col.key)}" title="Fold this column"
+        aria-label="Fold ${esc(col.label)}">–</button></div>
+      ${mine.length ? mine.map((t) => cardHtml(t, mode)).join('') : '<div class="empty">Nothing here</div>'}
+    </section>`;
+  }).join('')}</div>`;
+}
+function divergence(t) {
+  if (!t.copies) return null;
+  const b = board();
+  const diffs = Object.entries(t.copies).filter(([, s]) => s !== t.status);
+  if (!diffs.length) return null;
+  if (diffs.length > 1) return `Differs in ${diffs.length} copies`;
+  const [copyId, s] = diffs[0];
+  return `${cap(s)} in ${b.copies.find((c) => c.id === copyId).label}`;
+}
+let notedCard = { 5: false, 6: false, 7: false };
+function cardHtml(t, mode) {
+  const c = catOf(t);
+  const chips = [];
+  if (mode !== 'status') chips.push(`<span class="chip st cat-${c}"><span class="dot"></span>${esc(t.status)}</span>`);
+  const waits = openBlockers(t).length;
+  if (waits) chips.push(`<span class="chip">Waits on ${waits}</span>`);
+  const dv = divergence(t);
+  if (dv) chips.push(`<span class="chip warn" title="Another copy of the project has this task in another state">↗ ${
+    esc(dv)}</span>${notedCard[6] ? '' : ((notedCard[6] = true), nm(6))}`);
+  if (t.collision) chips.push(`<span class="chip bad" title="Two different tasks share this short id">Same id in 2
+    copies</span>${notedCard[7] ? '' : ((notedCard[7] = true), nm(7))}`);
+  const epic = t.epic && EPICS[t.epic] ? ` · ${esc(EPICS[t.epic].short)}` : '';
+  const first = notedCard[5] ? '' : ((notedCard[5] = true), nm(5));
+  return `<button class="tc ${c === 'active' ? 'lit' : ''} ${c} ${state.drawer === t.id ? 'sel' : ''}
+    ${state.flash.has(t.id) ? 'flash' : ''}" data-act="open" data-id="${t.id}">
+    <span class="tc-t">${esc(t.title)}${first}</span>
+    <span class="tc-m"><span>${esc(shortId(t.id))}${epic}</span></span>
+    ${chips.length ? `<span class="tc-c">${chips.join('')}</span>` : ''}</button>`;
+}
+
+/* ---------- run order ---------- */
+function goalsOf() {
+  const epics = [...new Set(visibleTasks().map((t) => t.epic).filter(Boolean))];
+  return epics.filter((e) => visibleTasks().some((t) => t.epic === e && isOpen(t)));
+}
+function closureSteps(goal) {
+  const set = new Map();
+  const walk = (t) => {
+    if (!t || !isOpen(t) || set.has(t.id)) return;
+    set.set(t.id, t);
+    t.blockedBy.forEach((id) => walk(byId(id)));
+  };
+  visibleTasks().filter((t) => t.epic === goal).forEach(walk);
+  const level = new Map();
+  const lv = (t) => {
+    if (level.has(t.id)) return level.get(t.id);
+    const deps = t.blockedBy.map((id) => set.get(id)).filter(Boolean);
+    const n = deps.length ? 1 + Math.max(...deps.map(lv)) : 1;
+    level.set(t.id, n);
+    return n;
+  };
+  [...set.values()].forEach(lv);
+  const steps = [];
+  for (const t of set.values()) (steps[level.get(t.id) - 1] ||= []).push(t);
+  return steps;
+}
+function pickGoal() {
+  const goals = goalsOf();
+  return goals.includes(state.goal) ? state.goal : (goals.includes(view().goal) ? view().goal : goals[0]);
+}
+function goalBar(goal, steps, words) {
+  const opts = goalsOf().map((g) => `<option value="${g}" ${g === goal ? 'selected' : ''}>${esc(EPICS[g].name)}
+    </option>`);
+  return `<div class="frow"><label for="goal"><b>Toward</b></label><select id="goal" data-act="goal">${opts.join('')}
+    </select><span class="muted">${[].concat(...steps).length} open tasks in ${steps.length} steps. ${words}</span>
+    </div>`;
+}
+function runOrderHtml() {
+  const goal = pickGoal();
+  if (!goal) return '<p class="muted">Nothing open to put in order.</p>';
+  const steps = closureSteps(goal);
+  return goalBar(goal, steps, 'Only open tasks are walked; finished ones are left out.')
+    + `<div class="steps">${steps.map((row, i) => `<div class="step"><div class="lab"><b>Step ${i + 1}</b>
+      <span>${i === 0 ? 'can start now' : `after step ${i}`}</span></div>
+      <div class="row">${row.map((t) => cardHtml(t, 'run')).join('')}</div></div>`).join('')}</div>`;
+}
+
+/* ---------- graph: the same steps as columns, with a line from each blocker ---------- */
+function graphHtml() {
+  const goal = pickGoal();
+  if (!goal) return '<p class="muted">Nothing open to put in order.</p>';
+  const steps = closureSteps(goal);
+  const W = 236, H = 68, top = 34, left = 16, nw = 200, nh = 52;
+  const pos = new Map();
+  steps.forEach((row, i) => {
+    // Order each column by where its blockers sit, so lines cross less.
+    const key = (t) => {
+      const ys = t.blockedBy.map((d) => pos.get(d)).filter(Boolean).map((p) => p.y);
+      return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
+    };
+    [...row].sort((a, b) => key(a) - key(b)).forEach((t, j) => pos.set(t.id, { x: left + i * W, y: top + j * H }));
+  });
+  const width = left * 2 + (steps.length - 1) * W + nw;
+  const height = top + Math.max(...steps.map((r) => r.length)) * H + 6;
+  const edges = [];
+  for (const [id, p] of pos) {
+    for (const d of byId(id).blockedBy) {
+      const q = pos.get(d);
+      if (!q) continue;
+      const x1 = q.x + nw, y1 = q.y + nh / 2, x2 = p.x, y2 = p.y + nh / 2, mx = (x1 + x2) / 2;
+      edges.push(`<path data-from="${d}" data-to="${id}" d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}"/>`);
+    }
+  }
+  const labels = steps.map((_, i) => `<span class="lvl" style="left:${left + i * W}px">Step ${i + 1}${i === 0
+    ? ' · can start now' : ''}</span>`);
+  const nodes = [...pos].map(([id, p]) => {
+    const t = byId(id), c = catOf(t);
+    return `<button class="tc gnode ${c === 'active' ? 'lit' : ''} ${state.drawer === id ? 'sel' : ''}"
+      data-act="open" data-id="${id}" style="left:${p.x}px;top:${p.y}px" title="${esc(t.title)}">
+      <span class="tc-t">${esc(t.title)}</span><span class="tc-m"><span class="dot cat-${c}"></span>
+      ${esc(shortId(id))} · ${esc(t.status)}</span></button>`;
+  });
+  return goalBar(goal, steps, 'A line runs from each blocker to what it holds up. Hover a task to light its lines.')
+    + `<div class="graphwrap"><div class="graph" style="width:${width}px;height:${height}px">
+    <svg width="${width}" height="${height}" aria-hidden="true">${edges.join('')}</svg>${labels.join('')}
+    ${nodes.join('')}</div></div>`;
+}
+function lightGraph(id) {
+  const near = new Set(id ? [id] : []);
+  document.querySelectorAll('.graph path').forEach((p) => {
+    const hot = !!id && (p.dataset.from === id || p.dataset.to === id);
+    p.classList.toggle('hot', hot);
+    if (hot) { near.add(p.dataset.from); near.add(p.dataset.to); }
+  });
+  document.querySelectorAll('.gnode').forEach((n) => n.classList.toggle('dim', !!id && !near.has(n.dataset.id)));
+}
+
+/* ---------- empty board ---------- */
+function emptyHtml() {
+  const b = board();
+  return `<section class="panel card center" aria-label="Empty board">
+    <h1>Nothing on this board yet ${nm(13)}</h1>
+    <p class="muted">Collide opened <b>${esc(b.folder)}</b> with the built-in packs. Plan what to build, add a first
+      task, or bring in the tasks you already keep somewhere else.</p>
+    <div class="choices">
+      <div class="choice rec"><div class="frow" style="gap:8px"><b>Plan it first</b><span class="chip info">most
+        people start here</span></div>
+        <label for="newplan" class="muted" style="font-size:13px">What are you building? A planning session talks it
+          through with Claude Code and writes a proposal: sections, features, then tasks.</label>
+        <textarea id="newplan" placeholder="For example: a pantry app that reminds you before food expires"></textarea>
+        <div class="frow"><button class="btn main" data-act="plan">Start a planning session</button>
+        <span class="newtag" title="Planning sessions arrive in Stage 9d">9d</span></div></div>
+      <div class="choice"><b>Start with a task</b>
+        <label for="newtask" class="muted" style="font-size:13px">What needs doing? A scratch task stays on your
+          machine until you share it.</label>
+        <textarea id="newtask" placeholder="For example: the sign-in page forgets where you were going"></textarea>
+        <div class="frow"><button class="btn" data-act="scratch">Add as a scratch task</button></div></div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><b>Sources Collide found</b><span style="font-size:13px">Scratch tasks · built in<br>
+        Planning (collide/plan) · no <code>.collide/planning</code> yet</span></div>
+      <div class="tile"><b>Add a pack</b><span class="muted" style="font-size:13px">A pack brings tasks from another
+        place, or a workflow. GitHub arrives in Stage 5.</span><button class="btn sm" data-act="addpack">Add a
+        pack…</button></div>
+    </div></section>`;
+}
+
+/* ---------- drawer ---------- */
+function mdInline(s) {
+  // s is already escaped. Images never load; only http(s) links open, and they ask first.
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, src) =>
+      `<span class="gone">[image not loaded: ${alt || 'no description'}, from ${src}]</span>`)
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, href) => {
+      const raw = href.replace(/&amp;/g, '&');
+      if (/^https?:\/\//i.test(raw)) {
+        return `<a href="#" data-act="ext" data-href="${href}" title="Opens in your browser, after asking">${text}</a>`;
+      }
+      return `${text} <span class="gone">(link not opened: ${esc(raw.split(':')[0])}: links are never opened)</span>`;
+    });
+}
+function mdHtml(src) {
+  const lines = esc(src).split('\n');
+  const out = [];
+  let list = null, para = [];
+  const flush = () => {
+    if (para.length) out.push(`<p>${mdInline(para.join(' '))}</p>`);
+    para = [];
+    if (list) out.push(`<ul>${list.map((li) => `<li>${mdInline(li)}</li>`).join('')}</ul>`);
+    list = null;
+  };
+  for (const line of lines) {
+    if (/^\s*$/.test(line)) { flush(); continue; }
+    const h = line.match(/^#{1,4}\s+(.*)/);
+    if (h) { flush(); out.push(`<h4>${mdInline(h[1])}</h4>`); continue; }
+    const li = line.match(/^\s*[-*]\s+(.*)/);
+    if (li) { if (para.length) flush(); (list ||= []).push(li[1]); continue; }
+    if (list && /^\s{2,}\S/.test(line)) { list[list.length - 1] += ' ' + line.trim(); continue; }
+    if (list) flush();
+    para.push(line);
+  }
+  flush();
+  return out.join('');
+}
+function linkRow(t) {
+  return `<button class="lk" data-act="open" data-id="${t.id}"><span class="dot cat-${catOf(t)}"></span>
+    <span class="grow">${esc(t.title)}</span><span class="muted" style="font-size:12.5px">${esc(shortId(t.id))} ·
+    ${esc(t.status)}</span></button>`;
+}
+function drawerHtml(t) {
+  const b = board();
+  const c = catOf(t);
+  const waits = t.blockedBy.map(byId).filter(Boolean);
+  const unblocks = visibleTasks().filter((x) => x.blockedBy.includes(t.id));
+  const views = b.views.filter((v) => v.test(t));
+  const copyRows = b.copies.map((cp) => {
+    if (t.collision && t.collision.copy === cp.id) {
+      return `<tr class="coll"><td><b>${esc(cp.label)}</b><br><span class="muted">${esc(cp.where)}</span></td>
+        <td colspan="2"><span class="chip bad">Same id, another task</span><br>${esc(t.collision.title)}<br>
+        <span class="mono muted" style="font-size:12px">${esc(t.collision.path)}</span></td></tr>`;
+    }
+    const s = (cp.id === 'main' ? null : t.copies && t.copies[cp.id]) || t.status;
+    const diff = s !== t.status;
+    return `<tr class="${diff ? 'diff' : ''}"><td><b>${esc(cp.label)}</b><br><span class="muted">${esc(cp.where)}
+      </span></td><td><span class="st cat-${catOf(t, s)}"><span class="dot"></span> ${esc(s)}</span></td>
+      <td class="muted">${cp.id === 'main' ? 'shown on the board' : diff ? 'differs from main' : 'same as main'}
+      </td></tr>`;
+  }).join('');
+  const src = SOURCES[t.src];
+  const file = t.src === 'plan' ? `.collide/planning/epics/${t.epic || 'none'}/tasks/${t.id}.md` : src.where;
+  const front = t.src === 'plan' ? [`id: ${t.id}`, `kind: task`, `status: ${t.status}`, `title: "${t.title}"`,
+    `links:${t.blockedBy.length ? '' : ' []'}`, ...t.blockedBy.map((d) => `  - { type: blocked-by, to: ${d} }`)]
+    .join('\n') : JSON.stringify({ key: `${t.src}:${t.id}`, status: t.status, category: c, labels: [],
+      deps: t.blockedBy, fields: t.fields || {} }, null, 2);
+  const ch = CHANGES[t.id];
+  return `<div class="dh"><div class="row"><span class="chip st cat-${c}"><span class="dot"></span>${esc(t.status)}
+    </span><span class="muted" style="font-size:13px">${esc(CATS[c].sub)}</span><span class="spacer"></span>
+    <span class="muted mono" style="font-size:12.5px">${esc(t.id)}</span>
+    <button class="btn ghost sm" data-act="close" aria-label="Close">${svg.close}</button></div>
+    <h2>${esc(t.title)}${nm(8)}</h2>
+    <div class="row muted" style="font-size:13px">Read only. ${t.src === 'plan'
+      ? 'Edit the file, or ask an agent; the board follows it.' : `Change it in ${esc(src.name)}.`}</div>
+    </div>
+    <div class="db">
+      <section class="ds"><h3>Description</h3><div class="md">${mdHtml(t.body || '')}</div></section>
+      ${src.links ? `<section class="ds"><h3>Waits on</h3>${waits.length
+        ? `<div class="links">${waits.map(linkRow).join('')}</div>`
+        : '<span class="muted">Nothing. It can start.</span>'}
+      </section>
+      <section class="ds"><h3>Unblocks</h3>${unblocks.length
+        ? `<div class="links">${unblocks.map(linkRow).join('')}</div>`
+        : '<span class="muted">Nothing waits on it.</span>'}
+      </section>` : ''}
+      <section class="ds"><h3>Part of</h3><div class="tc-c">${t.epic ? `<span class="chip info">${esc(
+        EPICS[t.epic].name)}</span>` : ''}${views.map((v) => `<span class="chip">view: ${esc(v.name)}</span>`).join('')}
+      </div></section>
+      ${ch ? changesHtml(t, ch) : ''}
+      ${src.fields.length ? fieldsHtml(t, src) : ''}
+      ${src.scope === 'ref' ? `<section class="ds"><h3>In each copy of the project</h3><table class="t"><thead><tr>
+        <th>Copy</th><th>Status</th><th></th></tr></thead><tbody>${copyRows}</tbody></table></section>` : ''}
+      <details class="eng"><summary>Details for engineers: source, file and raw fields</summary>
+        <dl class="kv"><dt>Source</dt><dd>${esc(src.name)} · ${esc(src.pack)}</dd>
+        <dt>${t.src === 'plan' ? 'File' : 'Reads'}</dt><dd class="mono">${esc(file)}</dd>
+        <dt>Copies</dt><dd>${src.scope === 'ref' ? 'one per checkout: it lives in the repo'
+          : 'one for every checkout: it lives outside the repo'}</dd>
+        <dt>Board</dt><dd>${esc(b.name)} · line ${esc(b.line)}</dd></dl><pre>${esc(front)}</pre></details>
+    </div>`;
+}
+function changesHtml(t, ch) {
+  const live = ch.from === 'run' && catOf(t) === 'active';
+  const add = ch.files.reduce((s, f) => s + f.add, 0), del = ch.files.reduce((s, f) => s + f.del, 0);
+  return `<section class="ds"><h3>Changes${nm(17)}</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:6px">${live
+      ? '<span class="live"><span class="dot"></span>Live, as the agent edits</span> · ' : ''}${esc(ch.where)},
+      ${esc(ch.how)}. ${ch.files.length} files, <span class="add">+${add}</span>
+      <span class="del">−${del}</span>.</div>
+    <div class="files">${ch.files.map((f, i) => `<button class="file" data-act="diff" data-id="${t.id}" data-v="${i}"
+      title="Open the diff"><span class="grow mono">${esc(f.path)}</span><span class="add">+${f.add}</span>
+      <span class="del">−${f.del}</span></button>`).join('')}</div>
+    ${ch.run ? `<div style="margin-top:8px"><button class="btn sm" data-act="track" data-v="${ch.run}">See the run in
+      Tracks</button></div>` : ''}</section>`;
+}
+function fieldsHtml(t, src) {
+  const label = (id) => cap(id.replace(/[_-]/g, ' '));
+  return `<section class="ds"><h3>Fields from ${esc(src.name)}${nm(18)}</h3><dl class="kv">${src.fields.map((f) =>
+    `<dt>${esc(label(f.id))}</dt><dd>${t.fields && t.fields[f.id] != null ? esc(t.fields[f.id])
+      : '<span class="muted">not set</span>'}</dd>`).join('')}</dl>
+    <div class="muted" style="font-size:12.5px">Declared by ${esc(src.pack)}. Filter on them with
+      <code>has(fields.${esc(src.fields[0].id)})</code> under Advanced.</div></section>`;
+}
+
+/* ---------- planning ---------- */
+function planningHtml() {
+  const tasks = visibleTasks();
+  const epics = [...new Set(tasks.map((t) => t.epic).filter(Boolean))];
+  const tiles = epics.map((e) => {
+    const mine = tasks.filter((t) => t.epic === e);
+    const done = mine.filter((t) => catOf(t) === 'done').length;
+    const next = mine.find((t) => isOpen(t) && !openBlockers(t).length);
+    return `<div class="tile"><b>${esc(EPICS[e].name)}</b><div class="bar"><i style="width:${
+      Math.round((100 * done) / mine.length)}%"></i></div><span class="muted" style="font-size:13px">${done} of
+      ${mine.length} done${next ? ` · next: ${esc(next.title)}` : ''}</span></div>`;
+  }).join('');
+  const feats = [
+    ['Field', 'Columns from each source\'s statuses', 'Board UI first', 'in a task', 'ts-0179-fd', false],
+    ['Field', 'Saved views', 'Board UI first', 'in a task', 'ts-0180-fb', false],
+    ['Drawer', 'Each copy\'s state', 'Board UI first', 'in a task', 'ts-0181-dr', false],
+    ['Settings', 'Settings page', 'Board UI first', 'in a task', 'ts-0182-st', false],
+    ['Settings', 'Settings view', 'GitHub source', 'no task yet', '', true],
+    ['Sources', 'Issues as tasks', 'GitHub source', 'in a task', 'ts-0173-ku', false],
+  ];
+  return `<section class="panel card" style="max-width:none" aria-label="Planning">
+    <div class="frow"><h1>Planning</h1><span class="chip">read only</span><span class="muted">What to build next, and
+      the decisions to make first. Changes are made in the files or by a planning session (Stage 9d).</span></div>
+    <h2>Epics</h2><div class="tiles">${tiles}</div>
+    <h2>Proposals</h2>
+    <div class="links">
+      <div class="lk"><span class="dot cat-active"></span><span class="grow">Board UI before GitHub
+        <span class="muted" style="font-size:12.5px">· draft · 3 sections, 4 features</span></span>
+        <span class="chip info">${svg.branch} only on branch plan/ui-first</span></div>
+      <div class="lk"><span class="dot cat-done"></span><span class="grow">GitHub source
+        <span class="muted" style="font-size:12.5px">· accepted · 2 sections, 2 features</span></span></div>
+    </div>
+    <h2>Features by section</h2>
+    <div style="overflow-x:auto"><table class="t"><thead><tr><th>Section</th><th>Feature</th><th>From</th>
+      <th>State</th><th>Task</th></tr></thead><tbody>${feats.map(([s, f, p, st, task, dup]) => `<tr><td>${esc(s)}</td>
+      <td>${esc(f)}${dup ? ' <span class="chip warn" title="Near-duplicate">looks like "Settings page"</span>' : ''}
+      </td><td>${esc(p)}</td><td>${esc(st)}</td><td class="mono">${task ? esc(shortId(task)) : '—'}</td></tr>`)
+      .join('')}
+      </tbody></table></div>
+    <h2>Readiness: Board UI before GitHub</h2>
+    <div class="checks">${[['Every feature has a task', true], ['Decisions recorded with their alternatives', true],
+      ['The kill criterion is written', false]].map(([l, ok]) => `<label class="chk" style="grid-template-columns:24px
+      1fr"><input type="checkbox" ${ok ? 'checked' : ''} disabled><span>${esc(l)}</span></label>`).join('')}</div>
+  </section>`;
+}
+
+/* ---------- later surfaces ---------- */
+function laterHtml(which) {
+  const words = which === 'tracks'
+    ? ['Tracks', 'Every live run as a row of its steps, with a timeline view.', 'Stage 9b']
+    : ['Queue', 'Every decision waiting on you, longest wait first.', 'Stage 9a'];
+  return `<section class="panel card center"><h1>${words[0]} ${nm(2)}</h1><p>${words[1]}</p>
+    <p class="muted">It arrives in ${words[2]}, with the run UI. Until then, the Loop page shows a run and what it
+      needs from you.</p><div><button class="btn" data-act="toast" data-v="The Loop page opens here in the app.">
+      Open the Loop page</button></div></section>`;
+}
+
+/* ---------- shared bits for Tracks and Comms ---------- */
+const fmt = (secs) => {
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return m ? `${m} m ${String(s).padStart(2, '0')} s` : `${s} s`;
+};
+const clock = () => new Date().toTimeString().slice(0, 5);
+const addTime = (at, secs) => {
+  const [h, m] = at.split(':').map(Number);
+  const t = h * 60 + m + Math.round(secs / 60);
+  return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+};
+const taskAnywhere = (id) => state.boards.collide.tasks.find((t) => t.id === id);
+function fileTask(title, body) {
+  const tasks = state.boards.collide.tasks;
+  const n = 186 + tasks.filter((t) => t.filed).length;
+  const id = `ts-0${n}-nw`;
+  tasks.push({ id, title, status: 'backlog', epic: null, src: 'plan', blockedBy: [], body, filed: true });
+  flash(id);
+  return id;
+}
+
+/* ---------- Tracks: a preview of Stage 9b ---------- */
+function tracksHtml() {
+  const banner = `<div class="banner"><span class="grow"><b>A preview of Stage 9b.</b> Tracks arrives with the run UI;
+    these runs are made up. Until then, the Loop page shows a run and what it needs from you. ${nm(2)}</span>
+    <button class="btn sm" data-act="toast" data-v="The Loop page opens here in the app.">Open the Loop page</button>
+    </div>`;
+  if (state.board !== 'collide') {
+    return banner + `<section class="panel card center"><h1>No runs on ${esc(board().name)} yet</h1>
+      <p class="muted">A run shows here as a row of its phases while it works.</p></section>`;
+  }
+  const run = RUNS.find((r) => r.id === state.track) || RUNS[0];
+  const runs = RUNS.map((r) => {
+    const t = taskAnywhere(r.task);
+    return `<button class="runrow" data-act="track" data-v="${r.id}" aria-current="${r.id === run.id}">
+      <span><b>${esc(r.label)}</b> ${r.live ? '<span class="livedot" title="Running"></span>' : ''}<br>
+      <span class="muted" style="font-size:12.5px">${esc(shortId(r.task))} · ${esc(t ? t.title : '')}</span></span>
+      <span class="segs">${r.phases.map((p) => `<i class="${p.state}" style="flex:${p.mins}">${p.name} ·
+        ${p.state === 'wait' ? 'next' : p.state === 'run' ? `${p.mins} m so far` : `${p.mins} m`}</i>`).join('')}
+      </span><span class="muted" style="font-size:12.5px">${esc(r.when)}</span></button>`;
+  }).join('');
+  const phase = run.phases.find((p) => p.state === 'run') || run.phases[1];
+  const all = TOOLTIME[run.id];
+  const total = all.reduce((s, x) => s + x.secs, 0);
+  const rows = all.filter((x) => (state.toolType === 'all' || x.tool === state.toolType) && x.slow >= state.minSecs);
+  const types = ['all', ...new Set(all.map((x) => x.tool))];
+  const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, w]) => `<option value="${v}"
+    ${String(cur) === String(v) ? 'selected' : ''}>${w}</option>`).join('')}</select>`;
+  const table = `<div style="overflow-x:auto"><table class="t"><thead><tr><th>Tool</th><th>What</th><th>Calls</th>
+    <th>Total</th><th>Share of the phase</th><th>Slowest call</th><th></th></tr></thead><tbody>
+    ${rows.map((x) => {
+      const pct = Math.round((100 * x.secs) / total);
+      return `<tr><td><b>${esc(x.tool === 'Model' ? 'Model time' : x.tool)}</b></td><td class="mono"
+        style="font-size:12.5px">${esc(x.what)}</td><td>${x.calls || '—'}</td><td>${fmt(x.secs)}</td>
+        <td><span class="share"><span class="bar"><i style="width:${pct}%"></i></span>${pct}%</span></td>
+        <td>${fmt(x.slow)}</td><td>${x.opt ? `<button class="btn sm" data-act="optimize" data-v="${x.opt}">Optimize…
+        </button>` : ''}</td></tr>`;
+    }).join('')}
+    <tr><td colspan="3"><b>All tool calls</b></td><td><b>${fmt(total)}</b></td><td colspan="3" class="muted">of
+      ${phase.mins} m in ${phase.name}; the rest was waiting on you or on a lock</td></tr></tbody></table></div>`;
+  const lanes = `<div class="lanes">${rows.map((x) => {
+    const n = x.calls || 12, w = x.secs / n, span = phase.mins * 60;
+    const blocks = Array.from({ length: Math.min(n, 40) }, (_, k) => {
+      const at = ((k + 0.5) / Math.min(n, 40)) * (span - w) + ((k * 37) % 11) - 5;
+      return `<b class="${x.tool === 'Model' ? 'm' : ''}" style="left:${Math.max(0, (100 * at) / span)}%;
+        width:${(100 * w) / span}%"></b>`;
+    }).join('');
+    return `<div class="lane"><span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+      title="${esc(x.what)}">${esc(x.tool === 'Model' ? 'Model time' : `${x.tool} ${x.what}`)}</span>
+      <span class="track">${blocks}</span></div>`;
+  }).join('')}<div class="lane"><span></span><span class="muted" style="display:flex;justify-content:space-between">
+    <span>${phase.name} began</span><span>${phase.mins} m</span></span></div></div>`;
+  const ch = CHANGES[run.task];
+  return banner + `<section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+    <div class="frow"><h1 style="font-size:var(--fs-xl);font-weight:650">Runs</h1><span class="muted">${
+      RUNS.filter((r) => r.live).length} running</span></div><div class="runs">${runs}</div></section>
+    <section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+      <div class="frow"><h2 style="font-size:var(--fs-lg)">Where the time went · ${esc(run.label)}, ${esc(phase.name)}
+        ${nm(23)}</h2><span class="spacer"></span>
+        <span class="seg" role="group" aria-label="Show as"><button data-act="ttab" data-v="table"
+          aria-pressed="${state.ttab === 'table'}">Table</button><button data-act="ttab" data-v="timeline"
+          aria-pressed="${state.ttab === 'timeline'}">Timeline</button></span></div>
+      <div class="frow"><label class="fgroup"><span class="lbl">Tool</span>${sel('ttype', types.map((t) => [t,
+        t === 'all' ? 'All tools' : t === 'Model' ? 'Model time' : t]), state.toolType)}</label>
+        <label class="fgroup"><span class="lbl">Slowest call at least</span>${sel('tmin', [[0, 'any length'],
+          [10, '10 s'], [60, '1 min']], state.minSecs)}</label>
+        <span class="muted" style="font-size:13px">Optimize asks an agent for a faster way to do a step.
+          <span class="newtag">new</span>${nm(24)}</span></div>
+      ${rows.length ? (state.ttab === 'table' ? table : lanes) : '<p class="muted">No calls match.</p>'}
+      ${ch ? `<div class="frow"><span class="muted">${run.live ? 'Changed so far' : 'Changed'}: ${ch.files.length}
+        files.</span><button class="btn sm" data-act="open" data-id="${run.task}">Open ${esc(shortId(run.task))}
+        and its changes</button></div>` : ''}
+    </section>`;
+}
+function optimizeModal(kind) {
+  const o = OPTIMIZE[kind];
+  modal(`<h2>Optimize <code>${esc(o.step)}</code> <span class="newtag">new</span></h2>
+    <p>An agent looks for a faster way to do this step. It reads:</p>
+    <ul><li>the timings: ${esc(o.facts)}</li><li>the command lines, and the workflow step that runs them</li>
+      <li>the repo's build and test settings</li></ul>
+    <p>It may search the web, and says where each idea came from. It changes nothing and starts no run. You choose
+      what, if anything, becomes a task.</p>
+    <dl class="kv"><dt>Agent</dt><dd>Claude Code · sonnet</dd><dt>Spend cap</dt><dd>$0.50</dd>
+      <dt>Time limit</dt><dd>5 min</dd><dt>Web search</dt><dd><label><input type="checkbox" checked> Let it search
+      the web</label></dd></dl>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+      <button class="btn main" data-act="opt-go" data-v="${kind}">Start research</button></div>`, 'wide');
+}
+function optimizeWorking(kind) {
+  modal(`<h2>Researching <code>${esc(OPTIMIZE[kind].step)}</code></h2><ul class="checks" style="list-style:none;
+    padding:0"><li>${svg.ok} Read the timings of this phase and of R-119</li><li>${svg.ok} Read the workflow and
+    3 build files</li><li><span class="livedot"></span> Searching the web…</li></ul>
+    <div class="acts"><button class="btn" data-act="modal-close">Stop</button></div>`, 'wide');
+  setTimeout(() => { if (!$('#overlay').hidden) optimizeResult(kind); }, 1400);
+}
+function optimizeResult(kind) {
+  const o = OPTIMIZE[kind];
+  const host = (u) => { try { return new URL(u).host; } catch (err) { return u; } };
+  modal(`<h2>${o.options.length} way${o.options.length === 1 ? '' : 's'} to speed up <code>${esc(o.step)}</code></h2>
+    <p class="muted">Researched in 2 m 10 s for $0.31: 6 files read, 4 web pages. Savings are estimates from this
+      run's timings.</p>
+    <div class="opts">${o.options.map((x, i) => `<div class="optc"><b>${i + 1}. ${esc(x.title)}</b>
+      <span>${mdInline(esc(x.how))}</span><div class="facts"><span class="chip info">Saves ${esc(x.saves)}</span>
+      <span class="chip">Effort: ${esc(x.effort)}</span><span class="chip warn">Risk: ${esc(x.risk)}</span></div>
+      ${x.src ? `<span style="font-size:13px">From <a href="#" data-act="ext" data-href="${esc(x.src)}">${esc(
+        host(x.src))}</a></span>` : ''}
+      <div class="frow"><button class="btn sm main" data-act="opt-task" data-v="${kind}" data-id="${i}">Schedule as
+        a task</button></div></div>`).join('')}</div>
+    <p class="muted" style="font-size:13px">Sources: ${o.sources.map((u) => `<a href="#" data-act="ext"
+      data-href="${esc(u)}">${esc(host(u))}</a>`).join(', ')}. Links ask before they open.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Close</button>
+      <button class="btn" data-act="opt-comms" data-v="${kind}">Discuss in Comms</button></div>`, 'wide');
+}
+
+/* ---------- Comms: sessions with an agent (new, round 2) ---------- */
+function commsHtml() {
+  const list = state.comms;
+  const s = list.find((x) => x.id === state.comm) || list[0];
+  const q = (state.cq || '').toLowerCase();
+  const row = (x) => `<button class="srow" data-act="comm" data-v="${x.id}" aria-current="${x.id === s.id}">
+    <span class="t">${x.live ? '<span class="livedot" title="Live"></span>' : ''}${esc(x.title)}${x.pinned
+      ? `<span class="chip" style="margin-left:auto">pinned</span>${nm(20)}` : ''}</span>
+    <span class="s">${x.date ? `${esc(x.date)}, ` : ''}${x.start} – ${x.live ? 'now' : x.last} ·
+      ${esc(x.agent.replace('Claude Code · ', ''))}</span></button>`;
+  const shown = list.filter((x) => !q || x.title.toLowerCase().includes(q));
+  const pinned = shown.filter((x) => x.pinned);
+  const groups = ['Today', 'Yesterday', 'Earlier'].map((d) => {
+    const mine = shown.filter((x) => !x.pinned && x.day === d);
+    return mine.length ? `<h4>${d}</h4>${mine.map(row).join('')}` : '';
+  }).join('');
+  const spent = s.turns.reduce((a, t) => a + t.cost, 0);
+  const work = (t) => {
+    if (!t.tools.length) return '<div class="work">Answered without tools</div>';
+    const items = t.calls.length ? t.calls.map((c) => `<li>${esc(c)}</li>`).join('')
+      : '<li>Each step is kept in the session\'s transcript.</li>';
+    return `<details class="work"><summary>Worked ${fmt(t.secs)} · ${t.tools.map(([n, c]) => `${c} ${n}`).join(', ')}
+      </summary><ul>${items}</ul></details>`;
+  };
+  const turnHtml = (t, i) => {
+    const going = !t.result;
+    return `<div class="turn"><div class="stamp" style="align-self:flex-end">You · ${s.day === 'Earlier' ? esc(s.date)
+      : s.day} ${t.at}</div><div class="you">${mdInline(esc(t.you))}</div>${going ? '' : work(t)}
+      ${going ? `<div class="result going"><div class="stamp"><span class="livedot"></span> Working · ${t.tools.map(
+        ([n, c]) => `${c} ${n}`).join(', ') || 'thinking'} so far</div></div>`
+        : `<div class="result"><div class="stamp">Result · ${addTime(t.at, t.secs)} · took ${fmt(t.secs)} ·
+          $${t.cost.toFixed(2)}</div><div class="md">${mdInline(esc(t.result))}</div><div class="acts">
+          <button class="btn ghost sm" data-act="copy">Copy</button><button class="btn ghost sm" data-act="file-turn"
+          data-v="${i}">File as a task…</button></div></div>`}</div>`;
+  };
+  const io = `<div style="overflow-x:auto;padding:12px 16px"><table class="t"><thead><tr><th>When</th><th>You asked</th>
+    <th>It came back with</th><th>Took</th><th>Cost</th></tr></thead><tbody>${s.turns.map((t) => `<tr>
+    <td class="mono" style="white-space:nowrap">${t.at}</td><td>${mdInline(esc(t.you))}</td><td>${t.result
+      ? mdInline(esc(t.result)) : '<span class="muted">working…</span>'}</td><td style="white-space:nowrap">${t.result
+      ? fmt(t.secs) : '—'}</td><td>$${t.cost.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="banner"><span class="grow"><b>Comms is new this round</b> and not in the plan yet. The sessions
+    are made up. ${nm(19)}</span></div>
+    <div class="comms">
+      <section class="card" aria-label="Sessions"><div class="slist">
+        <button class="btn main sm" data-act="newsess" style="justify-content:center">+ New session</button>
+        <label class="sr" for="cq">Find a session</label><input id="cq" class="ftext" style="width:100%"
+          type="search" placeholder="Find a session" value="${esc(state.cq || '')}" autocomplete="off">
+        ${pinned.map(row).join('')}${groups}</div></section>
+      <section class="card convo" aria-label="${esc(s.title)}">
+        <div class="convh"><h1>${esc(s.title)}</h1>${s.live ? '<span class="chip info"><span class="livedot"></span>'
+          + 'live</span>' : '<span class="chip">ended</span>'}<span class="stamp">Started ${s.day === 'Earlier'
+          ? esc(s.date) : s.day} ${s.start} · ${s.live ? 'active now' : `ended ${s.last}`}</span>
+          <span class="spacer"></span><span class="seg" role="group" aria-label="Show"><button data-act="cview"
+          data-v="convo" aria-pressed="${state.cview === 'convo'}">Conversation</button><button data-act="cview"
+          data-v="io" aria-pressed="${state.cview === 'io'}">Inputs and results</button></span>${nm(22)}</div>
+        ${state.cview === 'io' ? io : `<div class="turns">${s.turns.map(turnHtml).join('')}</div>`}
+        <div class="composer"><label class="sr" for="cmsg">Message</label><textarea id="cmsg" placeholder="${s.live
+          ? `Message ${esc(s.title)}` : `This session ended at ${s.last}. Sending resumes it.`}"></textarea>
+          <button class="btn main" data-act="send">Send</button></div>
+      </section>
+      <section class="card sidecard side" aria-label="Notes and details">
+        <div><h3>What this session is for ${nm(21)}</h3><textarea id="cpurpose" rows="3">${esc(s.purpose)}</textarea>
+        </div>
+        <div><h3>Notes</h3><textarea id="cnotes" rows="6" placeholder="What you tried, what to do next, anything to
+          keep.">${esc(s.notes)}</textarea><div class="stamp" id="csaved">Saved on this Mac at ${state.saved}. Only
+          you see them.</div></div>
+        <div><h3>Session</h3><dl class="kv"><dt>Started</dt><dd>${s.day === 'Earlier' ? esc(s.date) : s.day}
+          ${s.start}</dd><dt>Last active</dt><dd>${s.live ? 'now' : s.last}</dd><dt>Messages</dt>
+          <dd>${s.turns.length}</dd><dt>Agent</dt><dd>${esc(s.agent)}</dd><dt>Runs in</dt><dd>${esc(s.where)}</dd>
+          <dt>Spent</dt><dd>$${spent.toFixed(2)}</dd></dl>
+          <details class="eng"><summary>Details for engineers</summary><dl class="kv"><dt>Session id</dt>
+            <dd class="mono">${esc(s.sid)}</dd><dt>In a terminal</dt><dd class="mono">claude --resume ${esc(s.sid)}
+            </dd></dl></details></div>
+        ${s.live && !s.pinned ? '<div><button class="btn sm" data-act="endsess">End this session</button></div>' : ''}
+      </section>
+    </div>`;
+}
+function newSessionModal() {
+  modal(`<h2>New session</h2><label for="sname">Name</label><input type="text" id="sname" placeholder="For example:
+    why the release build is slow"><label for="spurpose">What it is for <span class="muted">(kept in its notes)
+    </span></label><input type="text" id="spurpose" placeholder="One line you will recognise next week">
+    <label for="sagent">Agent</label><select id="sagent"><option>Claude Code · sonnet</option>
+      <option>Claude Code · opus</option><option>Claude Code · haiku</option></select>
+    <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:4px"><legend>Where it runs
+      </legend><label><input type="radio" name="swhere" value="main" checked> This board's checkout. It edits only
+      when you ask.</label><label><input type="radio" name="swhere" value="tree"> A fresh worktree. It can edit
+      freely, apart from your work.</label></fieldset>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+      <button class="btn main" data-act="newsess-yes">Start</button></div>`);
+}
+function newSession(title, purpose, agent, where, turns = []) {
+  const now = clock();
+  const id = `s-${Date.now()}`;
+  state.comms.push({ id, title, agent, where, day: 'Today', start: now, last: now, live: true,
+    sid: `${Math.random().toString(16).slice(2, 10)}-new`, purpose, notes: '', turns });
+  state.comm = id;
+  state.surface = 'comms';
+  state.settings = false;
+  return id;
+}
+
+/* ---------- settings ---------- */
+const SETTINGS = [
+  ['Free disk space to keep', 'disk.floor_gib', '5 GiB', 'default', null],
+  ['Agent that answers an Ask', 'ask.agent', 'Claude Code, haiku', 'default', null],
+  ['Spend cap for one Ask', 'ask.budget_usd', '$0.25', 'repo', '$0.50'],
+  ['Time limit for one Ask', 'ask.timeout_s', '120 s', 'user', null],
+  ['Check for new Claude Code versions', 'claude.check_published', 'On, daily and at start', 'default', null],
+];
+function settingsHtml() {
+  const b = board();
+  const tabs = [['general', 'General'], ['packs', 'Packs'], ['secrets', 'Secrets'], ['agents', 'Agents']];
+  const layerWord = { default: 'Default', user: 'You', repo: 'This repo' };
+  let body = '';
+  if (state.stab === 'general') {
+    body = `<p class="muted">Each setting shows the value in use and where it came from. This repo's file wins over
+      yours; yours wins over the default. ${nm(12)}</p>
+      <div style="overflow-x:auto"><table class="t"><thead><tr><th>Setting</th><th>Value in use</th><th>Set in</th>
+      </tr></thead><tbody>${SETTINGS.map(([name, key, val, layer, over]) => `<tr><td><b>${esc(name)}</b><br>
+      <span class="mono muted" style="font-size:12px">${esc(key)}</span></td><td>${esc(val)}${over
+        ? `<br><span class="over">${esc(over)}</span> <span class="muted" style="font-size:12.5px">yours, overridden
+        by this repo</span>` : ''}</td><td><span class="layer l-${layer}">${layerWord[layer]}</span></td></tr>`)
+      .join('')}
+      </tbody></table></div>
+      <details class="eng"><summary>Details for engineers: the files</summary><dl class="kv">
+        <dt>Default</dt><dd>the settings schema</dd><dt>You</dt><dd class="mono">~/Library/Application Support/Collide/
+        config.yaml</dd><dt>This repo</dt><dd class="mono">${esc(b.folder)}/.collide/config.yaml</dd>
+        <dt>Run profile</dt><dd>applies inside a run only</dd></dl></details>`;
+  } else if (state.stab === 'packs') {
+    body = `<div class="links">${b.sources.map((s) => `<div class="lk"><span class="grow"><b>${esc(SOURCES[s].name)}</b>
+      <span class="sub muted" style="display:block;font-size:12.5px">${esc(SOURCES[s].pack)} · ${esc(SOURCES[s].where)}
+      </span></span><span class="chip">${SOURCES[s].statuses.length} statuses</span></div>`).join('')}</div>
+      <div><button class="btn sm" data-act="addpack">Add a pack…</button></div>`;
+  } else if (state.stab === 'secrets') {
+    body = `<p class="muted">Secrets go into your Mac's keychain. Collide never shows them again; it shows only
+      whether one is set.</p><table class="t"><tbody>
+      <tr><td><b>Webhook for the notify pack</b><br><span class="muted">demo/notify asks for it</span></td>
+      <td><span class="chip">Not set</span></td><td><button class="btn sm" data-act="secret">Set…</button></td></tr>
+      <tr><td><b>Model gateway key</b><br><span class="muted">demo/gateway asks for it</span></td>
+      <td><span class="chip info">Set</span></td><td><button class="btn sm" data-act="secret">Replace…</button></td>
+      </tr></tbody></table>`;
+  } else {
+    body = `<p>The agents you bring: Claude Code, an ACP agent, or an external one that connects to Collide.</p>
+      <p class="muted">This page arrives with the in-app agent, in Stage 6b.</p>`;
+  }
+  return `<section class="panel card" style="max-width:1000px" aria-label="Settings">
+    <div class="frow"><h1>Settings</h1><span class="muted">for ${esc(b.name)}</span><span class="spacer"></span>
+      <button class="btn sm" data-act="settings">Back to the board</button></div>
+    <div class="setgrid"><nav class="snav">${tabs.map(([id, w]) => `<button data-act="stab" data-v="${id}"
+      aria-current="${state.stab === id}">${w}</button>`).join('')}</nav><div class="panel" style="padding:0">${body}
+    </div></div></section>`;
+}
+
+/* ---------- first run ---------- */
+function welcomeHtml() {
+  const w = state.welcome;
+  const row = (ok, title, fix, extra = '') => `<div class="chk"><span class="${ok === null ? 'opt' : ok ? 'ok'
+    : 'no'}">${ok === null ? svg.dash : ok ? svg.ok : svg.no}</span><div><b>${title}</b>${fix
+    ? `<div class="fix">${fix}</div>` : ''}</div><div>${extra}</div></div>`;
+  const git = row(w.git, w.git ? 'A git repository' : 'Not a git repository', w.git ? ''
+    : 'Collide needs git to keep each agent\'s work apart. Making it one adds a <code>.git</code> folder and changes'
+    + ' nothing else.', w.git ? '' : '<button class="btn sm main" data-act="gitinit">Make it one…</button>');
+  const claude = row(w.claude, w.claude ? 'Claude Code is installed' : 'Claude Code is not installed', w.claude
+    ? 'version 2.1.330' : 'Install it, then check again: <code>npm install -g @anthropic-ai/claude-code</code>',
+    w.claude ? '' : '<button class="btn sm" data-act="copy">Copy</button>');
+  const login = !w.claude ? '' : row(w.login, w.login ? 'Claude Code is logged in' : 'Claude Code is not logged in',
+    w.login ? '' : 'Run <code>claude</code> in a terminal and log in. You can open the board now; runs need it.',
+    w.login ? '' : '<button class="btn sm" data-act="copy">Copy</button>');
+  return `<section class="panel card center" aria-label="Open a folder">
+    <h1>Open a project ${nm(13)}</h1>
+    <p class="muted">Any git repository opens as a board, with the built-in packs. Nothing is written into the folder
+      until you choose Share with team.</p>
+    <div class="frow"><span>Folder</span><code style="font-size:14px">${esc(w.folder)}</code>
+      <button class="btn sm" data-act="toast" data-v="The system folder picker opens here.">Choose another…</button>
+    </div>
+    <h2>Checks</h2><div class="checks">${git}${claude}${login}
+      ${row(null, 'GitHub', 'Checked when GitHub sources arrive, in Stage 5.')}</div>
+    <h2>Found in this folder</h2>
+    <div class="links"><div class="lk"><span class="grow">Scratch tasks <span class="muted">· built in, always on
+      </span></span></div><div class="lk"><span class="grow">Planning (collide/plan) <span class="muted">· built in ·
+      no <code>.collide/planning</code> yet</span></span></div></div>
+    <div class="frow"><button class="btn main" data-act="openfresh" ${w.git ? '' : 'disabled'}>Open the board</button>
+      <button class="btn" data-act="recheck">Check again</button>
+      ${w.git ? '' : '<span class="muted" style="font-size:13px">A folder that is not a git repo cannot open.</span>'}
+    </div></section>`;
+}
+
+/* ---------- missing board ---------- */
+function missingHtml() {
+  const b = board();
+  return `<section class="panel card center" aria-label="Board folder not found">
+    <h1>${esc(b.name)}: its folder is gone ${nm(15)}</h1>
+    <p>Collide looked for <code>${esc(b.folder)}</code> and found nothing there. It was moved or deleted.</p>
+    <p class="muted">Nothing has been deleted. Its ${b.tasks.length} tasks and its Up next list are kept, and come back
+      as they were when you point Collide at the folder.</p>
+    <div class="frow"><button class="btn main" data-act="locate">Locate the folder…</button>
+      <button class="btn" disabled title="Arrives with board removal">Remove from Collide</button></div>
+  </section>`;
+}
+
+/* ---------- mock panel ---------- */
+function mockHtml() {
+  const s = (v, label) => `<button class="btn sm" data-act="scn" data-v="${v}">${label}</button>`;
+  return `<h3>Scenarios</h3><div class="grid">
+      ${s('collide', 'Collide board')}${s('pantry', 'Pantry: 8 statuses')}${s('mixed', 'Pantry: mixed view')}
+      ${s('runorder', 'Run order')}${s('hostile', 'Hostile body')}${s('fresh', 'Fresh repo, first open')}
+      ${s('nogit', 'Not a git repo')}${s('logout', 'Claude logged out')}${s('missing', 'Missing board')}
+      ${s('clone', 'Second clone: trust')}${s('settings', 'Settings')}</div>
+    <h3>New this round</h3><div class="grid">${s('graph', 'Graph: toward Stage 5')}${s('ask', 'Describe what to show')}
+      ${s('changes', 'Changes: ts-0178, live')}${s('changes2', 'Changes: hand-made commits')}
+      ${s('fields', 'Fields from a pack')}${s('comms', 'Comms')}${s('tracks', 'Tracks: where the time went')}
+      ${s('optimize', 'Optimize a step')}${s('fresh', 'Empty board: plan or task')}</div>
+    <h3>Live updates (watch)</h3><div class="grid">${s('sim-finish', 'ts-0178 goes to review')}
+      ${s('sim-diverge', "A run's copy moves ts-0168")}</div>
+    <h3>View</h3><div class="grid"><button class="btn sm" data-act="notes" aria-pressed="${state.notes}">
+      ${state.notes ? 'Hide' : 'Show'} design notes</button>${s('reset', 'Reset everything')}</div>
+    <h3>Design notes</h3><p class="muted" style="margin:0;font-size:13px">Each is a choice with a recommendation.
+      Answer by number, for example "6: alternative". The tag says what round 2 did with it.</p>
+    <ol class="notes-list">${NOTES.map(([t, d, alt, v], i) => `<li><span class="nm">${i + 1}</span><div><b>${esc(t)}
+      <span class="verdict ${v === 'kept' ? 'muted' : 'newtag'}">${v === 'kept' ? 'kept' : v}</span></b>
+      ${esc(d)} <span class="alt">${esc(alt)}</span></div></li>`).join('')}</ol>`;
+}
+
+/* ---------- render ---------- */
+function render() {
+  notedCard = { 5: false, 6: false, 7: false };
+  $('#crumb').innerHTML = crumbHtml();
+  $('#tabs').innerHTML = state.screen === 'welcome' ? '' : tabsHtml();
+  $('#topr').innerHTML = state.screen === 'welcome' ? '' : topRightHtml();
+  let html;
+  if (state.screen === 'welcome') html = welcomeHtml();
+  else if (state.settings) html = settingsHtml();
+  else if (board().missing) html = missingHtml();
+  else if (state.surface === 'field') html = fieldHtml();
+  else if (state.surface === 'planning') html = planningHtml();
+  else if (state.surface === 'tracks') html = tracksHtml();
+  else if (state.surface === 'comms') html = commsHtml();
+  else html = laterHtml(state.surface);
+  $('#content').innerHTML = html;
+  const t = state.drawer && byId(state.drawer);
+  const d = $('#drawer');
+  d.hidden = !t || state.screen === 'welcome';
+  if (t) d.innerHTML = drawerHtml(t);
+  document.body.classList.toggle('notes', state.notes);
+  $('#mock').hidden = !state.mock;
+  $('#mockbtn').setAttribute('aria-expanded', String(state.mock));
+  if (state.mock) $('#mock').innerHTML = mockHtml();
+}
+
+/* ---------- modal and toast ---------- */
+function modal(html, cls = '') {
+  $('#modal').className = `modal ${cls}`;
+  $('#modal').innerHTML = html;
+  $('#overlay').hidden = false;
+  $('#modal').querySelector('input,button.main,button')?.focus();
+}
+function closeModal() { $('#overlay').hidden = true; }
+let toastTimer;
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 3600);
+}
+function flash(id) {
+  state.flash.add(id);
+  state.updated = Date.now();
+  setTimeout(() => state.flash.delete(id), 2100);
+}
+function resetFilters() {
+  state.filt = { stage: new Set(), cat: new Set(), src: new Set(), text: '', deps: false };
+  state.ask = null;
+}
+function goBoard(id, viewId) {
+  state.board = id;
+  state.view = viewId || state.boards[id].views[0].id;
+  state.screen = 'board';
+  state.settings = false;
+  state.surface = 'field';
+  state.drawer = null;
+  state.goal = null;
+  resetFilters();
+}
+
+/* ---------- scenarios ---------- */
+function scenario(v) {
+  const b = state.boards;
+  switch (v) {
+    case 'collide': state.layout = 'board'; state.groupBy = 'auto'; goBoard('collide'); break;
+    case 'pantry': state.layout = 'board'; state.groupBy = 'auto'; goBoard('pantry', 'tracker'); break;
+    case 'mixed': state.layout = 'board'; state.groupBy = 'auto'; goBoard('pantry', 'everything'); break;
+    case 'runorder': goBoard('collide', 's5'); state.layout = 'run'; break;
+    case 'hostile': goBoard('collide', 's6'); state.layout = 'board'; state.drawer = 'fx-0001-hb'; break;
+    case 'fresh': case 'nogit': case 'logout':
+      state.welcome = { folder: v === 'nogit' ? '~/notes' : '~/projects/my-app', git: v !== 'nogit', claude: true,
+        login: v !== 'logout' };
+      state.screen = 'welcome';
+      state.drawer = null;
+      break;
+    case 'missing': b.old.missing = true; goBoard('old'); break;
+    case 'clone':
+      goBoard('pantry', 'everything');
+      b.pantry.untrusted = true;
+      trustModal();
+      break;
+    case 'settings':
+      if (state.screen !== 'board' || board().missing) goBoard('collide');
+      state.settings = true; state.stab = 'general'; state.drawer = null; break;
+    case 'sim-finish': {
+      if (state.board !== 'collide') goBoard('collide');
+      const t = byId('ts-0178-fw');
+      t.status = 'review';
+      t.copies = { r121: 'review' };
+      flash(t.id);
+      break;
+    }
+    case 'sim-diverge': {
+      if (state.board !== 'collide') goBoard('collide');
+      const t = byId('ts-0168-tq');
+      t.copies = { r121: 'active' };
+      flash(t.id);
+      break;
+    }
+    case 'graph': goBoard('collide', 's5'); state.layout = 'graph'; break;
+    case 'ask': goBoard('collide'); state.layout = 'board'; render(); runAsk(ASK_EXAMPLES[0]); return;
+    case 'changes': goBoard('collide', 's6'); state.layout = 'board'; state.drawer = 'ts-0178-fw'; break;
+    case 'changes2': goBoard('collide'); state.layout = 'board'; state.drawer = 'ts-0160-th'; break;
+    case 'fields': state.layout = 'board'; goBoard('pantry', 'tracker'); state.drawer = 'PT-3'; break;
+    case 'comms': if (state.screen !== 'board' || board().missing) goBoard('collide');
+      state.surface = 'comms'; state.settings = false; state.comm = 'flaky'; break;
+    case 'tracks': goBoard('collide'); state.surface = 'tracks'; state.track = 'r121'; break;
+    case 'optimize': goBoard('collide'); state.surface = 'tracks'; state.track = 'r121'; render();
+      optimizeModal('cargo'); return;
+    case 'reset': {
+      const notes = state.notes;
+      state.boards = freshBoards();
+      Object.assign(state, { layout: 'board', groupBy: 'auto', open: new Set(), shut: new Set(), notes,
+        comms: JSON.parse(JSON.stringify(COMMS)), comm: 'flaky', cview: 'convo', track: 'r121', ttab: 'table',
+        minSecs: 0, toolType: 'all', cq: '' });
+      goBoard('collide');
+      break;
+    }
+  }
+  state.menu = null;
+  render();
+}
+function trustModal() {
+  modal(`<h2>Trust the packs this repo brings?</h2>
+    <p><b>pantry</b> brings one pack of its own: <code>demo/tracker</code>. A pack runs code on this Mac, with your
+      permissions, to read its tasks.</p>
+    <ul><li>From: <code>.collide/packs/tracker</code> in this repo</li><li>It reads: the tracker service at
+      <code>tracker.example</code></li></ul>
+    <p class="muted">The built-in packs need no trust. You can trust it later from Settings, Packs.</p>
+    <div class="acts"><button class="btn" data-act="trust-no">Open without it</button>
+      <button class="btn main" data-act="trust-yes">Trust and open</button></div>`);
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]');
+  if (state.menu && !e.target.closest('.pop') && !(el && el.dataset.act === 'menu')) {
+    state.menu = null;
+    if (!el) { render(); return; }
+  }
+  if (!el) return;
+  const { act, id, v, g } = el.dataset;
+  const b = board();
+  switch (act) {
+    case 'menu': state.menu = state.menu === el.dataset.menu ? null : el.dataset.menu; break;
+    case 'board': goBoard(id); break;
+    case 'view': state.view = id; state.goal = null; state.menu = null; resetFilters(); break;
+    case 'tab': state.surface = id; state.settings = false; break;
+    case 'layout': state.layout = v; break;
+    case 'group': state.groupBy = v; break;
+    case 'chip': { const s = state.filt[g]; s.has(v) ? s.delete(v) : s.add(v); break; }
+    case 'clear': resetFilters(); break;
+    case 'open': state.drawer = id; break;
+    case 'close': state.drawer = null; break;
+    case 'col': {
+      const col = { key: v, cat: '' };
+      const shut = state.shut.has(v) || (!state.open.has(v) && e.target.closest('.col.shut'));
+      if (shut) { state.shut.delete(v); state.open.add(v); } else { state.open.delete(v); state.shut.add(v); }
+      void col;
+      break;
+    }
+    case 'settings': state.settings = !state.settings; state.drawer = null; break;
+    case 'stab': state.stab = v; break;
+    case 'theme': {
+      const root = document.documentElement;
+      const dark = root.dataset.theme ? root.dataset.theme === 'dark'
+        : matchMedia('(prefers-color-scheme: dark)').matches;
+      root.dataset.theme = dark ? 'light' : 'dark';
+      return;
+    }
+    case 'mock': state.mock = !state.mock; break;
+    case 'notes': state.notes = !state.notes; break;
+    case 'scn': scenario(v); return;
+    case 'toast': toast(v); return;
+    case 'copy': toast('Copied.'); return;
+    case 'ext': e.preventDefault(); extModal(el.dataset.href); return;
+    case 'ext-yes': closeModal(); toast('Your browser opens the link.'); return;
+    case 'modal-close': closeModal(); return;
+    case 'save-view': saveViewModal(); return;
+    case 'save-yes': saveView(); return;
+    case 'share': shareModal(); return;
+    case 'share-yes': b.shared = true; closeModal(); toast('Wrote .collide/ to the repo. Commit it to share.'); break;
+    case 'trust': trustModal(); return;
+    case 'trust-yes': b.untrusted = false; closeModal(); toast('demo/tracker is trusted for this repo.'); break;
+    case 'trust-no': closeModal(); break;
+    case 'locate': locateModal(); return;
+    case 'locate-yes': {
+      const p = $('#locpath').value.trim() || b.folder;
+      b.folder = p; b.missing = false; closeModal();
+      toast(`Found it. ${b.tasks.length} tasks and the Up next list are as they were.`);
+      break;
+    }
+    case 'gitinit': gitInitModal(); return;
+    case 'gitinit-yes': state.welcome.git = true; closeModal(); toast('Made a git repository.'); break;
+    case 'recheck': state.welcome.login = true; state.welcome.claude = true; toast('Checked again.'); break;
+    case 'openfresh': openFresh(); break;
+    case 'scratch': addScratch(); break;
+    case 'addpack': toast('Add a pack: pick a built-in pack or a folder. (Not designed yet.)'); return;
+    case 'secret': secretModal(); return;
+    case 'secret-yes': closeModal(); toast('Saved to your keychain.'); return;
+    case 'ask': runAsk(($('#askq') && $('#askq').value) || ''); return;
+    case 'ask-ex': runAsk(v); return;
+    case 'ask-keep': state.ask = null; break;
+    case 'ask-undo': if (state.ask && state.ask.prev) state.filt = state.ask.prev; state.ask = null; break;
+    case 'deps-off': state.filt.deps = false; break;
+    case 'diff': diffModal(id, Number(v)); return;
+    case 'track': state.track = v; state.surface = 'tracks'; state.settings = false; break;
+    case 'ttab': state.ttab = v; break;
+    case 'optimize': optimizeModal(v); return;
+    case 'opt-go': optimizeWorking(v); return;
+    case 'opt-task': {
+      const o = OPTIMIZE[v], x = o.options[Number(id)];
+      const tid = fileTask(`Faster ${o.step}: ${x.title.toLowerCase()}`, `## Goal\n\n${x.how}\n\nFound by `
+        + `Optimize on Run R-121's Build phase. ${o.facts}\n\n## Notes\n\n- Saves ${x.saves}. Effort: ${x.effort}. `
+        + `Risk: ${x.risk}${x.src ? `\n- From [${x.src}](${x.src})` : ''}`);
+      closeModal();
+      toast(`Filed ${tid} in Backlog, with the research in its body. Nothing runs until you start it.`);
+      break;
+    }
+    case 'opt-comms': {
+      const o = OPTIMIZE[v];
+      closeModal();
+      newSession(`Optimize: ${o.step}`, `Pick a way to speed up ${o.step}, then schedule it.`,
+        'Claude Code · sonnet', 'main checkout · edits no code',
+        [tl(clock(), `Find a faster way to run \`${o.step}\`.`,
+          130, [['Read', 6], ['WebSearch', 4]], `${o.options.length} options: ${o.options.map((x) => x.title)
+            .join('; ')}. Which should we try first? I can draft the task.`, 0.31)]);
+      toast('Opened a Comms session with the research.');
+      break;
+    }
+    case 'comm': state.comm = v; break;
+    case 'cview': state.cview = v; break;
+    case 'newsess': newSessionModal(); return;
+    case 'newsess-yes': {
+      const tree = $('input[name=swhere]:checked').value === 'tree';
+      newSession($('#sname').value.trim() || 'A new session', $('#spurpose').value.trim(), $('#sagent').value,
+        tree ? 'a fresh worktree' : board().folder);
+      closeModal();
+      break;
+    }
+    case 'endsess': { const s = state.comms.find((x) => x.id === state.comm); s.live = false; s.last = clock(); break; }
+    case 'send': {
+      const text = $('#cmsg').value.trim();
+      if (!text) return;
+      const s = state.comms.find((x) => x.id === state.comm) || state.comms[0];
+      s.live = true; s.last = clock();
+      s.turns.push(tl(clock(), text, 4, [], 'The mock does not run an agent. In the app the answer arrives here, '
+        + 'with the work folded above it.', 0));
+      break;
+    }
+    case 'file-turn': fileTurnModal(Number(v)); return;
+    case 'file-turn-yes': {
+      const s = state.comms.find((x) => x.id === state.comm), t = s.turns[Number(v)];
+      const tid = fileTask($('#ftitle').value.trim() || 'A task from Comms', `## Goal\n\n${t.result}\n\nFrom the `
+        + `Comms session "${s.title}", ${s.day} ${t.at}.`);
+      closeModal();
+      toast(`Filed ${tid} in Backlog. The task links back to this session.`);
+      break;
+    }
+    case 'plan': planModal(); return;
+    case 'plan-yes': closeModal(); toast('In the app the session opens beside the Planning page.'); return;
+    default: return;
+  }
+  render();
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'goal') { state.goal = e.target.value; render(); }
+  if (e.target.id === 'ttype') { state.toolType = e.target.value; render(); }
+  if (e.target.id === 'tmin') { state.minSecs = Number(e.target.value); render(); }
+});
+document.addEventListener('input', (e) => {
+  const id = e.target.id;
+  if (id === 'cnotes' || id === 'cpurpose') {
+    const s = state.comms.find((x) => x.id === state.comm);
+    if (s) s[id === 'cnotes' ? 'notes' : 'purpose'] = e.target.value;
+    state.saved = clock();
+    const c = $('#csaved');
+    if (c) c.textContent = `Saved on this Mac at ${state.saved}. Only you see them.`;
+    return;
+  }
+  if (id !== 'ftext' && id !== 'cq') return;
+  if (id === 'ftext') state.filt.text = e.target.value; else state.cq = e.target.value;
+  const pos = e.target.selectionStart;
+  render();
+  const f = $(`#${id}`);
+  if (f) { f.focus(); f.setSelectionRange(pos, pos); }
+});
+document.addEventListener('mouseover', (e) => {
+  const n = e.target.closest && e.target.closest('.gnode');
+  if (n) lightGraph(n.dataset.id);
+});
+document.addEventListener('mouseout', (e) => {
+  if (e.target.closest && e.target.closest('.gnode') && !(e.relatedTarget && e.relatedTarget.closest
+    && e.relatedTarget.closest('.gnode'))) lightGraph(null);
+});
+document.addEventListener('keydown', (e) => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if (e.key === 'Escape') {
+    if (!$('#overlay').hidden) closeModal();
+    else if (state.menu) { state.menu = null; render(); }
+    else if (state.drawer) { state.drawer = null; render(); }
+    else if (state.settings) { state.settings = false; render(); }
+    return;
+  }
+  if (e.key === 'Enter' && document.activeElement.id === 'askq') { runAsk(document.activeElement.value); return; }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && document.activeElement.id === 'cmsg') {
+    $('[data-act=send]').click(); return;
+  }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  const tab = { 1: 'field', 2: 'tracks', 3: 'queue', 4: 'planning', 5: 'comms' }[e.key];
+  if (tab && state.screen === 'board') { state.surface = tab; state.settings = false; render(); }
+  if (e.key === '/') { const f = $('#ftext'); if (f) { e.preventDefault(); f.focus(); } }
+  if ((e.key === 'Enter' || e.key === ' ') && document.activeElement.matches('.col.shut')) {
+    e.preventDefault(); document.activeElement.click();
+  }
+});
+$('#overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') closeModal(); });
+
+/* ---------- modals ---------- */
+function extModal(href) {
+  let host = href;
+  try { host = new URL(href.replace(/&amp;/g, '&')).host; } catch (err) { /* shown as written */ }
+  modal(`<h2>Open this link in your browser?</h2><p>It leads to <b>${esc(host)}</b>:</p>
+    <p class="mono" style="overflow-wrap:anywhere;font-size:13px">${href}</p>
+    <p class="muted">The link came from a task's text. Collide does not open links by itself.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="ext-yes">Open in browser</button></div>`);
+}
+function saveViewModal() {
+  modal(`<h2>Save as a view</h2><label for="vname">Name</label>
+    <input type="text" id="vname" value="${esc(state.filt.text ? `Search: ${state.filt.text}` : 'My view')}">
+    <p class="muted">The view is kept for you. Share with team writes it to <code>.collide/views/</code>, with this
+      expression:</p><pre class="mono" style="background:var(--code-bg);padding:8px;border-radius:7px;
+      font-size:12.5px;overflow-x:auto;margin:0">${esc(celOf())}</pre>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="save-yes">Save view</button></div>`);
+}
+function saveView() {
+  const name = $('#vname').value.trim() || 'My view';
+  const f = state.filt;
+  const snap = { stage: new Set(f.stage), cat: new Set(f.cat), src: new Set(f.src), text: f.text };
+  const base = view();
+  const id = 'mine-' + Date.now();
+  board().views.push({ id, name, mine: true, where: celOf().replace(/\n\s+/g, ' '), goal: base.goal,
+    test: (t) => base.test(t) && (!snap.stage.size || snap.stage.has(t.epic))
+      && (!snap.cat.size || snap.cat.has(catOf(t))) && (!snap.src.size || snap.src.has(t.src))
+      && (!snap.text || (t.title + ' ' + t.id).toLowerCase().includes(snap.text.toLowerCase())) });
+  state.view = id;
+  resetFilters();
+  closeModal();
+  toast(`Saved "${name}" as your view.`);
+  render();
+}
+function shareModal() {
+  modal(`<h2>Share this board with your team?</h2><p>Collide writes these files into the repo. Nothing is committed;
+    you commit them like any change.</p><ul class="mono" style="font-size:13px"><li>.collide/board.yaml</li>
+    <li>.collide/views/ (your saved views)</li><li>.collide/config.yaml (this board's settings)</li></ul>
+    <p class="muted">A teammate's clone then opens the same board. If the repo brings its own packs, they are asked
+    to trust them first.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Not now</button>
+    <button class="btn main" data-act="share-yes">Write .collide/</button></div>`);
+}
+function locateModal() {
+  modal(`<h2>Locate ${esc(board().name)}</h2><label for="locpath">Where is the folder now?</label>
+    <input type="text" id="locpath" value="~/projects/old-check">
+    <p class="muted">In the app this is the system folder picker. Collide checks it is the same repository.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="locate-yes">Use this folder</button></div>`);
+}
+function gitInitModal() {
+  modal(`<h2>Make ${esc(state.welcome.folder)} a git repository?</h2><p>This runs <code>git init</code> there. It adds a
+    <code>.git</code> folder and changes nothing else.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="gitinit-yes">Run git init</button></div>`);
+}
+function secretModal() {
+  modal(`<h2>Set a secret</h2><label for="sec">Value</label><input type="text" id="sec" placeholder="Paste it here"
+    autocomplete="off"><p class="muted">It goes into your Mac's keychain. Collide will not show it again.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="secret-yes">Save to keychain</button></div>`);
+}
+let DIFFS = null;
+function diffOf(path) {
+  if (!DIFFS) {
+    DIFFS = {};
+    $('#diffs-0178').textContent.split(/^### FILE /m).slice(1).forEach((chunk) => {
+      const nl = chunk.indexOf('\n');
+      DIFFS[chunk.slice(0, nl).trim()] = chunk.slice(nl + 1).replace(/\n+$/, '');
+    });
+  }
+  return DIFFS[path];
+}
+function diffModal(id, i) {
+  const ch = CHANGES[id], f = ch.files[i];
+  const text = id === 'ts-0178-fw' && f.diff ? diffOf(f.path) : null;
+  const body = text ? `<pre class="diff">${text.split('\n').map((l) => `<span class="${l.startsWith('@@') ? 'h'
+    : l[0] === '+' ? 'a' : l[0] === '-' ? 'd' : ''}">${esc(l) || ' '}</span>`).join('')}</pre>`
+    : '<p class="muted">This mock carries the real diffs of six ts-0178 files only. In the app every file opens.</p>';
+  const nav = (j, w) => (j >= 0 && j < ch.files.length ? `<button class="btn" data-act="diff" data-id="${id}"
+    data-v="${j}">${w}</button>` : '');
+  modal(`<h2 class="mono" style="font-size:15px;overflow-wrap:anywhere">${esc(f.path)}</h2>
+    <p class="muted">${esc(id)} · ${esc(ch.where)} · <span class="add">+${f.add}</span> <span class="del">−${f.del}
+    </span> · file ${i + 1} of ${ch.files.length}</p>${body}
+    <div class="acts">${nav(i - 1, '‹ Previous file')}${nav(i + 1, 'Next file ›')}
+      <button class="btn main" data-act="modal-close">Close</button></div>`, 'wide');
+}
+function fileTurnModal(i) {
+  const s = state.comms.find((x) => x.id === state.comm), t = s.turns[i];
+  const title = t.you.replace(/`/g, '').split(/[.?!:]/)[0].slice(0, 70);
+  modal(`<h2>File as a task</h2><label for="ftitle">Title</label><input type="text" id="ftitle"
+    value="${esc(title)}"><p class="muted">The task goes to Backlog in Collide planning. Its body holds this result
+    and a link back to the session:</p><div class="result"><div class="md">${mdInline(esc(t.result))}</div></div>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+      <button class="btn main" data-act="file-turn-yes" data-v="${i}">File it</button></div>`);
+}
+function planModal() {
+  const what = ($('#newplan') && $('#newplan').value.trim()) || 'what to build first';
+  modal(`<h2>Start a planning session <span class="newtag">9d</span></h2>
+    <p>Claude Code talks <b>${esc(what)}</b> through with you, beside the Planning page. It writes a private
+      proposal as it goes: the sections, the features in each, the decisions with their alternatives. When you
+      accept it, the features become tasks on this board.</p>
+    <p class="muted">The proposal stays on your machine until you share it. Planning sessions arrive in Stage 9d.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+      <button class="btn main" data-act="plan-yes">Start planning</button></div>`);
+}
+function openFresh() {
+  const name = state.welcome.folder.split('/').pop();
+  state.boards.fresh = { id: 'fresh', name, folder: state.welcome.folder, line: 'main', shared: false,
+    sources: ['scratch', 'plan'], tasks: [], views: [{ id: 'all', name: 'All tasks', where: 'true', test: () => true }],
+    copies: [{ id: 'main', label: 'main', kind: 'Line root', where: 'your checkout' }] };
+  goBoard('fresh');
+}
+function addScratch() {
+  const text = ($('#newtask') && $('#newtask').value.trim()) || 'A first task';
+  const b = board();
+  const n = b.tasks.length + 1;
+  b.tasks.push({ id: `sc-${String(n).padStart(4, '0')}-new`, title: text, status: 'ready', epic: null,
+    blockedBy: [], src: 'scratch', body: 'A scratch task. It stays on this machine until you share it.' });
+  flash(b.tasks[b.tasks.length - 1].id);
+}
+
+setInterval(() => { if (state.screen === 'board' && state.surface === 'field' && !state.settings) {
+  const live = document.querySelector('.live');
+  if (live) render();
+} }, 15000);
+render();
+</script>
+</body>
+</html>
