@@ -1,7 +1,7 @@
 ---
 id: ts-0166-rq
 kind: task
-status: ready
+status: done
 title: "Claude versions: a run right after the daemon starts says it does not look up the published version"
 owners: []
 links: []
