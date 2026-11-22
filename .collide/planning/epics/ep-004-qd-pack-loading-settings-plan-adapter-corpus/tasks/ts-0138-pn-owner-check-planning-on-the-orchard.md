@@ -778,8 +778,7 @@ grep -rl "$ID" .collide/planning
 
 Pass: exit 0; the output names the old and the new id and the files touched; `links   rewritten in <key>` for the
 linker; the commit touches the renamed copy (its `id:` line and name) and the linker's file; no `skipped` line is left
-(`0`; the first listing right after the reid may still print one, and the next none: `ts-0161-ta`); the last command
-lists only the first probe's own file. Open the linker's file: its `blocked-by` target is the
+(`0`); the last command lists only the first probe's own file. Open the linker's file: its `blocked-by` target is the
 **new** id. That is the documented limit: the id cannot tell the two files apart, so a link meant for the first file is
 rewritten too (`HELP`, `reidLocked` in `packs/plan/src/reid.ts`). Then put the clone back:
 
@@ -929,11 +928,23 @@ fill in what the page did not show. Lines marked agent-run are for the owner to 
     $0.006, and ended with exit 0. Its item is private, with `fields` `root: private` and `run` its run id, links
     `part-of` only, not in `follow-ups`. With the app on the real daemon before the third run started, the owner saw
     "nothing" on the run card (`ts-0159-ra`). Only the third run is a fair look: the second's app had the temp `HOME`.
+    Re-check after `ts-0159-ra` (owner-run, 2026-11-21): pass. With the app on the real daemon, the owner ran
+    `collide run follow-up-probe.md --budget 0.10` in their own terminal: run `run-1795321946830-2`, $0.0055, exit 0.
+    The card switched to it by itself and showed it ended. Its item is private, with `run:` and no `raised-by`; the
+    daemon's log has no permission line. An earlier try that day from Claude Code (`run-1795315707074-0`) ran and ended
+    while the owner was not watching the card, so it does not count. The card's Details said Task "unknown" and left
+    Workflow and the branch blank (`ts-0178-fw`).
   - 6c (owner-run): the criterion passes; Discard fails. A mistaken first try (prompt "Gg", `run-1795250812644-1`) does
     not count. The quick run `run-1795253516592-2` ran the command with no denial, $0.0038, exit 0; its item is private,
     with `run:` and no `raised-by`. Discard's dialog read "Delete this work? This deletes the agent's copy of the
     project and its branch, which hold 0 changed files. ...". After Delete the worktree and branch stayed, and the store
     kept the Review item with no discard step (`ts-0160-th`). The owner removed them by hand.
+    Re-check after `ts-0160-th` (owner-run, 2026-11-21): pass. Quick run `run-1795322167564-3`, exit 0. Discard's
+    dialog read "Delete this work? Run run-1795322167564-3. This deletes the agent's copy of the project and its
+    branch. They hold 0 changed files. Your own checkout is not touched. This cannot be undone." After Delete the card
+    went and "Needs you" read "Nothing is waiting on you". The worktree and the branch are gone (`git worktree list`,
+    `git branch --list 'collide/*'`). The re-check's first quick run, `run-1795315777377-1`, was discarded the same
+    way. The two stale Review items of the first run were gone too.
   - `claude` 2.1.330 is outside the tested range (2.1.323 to 2.1.325); the smoke check passed and the runs went on, as
     designed.
 - 7 Reid (agent-run): the criterion passes. The set-aside file got a new id, the linker's `blocked-by` was rewritten to
@@ -949,8 +960,9 @@ fill in what the page did not show. Lines marked agent-run are for the owner to 
     have none, and the real files share a few common ones (`ts-0162-yh`). Files: ADRs 31 real and 6 fixture, spikes 108
     and 4, questions 175 and 5.
 - Differences found, each a fix item:
-  - The loop page does not show a file run (`ts-0159-ra`). It blocks this item.
-  - Discard from the page did not apply (`ts-0160-th`).
+  - The loop page does not show a file run (`ts-0159-ra`). Fixed, and re-checked: pass.
+  - Discard from the page did not apply (`ts-0160-th`). Fixed, and re-checked: pass.
+  - A file run's card says Task "unknown" and leaves two rows blank (`ts-0178-fw`), seen at the re-check.
   - A watch update keeps a second row of one key (`ts-0161-ta`).
   - The fixtures have no section headings (`ts-0162-yh`).
   - The text's own expectations, fixed in place: 1.1, 1.2, 2, 3a, 3c, 4a to 4e, 5.1, 5.4, 6.0, 6b, 6c, 7, 8a.
@@ -961,12 +973,13 @@ fill in what the page did not show. Lines marked agent-run are for the owner to 
   - The real daemon tries the boards of deleted check folders every 10 s and logs each time, and logs a listing failure
     as it stops (`ts-0163-su`).
   - The owner's queue keeps two stale Review items, and a mistaken prompt left a 20 MB worktree that the app cannot
-    remove (`ts-0160-th`).
+    remove (`ts-0160-th`). Both were gone at the re-check.
   - zsh's `time` report does not follow a redirection; the text uses `secs`.
 - The owner's own awkward notes: ____ (owner)
 - Step 6's follow-up is not in the `follow-ups` view (plan 0.10): whether your own-terminal runs' follow-ups should
   show there before review shows them (Stage 9a): ____ (owner)
-- Date the owner judges Stage 4c done: after `ts-0159-ra` and the owner's re-check of 6b's run card. ____ (owner)
+- Date the owner judges Stage 4c done: after `ts-0159-ra` and the owner's re-check of 6b's run card. 2026-11-21
+  (owner: the re-check and its clean-up were done that day).
 
 ### Clean up
 
