@@ -1,7 +1,7 @@
 ---
 id: ts-0162-yh
 kind: task
-status: ready
+status: done
 title: "Orchard fixtures: the common section headings"
 owners: []
 links: []
