@@ -1,7 +1,7 @@
 ---
 id: ts-0167-jj
 kind: task
-status: ready
+status: done
 title: "Boards: git in a folder that is gone says to install git"
 owners: []
 links: []
