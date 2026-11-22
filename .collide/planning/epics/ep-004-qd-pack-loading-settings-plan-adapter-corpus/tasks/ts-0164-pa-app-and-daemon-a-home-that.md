@@ -1,7 +1,7 @@
 ---
 id: ts-0164-pa
 kind: task
-status: ready
+status: done
 title: "App and daemon: a HOME that is gone is made again"
 owners: []
 links: []
