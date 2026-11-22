@@ -1,7 +1,7 @@
 ---
 id: ts-0138-pn
 kind: task
-status: active
+status: done
 title: "Owner check: planning on the Orchard repo and Collide's own records"
 owners: []
 links:
