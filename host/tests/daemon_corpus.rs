@@ -16,15 +16,16 @@ use collide_core::events::{Event, EventBody};
 use collide_core::item::LinkDir;
 use collide_core::non_empty::NonEmpty;
 use collide_core::owner::{
-    BoardOpenParams, BoardOpenResult, BoardTrustParams, BoardTrustResult, BoardTrustReviewParams,
-    BoardTrustReviewResult, RpcError, TaskApplyParams, TaskApplyResult, TaskGetParams,
-    TaskGetResult, TaskListResult, TaskSaveViewResult, TaskViewsParams, TaskViewsResult,
-    TrustState, ViewEntry, ViewSource,
+    BoardListParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardTrustParams,
+    BoardTrustResult, BoardTrustReviewParams, BoardTrustReviewResult, RpcError, TaskApplyParams,
+    TaskApplyResult, TaskGetParams, TaskGetResult, TaskListResult, TaskSaveViewResult,
+    TaskViewsParams, TaskViewsResult, TrustState, ViewEntry, ViewSource,
 };
 use collide_core::provider::{ApplyParams, ApplyResult};
 use collide_core::state::RunState;
 use collide_core::view::View;
 use collide_core::yaml::load_yaml_file;
+use collide_host::corpus_service::GONE_PERIODS;
 use collide_host::corpus_store::CorpusCache;
 use collide_host::daemon::{DaemonOptions, DaemonPaths};
 use collide_host::owner_client::{ClientError, OwnerClient};
@@ -1640,6 +1641,120 @@ fn a_line_that_does_not_load_at_the_start_says_why_before_any_look() {
         .sources_unread
         .expect("the start names the line as unread");
     assert!(reason.contains("line does not load"), "{reason}");
+}
+
+/// A recheck short enough that a few of the long waits of a board whose folder is gone fit in a test.
+const QUICK: Duration = Duration::from_millis(10);
+
+fn log_lines_with(rig: &Rig, text: &str) -> usize {
+    rig.log
+        .text()
+        .lines()
+        .filter(|line| line.contains(text))
+        .count()
+}
+
+/// What `board.list` says of `board` is unread, if anything.
+fn unread_in_board_list(rig: &Rig, board: &str) -> Option<String> {
+    let listed: BoardListResult = rpc(rig, "board.list", &BoardListParams {}).unwrap();
+    listed
+        .boards
+        .into_iter()
+        .find(|summary| summary.id == board)
+        .expect("the board is listed")
+        .sources_unread
+}
+
+#[test]
+fn a_board_whose_folder_is_gone_is_logged_once_over_many_looks_and_again_when_it_is_read_again() {
+    let rig = rig_with(|options| options.corpus_recheck = QUICK);
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.settled(&board);
+    let aside = rig.f().home().join("aside");
+
+    fs::rename(&root, &aside).unwrap();
+
+    wait_until("the corpus says its sources are not read", DEADLINE, || {
+        log_lines_with(&rig, "its sources are not read") > 0
+    });
+    let said = Instant::now();
+    wait_until("many of the long waits have passed", DEADLINE, || {
+        said.elapsed() >= QUICK * GONE_PERIODS * 3
+    });
+    assert_eq!(
+        log_lines_with(&rig, "its sources are not read"),
+        1,
+        "{}",
+        rig.log.text()
+    );
+
+    fs::rename(&aside, &root).unwrap();
+
+    wait_until("the corpus says it reads the board again", DEADLINE, || {
+        log_lines_with(&rig, "its sources are read again") > 0
+    });
+    assert_eq!(log_lines_with(&rig, "its sources are read again"), 1);
+    assert_eq!(
+        log_lines_with(&rig, "its sources are not read"),
+        1,
+        "{}",
+        rig.log.text()
+    );
+}
+
+#[test]
+fn board_list_keeps_a_board_whose_folder_is_gone_with_its_reason_until_it_is_read_again() {
+    let rig = rig_with(|options| options.corpus_recheck = QUICK);
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.settled(&board);
+    assert_eq!(unread_in_board_list(&rig, &board), None);
+    let aside = rig.f().home().join("aside");
+
+    fs::rename(&root, &aside).unwrap();
+
+    wait_until("board.list gives the reason", DEADLINE, || {
+        unread_in_board_list(&rig, &board).is_some_and(|reason| reason.contains("is not a folder"))
+    });
+
+    fs::rename(&aside, &root).unwrap();
+
+    wait_until("board.list gives no reason", DEADLINE, || {
+        unread_in_board_list(&rig, &board).is_none()
+    });
+}
+
+#[test]
+fn a_stop_with_a_listing_in_flight_logs_no_listing_failure() {
+    // One task to a page and no `watch`: each recheck lists again, and a list that ends while the daemon stops
+    // finds its next page after the stop.
+    let docs = Src { page: 1, ..DOCS };
+    let mut rig = rig();
+    let board = rig.board_with(&[&docs], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.task(&root, "2.json", "2", "todo", "v1");
+    rig.settled(&board);
+    let hold = rig.data(&board, &docs).join("hold-list");
+    fs::write(&hold, "").unwrap();
+    wait_until("a list is in flight", DEADLINE, || {
+        rig.data(&board, &docs).join("holding").exists()
+    });
+    let Fixture { repo, daemon } = rig.fixture.take().unwrap();
+
+    let stopping = std::thread::spawn(move || daemon.stop());
+    // The daemon no longer accepts once it is stopping: the list is held until then.
+    wait_until("the daemon is stopping", DEADLINE, || {
+        rig.log.text().contains("daemon stopped")
+    });
+    fs::remove_file(&hold).unwrap();
+    stopping.join().unwrap();
+
+    let log = rig.log.text();
+    assert!(!log.contains("could not be listed"), "{log}");
+    drop(repo);
 }
 
 #[test]

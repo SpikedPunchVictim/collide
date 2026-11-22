@@ -15,6 +15,13 @@
         },
         "root": {
           "type": "string"
+        },
+        "sources_unread": {
+          "description": "Why the daemon's last look at the board could not read its line or its checkouts (a folder that is gone, a\nline that does not load). Absent when the last look read them. Only `board.list` fills it.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

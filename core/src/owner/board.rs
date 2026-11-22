@@ -43,6 +43,10 @@ pub struct BoardSummary {
     pub id: String,
     pub root: String,
     pub lines: Vec<LineSummary>,
+    /// Why the daemon's last look at the board could not read its line or its checkouts (a folder that is gone, a
+    /// line that does not load). Absent when the last look read them. Only `board.list` fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources_unread: Option<String>,
 }
 
 /// `board.list` params: none.

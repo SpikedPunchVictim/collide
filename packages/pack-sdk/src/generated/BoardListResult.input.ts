@@ -29,6 +29,11 @@ export interface BoardSummary {
   id: string
   lines: LineSummary[]
   root: string
+  /**
+   * Why the daemon's last look at the board could not read its line or its checkouts (a folder that is gone, a
+   * line that does not load). Absent when the last look read them. Only `board.list` fills it.
+   */
+  sources_unread?: string | null
 }
 /**
  * One line of a board (0.12): a ref the user opened. `snapshot` is the commit its packs are read at. `problems` is

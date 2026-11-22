@@ -171,6 +171,7 @@ impl Lines {
             id: id.to_string(),
             root: root.to_string(),
             lines,
+            sources_unread: None,
         }
     }
 

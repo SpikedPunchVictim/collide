@@ -21,6 +21,7 @@
 //                 (`watch <json>`)
 //   notify.jsonl  each line a test appends is sent to the daemon as a notification, `{ "method", "params" }`
 //   hold-list     while it exists, `list` waits (30 s at most) before it answers
+//   holding       made by a `list` that starts to wait for `hold-list`, so a test knows one is in flight
 //   fail-list     when it exists, `list` answers a JSON-RPC error
 //   die-on-list   when it exists, `list` ends the process with no reply
 //   fail-get      when it exists, `get` answers a JSON-RPC error
@@ -92,6 +93,7 @@ const find = (checkout, id) => files(checkout).map((file) => read(checkout, file
 
 // Blocks until `hold-list` is gone or 30 s have passed: the provider answers one line at a time, so this holds all.
 const holdList = () => {
+  if (existsSync(join(DATA, 'hold-list'))) writeFileSync(join(DATA, 'holding'), '')
   const until = Date.now() + 30000
   const tick = new Int32Array(new SharedArrayBuffer(4))
   while (existsSync(join(DATA, 'hold-list')) && Date.now() < until) Atomics.wait(tick, 0, 0, 20)

@@ -2981,7 +2981,8 @@ fn with_role_problems(shared: &Shared, mut summary: BoardSummary) -> BoardSummar
 }
 
 /// `board.list`: the boards opened before, from the store. A board's line is the branch its checkout is on now, read
-/// from git; a board whose folder is gone or is no longer a checkout is listed with no line.
+/// from git; a board whose folder is gone or is no longer a checkout is listed with no line, and with the reason the
+/// corpus gives for not reading its sources.
 fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
     let lines = shared.config.lines();
     let tools = tools_path(shared);
@@ -2992,10 +2993,18 @@ fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
         .into_iter()
         .map(|board| {
             let checkout = boards::checkout_of(Path::new(&board.root), &shared.git_env).ok();
-            with_role_problems(
+            let summary = with_role_problems(
                 shared,
                 lines.summary(&board.id, &board.root, checkout.as_ref(), &tools),
-            )
+            );
+            BoardSummary {
+                sources_unread: shared
+                    .corpora
+                    .get()
+                    .and_then(|corpora| corpora.get(&board.id))
+                    .and_then(|service| service.sources_unread()),
+                ..summary
+            }
         })
         .collect();
     Ok(serde_json::to_value(BoardListResult { boards }).expect("a result is JSON"))

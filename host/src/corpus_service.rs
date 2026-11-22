@@ -68,6 +68,10 @@ const WRITTEN_KEPT: usize = 256;
 /// The most a source that did not start waits before it is tried again, in `recheck` intervals.
 const BACKOFF_CAP: u32 = 64;
 
+/// How many `recheck` intervals a board whose folder is gone waits between two looks (10 min at 10 s). A look that
+/// finds the folder again is also the one that says so, so the board is read again within this wait.
+pub const GONE_PERIODS: u32 = 60;
+
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
@@ -291,6 +295,11 @@ impl BoardCorpus {
         locked(&self.inner.state).refreshing
     }
 
+    /// Why the last look could not read the board's line or its checkouts. `None` when it read both.
+    pub fn sources_unread(&self) -> Option<String> {
+        locked(&self.inner.state).unread.clone()
+    }
+
     /// What the write path holds across a source's `apply`, its event and [`BoardCorpus::note_write`].
     pub fn gate(&self) -> MutexGuard<'_, ()> {
         locked(&self.inner.gate)
@@ -342,6 +351,39 @@ impl Inner {
         (self.config.log)(&format!("corpus of {}: {text}", self.board));
     }
 
+    /// Says that `name` could not be listed, unless the daemon is stopping. The daemon ends the providers of the
+    /// sources first, so a list that finds its source ended, or stops at its next page, is not a failure of the source.
+    fn log_list_failure(&self, name: &str, why: &str) {
+        if !self.stopping() {
+            self.log(&format!("{name} could not be listed: {why}"));
+        }
+    }
+
+    /// Notes why the board's sources could not be read at this look. `line` is logged when the reason is not the one
+    /// the last look gave: a board that stays unread says so once. A folder that is gone fails in different steps
+    /// (the line, then git), so it is one reason whichever step the look failed in.
+    fn note_unread(&self, reason: String, line: &str) {
+        let reason = if self.root.is_dir() {
+            reason
+        } else {
+            format!(
+                "`{}` is not a folder: it is gone or was moved",
+                self.root.display()
+            )
+        };
+        let before = locked(&self.state).unread.replace(reason.clone());
+        if before.as_deref() != Some(reason.as_str()) {
+            self.log(line);
+        }
+    }
+
+    /// Notes that this look read the board's line and checkouts, and says so when the last look did not.
+    fn note_read(&self) {
+        if locked(&self.state).unread.take().is_some() {
+            self.log("its sources are read again");
+        }
+    }
+
     fn board_ref(&self) -> BoardRef<'_> {
         BoardRef {
             id: &self.board,
@@ -368,8 +410,18 @@ impl Inner {
         }
     }
 
+    /// How long to wait for the next look: `recheck`, or [`GONE_PERIODS`] of it while the board's folder is gone. A
+    /// board that is unread for another reason (a line being edited) is looked at as often as any other.
+    fn period(&self) -> Duration {
+        if locked(&self.state).unread.is_some() && !self.root.exists() {
+            self.config.recheck.saturating_mul(GONE_PERIODS)
+        } else {
+            self.config.recheck
+        }
+    }
+
     fn wait_for_next_look(&self) {
-        let until = Instant::now() + self.config.recheck;
+        let until = Instant::now() + self.period();
         while Instant::now() < until && !self.stopping() {
             if self.nudged.swap(false, Ordering::SeqCst) {
                 return;
@@ -624,7 +676,7 @@ impl Inner {
                 }
                 Err(error) => {
                     let why = source_text(&error);
-                    self.log(&format!("{name} could not be listed: {why}"));
+                    self.log_list_failure(name, &why);
                     for target in &targets {
                         let _ = fresh.load(
                             name,
@@ -845,20 +897,21 @@ impl Inner {
         {
             Ok(plan) => plan,
             Err(error) => {
-                self.log(&format!("its sources are not read: {error:?}"));
-                locked(&self.state).unread = Some(source_text(&error));
+                self.note_unread(
+                    source_text(&error),
+                    &format!("its sources are not read: {error:?}"),
+                );
                 return;
             }
         };
         let checkouts = match self.discover(&plan.checkout_filter.exclude) {
             Ok(found) => found,
             Err(error) => {
-                self.log(&error);
-                locked(&self.state).unread = Some(error);
+                self.note_unread(error.clone(), &error);
                 return;
             }
         };
-        locked(&self.state).unread = None;
+        self.note_read();
         let changed = {
             let state = locked(&self.state);
             state.checkouts != checkouts
@@ -1032,7 +1085,7 @@ impl Inner {
             Ok(lists) => lists,
             Err(error) => {
                 let why = source_text(&error);
-                self.log(&format!("{name} could not be listed: {why}"));
+                self.log_list_failure(name, &why);
                 self.mark_source_stale(name, &why);
                 return;
             }
