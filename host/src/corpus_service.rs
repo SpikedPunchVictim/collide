@@ -39,6 +39,7 @@ use crate::scratch;
 use crate::sources::{Source, SourceError, Sources};
 use crate::store::Store;
 use crate::supervisor::SupervisedProvider;
+use crate::write_guard::canonical;
 use collide_core::change::Effect;
 use collide_core::corpus::{
     CheckoutInfo, CheckoutKind, Corpus, ListFilter, Page, reconcile_by_source,
@@ -165,6 +166,7 @@ struct Run {
     /// Which start of the provider this was ([`Source::instance`]).
     instance: u64,
     watch: bool,
+    scope: Scope,
     /// The checkouts the source was last told to watch.
     told: Option<Vec<String>>,
     /// The source's last list or notification said it is stale: the whole source when `whole`, else these checkouts.
@@ -307,9 +309,20 @@ impl BoardCorpus {
     /// A write went through: puts the written task in the corpus and the cache, and remembers what the watcher will
     /// say of it so that its notification is dropped. The caller holds [`BoardCorpus::gate`]. Another item the write
     /// changed is updated from its effect when the corpus holds it; the watcher's notice of one it does not hold is
-    /// not dropped.
-    pub fn note_write(&self, source: &str, task: &Task, items: &[Effect]) {
-        self.inner.note_write(source, task, items);
+    /// not dropped. `files` are the ones the write names: an invalid item at one of them is dropped, since a file
+    /// that was written is valid or gone. `written_in` is the checkout the write named, `None` for the board's root:
+    /// a ref-scoped source that names no checkout on its answer has the written copy held there, where its list
+    /// holds the others.
+    pub fn note_write(
+        &self,
+        source: &str,
+        task: &Task,
+        items: &[Effect],
+        files: &[String],
+        written_in: Option<&str>,
+    ) {
+        self.inner
+            .note_write(source, task, items, files, written_in);
     }
 
     fn join(&self) {
@@ -594,6 +607,7 @@ impl Inner {
             let mut run = Run {
                 instance: source.instance(),
                 watch: init.capabilities.watch,
+                scope: init.scope,
                 told: None,
                 stale: None,
             };
@@ -996,6 +1010,7 @@ impl Inner {
             Run {
                 instance: source.instance(),
                 watch: init.capabilities.watch,
+                scope: init.scope,
                 told: None,
                 stale,
             },
@@ -1291,7 +1306,47 @@ impl Inner {
 
     // ---- a write -----------------------------------------------------------------------------------------------
 
-    fn note_write(&self, source: &str, task: &Task, items: &[Effect]) {
+    /// The checkout the corpus holds a written copy in. A source that names one on its task has it. One that is
+    /// ref-scoped and names none (the plan pack never does) is held in the checkout the write went to, as the list of
+    /// that checkout holds it: a copy in no checkout would sit beside the listed one for as long as the daemon runs.
+    fn written_checkout(
+        &self,
+        source: &str,
+        task: &Task,
+        written_in: Option<&str>,
+    ) -> Option<String> {
+        if task.checkout.is_some() {
+            return task.checkout.clone();
+        }
+        let state = locked(&self.state);
+        if state.runs.get(source)?.scope != Scope::Ref {
+            return None;
+        }
+        let wrote = canonical(Path::new(
+            written_in.unwrap_or(&self.root.to_string_lossy()),
+        ));
+        state
+            .checkouts
+            .iter()
+            .find(|info| canonical(Path::new(&info.path)) == wrote)
+            .map(|info| info.path.clone())
+    }
+
+    fn note_write(
+        &self,
+        source: &str,
+        task: &Task,
+        items: &[Effect],
+        files: &[String],
+        written_in: Option<&str>,
+    ) {
+        let task = &Task {
+            checkout: self.written_checkout(source, task, written_in),
+            ..task.clone()
+        };
+        locked(&self.state)
+            .corpus
+            .clear_invalid(source, task.checkout.as_deref(), files);
         let kept = source != scratch::SOURCE;
         let cause = if kept {
             ChangeCause::Worktree

@@ -3897,7 +3897,10 @@ fn apply_and_record(
     let corpus = shared.corpora.get().and_then(|corpora| corpora.get(board));
     let _gate = corpus.as_ref().map(|corpus| corpus.gate());
     let result = source.apply(&told_who_asked(shared, &actor, apply))?;
-    if let ApplyResult::Ok { task, items, .. } = &result {
+    if let ApplyResult::Ok {
+        task, items, files, ..
+    } = &result
+    {
         for effect in items {
             let event = changed_event(
                 source.name(),
@@ -3913,7 +3916,7 @@ fn apply_and_record(
             }
         }
         if let Some(corpus) = &corpus {
-            corpus.note_write(source.name(), task, items);
+            corpus.note_write(source.name(), task, items, files, apply.checkout.as_deref());
         }
     }
     Ok(result)

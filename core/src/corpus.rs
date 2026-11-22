@@ -632,6 +632,19 @@ impl Corpus {
         Ok(())
     }
 
+    /// Drops the source's invalid items of `checkout` at `paths`, the files a write names. A write leaves each file it
+    /// names valid, or gone (a file that was renamed), so an invalid item at one of them is of the file as it was, and
+    /// the next list would drop it. A task that the write puts in is then held after this, and may add its own.
+    pub fn clear_invalid(&mut self, source: &str, checkout: Option<&str>, paths: &[String]) {
+        let Some(state) = self.sources.get_mut(source) else {
+            return;
+        };
+        state
+            .invalid
+            .retain(|(held, path), _| held.as_deref() != checkout || !paths.contains(path));
+        self.touch();
+    }
+
     /// `task.invalid`: the item joins the source's invalid items, and the task at its path leaves the listing.
     pub fn apply_invalid(&mut self, source: &str, item: &TaskInvalid) -> Result<(), CorpusError> {
         self.source(source)?;

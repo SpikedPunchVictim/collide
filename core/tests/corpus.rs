@@ -1366,6 +1366,34 @@ fn a_later_change_for_the_path_brings_the_task_back_and_clears_the_item() {
 }
 
 #[test]
+fn clearing_invalid_items_by_path_drops_only_those_of_that_checkout_and_those_paths() {
+    let mut corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT, WS_A]);
+    for (path, checkout) in [
+        ("arch/a.md", ROOT),
+        ("arch/b.md", ROOT),
+        ("arch/a.md", WS_A),
+    ] {
+        let item = invalid_item(path, checkout, "conflict markers");
+        corpus.apply_invalid("plan", &item).unwrap();
+    }
+
+    corpus.clear_invalid("plan", Some(ROOT), &["arch/a.md".to_string()]);
+
+    let left: Vec<_> = corpus
+        .invalid()
+        .iter()
+        .map(|held| (held.item.path.clone(), held.item.checkout.clone()))
+        .collect();
+    assert_eq!(
+        left,
+        [
+            ("arch/b.md".to_string(), Some(ROOT.to_string())),
+            ("arch/a.md".to_string(), Some(WS_A.to_string())),
+        ]
+    );
+}
+
+#[test]
 fn a_task_listed_twice_in_one_checkout_is_one_task_and_one_invalid_item() {
     let first = plan_task("T-01", "ready", ROOT, "arch/a/T-01.md");
     let second = plan_task("T-01", "doing", ROOT, "arch/b/T-01.md");
