@@ -27,6 +27,7 @@
   --destructive:#c62828;--border:#e7e1d8;--input:#d8d0c4;--ring:#4f46e5;
   --working:#0369a1;--waiting:#b45309;--blocked:#6f675d;--failed:#c62828;--done:#15803d;--cold:#a21caf;
   --code-bg:#f3efe8;--code-fg:#2b251e;
+  --term-bg:#1c1a17;--term-fg:#e9e4db;--term-dim:#a39a8c;--term-acc:#a5abff;--term-ok:#6ee7a0;
   --overlay:rgb(40 30 20 / .42);
   --shadow:0 1px 2px rgb(60 40 20 / .06);
   --shadow-card:0 1px 2px rgb(60 40 20 / .05),0 8px 28px rgb(60 40 20 / .07);
@@ -287,19 +288,21 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
   padding:20px 22px;display:flex;flex-direction:column;gap:12px}
 .modal h2{font-size:var(--fs-lg);font-weight:650}
 .modal p{margin:0}
-.modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+.modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:6px;flex-wrap:wrap}
 .modal input[type=text]{border:1px solid var(--input);border-radius:var(--radius-xs);padding:7px 10px;width:100%;
   background:var(--card)}
 .modal ul{margin:0;padding-left:1.2em}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--foreground);
+.toast{position:fixed;left:50%;bottom:calc(24px + var(--dockb,0px));transform:translateX(-50%);
+  background:var(--foreground);
   color:var(--background);padding:9px 16px;border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);z-index:60;
   font-size:var(--fs-sm);max-width:min(560px,calc(100% - 32px))}
 .toast[hidden]{display:none}
-.mockbtn{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:16px;z-index:40;
+.mockbtn{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(16px + var(--dockb,0px));z-index:40;
   background:var(--cold);color:#fff;border:0;border-radius:999px;padding:8px 14px;font-weight:600;cursor:pointer;
   box-shadow:var(--shadow-lg)}
-.mock{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:62px;z-index:40;width:min(440px,
-  calc(100% - 32px));max-height:calc(100% - 90px);overflow:auto;background:var(--popover);
+.mock{position:fixed;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(62px + var(--dockb,0px));
+  z-index:40;width:min(440px,calc(100% - 32px));max-height:calc(100% - 90px - var(--dockb,0px));overflow:auto;
+  background:var(--popover);
   border:2px solid var(--cold);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:14px 16px;
   display:flex;flex-direction:column;gap:10px}
 .mock[hidden]{display:none}
@@ -350,6 +353,10 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .diff .a{background:color-mix(in srgb,var(--done) 14%,transparent)}
 .diff .d{background:color-mix(in srgb,var(--failed) 12%,transparent)}
 .diff .h{color:var(--primary);background:var(--primary-soft)}
+.diff.whole{max-height:62vh;overflow:auto;position:relative}
+.diff i{display:inline-block;width:4ch;margin-right:12px;text-align:right;font-style:normal;
+  color:var(--muted-foreground);
+  user-select:none}
 
 /* Empty board: two ways in */
 .choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
@@ -364,21 +371,40 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .runrow{display:grid;grid-template-columns:minmax(180px,260px) 1fr auto;gap:12px;align-items:center;
   padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);
   cursor:pointer;text-align:left;width:100%}
+.runrow:hover{border-color:var(--input)}
 .runrow[aria-current="true"]{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
-.segs{display:flex;gap:3px;height:22px;min-width:0}
-.segs i{display:flex;align-items:center;padding:0 6px;border-radius:5px;font-size:11.5px;font-style:normal;
-  white-space:nowrap;overflow:hidden;color:var(--foreground);background:var(--secondary)}
-.segs i.done{background:color-mix(in srgb,var(--done) 22%,var(--card))}
-.segs i.run{background:color-mix(in srgb,var(--working) 25%,var(--card));box-shadow:inset 0 0 0 1px var(--working)}
-.segs i.wait{background:var(--secondary);color:var(--muted-foreground)}
+.rname{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0}
+.rname .rn{border:0;background:none;padding:0;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;
+  gap:6px}
+.tlink{border:0;background:none;padding:0;cursor:pointer;color:var(--primary);font-size:12.5px;text-align:left;
+  text-decoration:underline;text-underline-offset:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.segs{display:flex;gap:3px;height:24px;min-width:0}
+.segs .sg{display:flex;align-items:center;padding:0 6px;border:0;border-radius:5px;font:inherit;font-size:11.5px;
+  white-space:nowrap;overflow:hidden;color:var(--foreground);background:var(--secondary);cursor:pointer;min-width:0}
+.segs .sg:hover{filter:brightness(.95)}
+.segs .sg.done{background:color-mix(in srgb,var(--done) 22%,var(--card))}
+.segs .sg.run{background:color-mix(in srgb,var(--working) 25%,var(--card));box-shadow:inset 0 0 0 1px var(--working)}
+.segs .sg.wait{background:var(--secondary);color:var(--muted-foreground)}
+.segs .sg[aria-pressed="true"]{outline:2px solid var(--primary);outline-offset:1px}
 .share{display:flex;align-items:center;gap:8px;min-width:120px}
 .share .bar{flex:1}
 .share .bar i{background:var(--working)}
 .lanes{display:flex;flex-direction:column;gap:6px;font-size:12.5px}
-.lane{display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:center}
+.lane{display:grid;grid-template-columns:170px 1fr;gap:10px;align-items:center}
 .lane .track{position:relative;height:18px;background:var(--muted);border-radius:4px}
-.lane .track b{position:absolute;top:2px;bottom:2px;border-radius:3px;background:var(--working);min-width:2px}
+.lane .track b{position:absolute;top:2px;bottom:2px;border-radius:2px;background:var(--working);min-width:3px}
 .lane .track b.m{background:var(--cold)}
+.lane .track b.x{background:var(--failed)}
+.lane .track b:hover{outline:2px solid var(--foreground);z-index:1}
+.lane .track .pm{position:absolute;top:-3px;bottom:-3px;border-left:1px dashed var(--muted-foreground)}
+.axis{position:relative;height:18px;color:var(--muted-foreground)}
+.axis span{position:absolute;top:0;white-space:nowrap}
+.tip{position:fixed;z-index:70;pointer-events:none;background:var(--popover);border:1px solid var(--border);
+  border-radius:var(--radius-xs);box-shadow:var(--shadow-lg);padding:8px 10px;font-size:12.5px;max-width:340px;
+  display:flex;flex-direction:column;gap:2px}
+.tip[hidden]{display:none}
+.tip .mono{overflow-wrap:anywhere}
 .opts{display:flex;flex-direction:column;gap:10px}
 .optc{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;display:flex;
   flex-direction:column;gap:6px;background:var(--card)}
@@ -419,8 +445,60 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
   background:var(--card);resize:vertical}
 .side h3{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-foreground);
   font-weight:600;margin-bottom:6px;display:flex;align-items:center}
+.optc .optt{display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-weight:600}
+.optc .optt input{margin-top:4px}
+.optc:has(.optpick:checked){border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+.chip.good{color:var(--done);border-color:color-mix(in srgb,var(--done) 40%,var(--border))}
+
+/* Session notes, pins and the terminal view */
+.side h3 .btn{text-transform:none;letter-spacing:0;font-weight:500;color:var(--foreground)}
+.npv{max-height:9.5em;overflow:hidden;position:relative;font-size:13.5px;border:1px solid var(--border);
+  border-radius:var(--radius-xs);padding:6px 9px;cursor:pointer;background:var(--card)}
+.npv::after{content:"";position:absolute;inset:auto 0 0;height:2.2em;
+  background:linear-gradient(transparent,var(--card))}
+.npv:hover{border-color:var(--input)}
+.npv h4,.pin h4{font-size:13.5px;margin:.5em 0 .2em}
+.nwin{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.nwin .fgroup{flex-direction:column;align-items:stretch}
+.nwin textarea{width:100%;height:min(56vh,520px);border:1px solid var(--input);border-radius:var(--radius-xs);
+  padding:9px 11px;background:var(--card);resize:vertical;font-family:var(--font-mono);font-size:13px;line-height:1.55}
+.nwin .md{height:min(56vh,520px);overflow:auto;border:1px solid var(--border);border-radius:var(--radius-xs);
+  padding:9px 13px;max-width:none}
+.pins{display:flex;flex-direction:column;gap:8px}
+.pin{border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:var(--radius-xs);
+  padding:6px 9px;display:flex;flex-direction:column;gap:4px;font-size:13.5px}
+.pin .md{max-height:4.9em;overflow:hidden}
+.pin .acts{display:flex;gap:2px;flex-wrap:wrap}
+.term{margin:0;background:var(--term-bg);color:var(--term-fg);font:12.5px/1.55 var(--font-mono);padding:12px 14px;
+  overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:var(--radius-xs);
+  border:1px solid var(--border)}
+.term .p{color:var(--term-acc)}
+.term .d{color:var(--term-dim)}
+.term .o{color:var(--term-ok)}
+
+/* The dock: one session at the bottom of every page */
+.dock{flex:0 0 auto;height:300px;max-height:48vh;display:flex;flex-direction:column;background:var(--card);
+  border-top:1px solid var(--border);box-shadow:var(--shadow-card)}
+.dock[hidden]{display:none}
+.dock.min{height:auto}
+.dockh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--border);
+  padding:6px max(16px,env(safe-area-inset-right,0px)) 6px max(16px,env(safe-area-inset-left,0px))}
+.dock.min .dockh{border-bottom:0}
+.dockh select{border:1px solid var(--input);border-radius:var(--radius-xs);padding:3px 8px;background:var(--card);
+  font-weight:600;max-width:240px}
+.dockline{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;
+  color:var(--muted-foreground)}
+.dockb{flex:1;min-height:0;overflow:auto;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
+.dockb .turns{padding:0;gap:12px}
+.dockb .term{min-height:100%}
+.dockc{display:flex;gap:8px;align-items:flex-end;border-top:1px solid var(--border);
+  padding:8px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
+.dockc textarea{flex:1;border:1px solid var(--input);border-radius:var(--radius-sm);padding:6px 10px;height:38px;
+  resize:none;background:var(--card)}
 @media (max-width:1100px){.comms{grid-template-columns:230px minmax(0,1fr)}.comms .sidecard{grid-column:1 / -1}}
-@media (max-width:700px){.comms{grid-template-columns:1fr}.runrow{grid-template-columns:1fr}}
+@media (max-width:700px){.comms{grid-template-columns:1fr}.runrow{grid-template-columns:1fr}
+  .nwin{grid-template-columns:1fr}}
 @media (max-width:900px){.drawer{position:fixed;inset:0 0 0 auto;width:min(460px,100%);z-index:35;
   box-shadow:var(--shadow-lg)}.tabs{margin-inline:0;order:3;width:100%;overflow-x:auto}}
 </style>
@@ -437,6 +515,8 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
   <main class="content" id="content"></main>
   <aside class="drawer" id="drawer" hidden aria-label="Task"></aside>
 </div>
+<section class="dock" id="dock" hidden aria-label="Docked session"></section>
+<div class="tip" id="tip" hidden role="tooltip"></div>
 <div class="overlay" id="overlay" hidden><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 <button class="mockbtn" id="mockbtn" data-act="mock" aria-expanded="false">Mock</button>
@@ -680,6 +760,1439 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
      }
  
 </script>
+<!-- The whole of four ts-0178-fw files after the change (commit 660efc8), for the diff's Whole file view.
+     Each line starts with " ", "+" or "-". A line that starts with "~" continues the line before it. -->
+<script type="text/plain" id="whole-0178">
+### FILE app/src/loop/RunCard.tsx
+ // The run: its state and its phase in words, with the prompt. The engineer's detail (ids, branch, folder, session) is
+ // behind a disclosure (0.11, "Who it is for").
+ import { Badge } from '@/components/ui/badge'
+ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+ import { runStateWords } from '../components/words.ts'
+ import type { Followed, RunSummary } from './types.ts'
+ import { phaseWords } from './words.ts'
+ 
+ export interface RunCardProps {
+   readonly run: RunSummary
+   readonly followed: Followed
+ }
+ 
++/** What the Task row says. A file run has no task: it says what it ran from. */
++function taskWords(run: RunSummary, followed: Followed): string {
++  if (run.tasks.length === 0) {
++    return run.task_file == null ? 'none: a task file' : `none: a task file, ${run.task_file}`
++  }
++  if (followed.task === null || followed.board === null) {
++    return `${followed.task ?? run.tasks[0]?.key}, not found on any board`
++  }
++  return followed.task
++}
++
++/** A row of the details. A row with no value is not shown, so nothing reads as a failed load. */
++function Row({ label, value }: { readonly label: string; readonly value: string }) {
++  if (value === '') return null
++  return (
++    <>
++      <dt className="text-muted-foreground">{label}</dt>
++      <dd>{value}</dd>
++    </>
++  )
++}
++
+ export function RunCard({ run, followed }: RunCardProps) {
+   const phase = run.phases[run.phases.length - 1]
+   const instance = phase?.instances[0]
+   const sessions = run.phases.flatMap((p) => p.instances.map((i) => i.session_id).filter((id) => id != null))
+   return (
+     <Card>
+       <CardHeader>
+         <CardTitle>
+           <h2 className="text-lg font-semibold">The run</h2>
+         </CardTitle>
+       </CardHeader>
+       <CardContent className="flex flex-col gap-3">
+         {followed.prompt === null ? null : (
+           <blockquote className="border-l-2 pl-3 text-sm whitespace-pre-wrap">{followed.prompt}</blockquote>
+         )}
+         <p className="flex flex-wrap items-center gap-2 text-sm">
+           <Badge variant="secondary">{runStateWords(run.state)}</Badge>
+           {phase === undefined || instance === undefined ? null : (
+             <span>{`Step: ${phase.name}. ${phaseWords(instance.state)}.`}</span>
+           )}
+         </p>
+         <details className="text-sm">
+           <summary className="cursor-pointer font-medium">Details</summary>
+           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+-            <dt className="text-muted-foreground">Run</dt>
+-            <dd>{run.id}</dd>
+-            <dt className="text-muted-foreground">Task</dt>
+-            <dd>{followed.task ?? 'unknown'}</dd>
+-            <dt className="text-muted-foreground">Workflow</dt>
+-            <dd>{run.workflow}</dd>
+-            <dt className="text-muted-foreground">Branch the work started from</dt>
+-            <dd>{run.line}</dd>
++            <Row label="Run" value={run.id} />
++            <Row label="Task" value={taskWords(run, followed)} />
++            <Row label="Workflow" value={run.workflow} />
++            <Row label="Branch the work started from" value={run.line} />
+             {run.workspace == null ? null : (
+               <>
+                 <dt className="text-muted-foreground">Work folder</dt>
+                 <dd className="font-mono text-xs">{run.workspace}</dd>
+               </>
+             )}
+             {sessions.map((id) => (
+               <div key={id} className="contents">
+                 <dt className="text-muted-foreground">Session</dt>
+                 <dd className="font-mono text-xs">{id}</dd>
+               </div>
+             ))}
+           </dl>
+         </details>
+       </CardContent>
+     </Card>
+   )
+ }
+### FILE core/src/owner/run.rs
+ //! The `run.*` methods: start a run, watch it, steer it and stop it (`collide run`, `collide stop`, Launch, Tracks,
+ //! Output, Review and the take-over of 0.11). The decisions of a run are Queue items (`queue.*`), and the run's own
+ //! events come on the event channel.
+ 
+ use crate::agent::{AgentEvent, Money, UsageQuality, UsageScope};
+ use crate::hook::HookStatus;
+ use crate::profile::RoleConfig;
+ use crate::state::{PhaseState, RunState};
+ use crate::workflow::PhaseKind;
+ use schemars::JsonSchema;
+ use serde::{Deserialize, Serialize};
+ use serde_json::Value;
+ use std::collections::BTreeMap;
+ 
+ /// A phase's kind: the five names of [`PhaseKind`]. That enum is written to JSON but not read from it, so this is the
+ /// wire form, and a test pins the names to it.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(rename_all = "lowercase")]
+ pub enum PhaseKindWire {
+     Agent,
+     Fanout,
+     Script,
+     Wait,
+     Human,
+ }
+ 
+ impl From<PhaseKind> for PhaseKindWire {
+     fn from(kind: PhaseKind) -> Self {
+         match kind {
+             PhaseKind::Agent => PhaseKindWire::Agent,
+             PhaseKind::Fanout => PhaseKindWire::Fanout,
+             PhaseKind::Script => PhaseKindWire::Script,
+             PhaseKind::Wait => PhaseKindWire::Wait,
+             PhaseKind::Human => PhaseKindWire::Human,
+         }
+     }
+ }
+ 
+ /// Whether a run's agent is driven by Collide or sat in by a person in a terminal (0.11, New session).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+ #[serde(rename_all = "snake_case")]
+ pub enum RunMode {
+     #[default]
+     Headless,
+     /// A New session or a Plan… session: interactive Claude in a fresh worktree, taken over from the first moment. The
+     /// caller makes the scratch task or the draft proposal first, with `task.apply`, and names it in `tasks`.
+     Interactive,
+ }
+ 
+ /// `run.start` params (`collide run`, Launch, the prompt box): one workflow over one or more tasks. Every field the
+ /// caller leaves out has the default of 0.11's run preview: the board's default workflow, its default line, the
+ /// view's or the board's profile. `launch` is the pack's `launch` parameters. There is no actor field: the connection
+ /// is who started it.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunStartParams {
+     pub board: String,
+     /// Task keys, `source:shortId`.
+     pub tasks: Vec<String>,
+     /// `pack/workflow`.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub workflow: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub line: Option<String>,
+     #[serde(default)]
+     pub launch: BTreeMap<String, Value>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub profile: Option<String>,
+     #[serde(default)]
+     pub mode: RunMode,
+ }
+ 
+ /// `run.start_file` params: a run of one task file, with no board and no workflow (ts-0065-kx). The daemon runs the
+ /// built-in `collide/builder` role in a new worktree of `repo`, and the text of `task_file` is the first turn. It is
+ /// a call of its own, so `run.start`'s request (which `run.preview` shares) does not change.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunStartFileParams {
+     /// The checkout the worktree is made from: an absolute path.
+     pub repo: String,
+     /// The task file whose text is the phase's first turn: an absolute path.
+     pub task_file: String,
+     /// The model alias to run, as the user's `models.yaml` maps it. The role's default when absent.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub alias: Option<String>,
+     /// The phase's budget in US dollars, passed to the tool when it enforces one itself.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub budget_usd: Option<f64>,
+     /// Overrides the role's `config` for this run: `none` loads none of the user's settings.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub config: Option<RoleConfig>,
+ }
+ 
+ /// `run.preview` params: the same call as `run.start`, so the preview is what the start would do.
+ pub type RunPreviewParams = RunStartParams;
+ 
+ /// A reason a run was not started: one task's, or the launch's own when `task` is absent.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct LaunchProblem {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub task: Option<String>,
+     pub message: String,
+ }
+ 
+ /// `run.start` result: started, or refused with every problem (a task the workflow does not accept, a live run on
+ /// the task, an alias with no mapping).
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+ pub enum RunStartResult {
+     Started { run: String },
+     Refused { problems: Vec<LaunchProblem> },
+ }
+ 
+ /// One phase of the workflow, as the preview lists it.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct PreviewPhase {
+     pub name: String,
+     pub kind: PhaseKindWire,
+ }
+ 
+ /// One task of the preview: its status at the line's ref, and whether the workflow accepts it. `lacks` names the
+ /// field or operation a refused task lacks.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct PreviewTask {
+     pub key: String,
+     pub status: String,
+     pub accepted: bool,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub lacks: Option<String>,
+ }
+ 
+ /// Why a profile applies (0.11, Launch shows a run preview).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(rename_all = "snake_case")]
+ pub enum ProfileReason {
+     Picked,
+     View,
+     Rule,
+     BoardDefault,
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct PreviewProfile {
+     pub name: String,
+     pub reason: ProfileReason,
+ }
+ 
+ /// One resolved setting of the preview with its layer (0.7).
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct PreviewSetting {
+     pub key: String,
+     pub value: Value,
+     pub layer: crate::owner::SettingLayer,
+ }
+ 
+ /// A user hook or plugin a phase will load, with the flags on those that change behaviour (0.3).
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct PreviewHook {
+     pub phase: String,
+     pub name: String,
+     #[serde(default)]
+     pub flags: Vec<String>,
+ }
+ 
+ /// A badge of the preview (0.11).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(rename_all = "snake_case")]
+ pub enum PreviewBadge {
+     /// A pack loaded from a `dev:` folder.
+     DevPack,
+     /// A phase with `agentWork`.
+     AgentWork,
+ }
+ 
+ /// `run.preview` result: what 0.11 lists before anything starts. `implementations` maps `workspace` and `integrate`
+ /// to `builtin` or `pack/name`; a workflow with no `integrate` has no such key, so it cannot be accepted. The
+ /// expected duration is absent until three earlier runs of the workflow have timings, and the UI says "unknown".
+ /// `model_endpoint_host` is the host of a redirected model endpoint, and never a path, a query or a key (0.3).
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunPreviewResult {
+     pub line: String,
+     pub workflow: String,
+     pub phases: Vec<PreviewPhase>,
+     pub implementations: BTreeMap<String, String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub budget_usd: Option<f64>,
+     #[serde(default)]
+     pub launch: BTreeMap<String, Value>,
+     pub tasks: Vec<PreviewTask>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub profile: Option<PreviewProfile>,
+     #[serde(default)]
+     pub settings: Vec<PreviewSetting>,
+     #[serde(default)]
+     pub user_hooks: Vec<PreviewHook>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub model_endpoint_host: Option<String>,
+     #[serde(default)]
+     pub badges: Vec<PreviewBadge>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub expected_duration_secs: Option<u64>,
+ }
+ 
+ /// One task of a run, with its status when the run started.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunTaskRef {
+     pub key: String,
+     pub status: String,
+ }
+ 
+ /// Whether a take-over's terminal is open (0.11, Talking to an agent): closing the view detaches, and the session
+ /// goes on in its shim.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+ pub enum TakeOverState {
+     Attached {},
+     Detached {},
+ }
+ 
+ /// One instance of a phase: the only one of an `agent` phase, one for each model or instance of a `fanout`.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct InstanceSummary {
+     pub id: String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub model: Option<String>,
+     /// The agent session's id, once bound.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub session_id: Option<String>,
+     pub state: PhaseState,
+ }
+ 
+ /// One phase of a run, for a track's segment: its instances' states, its real times and its gate verdicts.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct PhaseSummary {
+     pub name: String,
+     pub kind: PhaseKindWire,
+     pub round: u32,
+     pub instances: Vec<InstanceSummary>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub started_ms: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub ended_ms: Option<u64>,
+     #[serde(default)]
+     pub gate_results: BTreeMap<String, HookStatus>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub take_over: Option<TakeOverState>,
+ }
+ 
+ /// What a run warning is about.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(rename_all = "snake_case")]
+ pub enum RunWarningKind {
+     /// The phase read an instruction file the run changed.
+     InstructionFilesChanged,
+ }
+ 
+ /// A warning on a run: a phase and the instruction files it started after the run changed.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunWarning {
+     pub kind: RunWarningKind,
+     pub phase: String,
+     pub files: Vec<String>,
+ }
+ 
+ /// A run for a track and for a list: the domain record's wire form (the record is plain Rust). Times are on the wall
+ /// clock; the spans and metrics of a run are Stage 9c's.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunSummary {
+     pub id: String,
+     pub tasks: Vec<RunTaskRef>,
+     pub line: String,
+     /// `pack/workflow`.
+     pub workflow: String,
+     pub state: RunState,
+     pub started_ms: u64,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub ended_ms: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub workspace: Option<String>,
++    /// The task file a run of a file (`collide run <file>`) was started from, as the daemon was given it. Absent for
++    /// every other run, and for a file run an older daemon recorded.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub task_file: Option<String>,
+     pub phases: Vec<PhaseSummary>,
+     /// What the run did that the person should look at, oldest first. Empty for most runs.
+     #[serde(default)]
+     pub warnings: Vec<RunWarning>,
+ }
+ 
+ /// Which runs `run.list` returns.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+ #[serde(rename_all = "lowercase")]
+ pub enum RunScope {
+     Live,
+     Finished,
+     #[default]
+     All,
+ }
+ 
+ /// `run.list` params: the runs for Tracks, and for an app that reattaches to the daemon's runs after it restarts.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunListParams {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub board: Option<String>,
+     #[serde(default)]
+     pub scope: RunScope,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub task: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub limit: Option<u32>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub cursor: Option<String>,
+ }
+ 
+ /// `run.list` result, newest first.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunListResult {
+     pub runs: Vec<RunSummary>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub next_cursor: Option<String>,
+ }
+ 
+ /// `run.get` params.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunGetParams {
+     pub run: String,
+ }
+ 
+ /// `run.get` result: the summary and what the run pinned at launch (0.8, Run). `implementations` maps `workspace` and
+ /// `integrate` to `builtin` or `pack/name`. `rounds` counts how often each phase was entered.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunGetResult {
+     pub summary: RunSummary,
+     pub snapshot_commit: String,
+     #[serde(default)]
+     pub launch: BTreeMap<String, Value>,
+     #[serde(default)]
+     pub implementations: BTreeMap<String, String>,
+     #[serde(default)]
+     pub rounds: BTreeMap<String, u32>,
+     #[serde(default)]
+     pub fingerprint: BTreeMap<String, Value>,
+     #[serde(default)]
+     pub annotations: Vec<String>,
+ }
+ 
+ /// `run.stop` params (`collide stop`): the stop of 0.5. `grace_secs` is the time between SIGTERM and SIGKILL; the
+ /// default is the daemon's.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunStopParams {
+     pub run: String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub grace_secs: Option<u32>,
+ }
+ 
+ /// A process still alive after the final rescan (0.5, Stopping). One its hook recorded is stopped by the cleanup
+ /// hook; one it did not record is listed here.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct Survivor {
+     pub pid: u32,
+     pub command: String,
+ }
+ 
+ /// `run.stop` result: the run's state after the stop, how many processes the first scan signalled, and the
+ /// survivors.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunStopResult {
+     pub state: RunState,
+     pub signalled: u32,
+     #[serde(default)]
+     pub survivors: Vec<Survivor>,
+ }
+ 
+ /// `run.record` params (`collide run`, ts-0069-bn).
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunRecordParams {
+     pub run: String,
+ }
+ 
+ /// One model call of a run's record, as `collide run` prints it. Each figure is absent when the agent did not report
+ /// it: 0.13's missing is not zero, so an absent `cost` is "not reported" and never `$0`. `scope` says what the line 
+~is: a
+ /// `turn`, a `compaction`, `other_calls`, or a `step` for a turn that was cut before its `result` (the tokens of the
+ /// responses it did get, which are `partial`: their output and cost are not known). `wall_ms` is Collide's own
+ /// measure of the turn it sent, and is absent for a line that is not a turn it sent. `model_ms` is the agent's
+ /// `duration_api_ms` as a difference of its running total.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RecordedCall {
+     pub scope: UsageScope,
+     pub quality: UsageQuality,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub wall_ms: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub model_ms: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub input: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub output: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub cache_read: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub cache_write: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub cost: Option<Money>,
+ }
+ 
+ /// `run.record` result: what `collide run` prints at the end, and what it shows when it reattaches. `state` is the
+ /// run's state as the daemon last recorded it. `failure` is why a phase failed when its session could say (`no_resul
+~t`,
+ /// `budget`, `disk`, `api_500`, ...). `failure_evidence` is the text that backs it when the session had some (the end
+ /// of an ACP agent's stderr for an `empty_turn`, an error response's code), at most 2 KiB and untrusted. `report` is
+ /// the final report. `calls` are the model calls in the order they were
+ /// recorded. `wall_ms` is the run's length (absent while it has none to give), and `workspace` the worktree.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunRecordResult {
+     pub run: String,
+     pub state: RunState,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub failure: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub failure_evidence: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub report: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub workspace: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub wall_ms: Option<u64>,
+     #[serde(default)]
+     pub calls: Vec<RecordedCall>,
+     /// The same warnings as the run's summary.
+     #[serde(default)]
+     pub warnings: Vec<RunWarning>,
+ }
+ 
+ /// `run.diff` params: a run's diff for Review (0.11, Drill-down). With `path`, that file's patch is in the result.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunDiffParams {
+     pub run: String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub path: Option<String>,
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(rename_all = "snake_case")]
+ pub enum DiffStatus {
+     Added,
+     Modified,
+     Deleted,
+     Renamed,
+ }
+ 
+ /// One changed file. The counts are absent for a binary file.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct DiffFile {
+     pub path: String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub old_path: Option<String>,
+     pub status: DiffStatus,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub additions: Option<u32>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub deletions: Option<u32>,
+ }
+ 
+ /// A folder the diff collapses (dependency stores and build output that `.gitignore` does not hide, 0.11): its file
+ /// count and size are shown instead of its files. Lock files are never collapsed.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct CollapsedFolder {
+     pub path: String,
+     pub files: u32,
+     pub bytes: u64,
+ }
+ 
+ /// One file's patch as text. It is untrusted (0.9). `truncated` says the text was cut, and `bytes` is the patch's
+ /// full size.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct FilePatch {
+     pub path: String,
+     pub text: String,
+     pub bytes: u64,
+     pub truncated: bool,
+ }
+ 
+ /// `run.diff` result, from `base` to `head`. `files` is capped, and `more` counts the files left out (the stored
+ /// list is capped with the rest counted, 0.11).
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunDiffResult {
+     pub base: String,
+     pub head: String,
+     pub files: Vec<DiffFile>,
+     #[serde(default)]
+     pub collapsed: Vec<CollapsedFolder>,
+     pub more: u32,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub patch: Option<FilePatch>,
+ }
+ 
+ /// One normalized event of an agent's stream, with its place in the phase's log and the time the shim saw it (from
+ /// the journal's `wall_ns`, so a replayed log gives the same time). `index` counts from 0 in the phase instance's log.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct OutputEntry {
+     pub index: u64,
+     pub wall_ms: u64,
+     pub event: AgentEvent,
+ }
+ 
+ /// `run.output` params: one page of a phase's normalized stream, for the Output pane (0.11, Agent output). `from` is
+ /// the first `index`, or the start. `instance` picks one of a fan-out's instances, and is left out for a phase with
+ /// one.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunOutputParams {
+     pub run: String,
+     pub phase: String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub instance: Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub from: Option<u64>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub limit: Option<u32>,
+ }
+ 
+ /// `run.output` result. `next` is the `index` to ask for after this page, absent when the page reached the end of
+ /// the log so far. New entries after that come as `run.output` notifications.
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunOutputResult {
+     pub entries: Vec<OutputEntry>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub next: Option<u64>,
+ }
+ 
+ /// The params of the `run.output` notification: one new entry of a phase's stream, sent to a connection that has
+ /// subscribed to events (`daemon.subscribe`).
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunOutputNotice {
+     pub run: String,
+     pub phase: String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub instance: Option<String>,
+     pub entry: OutputEntry,
+ }
+ 
+ /// `run.intervene` params: send a note to a running phase (0.11, Talking to an agent is the exception). The note is
+ /// the person's words and goes to the agent as a message.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunIntervenParams {
+     pub run: String,
+     pub phase: String,
+     pub note: String,
+ }
+ 
+ /// `run.take_over` params: open the phase's session in a terminal through the owner's PTY, or attach again to one
+ /// that was detached. `cols` and `rows` are the terminal's size.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunTakeOverParams {
+     pub run: String,
+     pub phase: String,
+     pub cols: u16,
+     pub rows: u16,
+ }
+ 
+ /// `run.take_over` result. `replay` is the last 1 MiB of the terminal's output as base64, and the daemon sends it
+ /// atomically with the attach (0.2): `run.terminal_output` notifications for `terminal` follow it with no gap and no
+ /// repeat. Terminal bytes are not always UTF-8, so every byte string of this protocol is base64.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunTakeOverResult {
+     pub terminal: String,
+     pub session_id: String,
+     pub replay: String,
+ }
+ 
+ /// `run.terminal_input` params: keys for the terminal, as base64.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunTerminalInputParams {
+     pub terminal: String,
+     pub data: String,
+ }
+ 
+ /// `run.terminal_resize` params.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunTerminalResizeParams {
+     pub terminal: String,
+     pub cols: u16,
+     pub rows: u16,
+ }
+ 
+ /// `run.detach` params: close the terminal's view. The session goes on in its shim (0.11).
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunDetachParams {
+     pub terminal: String,
+ }
+ 
+ /// `run.end_take_over` params: End take-over. The phase's gates then run as usual (0.11).
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunEndTakeOverParams {
+     pub run: String,
+     pub phase: String,
+ }
+ 
+ /// The params of the `run.terminal_output` notification: bytes the take-over's terminal wrote, as base64.
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+ #[serde(deny_unknown_fields)]
+ pub struct RunTerminalOutput {
+     pub terminal: String,
+     pub data: String,
+ }
+### FILE host/src/run_store.rs
+ //! The runs in the store (ts-0076-cw; 0.8, Run; Stage 3c). The tables are migration 6 of the store
+ //! ([`crate::store::MIGRATIONS`]); this file is the writes and reads on them.
+ //!
+ //! - **`runs` has one row for each run: its board, line and workflow, its latest state and its times.** The row is
+ //!   written by [`Store::append_event`] in the same transaction as the `run.transition` event ([`note_transition`]),
+~ so
+ //!   the two never disagree, and a run that has an event has a row. `run.list`, `run.get` and the run-state read
+ //!   ([`Store::run_state`]) read it, so none scans the event log.
+ //! - **The board and the tasks are not in the event.** `run.start` links them with [`Store::set_run_launch`] once the
+ //!   run has its first event. A run started by `run.start_file` has no board, no tasks, and no line or workflow, which
+-//!   read as empty text.
++//!   read as empty text. It has its task file, which [`Store::set_run_task_file`] keeps (migration 11).
+ //! - **`run_tasks` holds a run's task keys in the order they were given**, each with its status when the run started,
+ //!   so a read by task is an index lookup.
+ //! - **Newest first** is `opened_seq` descending: the `seq` of the run's first event, which is also the cursor of a
+ //!   page.
+ //!
+ //! A run's state is final when it is `ended`, `failed` or `stopped`; it is live otherwise, which includes
+ //! `integrating`.
+ 
+ use crate::store::{Store, StoreError, sql_error};
+ use collide_core::owner::{RunScope, RunTaskRef};
+ use collide_core::state::RunState;
+ use rusqlite::types::Value;
+ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, params_from_iter};
+ use std::io;
+ 
+ /// What `run.start` knows about a run that its `run.transition` event does not say.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct RunLaunch {
+     /// The board's name, or `None` for a run that has no board.
+     pub board: Option<String>,
+     pub tasks: Vec<RunTaskRef>,
+     pub line: String,
+     /// `pack/workflow`.
+     pub workflow: String,
+ }
+ 
+ /// One run as the store holds it.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct RunRow {
+     pub run: String,
+     pub board: Option<String>,
+     pub line: String,
+     pub workflow: String,
+     pub state: RunState,
+     /// The `seq` of the run's first event.
+     pub opened_seq: u64,
+     pub started_ms: u64,
+     /// When the run reached a final state, or `None` while it has not.
+     pub ended_ms: Option<u64>,
+     pub tasks: Vec<RunTaskRef>,
++    /// The task file of a run of a file, or `None`.
++    pub task_file: Option<String>,
+ }
+ 
+ /// Which runs [`Store::runs`] reads: all that match every part that is given.
+ #[derive(Debug, Clone, Copy)]
+ pub struct RunFilter<'a> {
+     pub board: Option<&'a str>,
+     pub task: Option<&'a str>,
+     pub scope: RunScope,
+     /// Only the runs opened before this `seq`: the cursor of the page before.
+     pub before: Option<u64>,
+     pub limit: u32,
+ }
+ 
+ /// Whether the run is still going: not `ended`, `failed` or `stopped`.
+ pub fn is_live(state: &RunState) -> bool {
+     !matches!(
+         state,
+         RunState::Ended { .. } | RunState::Failed {} | RunState::Stopped {}
+     )
+ }
+ 
+ fn unreadable(run: &str, error: serde_json::Error) -> StoreError {
+     StoreError::Io {
+         context: format!("reading the state of run {run}"),
+         source: io::Error::new(io::ErrorKind::InvalidData, error),
+     }
+ }
+ 
+ fn to_i64(number: u64) -> i64 {
+     i64::try_from(number).unwrap_or(i64::MAX)
+ }
+ 
+ /// Writes the row of the run an event moved to `to`: made at its first event, and moved to the new state at each one
+ /// after. The caller is inside the transaction that wrote the event.
+ pub(crate) fn note_transition(
+     conn: &Connection,
+     seq: u64,
+     wall_ms: u64,
+     run: &str,
+     to: &RunState,
+ ) -> Result<(), StoreError> {
+     let state = serde_json::to_string(to).map_err(|error| unreadable(run, error))?;
+     let live = is_live(to);
+     let ended_ms = (!live).then(|| to_i64(wall_ms));
+     conn.execute(
+         "INSERT INTO runs (run, state, live, opened_seq, started_ms, ended_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+          ON CONFLICT (run) DO UPDATE SET state = excluded.state, live = excluded.live, ended_ms = excluded.ended_ms",
+         params![run, state, live, to_i64(seq), to_i64(wall_ms), ended_ms],
+     )
+     .map_err(|e| sql_error("writing a run", e))?;
+     Ok(())
+ }
+ 
+-const COLUMNS: &str = "run, board, line, workflow, state, opened_seq, started_ms, ended_ms";
++const COLUMNS: &str =
++    "run, board, line, workflow, state, opened_seq, started_ms, ended_ms, task_file";
+ 
+ /// A row of [`COLUMNS`], with no tasks yet.
+ fn row_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<(RunRow, String)> {
+     let run: String = row.get(0)?;
+     let state: String = row.get(4)?;
+     Ok((
+         RunRow {
+             run,
+             board: row.get(1)?,
+             line: row.get(2)?,
+             workflow: row.get(3)?,
+             state: RunState::Running {},
+             opened_seq: row.get::<_, i64>(5)? as u64,
+             started_ms: row.get::<_, i64>(6)? as u64,
+             ended_ms: row.get::<_, Option<i64>>(7)?.map(|ms| ms as u64),
+             tasks: Vec::new(),
++            task_file: row.get(8)?,
+         },
+         state,
+     ))
+ }
+ 
+ impl Store {
+     /// The run's latest state, from its row. `None` for a run that has no `run.transition` event.
+     pub fn run_state(&self, run: &str) -> Result<Option<RunState>, StoreError> {
+         let state: Option<String> = self
+             .connect()?
+             .query_row("SELECT state FROM runs WHERE run = ?1", [run], |row| {
+                 row.get(0)
+             })
+             .optional()
+             .map_err(|e| sql_error("reading a run's state", e))?;
+         state
+             .map(|text| serde_json::from_str(&text).map_err(|error| unreadable(run, error)))
+             .transpose()
+     }
+ 
+     /// Links a run to its board, tasks, line and workflow, replacing what it had. `false` when the run has no row yet,
+     /// which is a run with no `run.transition` event: nothing is written.
+     pub fn set_run_launch(&self, run: &str, launch: &RunLaunch) -> Result<bool, StoreError> {
+         let context = "linking a run";
+         let mut conn = self.connect()?;
+         let tx = conn
+             .transaction_with_behavior(TransactionBehavior::Immediate)
+             .map_err(|e| sql_error(context, e))?;
+         let changed = tx
+             .execute(
+                 "UPDATE runs SET board = ?2, line = ?3, workflow = ?4 WHERE run = ?1",
+                 params![run, launch.board, launch.line, launch.workflow],
+             )
+             .map_err(|e| sql_error(context, e))?;
+         if changed == 0 {
+             return Ok(false);
+         }
+         tx.execute("DELETE FROM run_tasks WHERE run = ?1", [run])
+             .map_err(|e| sql_error(context, e))?;
+         for (order, task) in launch.tasks.iter().enumerate() {
+             tx.execute(
+                 "INSERT INTO run_tasks (run, ord, task, status) VALUES (?1, ?2, ?3, ?4)",
+                 params![run, to_i64(order as u64), task.key, task.status],
+             )
+             .map_err(|e| sql_error(context, e))?;
+         }
+         tx.commit().map_err(|e| sql_error(context, e))?;
+         Ok(true)
+     }
+ 
++    /// Keeps the task file a run of a file was started from. `false` when the run has no row yet.
++    pub fn set_run_task_file(&self, run: &str, task_file: &str) -> Result<bool, StoreError> {
++        let changed = self
++            .connect()?
++            .execute(
++                "UPDATE runs SET task_file = ?2 WHERE run = ?1",
++                params![run, task_file],
++            )
++            .map_err(|e| sql_error("writing a run's task file", e))?;
++        Ok(changed > 0)
++    }
++
+     /// One run, or `None` for a run the store has no row of.
+     pub fn run(&self, run: &str) -> Result<Option<RunRow>, StoreError> {
+         let conn = self.connect()?;
+         let found = conn
+             .query_row(
+                 &format!("SELECT {COLUMNS} FROM runs WHERE run = ?1"),
+                 [run],
+                 row_of,
+             )
+             .optional()
+             .map_err(|e| sql_error("reading a run", e))?;
+         found.map(|row| finish(&conn, row)).transpose()
+     }
+ 
+     /// The runs that match `filter`, newest first.
+     pub fn runs(&self, filter: &RunFilter<'_>) -> Result<Vec<RunRow>, StoreError> {
+         let mut clauses: Vec<&str> = Vec::new();
+         let mut values: Vec<Value> = Vec::new();
+         if let Some(board) = filter.board {
+             clauses.push("board = ?");
+             values.push(Value::Text(board.to_string()));
+         }
+         if let Some(task) = filter.task {
+             clauses.push("run IN (SELECT run FROM run_tasks WHERE task = ?)");
+             values.push(Value::Text(task.to_string()));
+         }
+         match filter.scope {
+             RunScope::Live => clauses.push("live = 1"),
+             RunScope::Finished => clauses.push("live = 0"),
+             RunScope::All => {}
+         }
+         if let Some(before) = filter.before {
+             clauses.push("opened_seq < ?");
+             values.push(Value::Integer(to_i64(before)));
+         }
+         values.push(Value::Integer(i64::from(filter.limit)));
+         let condition = if clauses.is_empty() {
+             String::new()
+         } else {
+             format!("WHERE {}", clauses.join(" AND "))
+         };
+         let context = "reading the runs";
+         let conn = self.connect()?;
+         let mut statement = conn
+             .prepare(&format!(
+                 "SELECT {COLUMNS} FROM runs {condition} ORDER BY opened_seq DESC LIMIT ?"
+             ))
+             .map_err(|e| sql_error(context, e))?;
+         let rows = statement
+             .query_map(params_from_iter(values), row_of)
+             .map_err(|e| sql_error(context, e))?
+             .collect::<Result<Vec<_>, _>>()
+             .map_err(|e| sql_error(context, e))?;
+         rows.into_iter().map(|row| finish(&conn, row)).collect()
+     }
+ }
+ 
+ /// The row with its state read and its tasks.
+ fn finish(conn: &Connection, (mut row, state): (RunRow, String)) -> Result<RunRow, StoreError> {
+     row.state = serde_json::from_str(&state).map_err(|error| unreadable(&row.run, error))?;
+     let context = "reading a run's tasks";
+     let mut statement = conn
+         .prepare("SELECT task, status FROM run_tasks WHERE run = ?1 ORDER BY ord")
+         .map_err(|e| sql_error(context, e))?;
+     row.tasks = statement
+         .query_map([&row.run], |task| {
+             Ok(RunTaskRef {
+                 key: task.get(0)?,
+                 status: task.get(1)?,
+             })
+         })
+         .map_err(|e| sql_error(context, e))?
+         .collect::<Result<Vec<_>, _>>()
+         .map_err(|e| sql_error(context, e))?;
+     Ok(row)
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use collide_core::change::{Actor, ActorKind};
+     use collide_core::events::{Event, EventBody};
+     use collide_core::non_empty::NonEmpty;
+     use collide_core::state::PauseCause;
+     use std::fs;
+     use std::path::PathBuf;
+     use std::sync::atomic::{AtomicU32, Ordering};
+ 
+     static COUNTER: AtomicU32 = AtomicU32::new(0);
+ 
+     /// A folder made for one test; `Drop` removes the files in it by their own paths and then the folder.
+     struct TempDir(PathBuf);
+ 
+     impl TempDir {
+         fn new() -> TempDir {
+             let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+             let dir =
+                 std::env::temp_dir().join(format!("collide-run-store-{}-{n}", std::process::id()));
+             fs::create_dir_all(&dir).unwrap();
+             TempDir(dir)
+         }
+     }
+ 
+     impl Drop for TempDir {
+         fn drop(&mut self) {
+             if let Ok(entries) = fs::read_dir(&self.0) {
+                 for entry in entries.flatten() {
+                     let _ = fs::remove_file(entry.path());
+                 }
+             }
+             let _ = fs::remove_dir(&self.0);
+         }
+     }
+ 
+     fn ended() -> RunState {
+         RunState::Ended {
+             outcome: NonEmpty::new("done").unwrap(),
+         }
+     }
+ 
+     fn transition(store: &Store, run: &str, to: RunState) {
+         let seq = store.last_seq().unwrap() + 1;
+         store
+             .append_event(&Event {
+                 seq,
+                 wall_ms: 100 * seq,
+                 actor: Actor {
+                     kind: ActorKind::Workflow,
+                     run: None,
+                     phase: None,
+                 },
+                 experiment: None,
+                 body: EventBody::RunTransition {
+                     run: run.to_string(),
+                     from: None,
+                     to,
+                 },
+             })
+             .unwrap();
+     }
+ 
+     fn launch(board: Option<&str>, tasks: &[&str]) -> RunLaunch {
+         RunLaunch {
+             board: board.map(str::to_string),
+             tasks: tasks
+                 .iter()
+                 .map(|key| RunTaskRef {
+                     key: key.to_string(),
+                     status: "status-a".to_string(),
+                 })
+                 .collect(),
+             line: "main".to_string(),
+             workflow: "collide/quick".to_string(),
+         }
+     }
+ 
+     fn filter(scope: RunScope) -> RunFilter<'static> {
+         RunFilter {
+             board: None,
+             task: None,
+             scope,
+             before: None,
+             limit: 100,
+         }
+     }
+ 
+     fn names(rows: &[RunRow]) -> Vec<&str> {
+         rows.iter().map(|row| row.run.as_str()).collect()
+     }
+ 
+     #[test]
+     fn a_run_is_live_unless_it_ended_failed_or_was_stopped() {
+         assert!(is_live(&RunState::Running {}));
+         assert!(is_live(&RunState::Integrating {}));
+         assert!(is_live(&RunState::Paused {
+             cause: PauseCause::UsageLimit
+         }));
+         assert!(!is_live(&ended()));
+         assert!(!is_live(&RunState::Failed {}));
+         assert!(!is_live(&RunState::Stopped {}));
+     }
+ 
+     #[test]
+     fn linking_a_run_that_has_no_row_writes_nothing_and_says_so() {
+         let dir = TempDir::new();
+         let store = Store::open(&dir.0).unwrap();
+         assert!(
+             !store
+                 .set_run_launch("ghost", &launch(None, &["t:1"]))
+                 .unwrap()
+         );
+         assert_eq!(store.run("ghost").unwrap(), None);
+         assert!(store.runs(&filter(RunScope::All)).unwrap().is_empty());
+     }
+ 
+     #[test]
+     fn linking_again_replaces_the_board_and_the_tasks() {
+         let dir = TempDir::new();
+         let store = Store::open(&dir.0).unwrap();
+         transition(&store, "a", RunState::Running {});
+         assert!(
+             store
+                 .set_run_launch("a", &launch(Some("board-1"), &["t:1", "t:2"]))
+                 .unwrap()
+         );
+         assert!(
+             store
+                 .set_run_launch("a", &launch(Some("board-2"), &["t:3"]))
+                 .unwrap()
+         );
+         let row = store.run("a").unwrap().unwrap();
+         assert_eq!(row.board.as_deref(), Some("board-2"));
+         let keys: Vec<&str> = row.tasks.iter().map(|t| t.key.as_str()).collect();
+         assert_eq!(keys, ["t:3"]);
+     }
+ 
+     #[test]
+     fn a_later_transition_keeps_the_link_and_the_first_time_and_sets_the_end() {
+         let dir = TempDir::new();
+         let store = Store::open(&dir.0).unwrap();
+         transition(&store, "a", RunState::Running {});
+         store
+             .set_run_launch("a", &launch(Some("board-1"), &["t:1"]))
+             .unwrap();
+         transition(&store, "a", ended());
+         let row = store.run("a").unwrap().unwrap();
+         assert_eq!((row.started_ms, row.ended_ms), (100, Some(200)));
+         assert_eq!(
+             (row.board.as_deref(), row.tasks.len()),
+             (Some("board-1"), 1)
+         );
+         assert_eq!(row.state, ended());
+     }
+ 
++    #[test]
++    fn a_runs_task_file_is_kept_through_its_end_and_a_run_without_one_has_none() {
++        let dir = TempDir::new();
++        let store = Store::open(&dir.0).unwrap();
++        transition(&store, "a", RunState::Running {});
++        transition(&store, "b", RunState::Running {});
++        assert!(
++            store
++                .set_run_task_file("a", "/work/notes/probe.md")
++                .unwrap()
++        );
++        transition(&store, "a", ended());
++        let a = store.run("a").unwrap().unwrap();
++        assert_eq!(a.task_file.as_deref(), Some("/work/notes/probe.md"));
++        assert_eq!(store.run("b").unwrap().unwrap().task_file, None);
++    }
++
++    #[test]
++    fn a_task_file_for_a_run_that_has_no_row_writes_nothing_and_says_so() {
++        let dir = TempDir::new();
++        let store = Store::open(&dir.0).unwrap();
++        assert!(!store.set_run_task_file("ghost", "/work/probe.md").unwrap());
++        assert_eq!(store.run("ghost").unwrap(), None);
++    }
++
+     #[test]
+     fn a_run_that_resumes_after_it_ended_is_live_again_with_no_end() {
+         let dir = TempDir::new();
+         let store = Store::open(&dir.0).unwrap();
+         transition(&store, "a", RunState::Running {});
+         transition(&store, "a", RunState::Stopped {});
+         transition(&store, "a", RunState::Running {});
+         let row = store.run("a").unwrap().unwrap();
+         assert_eq!(row.ended_ms, None);
+         assert_eq!(names(&store.runs(&filter(RunScope::Live)).unwrap()), ["a"]);
+     }
+ 
+     #[test]
+     fn runs_come_newest_first_and_before_and_limit_cut_a_page() {
+         let dir = TempDir::new();
+         let store = Store::open(&dir.0).unwrap();
+         for run in ["a", "b", "c", "d"] {
+             transition(&store, run, RunState::Running {});
+         }
+         let all = store.runs(&filter(RunScope::All)).unwrap();
+         assert_eq!(names(&all), ["d", "c", "b", "a"]);
+         let page = store
+             .runs(&RunFilter {
+                 before: Some(all[1].opened_seq),
+                 limit: 1,
+                 ..filter(RunScope::All)
+             })
+             .unwrap();
+         assert_eq!(names(&page), ["b"]);
+     }
+ 
+     #[test]
+     fn board_task_and_scope_each_narrow_the_runs() {
+         let dir = TempDir::new();
+         let store = Store::open(&dir.0).unwrap();
+         transition(&store, "a", RunState::Running {});
+         store
+             .set_run_launch("a", &launch(Some("board-1"), &["t:1"]))
+             .unwrap();
+         transition(&store, "b", RunState::Running {});
+         store
+             .set_run_launch("b", &launch(Some("board-2"), &["t:1", "t:2"]))
+             .unwrap();
+         transition(&store, "b", RunState::Failed {});
+         let by = |board, task, scope| {
+             let rows = store
+                 .runs(&RunFilter {
+                     board,
+                     task,
+                     ..filter(scope)
+                 })
+                 .unwrap();
+             rows.into_iter().map(|row| row.run).collect::<Vec<_>>()
+         };
+         assert_eq!(by(Some("board-1"), None, RunScope::All), ["a"]);
+         assert_eq!(by(None, Some("t:1"), RunScope::All), ["b", "a"]);
+         assert_eq!(by(None, Some("t:2"), RunScope::All), ["b"]);
+         assert_eq!(
+             by(Some("board-1"), Some("t:2"), RunScope::All),
+             Vec::<String>::new()
+         );
+         assert_eq!(by(None, None, RunScope::Live), ["a"]);
+         assert_eq!(by(None, None, RunScope::Finished), ["b"]);
+     }
+ }
+### FILE host/src/run_summary.rs
+ //! A run as `run.list` and `run.get` give it (ts-0076-cw; 0.8, Run): the run's row in the store ([`crate::run_store`
+~]),
+ //! its phases and the times of their spans ([`crate::metrics_store`]), and its workspace folder. The function here is
+ //! plain: the daemon reads the parts and this puts them together, so a test hands it the parts.
+ //!
+ //! - **A run's state is its row's**, not the phases': the row is what the run's own `run.transition` events said, and
+ //!   it is the same after a restart.
+ //! - **A phase is `agent`, with one instance.** Every phase the daemon has run is an agent phase: the other kinds come
+ //!   with the workflow engine. The instance is named for the phase, and has no model or session id here.
+ //! - **A phase's times are its spans'**: it started when its first span opened, and ended when its last one closed. A
+ //!   phase whose last span is open has no end. A phase entered again has a span for each round, so its round is the
+ //!   number of its spans (at least one).
+ //! - **The text of a task's status is not read.** The status is carried as it was given.
+ 
+ use crate::metrics_store::{Span, SpanKind};
+ use crate::run_store::RunRow;
+ use collide_core::owner::{InstanceSummary, PhaseKindWire, PhaseSummary, RunSummary};
+ use collide_core::state::PhaseState;
+ use std::collections::BTreeMap;
+ 
+ /// The summary of the run, and how often each of its phases was entered.
+ pub fn summarize(
+     row: &RunRow,
+     phases: &[(String, PhaseState)],
+     spans: &[Span],
+     workspace: Option<String>,
+ ) -> (RunSummary, BTreeMap<String, u32>) {
+     let mut rounds = BTreeMap::new();
+     let mut summaries: Vec<PhaseSummary> = phases
+         .iter()
+         .map(|(name, state)| {
+             let own: Vec<&Span> = spans
+                 .iter()
+                 .filter(|span| span.kind == SpanKind::Phase && span.phase.as_deref() == Some(name))
+                 .collect();
+             let round = u32::try_from(own.len()).unwrap_or(u32::MAX).max(1);
+             rounds.insert(name.clone(), round);
+             PhaseSummary {
+                 name: name.clone(),
+                 kind: PhaseKindWire::Agent,
+                 round,
+                 instances: vec![InstanceSummary {
+                     id: name.clone(),
+                     model: None,
+                     session_id: None,
+                     state: state.clone(),
+                 }],
+                 started_ms: own.first().map(|span| wall_ms(span.started_wall_ms)),
+                 ended_ms: own.last().and_then(|span| span.ended_wall_ms).map(wall_ms),
+                 gate_results: BTreeMap::new(),
+                 take_over: None,
+             }
+         })
+         .collect();
+     summaries.sort_by(|a, b| (a.started_ms, &a.name).cmp(&(b.started_ms, &b.name)));
+     let summary = RunSummary {
+         id: row.run.clone(),
+         tasks: row.tasks.clone(),
+         line: row.line.clone(),
+         workflow: row.workflow.clone(),
+         state: row.state.clone(),
+         started_ms: row.started_ms,
+         ended_ms: row.ended_ms,
+         workspace,
++        task_file: row.task_file.clone(),
+         phases: summaries,
+         warnings: Vec::new(),
+     };
+     (summary, rounds)
+ }
+ 
+ fn wall_ms(ms: i64) -> u64 {
+     u64::try_from(ms).unwrap_or(0)
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use collide_core::owner::RunTaskRef;
+     use collide_core::state::RunState;
+ 
+     fn row() -> RunRow {
+         RunRow {
+             run: "run-1".to_string(),
+             board: Some("board-1".to_string()),
+             line: "main".to_string(),
+             workflow: "collide/quick".to_string(),
+             state: RunState::Running {},
+             opened_seq: 4,
+             started_ms: 1000,
+             ended_ms: None,
+             tasks: vec![RunTaskRef {
+                 key: "scratch:1".to_string(),
+                 status: "status-a".to_string(),
+             }],
++            task_file: None,
+         }
+     }
+ 
+     fn phase_span(phase: &str, started: i64, ended: Option<i64>) -> Span {
+         Span {
+             id: started,
+             run: "run-1".to_string(),
+             phase: Some(phase.to_string()),
+             parent: None,
+             kind: SpanKind::Phase,
+             wait: None,
+             item: None,
+             started_wall_ms: started,
+             started_ns: 0,
+             ended_wall_ms: ended,
+             ended_ns: ended.map(|_| 1),
+             outcome: None,
+         }
+     }
+ 
+     #[test]
+     fn the_row_gives_the_run_and_a_phase_gives_one_agent_instance_with_its_spans_times() {
+         let phases = [("work".to_string(), PhaseState::Ended {})];
+         let spans = [phase_span("work", 1100, Some(1900))];
+         let (summary, rounds) = summarize(&row(), &phases, &spans, Some("/w/run-1".to_string()));
+         assert_eq!(summary.id, "run-1");
+         assert_eq!(summary.workspace.as_deref(), Some("/w/run-1"));
+         assert_eq!((summary.line.as_str(), summary.tasks.len()), ("main", 1));
+         let phase = &summary.phases[0];
+         assert_eq!(phase.kind, PhaseKindWire::Agent);
+         assert_eq!((phase.started_ms, phase.ended_ms), (Some(1100), Some(1900)));
+         assert_eq!(phase.instances.len(), 1);
+         assert_eq!(phase.instances[0].state, PhaseState::Ended {});
+         assert_eq!(rounds["work"], 1);
+     }
+ 
+     #[test]
+     fn a_phase_entered_twice_is_round_two_and_ends_with_its_last_span() {
+         let phases = [("work".to_string(), PhaseState::Running {})];
+         let spans = [
+             phase_span("work", 1100, Some(1200)),
+             phase_span("work", 1300, None),
+         ];
+         let (summary, rounds) = summarize(&row(), &phases, &spans, None);
+         let phase = &summary.phases[0];
+         assert_eq!(
+             (phase.round, phase.started_ms, phase.ended_ms),
+             (2, Some(1100), None)
+         );
+         assert_eq!(rounds["work"], 2);
+     }
+ 
+     #[test]
+     fn a_phase_with_no_span_has_no_times_and_is_round_one() {
+         let phases = [("work".to_string(), PhaseState::Pending {})];
+         let (summary, _) = summarize(&row(), &phases, &[], None);
+         let phase = &summary.phases[0];
+         assert_eq!(
+             (phase.round, phase.started_ms, phase.ended_ms),
+             (1, None, None)
+         );
+     }
+ 
+     #[test]
+     fn phases_are_in_the_order_they_started() {
+         let phases = [
+             ("a".to_string(), PhaseState::Ended {}),
+             ("b".to_string(), PhaseState::Ended {}),
+         ];
+         let spans = [
+             phase_span("b", 1100, Some(1200)),
+             phase_span("a", 1300, Some(1400)),
+         ];
+         let (summary, _) = summarize(&row(), &phases, &spans, None);
+         let names: Vec<&str> = summary.phases.iter().map(|p| p.name.as_str()).collect();
+         assert_eq!(names, ["b", "a"]);
+     }
+ 
+     #[test]
+     fn a_run_with_no_phases_has_none() {
+         let (summary, rounds) = summarize(&row(), &[], &[], None);
+         assert!(summary.phases.is_empty() && rounds.is_empty());
+     }
+ }
+</script>
 <script>
 'use strict';
 /* ---------- helpers ---------- */
@@ -699,6 +2212,8 @@ const svg = {
     + '1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 '
     + '1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   moon: '<svg class="ic" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>',
+  chat: '<svg class="ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'
+    + '</svg>',
   ok: '<svg class="ic" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
   no: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
   dash: '<svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
@@ -1294,53 +2809,68 @@ const CHANGES = {
 
 // Tracks preview (Stage 9b). Made-up runs; the tool names are generic.
 const RUNS = [
-  { id: 'r121', label: 'Run R-121', task: 'ts-0178-fw', live: true, when: 'Today 09:20', phases: [
+  { id: 'r121', label: 'Run R-121', task: 'ts-0178-fw', live: true, when: 'Today 09:20', start: '09:20:00', phases: [
     { name: 'Plan', state: 'done', mins: 3 }, { name: 'Build', state: 'run', mins: 17 },
     { name: 'Review', state: 'wait', mins: 6 }] },
-  { id: 'r119', label: 'Run R-119', task: 'ts-0160-th', live: false, when: 'Yesterday 15:02', phases: [
-    { name: 'Plan', state: 'done', mins: 4 }, { name: 'Build', state: 'done', mins: 31 },
-    { name: 'Review', state: 'done', mins: 9 }] },
+  { id: 'r119', label: 'Run R-119', task: 'ts-0160-th', live: false, when: 'Yesterday 15:02', start: '15:02:00',
+    phases: [{ name: 'Plan', state: 'done', mins: 4 }, { name: 'Build', state: 'done', mins: 31 },
+      { name: 'Review', state: 'done', mins: 9 }] },
 ];
+// Tool time per run and phase: calls, total seconds, the slowest call. Model time has turns, not calls.
+const tt = (tool, what, calls, secs, slow, opt) => ({ tool, what, calls, secs, slow, opt });
 const TOOLTIME = {
-  r121: [
-    { tool: 'Bash', what: 'cargo test -p collide-host', calls: 6, secs: 468, slow: 121, opt: 'cargo' },
-    { tool: 'Model', what: 'thinking and writing', calls: 0, secs: 250, slow: 38 },
-    { tool: 'Bash', what: 'pnpm exec vitest run', calls: 3, secs: 112, slow: 51, opt: 'vitest' },
-    { tool: 'Bash', what: 'cargo build', calls: 2, secs: 80, slow: 62, opt: 'cargo' },
-    { tool: 'Read', what: '41 files', calls: 41, secs: 38, slow: 3 },
-    { tool: 'Edit', what: '9 files', calls: 17, secs: 21, slow: 2 },
-    { tool: 'Grep', what: 'searches', calls: 12, secs: 9, slow: 1 },
-  ],
-  r119: [
-    { tool: 'Bash', what: 'cargo test -p collide-host', calls: 11, secs: 1010, slow: 140, opt: 'cargo' },
-    { tool: 'Model', what: 'thinking and writing', calls: 0, secs: 520, slow: 61 },
-    { tool: 'Bash', what: 'pnpm exec vitest run', calls: 5, secs: 190, slow: 48, opt: 'vitest' },
-    { tool: 'Read', what: '63 files', calls: 63, secs: 52, slow: 4 },
-    { tool: 'Edit', what: '14 files', calls: 29, secs: 33, slow: 2 },
-  ],
+  r121: {
+    Plan: [tt('Model', 'thinking and writing', 0, 110, 30), tt('Read', 'files read', 22, 25, 3),
+      tt('Grep', 'searches', 8, 6, 1), tt('Bash', 'git log', 2, 3, 2)],
+    Build: [tt('Bash', 'cargo test -p collide-host', 6, 468, 121, 'cargo'),
+      tt('Model', 'thinking and writing', 0, 250, 38), tt('Bash', 'pnpm exec vitest run', 3, 112, 51, 'vitest'),
+      tt('Bash', 'cargo build', 2, 80, 62), tt('Read', 'files read', 41, 38, 3), tt('Edit', 'files edited', 17, 21, 2),
+      tt('Grep', 'searches', 12, 9, 1)],
+    Review: [],
+  },
+  r119: {
+    Plan: [tt('Model', 'thinking and writing', 0, 150, 40), tt('Read', 'files read', 18, 31, 3),
+      tt('Grep', 'searches', 9, 7, 1)],
+    Build: [tt('Bash', 'cargo test -p collide-host', 11, 1010, 140, 'cargo'),
+      tt('Model', 'thinking and writing', 0, 520, 61), tt('Bash', 'pnpm exec vitest run', 5, 190, 48, 'vitest'),
+      tt('Read', 'files read', 63, 52, 4), tt('Edit', 'files edited', 29, 33, 2)],
+    Review: [tt('Model', 'thinking and writing', 0, 180, 45),
+      tt('Bash', 'cargo test -p collide-host', 2, 190, 98, 'cargo'),
+      tt('Bash', 'pnpm exec vitest run', 1, 38, 38, 'vitest'), tt('Read', 'files read', 22, 20, 2),
+      tt('Bash', 'git diff', 3, 4, 2)],
+  },
 };
-// Optimize: a canned research result per kind of step.
+// Optimize: a canned research result per kind of step, and a canned bake-off. A bake-off row is
+// [median seconds, the tests, tone, verdict, detail]; the base row is today's way.
 const OPTIMIZE = {
-  cargo: { step: 'cargo test -p collide-host', facts: '6 calls in this phase, 7 m 48 s; 11 calls in R-119, 16 m 50 s. '
-    + 'About 80 s a call, of which about 25 s is the build.', options: [
-    { title: 'Run only the test files the change touches', how: 'In Build, run `cargo test -p collide-host --test '
-      + '<name>` for the areas the diff touches, and keep the full run for Review.', saves: 'about 5 min a phase',
-      effort: 'Small: one line in the workflow', risk: 'A test outside those areas fails later, in Review.' },
-    { title: 'Run the suite with cargo-nextest', how: 'Each test runs in its own process, in parallel across test '
-      + 'binaries.', saves: 'about 2 to 3 min a phase', effort: 'Medium: a new dev tool on each machine',
-      risk: 'Tests that share a temp folder by mistake start to fail. Worth finding anyway.',
-      src: 'https://nexte.st/' },
-    { title: 'Stop rebuilding between calls', how: '2 of the 6 calls rebuilt most of the workspace after an edit to '
-      + '`core`. A shared compile cache cuts that.', saves: 'about 1 min a phase', effort: 'Medium',
-      risk: 'Low. A cache that goes stale is cleared by hand.', src: 'https://github.com/mozilla/sccache' }],
+  cargo: { step: 'cargo test -p collide-host', extra: 'About 80 s a call, of which about 25 s is the build.',
+    options: [
+      { title: 'Run only the test files the change touches', how: 'In Build, run `cargo test -p collide-host --test '
+        + '<name>` for the areas the diff touches, and keep the full run for Review.', saves: 'about 5 min a phase',
+        effort: 'Small: one line in the workflow', risk: 'A test outside those areas fails later, in Review.' },
+      { title: 'Run the suite with cargo-nextest', how: 'Each test runs in its own process, in parallel across test '
+        + 'binaries.', saves: 'about 2 to 3 min a phase', effort: 'Medium: a new dev tool on each machine',
+        risk: 'Tests that share a temp folder by mistake start to fail. Worth finding anyway.',
+        src: 'https://nexte.st/' },
+      { title: 'Stop rebuilding between calls', how: '2 of the 6 calls rebuilt most of the workspace after an edit to '
+        + '`core`. A shared compile cache cuts that.', saves: 'about 1 min a phase', effort: 'Medium',
+        risk: 'Low. A cache that goes stale is cleared by hand.', src: 'https://github.com/mozilla/sccache' }],
     sources: ['https://doc.rust-lang.org/cargo/commands/cargo-test.html', 'https://nexte.st/',
-      'https://github.com/mozilla/sccache'] },
-  vitest: { step: 'pnpm exec vitest run', facts: '3 calls in this phase, 1 m 52 s. Every call ran all 31 test files.',
+      'https://github.com/mozilla/sccache'],
+    bake: { base: [78, '212 passed'], arms: [
+      [21, '38 of 212 ran', 'warn', 'Not the same check', 'Faster in 8 of 8 pairs, but it skips 174 tests. Keep the '
+        + 'full run for Review.'],
+      [49, '212 passed', 'good', 'Faster', 'Faster in 8 of 8 pairs, with the same tests.'],
+      [71, '212 passed', '', 'No clear difference', 'Faster in 5 of 8 pairs: within the noise.']] } },
+  vitest: { step: 'pnpm exec vitest run', extra: 'Every call ran all 31 test files.',
     options: [
       { title: 'Run only the files the change touches', how: 'Use `vitest related <changed files>` in Build, and the '
         + 'full run in Review.', saves: 'about 1 min a phase', effort: 'Small', risk: 'Low.',
         src: 'https://vitest.dev/guide/cli' }],
-    sources: ['https://vitest.dev/guide/cli'] },
+    sources: ['https://vitest.dev/guide/cli'],
+    bake: { base: [37, '31 files passed'], arms: [
+      [9, '4 of 31 files ran', 'warn', 'Not the same check', 'Faster in 8 of 8 pairs, but it runs 4 of 31 files. '
+        + 'Keep the full run for Review.']] } },
 };
 
 // Comms (owner's note, round 2): sessions with an agent that are not a task or a plan. All made up.
@@ -1361,7 +2891,9 @@ const COMMS = [
   { id: 'flaky', title: 'Flaky daemon tests', agent: 'Claude Code · sonnet', where: '~/projects/collide',
     day: 'Today', start: '09:12', last: '09:58', live: true, sid: '8b41d0e5-flaky',
     purpose: 'Find out why two tests failed once in the ts-0178 run, and decide whether to file items.',
-    notes: 'Both passed on a re-run. Do not file until the 50-run numbers are in.',
+    notes: 'Both passed on a re-run. **Do not file** until the 50-run numbers are in.\n\n#### Seen so far\n'
+      + '- Daemon test: gives the daemon 2 s to outlive its terminal.\n- Bridge test: races the frame\'s load '
+      + 'against its first call.\n\n#### Next\n- Ask for a fix for each, then file both under Stage 6.',
     turns: [
       tl('09:12', 'Two tests failed once in the ts-0178 run and passed on a re-run: `daemon_process::a_daemon_started_'
         + 'from_a_terminal_survives_the_terminal_closing`, and "bridge: a page of another origin cannot call the '
@@ -1395,6 +2927,8 @@ const COMMS = [
         + 'openssl. Nothing else needs it.', 0.29),
     ] },
 ];
+// A pin is a copy of a result, kept beside the session (owner's note, round 3).
+COMMS[1].pins = [{ turn: 1, text: COMMS[1].turns[1].result, at: '09:31', pinnedAt: '09:44' }];
 
 const isOpen = (t) => !['done', 'dropped'].includes(catOf(t));
 const COLLIDE_VIEWS = [
@@ -1440,6 +2974,9 @@ const state = {
   welcome: { folder: '~/projects/my-app', git: true, claude: true, login: true },
   ask: null, comms: JSON.parse(JSON.stringify(COMMS)), comm: 'flaky', cview: 'convo', saved: '09:58',
   track: 'r121', ttab: 'table', minSecs: 0, toolType: 'all',
+  // Round 3: a phase of the run (null: the whole run), Optimize's picks, the diff view, and the dock.
+  tphase: null, optCtx: null, optSel: new Set(), optCap: false, optTime: false, diffView: 'changes',
+  dock: false, dockSess: 'desk', dview: 'chat', ddraft: '',
 };
 const board = () => state.boards[state.board];
 const view = () => board().views.find((v) => v.id === state.view) || board().views[0];
@@ -1453,7 +2990,8 @@ const visibleTasks = () => board().tasks.filter((t) => !(board().untrusted && t.
 const openBlockers = (t) => t.blockedBy.map(byId).filter((x) => x && isOpen(x));
 
 /* ---------- design notes ---------- */
-// [title, what the mock does, the alternative, the owner's verdict: 'kept', 'changed' (round 2) or 'new' (round 2)]
+// [title, what the mock does, the alternative, the owner's verdict ('kept', 'changed', 'new', 'decided'),
+//  and the round that last changed it (2 when left out)]
 const NOTES = [
   ['Board, line and view live in the top-left trail', 'One menu lists every open board with its default line '
     + '(plan 0.11); a second picks the view. Switching stops nothing.',
@@ -1486,12 +3024,11 @@ const NOTES = [
   ['Saved views are yours until you share', 'A saved view is kept per user; Share with team writes it, with the '
     + 'board settings, to .collide/ (plan 0.11).', 'Alternative: every saved view writes .collide/views/ at once.',
     'kept'],
-  ['Run order or Graph: compare them', 'Both lay out the same open tasks toward one goal. Run order: numbered steps, '
-    + 'step 1 is what can start now; it reads the same at 10 tasks or 200. Graph: the same steps as columns, with a '
-    + 'line from each blocker to what it holds up; hover a task to light its lines. Try "Toward Stage 5", where 6a '
-    + 'branches and Stage 5 is one long chain. Recommendation: ship Run order in 6a, and Graph as the second layout '
-    + 'if you prefer it here.', 'Alternative: Graph as the default layout. The plan defers a full graph layout; this '
-    + 'is the simple layered kind, readable to about 30 tasks.', 'changed'],
+  ['Run order and Graph: both, in 6a', 'Both lay out the same open tasks toward one goal. Run order: numbered '
+    + 'steps; step 1 is what can start now. Graph: the same steps as columns, with a line from each blocker to what '
+    + 'it holds up; hover a task to light its lines. Your call (round 3): both ship in 6a, as complementary layouts. '
+    + 'This changes the plan, which defers a graph layout.', 'Alternative (not taken): Run order in 6a, Graph later.',
+    'decided', 3],
   ['Settings: one table, the layer as a badge', 'Each key shows its value and where it came from: Default, You, or '
     + 'This repo. A value overridden by the repo is shown struck through. Secrets show "Set" or "Not set", never the '
     + 'value.', 'Alternative: a form per section, layers in a tooltip.', 'kept'],
@@ -1517,13 +3054,16 @@ const NOTES = [
     + 'a "Fields from <source>" section, labelled from the id. Every task also has the fields every source must give '
     + '(title, status and category, labels, collections, dependencies, author), mapped by the pack.',
     'Alternative: a per-board mapping file, where a person maps a source field onto a Collide section.', 'new'],
-  ['Comms: a fifth tab for sessions with an agent', 'For work that is not a task or a plan: a question, a check, a '
-    + 'draft. A list of sessions by day with their times, the conversation, and notes beside it. "File as a task" '
-    + 'turns a result into a task. Not in the plan yet.', 'Alternative: no tab; sessions live in a pane that docks '
-    + 'on every page.', 'new'],
-  ['The Desk is the pinned Comms session', 'Plan 9e\'s Desk (one per board, edits no code) becomes the session '
-    + 'pinned at the top of Comms, so there is one place for every conversation.', 'Alternative: keep the Desk as a '
-    + 'pane docked on every page, as the plan says, and Comms for the other sessions.', 'new'],
+  ['Comms: a fifth tab, and a pane docked on every page', 'The tab holds every session: the list by day, the '
+    + 'conversation, notes and pins. The dock (Desk, top right) shows one session at the foot of any page, so you '
+    + 'can talk to it while you look at the board; it hides on the Comms tab, which shows the same thing larger. '
+    + 'Not in the plan yet.', 'Alternative: the dock alone, with no tab; or the tab alone.', 'changed', 3],
+  ['The Desk: the plan\'s docked pane, and the pinned Comms session', 'Round 2 drew the Desk only as a session in '
+    + 'Comms. Plan 9e\'s Desk is one Claude Code session per board, in a pane docked on every page, through the '
+    + 'shim\'s terminal, that edits no code. Now it is both: the dock opens on the Desk, and Comms lists it pinned, '
+    + 'so its history sits with the other sessions. One session, two places to see it. "Discuss with the Desk" in '
+    + 'the drawer puts the task\'s id into its message box.', 'Alternative: the Desk only in the dock, as the plan '
+    + 'says, and not in Comms.', 'changed', 3],
   ['Session notes are yours, per session', '"What this session is for" and free notes, kept on your machine with '
     + 'the session, saved as you type.', 'Alternative: notes as a Markdown file in .collide/, shared with the team.',
     'new'],
@@ -1532,10 +3072,50 @@ const NOTES = [
     + 'long, the cost.', 'Alternative: one view, with the work steps folded away.', 'new'],
   ['Tracks: where the time went', 'Per phase, a table of tool calls (calls, total, share, slowest) with filters by '
     + 'type and length, and a timeline. Plan 9b has this breakdown.', 'Alternative: the timeline alone.', 'new'],
-  ['Optimize: research, then options, then a task', 'On a row of the breakdown. An agent reads the timings and the '
-    + 'commands, may search the web, and comes back with options: effort, saving, risk, sources. It is read-only and '
-    + 'capped. Schedule as a task files one; Discuss opens a Comms session. Not in the plan yet.', 'Alternative: '
-    + 'Optimize files a task with the research at once, with no options step.', 'new'],
+  ['Optimize: options first; pick several, then schedule or bake them off', 'On a row of the breakdown. An agent '
+    + 'reads the timings and the commands, may search the web, and comes back with options: effort, saving, risk, '
+    + 'sources. Pick one or more: Schedule files a task for each; Bake-off (32) races the picks against today\'s '
+    + 'way and shows which is faster, by how much, and whether the same tests ran. Discuss opens a Comms session '
+    + 'with all of it (28). Not in the plan yet.', 'Alternative: Optimize files a task with the research at once.',
+    'changed', 3],
+  ['Tracks: click a phase to drill in; the rest of the row shows the whole run', 'Each phase in a run\'s row is '
+    + 'its own button: the breakdown and the timeline then show that phase alone. A click elsewhere on the row '
+    + 'shows the whole run, with a Phases column. The row links its task, when it has one; the link opens the '
+    + 'drawer beside Tracks.', 'Alternative: phase tabs above the breakdown, and the row only picks the run.',
+    'new', 3],
+  ['Timeline: one bar per call, with a tooltip', 'Calls are laid out in the order they ran, one after another. '
+    + 'Hover a bar for the tool and command, call k of n, the phase, when it started and ended, how long it took, '
+    + 'and its result. A failed call is red. The whole run marks where each phase began.', 'Alternative: no '
+    + 'tooltips; the table carries the numbers.', 'new', 3],
+  ['Optimize can run with no spend cap, or no time limit', 'Two checkboxes, off each time Optimize opens. With no '
+    + 'cap, the repo\'s budget still applies if it sets one (a repo\'s budget wins over a caller\'s, plan 0.7). With '
+    + 'no time limit it runs until it is done or you stop it.', 'Alternative: editable amounts, with no way to turn '
+    + 'them off.', 'new', 3],
+  ['A session opened from Optimize says where it came from', 'Its name gives the step, the run and the phase. '
+    + '"What it is for" says it in words. Its notes start with where it came from, what you saw (calls, time, '
+    + 'share, the slowest call, the other run), the research and its sources, and the bake-off if there was one. '
+    + 'The Session panel links back to the run and the task.', 'Alternative: a bare session with the research as '
+    + 'its first message.', 'new', 3],
+  ['Diffs: the changes, or the whole file', 'A diff opens on its changes. Whole file shows every line of the file '
+    + 'after the change, numbered, with added and removed lines marked, scrolled to the first change. The mock '
+    + 'carries four whole files.', 'Alternative: open on the whole file.', 'new', 3],
+  ['Session notes open in a larger window, in Markdown', 'The side panel shows the notes rendered and clipped. Open '
+    + 'notes shows a window with the Markdown on the left and the result on the right, saved as you type.',
+    'Alternative: Notes as a third view of the session, beside Conversation and Inputs and results.', 'new', 3],
+  ['Pin an output so it is never lost', 'Pin on a result copies it into the session\'s Pinned list, which stays '
+    + 'however long the conversation grows or is compacted. A pin opens, copies, or files as a task. Ending a '
+    + 'session asks to delete its pins, ticked by default.', 'Alternative: keep pins until you delete them by hand.',
+    'new', 3],
+  ['Bake-off: each pick runs against today\'s way, in pairs', 'A Stage 15 experiment. An agent prepares each pick '
+    + 'on its own branch (under the experiment prefix); each then runs against today\'s way on the same code in 8 '
+    + 'pairs, the order turned each pair, after a warm-up pair. The verdict counts the pairs where it was faster '
+    + '(the exact crossover test), and checks the same tests ran. Recommendation: pairs against today\'s way, the '
+    + 'shape Stage 15\'s test is built for.', 'Alternative: one round-robin of every arm, today\'s way included. '
+    + 'Fewer runs of today\'s way, but it needs a test for more than two arms.', 'new', 3],
+  ['A session as a chat, or as the terminal', 'Chat is drawn from the session\'s transcript: messages, the work '
+    + 'folded, results you can pin. Terminal is Claude Code itself, through the shim\'s terminal, as plan 9e has '
+    + 'for the Desk. Recommendation: Chat by default and Terminal one click away, in Comms and in the dock.',
+    'Alternative: the terminal only, as the plan has for the Desk.', 'new', 3],
 ];
 
 /* ---------- top bar ---------- */
@@ -1582,7 +3162,9 @@ function tabsHtml() {
     title="${name}: ${sub} (key ${i + 1})">${name}<small>${sub}</small></button>`).join('') + nm(2);
 }
 function topRightHtml() {
-  return `<button class="btn ghost sm" data-act="settings" aria-pressed="${state.settings}">${svg.gear}Settings
+  return `<button class="btn ghost sm" data-act="dock" aria-pressed="${!!state.dock}" title="The Desk, docked at the
+    foot of every page">${svg.chat}Desk</button><button class="btn ghost sm" data-act="settings"
+    aria-pressed="${state.settings}">${svg.gear}Settings
     </button><button class="btn ghost sm" data-act="theme" aria-label="Switch light and dark">${svg.moon}</button>`;
 }
 
@@ -2032,7 +3614,9 @@ function drawerHtml(t) {
     <button class="btn ghost sm" data-act="close" aria-label="Close">${svg.close}</button></div>
     <h2>${esc(t.title)}${nm(8)}</h2>
     <div class="row muted" style="font-size:13px">Read only. ${t.src === 'plan'
-      ? 'Edit the file, or ask an agent; the board follows it.' : `Change it in ${esc(src.name)}.`}</div>
+      ? 'Edit the file, or ask an agent; the board follows it.' : `Change it in ${esc(src.name)}.`}
+      <span class="spacer"></span><button class="btn sm" data-act="discuss" data-id="${t.id}">Discuss with the Desk
+      </button></div>
     </div>
     <div class="db">
       <section class="ds"><h3>Description</h3><div class="md">${mdHtml(t.body || '')}</div></section>
@@ -2161,6 +3745,107 @@ function fileTask(title, body) {
 }
 
 /* ---------- Tracks: a preview of Stage 9b ---------- */
+const hms = (start, secs) => {
+  const [h, m, s] = start.split(':').map(Number);
+  const t = h * 3600 + m * 60 + s + Math.round(secs);
+  return [Math.floor(t / 3600) % 24, Math.floor(t / 60) % 60, t % 60].map((n) => String(n).padStart(2, '0')).join(':');
+};
+const took = (d) => (d < 1 ? 'under 1 s' : fmt(Math.round(d)));
+const toolName = (x) => (x.tool === 'Model' ? 'Model time' : x.tool);
+const keyOf = (x) => `${x.tool}|${x.what}`;
+const words = (a) => (a.length < 3 ? a.join(' and ') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
+function seeded(str) {
+  let x = [...str].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 2147483647, 7);
+  return () => { x = (x * 48271) % 2147483647; return x / 2147483647; };
+}
+const runOf = () => RUNS.find((r) => r.id === state.track) || RUNS[0];
+const startOf = (run, p) => run.phases.slice(0, run.phases.indexOf(p)).reduce((a, q) => a + q.mins * 60, 0);
+// The phases a selection covers: the one picked, or every phase that has begun (the whole run).
+const scopeOf = (run) => (state.tphase ? run.phases.filter((p) => p.name === state.tphase)
+  : run.phases.filter((p) => p.state !== 'wait'));
+// The breakdown of a selection. The whole run adds up each tool and command across its phases.
+function rowsOf(run, phases) {
+  const by = new Map();
+  phases.forEach((p) => (TOOLTIME[run.id][p.name] || []).forEach((x) => {
+    const y = by.get(keyOf(x));
+    if (!y) by.set(keyOf(x), { ...x, phases: [p.name] });
+    else Object.assign(y, { calls: y.calls + x.calls, secs: y.secs + x.secs, slow: Math.max(y.slow, x.slow),
+      phases: [...y.phases, p.name] });
+  }));
+  return [...by.values()].sort((a, b) => b.secs - a.secs);
+}
+// Every call of one phase, in the order it ran: when it started (seconds into the phase) and how long it took.
+function callsOf(run, p) {
+  const r = seeded(run.id + p.name), span = p.mins * 60, calls = [];
+  (TOOLTIME[run.id][p.name] || []).forEach((x) => {
+    const n = x.calls || Math.max(2, Math.round(x.secs / 30));
+    const slowAt = Math.floor(r() * n);
+    const w = Array.from({ length: n }, () => 0.5 + r());
+    const rest = w.reduce((a, b, k) => a + (k === slowAt ? 0 : b), 0);
+    for (let k = 0; k < n; k += 1) {
+      const d = n === 1 ? x.secs : k === slowAt ? x.slow : Math.min(x.slow, ((x.secs - x.slow) * w[k]) / rest);
+      calls.push({ x, k, n, d, slow: k === slowAt, key: (k + r() * 0.9) / n });
+    }
+  });
+  calls.sort((a, b) => a.key - b.key);
+  const busy = calls.reduce((a, c) => a + c.d, 0);
+  const g = calls.map(() => 0.3 + r());
+  const gsum = g.reduce((a, b) => a + b, 0) * 1.08;
+  let t = 0;
+  calls.forEach((c, i) => { t += (Math.max(0, span - busy) * g[i]) / gsum; c.at = t; t += c.d; });
+  return calls;
+}
+const GREPS = ['RunSummary', 'fn record', 'phase_heads', 'ended_ms', 'LoopPage', 'file_run'];
+function resultOf(run, p, c) {
+  const x = c.x, ch = CHANGES[run.task];
+  const paths = ch ? ch.files.map((f) => f.path).filter((f) => !f.includes(' (')) : ['README.md'];
+  const path = paths[(c.k * 7 + p.name.length) % paths.length];
+  const tests = run.id === 'r119' ? 205 : 212;
+  if (x.what.startsWith('cargo test')) {
+    return run.id === 'r121' && p.name === 'Build' && c.k === 3
+      ? `exit 101 · ${tests - 1} passed, 1 failed (daemon_process). The next call passed.` : `exit 0 · ${tests} passed`;
+  }
+  if (x.what.startsWith('pnpm exec vitest')) return 'exit 0 · 31 files, 268 tests passed';
+  if (x.what === 'cargo build') return 'exit 0 · compiled 9 crates';
+  if (x.what === 'git log') return 'exit 0 · 40 commits';
+  if (x.what === 'git diff') return 'exit 0 · 14 files changed';
+  if (x.tool === 'Read' || x.tool === 'Edit') return path;
+  if (x.tool === 'Grep') return `"${GREPS[c.k % GREPS.length]}" · ${3 + ((c.k * 5) % 17)} matches`;
+  return 'No tool: the model reading and writing';
+}
+let TIPS = [];
+function lanesHtml(run, phases, rows) {
+  TIPS = [];
+  const keys = new Set(rows.map(keyOf)), bars = {}, marks = [], labels = [];
+  const total = phases.reduce((a, p) => a + p.mins * 60, 0);
+  let off = 0;
+  phases.forEach((p, pi) => {
+    const base = startOf(run, p);
+    if (pi) marks.push(off);
+    labels.push(`<span style="left:${(100 * off) / total}%">${p.name} · ${hms(run.start, base).slice(0, 5)}</span>`);
+    callsOf(run, p).forEach((c) => {
+      if (!keys.has(keyOf(c.x))) return;
+      const res = resultOf(run, p, c), bad = res.startsWith('exit 1');
+      TIPS.push(`<b>${esc(toolName(c.x))}${c.x.tool === 'Bash' ? ` · <span class="mono">${esc(c.x.what)}</span>`
+        : ''}</b><span>${c.x.tool === 'Model' ? 'Turn' : 'Call'} ${c.k + 1} of ${c.n} · ${p.name} phase</span>
+        <span>Started ${hms(run.start, base + c.at)} · ended ${hms(run.start, base + c.at + c.d)}</span>
+        <span>Took ${took(c.d)}${c.slow && c.n > 1 ? ' · the slowest' : ''}</span>
+        <span class="${bad ? 'del' : 'muted'} ${/Read|Edit/.test(c.x.tool) ? 'mono' : ''}">${esc(res)}</span>`);
+      (bars[keyOf(c.x)] ||= []).push(`<b class="${c.x.tool === 'Model' ? 'm' : bad ? 'x' : ''}"
+        data-tip="${TIPS.length - 1}" style="left:${(100 * (off + c.at)) / total}%;width:${(100 * c.d) / total}%">
+        </b>`);
+    });
+    off += p.mins * 60;
+  });
+  const pm = marks.map((m) => `<i class="pm" style="left:${(100 * m) / total}%"></i>`).join('');
+  const last = phases[phases.length - 1];
+  const end = hms(run.start, startOf(run, last) + last.mins * 60).slice(0, 5);
+  return `<div class="lanes">${rows.map((x) => `<div class="lane"><span class="${x.tool === 'Bash' ? 'mono' : ''}"
+    style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(`${toolName(x)}: ${x.what}`)}">${
+    esc(x.tool === 'Bash' ? x.what : toolName(x))}</span><span class="track">${pm}${(bars[keyOf(x)] || []).join('')}
+    </span></div>`).join('')}<div class="lane"><span class="muted">Hover a bar ${nm(26)}</span><span class="axis">${
+    labels.join('')}<span style="right:0">${end}${last.state === 'run' ? ' · now' : ''}</span></span></div></div>`;
+}
 function tracksHtml() {
   const banner = `<div class="banner"><span class="grow"><b>A preview of Stage 9b.</b> Tracks arrives with the run UI;
     these runs are made up. Until then, the Loop page shows a run and what it needs from you. ${nm(2)}</span>
@@ -2170,114 +3855,302 @@ function tracksHtml() {
     return banner + `<section class="panel card center"><h1>No runs on ${esc(board().name)} yet</h1>
       <p class="muted">A run shows here as a row of its phases while it works.</p></section>`;
   }
-  const run = RUNS.find((r) => r.id === state.track) || RUNS[0];
+  const run = runOf();
   const runs = RUNS.map((r) => {
-    const t = taskAnywhere(r.task);
-    return `<button class="runrow" data-act="track" data-v="${r.id}" aria-current="${r.id === run.id}">
-      <span><b>${esc(r.label)}</b> ${r.live ? '<span class="livedot" title="Running"></span>' : ''}<br>
-      <span class="muted" style="font-size:12.5px">${esc(shortId(r.task))} · ${esc(t ? t.title : '')}</span></span>
-      <span class="segs">${r.phases.map((p) => `<i class="${p.state}" style="flex:${p.mins}">${p.name} ·
-        ${p.state === 'wait' ? 'next' : p.state === 'run' ? `${p.mins} m so far` : `${p.mins} m`}</i>`).join('')}
-      </span><span class="muted" style="font-size:12.5px">${esc(r.when)}</span></button>`;
+    const t = r.task && taskAnywhere(r.task), cur = r.id === run.id;
+    return `<div class="runrow" data-act="track" data-v="${r.id}" aria-current="${cur}" title="Show the whole run">
+      <span class="rname"><button class="rn" data-act="track" data-v="${r.id}">${esc(r.label)}${r.live
+        ? '<span class="livedot" title="Running"></span>' : ''}</button>${t ? `<button class="tlink" data-act="open"
+        data-id="${r.task}" title="Open the task beside Tracks">${esc(shortId(r.task))} · ${esc(t.title)}</button>`
+        : '<span class="muted" style="font-size:12.5px">No task</span>'}</span>
+      <span class="segs">${r.phases.map((p) => `<button class="sg ${p.state}" style="flex:${p.mins}" data-act="phase"
+        data-v="${r.id}" data-id="${p.name}" aria-pressed="${cur && state.tphase === p.name}"
+        title="Show the ${p.name} phase alone">${p.name} · ${p.state === 'wait' ? 'next' : p.state === 'run'
+          ? `${p.mins} m so far` : `${p.mins} m`}</button>`).join('')}</span>
+      <span class="muted" style="font-size:12.5px">${esc(r.when)}</span></div>`;
   }).join('');
-  const phase = run.phases.find((p) => p.state === 'run') || run.phases[1];
-  const all = TOOLTIME[run.id];
+  const one = state.tphase && run.phases.find((p) => p.name === state.tphase);
+  const phases = scopeOf(run);
+  const head = `<div class="frow"><h2 style="font-size:var(--fs-lg)">Where the time went · ${esc(run.label)},
+    ${one ? `${esc(one.name)} phase` : 'whole run'} ${nm(23)}</h2>${one ? `<button class="btn sm" data-act="track"
+    data-v="${run.id}">Show the whole run</button>` : ''}<span class="spacer"></span>
+    <span class="seg" role="group" aria-label="Show as"><button data-act="ttab" data-v="table"
+      aria-pressed="${state.ttab === 'table'}">Table</button><button data-act="ttab" data-v="timeline"
+      aria-pressed="${state.ttab === 'timeline'}">Timeline</button></span></div>`;
+  const ch = CHANGES[run.task];
+  const changed = ch ? `<div class="frow"><span class="muted">${run.live ? 'Changed so far' : 'Changed'}:
+    ${ch.files.length} files.</span><button class="btn sm" data-act="open" data-id="${run.task}">Open
+    ${esc(shortId(run.task))} and its changes</button></div>` : '';
+  const top = banner + `<section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+    <div class="frow"><h1 style="font-size:var(--fs-xl);font-weight:650">Runs</h1><span class="muted">${
+      RUNS.filter((r) => r.live).length} running · click a phase to see it alone, or the rest of a row for the
+      whole run</span>${nm(25)}</div><div class="runs">${runs}</div></section>`;
+  if (one && one.state === 'wait') {
+    const prev = run.phases[run.phases.indexOf(one) - 1];
+    return top + `<section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">${head}
+      <p class="muted">${esc(one.name)} has not started. It begins when ${esc(prev.name)} ends.</p>${changed}
+      </section>`;
+  }
+  const all = rowsOf(run, phases);
   const total = all.reduce((s, x) => s + x.secs, 0);
   const rows = all.filter((x) => (state.toolType === 'all' || x.tool === state.toolType) && x.slow >= state.minSecs);
   const types = ['all', ...new Set(all.map((x) => x.tool))];
+  const mins = phases.reduce((a, p) => a + p.mins, 0);
+  const live = phases.some((p) => p.state === 'run');
   const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, w]) => `<option value="${v}"
     ${String(cur) === String(v) ? 'selected' : ''}>${w}</option>`).join('')}</select>`;
-  const table = `<div style="overflow-x:auto"><table class="t"><thead><tr><th>Tool</th><th>What</th><th>Calls</th>
-    <th>Total</th><th>Share of the phase</th><th>Slowest call</th><th></th></tr></thead><tbody>
+  const table = `<div style="overflow-x:auto"><table class="t"><thead><tr><th>Tool</th><th>What</th>${one ? ''
+    : '<th>Phases</th>'}<th>Calls</th><th>Total</th><th>Share of the ${one ? 'phase' : 'run'}</th><th>Slowest call</th>
+    <th></th></tr></thead><tbody>
     ${rows.map((x) => {
       const pct = Math.round((100 * x.secs) / total);
-      return `<tr><td><b>${esc(x.tool === 'Model' ? 'Model time' : x.tool)}</b></td><td class="mono"
-        style="font-size:12.5px">${esc(x.what)}</td><td>${x.calls || '—'}</td><td>${fmt(x.secs)}</td>
-        <td><span class="share"><span class="bar"><i style="width:${pct}%"></i></span>${pct}%</span></td>
-        <td>${fmt(x.slow)}</td><td>${x.opt ? `<button class="btn sm" data-act="optimize" data-v="${x.opt}">Optimize…
-        </button>` : ''}</td></tr>`;
+      return `<tr><td><b>${esc(toolName(x))}</b></td><td class="mono" style="font-size:12.5px">${esc(x.what)}</td>
+        ${one ? '' : `<td style="font-size:13px">${x.phases.join(', ')}</td>`}<td>${x.calls || '—'}</td>
+        <td>${fmt(x.secs)}</td><td><span class="share"><span class="bar"><i style="width:${pct}%"></i></span>${pct}%
+        </span></td><td>${fmt(x.slow)}</td><td>${x.opt ? `<button class="btn sm" data-act="optimize"
+        data-v="${x.opt}">Optimize…</button>` : ''}</td></tr>`;
     }).join('')}
-    <tr><td colspan="3"><b>All tool calls</b></td><td><b>${fmt(total)}</b></td><td colspan="3" class="muted">of
-      ${phase.mins} m in ${phase.name}; the rest was waiting on you or on a lock</td></tr></tbody></table></div>`;
-  const lanes = `<div class="lanes">${rows.map((x) => {
-    const n = x.calls || 12, w = x.secs / n, span = phase.mins * 60;
-    const blocks = Array.from({ length: Math.min(n, 40) }, (_, k) => {
-      const at = ((k + 0.5) / Math.min(n, 40)) * (span - w) + ((k * 37) % 11) - 5;
-      return `<b class="${x.tool === 'Model' ? 'm' : ''}" style="left:${Math.max(0, (100 * at) / span)}%;
-        width:${(100 * w) / span}%"></b>`;
-    }).join('');
-    return `<div class="lane"><span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-      title="${esc(x.what)}">${esc(x.tool === 'Model' ? 'Model time' : `${x.tool} ${x.what}`)}</span>
-      <span class="track">${blocks}</span></div>`;
-  }).join('')}<div class="lane"><span></span><span class="muted" style="display:flex;justify-content:space-between">
-    <span>${phase.name} began</span><span>${phase.mins} m</span></span></div></div>`;
-  const ch = CHANGES[run.task];
-  return banner + `<section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
-    <div class="frow"><h1 style="font-size:var(--fs-xl);font-weight:650">Runs</h1><span class="muted">${
-      RUNS.filter((r) => r.live).length} running</span></div><div class="runs">${runs}</div></section>
-    <section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
-      <div class="frow"><h2 style="font-size:var(--fs-lg)">Where the time went · ${esc(run.label)}, ${esc(phase.name)}
-        ${nm(23)}</h2><span class="spacer"></span>
-        <span class="seg" role="group" aria-label="Show as"><button data-act="ttab" data-v="table"
-          aria-pressed="${state.ttab === 'table'}">Table</button><button data-act="ttab" data-v="timeline"
-          aria-pressed="${state.ttab === 'timeline'}">Timeline</button></span></div>
+    <tr><td colspan="${one ? 3 : 4}"><b>All tool calls</b></td><td><b>${fmt(total)}</b></td><td colspan="3"
+      class="muted">of ${mins} m ${one ? `in ${one.name}` : `across ${phases.length} phase${phases.length === 1 ? ''
+      : 's'}`}${live ? ' so far' : ''}; the rest was waiting on you or on a lock</td></tr></tbody></table></div>`;
+  return top + `<section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">${head}
       <div class="frow"><label class="fgroup"><span class="lbl">Tool</span>${sel('ttype', types.map((t) => [t,
         t === 'all' ? 'All tools' : t === 'Model' ? 'Model time' : t]), state.toolType)}</label>
         <label class="fgroup"><span class="lbl">Slowest call at least</span>${sel('tmin', [[0, 'any length'],
           [10, '10 s'], [60, '1 min']], state.minSecs)}</label>
         <span class="muted" style="font-size:13px">Optimize asks an agent for a faster way to do a step.
           <span class="newtag">new</span>${nm(24)}</span></div>
-      ${rows.length ? (state.ttab === 'table' ? table : lanes) : '<p class="muted">No calls match.</p>'}
-      ${ch ? `<div class="frow"><span class="muted">${run.live ? 'Changed so far' : 'Changed'}: ${ch.files.length}
-        files.</span><button class="btn sm" data-act="open" data-id="${run.task}">Open ${esc(shortId(run.task))}
-        and its changes</button></div>` : ''}
+      ${rows.length ? (state.ttab === 'table' ? table : lanesHtml(run, phases, rows))
+        : '<p class="muted">No calls match.</p>'}
+      ${changed}
     </section>`;
 }
+
+/* ---------- Optimize: research, options, a bake-off ---------- */
+const LETTER = 'ABCDEFGH';
+const hostOf = (u) => { try { return new URL(u).host; } catch (err) { return u; } };
+// What the person saw, for the step on the selection they were looking at.
+function optContext(kind) {
+  const o = OPTIMIZE[kind], run = runOf(), phases = scopeOf(run), all = rowsOf(run, phases);
+  const x = all.find((y) => y.opt === kind) || { calls: 0, secs: 0, slow: 0 };
+  const toolSecs = all.reduce((a, y) => a + y.secs, 0);
+  const share = toolSecs ? Math.round((100 * x.secs) / toolSecs) : 0;
+  const other = RUNS.find((r) => r.id !== run.id);
+  const ox = rowsOf(other, other.phases.filter((p) => p.state !== 'wait')).find((y) => y.opt === kind);
+  const scope = state.tphase ? `${state.tphase} phase` : 'whole run';
+  const otherText = ox ? `${other.label} (${shortId(other.task)}), whole run: ${ox.calls} calls, ${fmt(ox.secs)}` : '';
+  const t = run.task && taskAnywhere(run.task);
+  return { kind, run, tphase: state.tphase, scope, short: `${run.label.replace('Run ', '')}, ${state.tphase
+    || 'whole run'}`, task: run.task, taskTitle: t ? t.title : '', calls: x.calls, secs: x.secs, slow: x.slow, share,
+    otherLabel: other.label, other: otherText,
+    facts: `${x.calls} call${x.calls === 1 ? '' : 's'} in ${run.label}'s ${scope}, ${fmt(x.secs)} in all (${share}% of `
+      + `its tool time), the slowest ${fmt(x.slow)}${otherText ? `; ${otherText}` : ''}. ${o.extra}` };
+}
 function optimizeModal(kind) {
-  const o = OPTIMIZE[kind];
+  const o = OPTIMIZE[kind], c = optContext(kind);
+  Object.assign(state, { optCtx: c, optSel: new Set(), optCap: false, optTime: false });
   modal(`<h2>Optimize <code>${esc(o.step)}</code> <span class="newtag">new</span></h2>
-    <p>An agent looks for a faster way to do this step. It reads:</p>
-    <ul><li>the timings: ${esc(o.facts)}</li><li>the command lines, and the workflow step that runs them</li>
+    <p>From ${esc(c.run.label)}, ${esc(c.scope)}${c.task ? `, which builds ${esc(shortId(c.task))}` : ''}. An agent
+      looks for a faster way to do this step. It reads:</p>
+    <ul><li>the timings: ${esc(c.facts)}</li><li>the command lines, and the workflow step that runs them</li>
       <li>the repo's build and test settings</li></ul>
     <p>It may search the web, and says where each idea came from. It changes nothing and starts no run. You choose
       what, if anything, becomes a task.</p>
-    <dl class="kv"><dt>Agent</dt><dd>Claude Code · sonnet</dd><dt>Spend cap</dt><dd>$0.50</dd>
-      <dt>Time limit</dt><dd>5 min</dd><dt>Web search</dt><dd><label><input type="checkbox" checked> Let it search
-      the web</label></dd></dl>
+    <dl class="kv"><dt>Agent</dt><dd>Claude Code · sonnet</dd>
+      <dt>Spend cap</dt><dd><span id="capv">$0.50</span> <label style="margin-left:10px"><input type="checkbox"
+        id="optcap"> No spend cap</label>${nm(27)}<div class="stamp" id="capnote" hidden>The repo's budget still
+        applies, if it sets one.</div></dd>
+      <dt>Time limit</dt><dd><span id="timev">5 min</span> <label style="margin-left:10px"><input type="checkbox"
+        id="opttime"> No time limit</label><div class="stamp" id="timenote" hidden>It runs until it is done, or
+        until you stop it.</div></dd>
+      <dt>Web search</dt><dd><label><input type="checkbox" checked> Let it search the web</label></dd></dl>
     <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
       <button class="btn main" data-act="opt-go" data-v="${kind}">Start research</button></div>`, 'wide');
 }
 function optimizeWorking(kind) {
-  modal(`<h2>Researching <code>${esc(OPTIMIZE[kind].step)}</code></h2><ul class="checks" style="list-style:none;
-    padding:0"><li>${svg.ok} Read the timings of this phase and of R-119</li><li>${svg.ok} Read the workflow and
-    3 build files</li><li><span class="livedot"></span> Searching the web…</li></ul>
+  const c = state.optCtx;
+  const lim = `${state.optCap ? 'No spend cap' : 'Cap $0.50'} · ${state.optTime ? 'no time limit' : '5 min limit'}`;
+  modal(`<h2>Researching <code>${esc(OPTIMIZE[kind].step)}</code></h2><p class="muted">${lim}. Spent $0.09 so far.</p>
+    <ul class="checks" style="list-style:none;padding:0"><li>${svg.ok} Read the timings of ${esc(c.run.label)}'s
+    ${esc(c.scope)} and of ${esc(c.otherLabel)}</li><li>${svg.ok} Read the workflow and 3 build files</li>
+    <li><span class="livedot"></span> Searching the web…</li></ul>
     <div class="acts"><button class="btn" data-act="modal-close">Stop</button></div>`, 'wide');
-  setTimeout(() => { if (!$('#overlay').hidden) optimizeResult(kind); }, 1400);
+  setTimeout(() => {
+    if (!$('#overlay').hidden && $('#modal h2').textContent.startsWith('Researching')) optimizeResult(kind);
+  }, 1400);
 }
 function optimizeResult(kind) {
   const o = OPTIMIZE[kind];
-  const host = (u) => { try { return new URL(u).host; } catch (err) { return u; } };
   modal(`<h2>${o.options.length} way${o.options.length === 1 ? '' : 's'} to speed up <code>${esc(o.step)}</code></h2>
     <p class="muted">Researched in 2 m 10 s for $0.31: 6 files read, 4 web pages. Savings are estimates from this
       run's timings.</p>
-    <div class="opts">${o.options.map((x, i) => `<div class="optc"><b>${i + 1}. ${esc(x.title)}</b>
-      <span>${mdInline(esc(x.how))}</span><div class="facts"><span class="chip info">Saves ${esc(x.saves)}</span>
-      <span class="chip">Effort: ${esc(x.effort)}</span><span class="chip warn">Risk: ${esc(x.risk)}</span></div>
-      ${x.src ? `<span style="font-size:13px">From <a href="#" data-act="ext" data-href="${esc(x.src)}">${esc(
-        host(x.src))}</a></span>` : ''}
-      <div class="frow"><button class="btn sm main" data-act="opt-task" data-v="${kind}" data-id="${i}">Schedule as
-        a task</button></div></div>`).join('')}</div>
+    <p>Pick one or more. Schedule files each as a task; Bake-off races them against today's way on the same code.
+      ${nm(24)}</p>
+    <div class="opts">${o.options.map((x, i) => `<div class="optc"><label class="optt"><input type="checkbox"
+      class="optpick" value="${i}" ${state.optSel.has(i) ? 'checked' : ''}><span>${i + 1}. ${esc(x.title)}</span>
+      </label><span>${mdInline(esc(x.how))}</span><div class="facts"><span class="chip info">Saves ${esc(x.saves)}
+      </span><span class="chip">Effort: ${esc(x.effort)}</span><span class="chip warn">Risk: ${esc(x.risk)}</span>
+      </div>${x.src ? `<span style="font-size:13px">From <a href="#" data-act="ext" data-href="${esc(x.src)}">${esc(
+        hostOf(x.src))}</a></span>` : ''}</div>`).join('')}</div>
     <p class="muted" style="font-size:13px">Sources: ${o.sources.map((u) => `<a href="#" data-act="ext"
-      data-href="${esc(u)}">${esc(host(u))}</a>`).join(', ')}. Links ask before they open.</p>
+      data-href="${esc(u)}">${esc(hostOf(u))}</a>`).join(', ')}. Links ask before they open.</p>
     <div class="acts"><button class="btn" data-act="modal-close">Close</button>
-      <button class="btn" data-act="opt-comms" data-v="${kind}">Discuss in Comms</button></div>`, 'wide');
+      <button class="btn" data-act="opt-comms" data-v="${kind}">Discuss in Comms</button>
+      <button class="btn" id="opt-sched" data-act="opt-tasks" data-v="${kind}">Schedule as a task</button>
+      <button class="btn main" id="opt-bake" data-act="bake" data-v="${kind}">Bake-off…</button></div>`, 'wide');
+  pickCount();
+}
+function pickCount() {
+  const n = state.optSel.size, s = $('#opt-sched'), b = $('#opt-bake');
+  if (!s) return;
+  s.disabled = b.disabled = !n;
+  s.textContent = n > 1 ? `Schedule ${n} as tasks` : 'Schedule as a task';
+  b.textContent = n ? `Bake-off: ${n} against today's way…` : 'Bake-off…';
+}
+const picks = () => [...state.optSel].sort((a, b) => a - b);
+function fileOpt(o, c, i, bakeLine = '') {
+  const x = o.options[i];
+  return fileTask(`Faster ${o.step}: ${x.title.toLowerCase()}`, `## Goal\n\n${x.how}\n\nFound by Optimize on `
+    + `${c.run.label}'s ${c.scope}. ${c.facts}\n\n## Notes\n\n- Saves ${x.saves}. Effort: ${x.effort}. Risk: `
+    + `${x.risk}${bakeLine ? `\n- Bake-off: ${bakeLine}` : ''}${x.src ? `\n- From [${x.src}](${x.src})` : ''}`);
+}
+function bakeModal(kind) {
+  const o = OPTIMIZE[kind], c = state.optCtx, p = picks(), base = o.bake.base[0];
+  const secs = p.reduce((a, i) => a + 9 * (base + o.bake.arms[i][0]), 0);
+  modal(`<h2>Bake-off: <code>${esc(o.step)}</code> <span class="newtag">Stage 15</span></h2>
+    <p>Each pick runs against today's way on the same code, in pairs, the order turned each pair, so the machine's
+      load and a warm cache fall evenly. ${nm(32)}</p>
+    <div style="overflow-x:auto"><table class="t"><thead><tr><th>Arm</th><th>How it is set up</th></tr></thead><tbody>
+      <tr><td><b>Today's way</b></td><td>As the workflow runs it now: <code>${esc(o.step)}</code></td></tr>
+      ${p.map((i, n) => `<tr><td><b>${LETTER[n]}. ${esc(o.options[i].title)}</b></td><td>An agent prepares it on
+        its own branch, <code>collide-exp/bake-1/${LETTER[n].toLowerCase()}/</code>. Nothing lands on your
+        line.</td></tr>`).join('')}</tbody></table></div>
+    <dl class="kv"><dt>Code</dt><dd>${c.task ? `${esc(shortId(c.task))}'s changes as they are now`
+      : 'your line as it is now'}, the same for every arm</dd>
+      <dt>Pairs</dt><dd>8 for each pick, against a fresh run of today's way (AB, then BA), after one warm-up pair
+        that is not counted</dd>
+      <dt>Measured</dt><dd>The step's wall time, and that the same tests run and pass</dd>
+      <dt>Verdict</dt><dd>In how many of the 8 pairs it was faster (the exact crossover test), and by how much</dd>
+      <dt>Agent</dt><dd>Claude Code · sonnet prepares each arm: $0.50 cap per arm</dd>
+      <dt>Estimate</dt><dd>About ${Math.round(secs / 60)} min of this Mac's time; $${(0.5 * p.length).toFixed(2)} at
+        most for the agent</dd></dl>
+    <p class="muted">It runs in the background, and shows in Tracks as a run. You choose what becomes a task.</p>
+    <div class="acts"><button class="btn" data-act="opt-back" data-v="${kind}">‹ Back to the options</button>
+      <button class="btn main" data-act="bake-go" data-v="${kind}">Start the bake-off</button></div>`, 'wide');
+}
+function bakeWorking(kind) {
+  const n = picks().length;
+  modal(`<h2>Bake-off running</h2><ul class="checks" style="list-style:none;padding:0">
+    <li>${svg.ok} Prepared ${n} arm${n === 1 ? '' : 's'} on ${n === 1 ? 'its own branch' : 'their own branches'}</li>
+    <li>${svg.ok} Warm-up pairs</li><li><span class="livedot"></span> Pair 6 of 8${n > 1 ? `, arm ${LETTER[n - 1]}`
+    : ''}…</li></ul><p class="muted">The mock skips ahead. You can close this; the result waits in Tracks.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Run in the background</button></div>`, 'wide');
+  setTimeout(() => {
+    if (!$('#overlay').hidden && $('#modal h2').textContent.startsWith('Bake-off running')) bakeResult(kind);
+  }, 1600);
+}
+// The best pick: a clear win with the same tests, else a faster one that runs fewer tests.
+function bakeBest(o, p) {
+  const tone = (i) => o.bake.arms[i][2];
+  const i = p.find((j) => tone(j) === 'good') ?? p.find((j) => tone(j) === 'warn');
+  return i === undefined ? null : { i, n: p.indexOf(i), why: tone(i) === 'good' ? 'Faster in every pair, with the '
+    + 'same tests.' : 'Faster in every pair, but it runs fewer tests: use it in Build, and keep the full run in '
+    + 'Review.' };
+}
+function bakeResult(kind) {
+  const o = OPTIMIZE[kind], c = state.optCtx, p = picks(), [base, baseTests] = o.bake.base;
+  const best = bakeBest(o, p);
+  const rows = p.map((i, n) => {
+    const [m, tests, tone, verdict, detail] = o.bake.arms[i];
+    return `<tr><td><b>${LETTER[n]}. ${esc(o.options[i].title)}</b></td><td>${fmt(m)}</td><td>−${fmt(base - m)}
+      (${Math.round((100 * (base - m)) / base)}%)</td><td>${esc(tests)}</td><td><span class="chip ${tone}">${esc(
+      verdict)}</span><br><span style="font-size:13px">${esc(detail)}</span></td><td><button class="btn sm"
+      data-act="bake-task" data-v="${kind}" data-id="${i}">Schedule</button></td></tr>`;
+  }).join('');
+  modal(`<h2>Bake-off: <code>${esc(o.step)}</code> <span class="newtag">Stage 15</span></h2>
+    <p class="muted">8 pairs for each pick on ${c.task ? `${esc(shortId(c.task))}'s` : 'the same'} code, after a
+      warm-up pair. The agent spent $${(0.21 * p.length).toFixed(2)} preparing the arms.</p>
+    <div style="overflow-x:auto"><table class="t"><thead><tr><th>Arm</th><th>Median</th><th>Against today</th>
+      <th>Tests</th><th>Verdict</th><th></th></tr></thead><tbody><tr><td><b>Today's way</b></td><td>${fmt(base)}</td>
+      <td>—</td><td>${esc(baseTests)}</td><td class="muted">the baseline</td><td></td></tr>${rows}</tbody></table></div>
+    ${best ? `<p><b>Recommendation: ${LETTER[best.n]}.</b> ${esc(o.options[best.i].title)}. ${esc(best.why)}</p>`
+      : '<p>None was clearly faster than today\'s way.</p>'}
+    <div class="acts"><button class="btn" data-act="modal-close">Close</button>
+      <button class="btn" data-act="opt-comms" data-v="${kind}" data-id="bake">Discuss in Comms</button>
+      ${best ? `<button class="btn main" data-act="bake-task" data-v="${kind}" data-id="${best.i}">Schedule
+        ${LETTER[best.n]} as a task</button>` : ''}</div>`, 'wide');
+}
+// A Comms session that carries where it came from (owner's note, round 3).
+function optSession(kind, bake) {
+  const o = OPTIMIZE[kind], c = state.optCtx, p = picks(), [base, baseTests] = o.bake.base;
+  const best = bake ? bakeBest(o, p) : null;
+  const notes = [
+    '#### Where this came from',
+    `- Optimize on ${c.run.label}, ${c.scope} (${c.run.when}).`,
+    c.task ? `- The run builds ${c.task}: ${c.taskTitle}.` : '- The run has no task.',
+    '', '#### What you saw',
+    `- \`${o.step}\`: ${c.calls} call${c.calls === 1 ? '' : 's'}, ${fmt(c.secs)} in all, ${c.share}% of the tool time.`,
+    `- The slowest call took ${fmt(c.slow)}.`,
+    c.other ? `- ${c.other}.` : null,
+    `- ${o.extra}`,
+    '', '#### Research',
+    `- 2 m 10 s for $0.31${state.optCap ? ', with no spend cap' : ''}: 6 files read, 4 web pages.`,
+    ...o.options.map((x, i) => `- ${i + 1}. ${x.title}: saves ${x.saves}. Effort: ${x.effort}. Risk: ${x.risk}`),
+    ...(bake ? ['', '#### Bake-off', `- Today's way: ${fmt(base)} median, ${baseTests}.`, ...p.map((i, n) => {
+      const [m, tests, , , detail] = o.bake.arms[i];
+      return `- ${LETTER[n]}. ${o.options[i].title}: ${fmt(m)}, ${tests}. ${detail}`;
+    })] : []),
+    '', '#### Sources', ...o.sources.map((u) => `- [${hostOf(u)}](${u})`),
+  ].filter((l) => l !== null).join('\n');
+  const answer = best ? `The bake-off is in the notes. ${LETTER[best.n]}, ${o.options[best.i].title.toLowerCase()}, `
+    + `came out best. Shall I draft the task?` : `${o.options.length} option${o.options.length === 1 ? '' : 's'}: `
+    + `${o.options.map((x) => x.title).join('; ')}. Which should we try? I can draft a task, or set up a bake-off.`;
+  newSession(`Optimize: ${o.step} (${c.short})`, `Find a faster way to run ${o.step}. Opened from Optimize on `
+    + `${c.run.label}'s ${c.scope}${c.task ? `, which builds ${c.task}` : ''}. Pick a way, then schedule it.`,
+    'Claude Code · sonnet', 'main checkout · edits no code',
+    [tl(clock(), `Find a faster way to run \`${o.step}\`. In ${c.run.label}'s ${c.scope} it took ${fmt(c.secs)} over `
+      + `${c.calls} calls.`, 130, [['Read', 6], ['WebSearch', 4]], answer, 0.31)],
+    { notes, from: { what: bake ? 'Bake-off' : 'Optimize', run: c.run.id, runLabel: c.run.label, tphase: c.tphase,
+      scope: c.scope, task: c.task } });
 }
 
-/* ---------- Comms: sessions with an agent (new, round 2) ---------- */
+/* ---------- Comms: sessions with an agent (round 2; notes, pins and the terminal, round 3) ---------- */
+const curSess = () => state.comms.find((x) => x.id === state.comm) || state.comms[0];
+const dockSess = () => state.comms.find((x) => x.id === state.dockSess) || state.comms[0];
+const dayOf = (s) => (s.day === 'Earlier' ? s.date : s.day);
+// The terminal view: Claude Code itself, through the shim's terminal. Drawn here from the turns.
+function termHtml(s) {
+  const model = s.agent.replace('Claude Code · ', '');
+  const out = [`<span class="d">╭─ Claude Code · ${esc(model)} · ${esc(s.where)}</span>`,
+    `<span class="d">╰─ claude --resume ${esc(s.sid)}</span>`, ''];
+  s.turns.forEach((t) => {
+    out.push(`<span class="p">&gt;</span> ${esc(t.you)}`, '');
+    t.calls.forEach((c) => {
+      const sp = c.indexOf(' '), [cmd, dur] = c.slice(sp + 1).split(' · ');
+      out.push(`<span class="o">⏺</span> ${esc(c.slice(0, sp))}(${esc(cmd)})`,
+        `<span class="d">  ⎿  ${esc(dur || '')}</span>`);
+    });
+    if (!t.calls.length && t.tools.length) {
+      const used = t.tools.map(([n, k]) => `${k} ${n}`).join(', ');
+      out.push(`<span class="o">⏺</span> <span class="d">${esc(used)}</span>`);
+    }
+    out.push(t.result ? `<span class="o">⏺</span> ${esc(t.result)}` : '<span class="d">✻ Working…</span>', '');
+  });
+  out.push(s.live ? '<span class="p">&gt;</span> ▌' : `<span class="d">Session ended at ${esc(s.last)}.</span>`);
+  return `<pre class="term">${out.join('\n')}</pre>`;
+}
+function pinHtml(p, j) {
+  return `<div class="pin"><div class="stamp">From the result of ${p.at} · pinned ${p.pinnedAt}</div>
+    <div class="md">${mdHtml(p.text)}</div><div class="acts"><button class="btn ghost sm" data-act="pin-open"
+    data-v="${j}">Open</button><button class="btn ghost sm" data-act="copy">Copy</button><button class="btn ghost sm"
+    data-act="pin-task" data-v="${j}">File as a task…</button><button class="btn ghost sm" data-act="unpin"
+    data-v="${j}">Unpin</button></div></div>`;
+}
 function commsHtml() {
   const list = state.comms;
-  const s = list.find((x) => x.id === state.comm) || list[0];
+  const s = curSess();
   const q = (state.cq || '').toLowerCase();
+  const pins = s.pins || [];
   const row = (x) => `<button class="srow" data-act="comm" data-v="${x.id}" aria-current="${x.id === s.id}">
     <span class="t">${x.live ? '<span class="livedot" title="Live"></span>' : ''}${esc(x.title)}${x.pinned
       ? `<span class="chip" style="margin-left:auto">pinned</span>${nm(20)}` : ''}</span>
@@ -2298,23 +4171,33 @@ function commsHtml() {
       </summary><ul>${items}</ul></details>`;
   };
   const turnHtml = (t, i) => {
-    const going = !t.result;
-    return `<div class="turn"><div class="stamp" style="align-self:flex-end">You · ${s.day === 'Earlier' ? esc(s.date)
-      : s.day} ${t.at}</div><div class="you">${mdInline(esc(t.you))}</div>${going ? '' : work(t)}
+    const going = !t.result, pin = pins.some((p) => p.turn === i);
+    return `<div class="turn"><div class="stamp" style="align-self:flex-end">You · ${esc(dayOf(s))} ${t.at}</div>
+      <div class="you">${mdInline(esc(t.you))}</div>${going ? '' : work(t)}
       ${going ? `<div class="result going"><div class="stamp"><span class="livedot"></span> Working · ${t.tools.map(
         ([n, c]) => `${c} ${n}`).join(', ') || 'thinking'} so far</div></div>`
         : `<div class="result"><div class="stamp">Result · ${addTime(t.at, t.secs)} · took ${fmt(t.secs)} ·
-          $${t.cost.toFixed(2)}</div><div class="md">${mdInline(esc(t.result))}</div><div class="acts">
-          <button class="btn ghost sm" data-act="copy">Copy</button><button class="btn ghost sm" data-act="file-turn"
-          data-v="${i}">File as a task…</button></div></div>`}</div>`;
+          $${t.cost.toFixed(2)}${pin ? ' · <span class="chip info">Pinned</span>' : ''}</div><div class="md">${
+          mdInline(esc(t.result))}</div><div class="acts"><button class="btn ghost sm" data-act="copy">Copy</button>
+          <button class="btn ghost sm" data-act="${pin ? 'unpin-turn' : 'pin'}" data-v="${i}">${pin ? 'Unpin'
+          : 'Pin'}</button>${i === 1 && s.id === 'flaky' ? nm(31) : ''}<button class="btn ghost sm"
+          data-act="file-turn" data-v="${i}">File as a task…</button></div></div>`}</div>`;
   };
   const io = `<div style="overflow-x:auto;padding:12px 16px"><table class="t"><thead><tr><th>When</th><th>You asked</th>
     <th>It came back with</th><th>Took</th><th>Cost</th></tr></thead><tbody>${s.turns.map((t) => `<tr>
     <td class="mono" style="white-space:nowrap">${t.at}</td><td>${mdInline(esc(t.you))}</td><td>${t.result
       ? mdInline(esc(t.result)) : '<span class="muted">working…</span>'}</td><td style="white-space:nowrap">${t.result
       ? fmt(t.secs) : '—'}</td><td>$${t.cost.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
-  return `<div class="banner"><span class="grow"><b>Comms is new this round</b> and not in the plan yet. The sessions
-    are made up. ${nm(19)}</span></div>
+  const views = [['convo', 'Conversation'], ['io', 'Inputs and results'], ['term', 'Terminal']];
+  const body = state.cview === 'io' ? io : state.cview === 'term'
+    ? `<div style="padding:12px 16px">${termHtml(s)}</div>`
+    : `<div class="turns">${s.turns.map(turnHtml).join('')}</div>`;
+  const from = s.from ? `<dt>Opened from</dt><dd>${esc(s.from.what)} on <button class="tlink" data-act="${s.from.tphase
+    ? 'phase' : 'track'}" data-v="${s.from.run}" data-id="${esc(s.from.tphase || '')}">${esc(s.from.runLabel)},
+    ${esc(s.from.scope)}</button>${s.from.task ? ` · task <button class="tlink" data-act="open"
+    data-id="${s.from.task}">${esc(shortId(s.from.task))}</button>` : ''}${nm(28)}</dd>` : '';
+  return `<div class="banner"><span class="grow"><b>Comms is not in the plan yet.</b> The sessions are made up. Desk,
+    top right, docks a session at the foot of every other page. ${nm(19)}</span></div>
     <div class="comms">
       <section class="card" aria-label="Sessions"><div class="slist">
         <button class="btn main sm" data-act="newsess" style="justify-content:center">+ New session</button>
@@ -2323,30 +4206,36 @@ function commsHtml() {
         ${pinned.map(row).join('')}${groups}</div></section>
       <section class="card convo" aria-label="${esc(s.title)}">
         <div class="convh"><h1>${esc(s.title)}</h1>${s.live ? '<span class="chip info"><span class="livedot"></span>'
-          + 'live</span>' : '<span class="chip">ended</span>'}<span class="stamp">Started ${s.day === 'Earlier'
-          ? esc(s.date) : s.day} ${s.start} · ${s.live ? 'active now' : `ended ${s.last}`}</span>
-          <span class="spacer"></span><span class="seg" role="group" aria-label="Show"><button data-act="cview"
-          data-v="convo" aria-pressed="${state.cview === 'convo'}">Conversation</button><button data-act="cview"
-          data-v="io" aria-pressed="${state.cview === 'io'}">Inputs and results</button></span>${nm(22)}</div>
-        ${state.cview === 'io' ? io : `<div class="turns">${s.turns.map(turnHtml).join('')}</div>`}
-        <div class="composer"><label class="sr" for="cmsg">Message</label><textarea id="cmsg" placeholder="${s.live
-          ? `Message ${esc(s.title)}` : `This session ended at ${s.last}. Sending resumes it.`}"></textarea>
-          <button class="btn main" data-act="send">Send</button></div>
+          + 'live</span>' : '<span class="chip">ended</span>'}<span class="stamp">Started ${esc(dayOf(s))} ${s.start}
+          · ${s.live ? 'active now' : `ended ${s.last}`}</span>
+          <span class="spacer"></span><span class="seg" role="group" aria-label="Show">${views.map(([v, w]) => `<button
+          data-act="cview" data-v="${v}" aria-pressed="${state.cview === v}">${w}</button>`).join('')}</span>${nm(22)}
+          ${nm(33)}</div>
+        ${body}
+        ${state.cview === 'term' ? `<div class="composer stamp">Type in the terminal itself: it is Claude Code,
+          through the shim's terminal. Conversation shows the same session as a chat.</div>`
+          : `<div class="composer"><label class="sr" for="cmsg">Message</label><textarea id="cmsg"
+          placeholder="${s.live ? `Message ${esc(s.title)}` : `This session ended at ${s.last}. Sending resumes it.`}"
+          ></textarea><button class="btn main" data-act="send">Send</button></div>`}
       </section>
       <section class="card sidecard side" aria-label="Notes and details">
         <div><h3>What this session is for ${nm(21)}</h3><textarea id="cpurpose" rows="3">${esc(s.purpose)}</textarea>
         </div>
-        <div><h3>Notes</h3><textarea id="cnotes" rows="6" placeholder="What you tried, what to do next, anything to
-          keep.">${esc(s.notes)}</textarea><div class="stamp" id="csaved">Saved on this Mac at ${state.saved}. Only
-          you see them.</div></div>
-        <div><h3>Session</h3><dl class="kv"><dt>Started</dt><dd>${s.day === 'Earlier' ? esc(s.date) : s.day}
-          ${s.start}</dd><dt>Last active</dt><dd>${s.live ? 'now' : s.last}</dd><dt>Messages</dt>
-          <dd>${s.turns.length}</dd><dt>Agent</dt><dd>${esc(s.agent)}</dd><dt>Runs in</dt><dd>${esc(s.where)}</dd>
+        <div><h3>Pinned${pins.length ? ` · ${pins.length}` : ''}${nm(31)}</h3>${pins.length ? `<div class="pins">${
+          pins.map(pinHtml).join('')}</div>` : `<p class="muted" style="margin:0;font-size:13px">Pin a result to keep
+          it here, however long the session grows.</p>`}</div>
+        <div><h3>Notes<span class="spacer"></span><button class="btn ghost sm" data-act="notes-open">Open notes
+          </button>${nm(30)}</h3><div class="npv md" data-act="notes-open" title="Open notes">${s.notes
+          ? mdHtml(s.notes) : '<p class="muted">No notes yet. Open notes to write some, in Markdown.</p>'}</div>
+          <div class="stamp" id="csaved">Saved on this Mac at ${state.saved}. Only you see them.</div></div>
+        <div><h3>Session</h3><dl class="kv">${from}<dt>Started</dt><dd>${esc(dayOf(s))} ${s.start}</dd>
+          <dt>Last active</dt><dd>${s.live ? 'now' : s.last}</dd><dt>Messages</dt><dd>${s.turns.length}</dd>
+          <dt>Agent</dt><dd>${esc(s.agent)}</dd><dt>Runs in</dt><dd>${esc(s.where)}</dd>
           <dt>Spent</dt><dd>$${spent.toFixed(2)}</dd></dl>
           <details class="eng"><summary>Details for engineers</summary><dl class="kv"><dt>Session id</dt>
             <dd class="mono">${esc(s.sid)}</dd><dt>In a terminal</dt><dd class="mono">claude --resume ${esc(s.sid)}
             </dd></dl></details></div>
-        ${s.live && !s.pinned ? '<div><button class="btn sm" data-act="endsess">End this session</button></div>' : ''}
+        ${s.live && !s.pinned ? '<div><button class="btn sm" data-act="endsess">End this session…</button></div>' : ''}
       </section>
     </div>`;
 }
@@ -2363,15 +4252,74 @@ function newSessionModal() {
     <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
       <button class="btn main" data-act="newsess-yes">Start</button></div>`);
 }
-function newSession(title, purpose, agent, where, turns = []) {
+function newSession(title, purpose, agent, where, turns = [], extra = {}) {
   const now = clock();
   const id = `s-${Date.now()}`;
   state.comms.push({ id, title, agent, where, day: 'Today', start: now, last: now, live: true,
-    sid: `${Math.random().toString(16).slice(2, 10)}-new`, purpose, notes: '', turns });
+    sid: `${Math.random().toString(16).slice(2, 10)}-new`, purpose, notes: '', pins: [], turns, ...extra });
   state.comm = id;
   state.surface = 'comms';
   state.settings = false;
   return id;
+}
+function notesModal() {
+  const s = curSess();
+  modal(`<h2>Notes · ${esc(s.title)}</h2>
+    <div class="nwin"><label class="fgroup"><span class="lbl">Write, in Markdown</span><textarea id="nwrite"
+      placeholder="What you tried, what to do next, anything to keep.">${esc(s.notes)}</textarea></label>
+      <div class="fgroup"><span class="lbl">Preview</span><div class="md" id="nprev">${mdHtml(s.notes)}</div></div>
+    </div>
+    <div class="frow"><span class="stamp" id="nsaved">Saved on this Mac at ${state.saved}. Only you see them.</span>
+      <span class="spacer"></span><button class="btn main" data-act="modal-close">Done</button></div>`, 'wide');
+  $('#nwrite').focus();
+}
+function pinModal(j) {
+  const s = curSess(), p = s.pins[j];
+  modal(`<h2>Pinned from ${esc(s.title)}</h2><p class="muted">The result of ${p.at}, pinned at ${p.pinnedAt}. A pin is
+    a copy: it stays when the conversation is compacted.</p><div class="result"><div class="md">${mdHtml(p.text)}</div>
+    </div><div class="acts"><button class="btn" data-act="unpin" data-v="${j}">Unpin</button>
+      <button class="btn" data-act="copy">Copy</button><button class="btn main" data-act="modal-close">Close</button>
+    </div>`, 'wide');
+}
+function endModal() {
+  const s = curSess(), n = (s.pins || []).length;
+  modal(`<h2>End "${esc(s.title)}"?</h2><p>The agent stops. The session stays in the list with its notes, and sending
+    a message resumes it.</p>${n ? `<label><input type="checkbox" id="delpins" checked> Delete its ${n}
+    pin${n === 1 ? '' : 's'}</label><p class="muted" style="font-size:13px">To keep one, file it as a task first, or
+    untick this. ${nm(31)}</p>` : ''}
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+      <button class="btn main" data-act="endsess-yes">End the session</button></div>`);
+}
+
+/* ---------- the dock: one session at the foot of every page (round 3) ---------- */
+function dockHtml() {
+  const s = dockSess(), min = state.dock === 'min';
+  const last = [...s.turns].reverse().find((t) => t.result);
+  const opts = [...state.comms].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).map((x) => `<option
+    value="${x.id}" ${x.id === s.id ? 'selected' : ''}>${esc(x.title)}${x.live ? '' : ' (ended)'}</option>`).join('');
+  const head = `<div class="dockh"><label class="sr" for="dsess">Session in the dock</label><select id="dsess">${opts}
+    </select>${s.live ? '<span class="chip info"><span class="livedot"></span>live</span>' : '<span class="chip">ended'
+    + '</span>'}${nm(20)}${min ? `<span class="dockline">${last ? esc(last.result) : ''}</span>`
+    : `<span class="stamp">${
+    esc(s.where)}</span><span class="spacer"></span><span class="seg" role="group" aria-label="Show"><button
+    data-act="dview" data-v="chat" aria-pressed="${state.dview === 'chat'}">Chat</button><button data-act="dview"
+    data-v="term" aria-pressed="${state.dview === 'term'}">Terminal</button></span>${nm(33)}`}
+    <button class="btn ghost sm" data-act="dock-comms">Open in Comms</button>
+    <button class="btn ghost sm" data-act="dock-min">${min ? 'Show' : 'Hide'}</button>
+    <button class="btn ghost sm" data-act="dock-close" aria-label="Close the dock">${svg.close}</button></div>`;
+  if (min) return head;
+  const shown = s.turns.slice(-3);
+  const turn = (t) => `<div class="turn"><div class="stamp" style="align-self:flex-end">You · ${t.at}</div>
+    <div class="you">${mdInline(esc(t.you))}</div>${t.result ? `<div class="result"><div class="stamp">${addTime(t.at,
+    t.secs)} · took ${fmt(t.secs)}</div><div class="md">${mdInline(esc(t.result))}</div></div>`
+    : '<div class="result going"><div class="stamp"><span class="livedot"></span> Working…</div></div>'}</div>`;
+  const body = state.dview === 'term' ? termHtml(s) : `<div class="turns">${s.turns.length > shown.length
+    ? `<div class="stamp">${s.turns.length - shown.length} earlier in Comms.</div>` : ''}${shown.map(turn).join('')}
+    </div>`;
+  return `${head}<div class="dockb">${body}</div>${state.dview === 'term' ? '' : `<div class="dockc"><label class="sr"
+    for="dmsg">Message</label><textarea id="dmsg" placeholder="Message ${esc(s.title)}${s.pinned
+    ? '. It reads the board and runs, and edits no code' : ''}">${esc(state.ddraft)}</textarea>
+    <button class="btn main sm" data-act="dsend">Send</button></div>`}`;
 }
 
 /* ---------- settings ---------- */
@@ -2481,18 +4429,24 @@ function mockHtml() {
       ${s('runorder', 'Run order')}${s('hostile', 'Hostile body')}${s('fresh', 'Fresh repo, first open')}
       ${s('nogit', 'Not a git repo')}${s('logout', 'Claude logged out')}${s('missing', 'Missing board')}
       ${s('clone', 'Second clone: trust')}${s('settings', 'Settings')}</div>
-    <h3>New this round</h3><div class="grid">${s('graph', 'Graph: toward Stage 5')}${s('ask', 'Describe what to show')}
+    <h3>Round 2</h3><div class="grid">${s('graph', 'Graph: toward Stage 5')}${s('ask', 'Describe what to show')}
       ${s('changes', 'Changes: ts-0178, live')}${s('changes2', 'Changes: hand-made commits')}
       ${s('fields', 'Fields from a pack')}${s('comms', 'Comms')}${s('tracks', 'Tracks: where the time went')}
       ${s('optimize', 'Optimize a step')}${s('fresh', 'Empty board: plan or task')}</div>
+    <h3>Round 3</h3><div class="grid">${s('tracks-phase', 'Tracks: one phase, and the task link')}
+      ${s('tracks-tl', 'Timeline: hover a bar')}${s('opt-pick', 'Optimize: pick two')}${s('bake', 'Bake-off result')}
+      ${s('opt-comms', 'Comms from Optimize')}${s('whole', 'Diff: the whole file')}
+      ${s('cnotes', 'Session notes window')}${s('pins', 'Pins in a session')}${s('dock', 'The Desk, docked')}
+      ${s('dockterm', 'The Desk as a terminal')}</div>
     <h3>Live updates (watch)</h3><div class="grid">${s('sim-finish', 'ts-0178 goes to review')}
       ${s('sim-diverge', "A run's copy moves ts-0168")}</div>
     <h3>View</h3><div class="grid"><button class="btn sm" data-act="notes" aria-pressed="${state.notes}">
       ${state.notes ? 'Hide' : 'Show'} design notes</button>${s('reset', 'Reset everything')}</div>
     <h3>Design notes</h3><p class="muted" style="margin:0;font-size:13px">Each is a choice with a recommendation.
-      Answer by number, for example "6: alternative". The tag says what round 2 did with it.</p>
-    <ol class="notes-list">${NOTES.map(([t, d, alt, v], i) => `<li><span class="nm">${i + 1}</span><div><b>${esc(t)}
-      <span class="verdict ${v === 'kept' ? 'muted' : 'newtag'}">${v === 'kept' ? 'kept' : v}</span></b>
+      Answer by number, for example "6: alternative". The tag says what the last round did with it.</p>
+    <ol class="notes-list">${NOTES.map(([t, d, alt, v, r], i) => `<li><span class="nm">${i + 1}</span><div><b>${esc(t)}
+      <span class="verdict ${v === 'kept' ? 'muted' : 'newtag'}">${v === 'kept' ? 'kept' : `${v} · round ${r || 2}`}
+      </span></b>
       ${esc(d)} <span class="alt">${esc(alt)}</span></div></li>`).join('')}</ol>`;
 }
 
@@ -2516,6 +4470,17 @@ function render() {
   const d = $('#drawer');
   d.hidden = !t || state.screen === 'welcome';
   if (t) d.innerHTML = drawerHtml(t);
+  const dk = $('#dock');
+  const docked = !!state.dock && state.screen === 'board' && (state.settings || state.surface !== 'comms');
+  dk.hidden = !docked;
+  if (docked) {
+    dk.className = `dock ${state.dock === 'min' ? 'min' : ''}`;
+    dk.innerHTML = dockHtml();
+    const db = dk.querySelector('.dockb');
+    if (db) db.scrollTop = db.scrollHeight;
+  }
+  document.body.style.setProperty('--dockb', `${docked ? dk.offsetHeight : 0}px`);
+  $('#tip').hidden = true;
   document.body.classList.toggle('notes', state.notes);
   $('#mock').hidden = !state.mock;
   $('#mockbtn').setAttribute('aria-expanded', String(state.mock));
@@ -2604,21 +4569,47 @@ function scenario(v) {
     case 'fields': state.layout = 'board'; goBoard('pantry', 'tracker'); state.drawer = 'PT-3'; break;
     case 'comms': if (state.screen !== 'board' || board().missing) goBoard('collide');
       state.surface = 'comms'; state.settings = false; state.comm = 'flaky'; break;
-    case 'tracks': goBoard('collide'); state.surface = 'tracks'; state.track = 'r121'; break;
-    case 'optimize': goBoard('collide'); state.surface = 'tracks'; state.track = 'r121'; render();
-      optimizeModal('cargo'); return;
+    case 'tracks': goBoard('collide'); Object.assign(state, { surface: 'tracks', track: 'r121', tphase: null,
+      ttab: 'table' }); break;
+    case 'optimize': goTracks('Build', 'table'); render(); optimizeModal('cargo'); return;
+    case 'tracks-phase': goTracks('Plan', 'table'); break;
+    case 'tracks-tl': goTracks(null, 'timeline'); break;
+    case 'opt-pick': case 'bake':
+      goTracks('Build', 'table'); render(); optimizeModal('cargo');
+      state.optSel = new Set(v === 'bake' ? [0, 1, 2] : [0, 1]);
+      if (v === 'bake') bakeResult('cargo'); else optimizeResult('cargo');
+      return;
+    case 'opt-comms':
+      goTracks('Build', 'table'); state.optCtx = optContext('cargo'); state.optSel = new Set([0, 1, 2]);
+      optSession('cargo', true); break;
+    case 'whole': goBoard('collide', 's6'); state.layout = 'board'; state.drawer = 'ts-0178-fw';
+      state.diffView = 'whole'; render(); diffModal('ts-0178-fw', 0); return;
+    case 'cnotes': case 'pins':
+      if (state.screen !== 'board' || board().missing) goBoard('collide');
+      Object.assign(state, { surface: 'comms', settings: false, comm: 'flaky', cview: 'convo' });
+      if (v === 'cnotes') { render(); notesModal(); return; }
+      break;
+    case 'dock': case 'dockterm':
+      goBoard('collide');
+      Object.assign(state, { dock: 'open', dockSess: 'desk', dview: v === 'dock' ? 'chat' : 'term', ddraft: '' });
+      break;
     case 'reset': {
       const notes = state.notes;
       state.boards = freshBoards();
       Object.assign(state, { layout: 'board', groupBy: 'auto', open: new Set(), shut: new Set(), notes,
         comms: JSON.parse(JSON.stringify(COMMS)), comm: 'flaky', cview: 'convo', track: 'r121', ttab: 'table',
-        minSecs: 0, toolType: 'all', cq: '' });
+        minSecs: 0, toolType: 'all', cq: '', tphase: null, optCtx: null, optSel: new Set(), optCap: false,
+        optTime: false, diffView: 'changes', dock: false, dockSess: 'desk', dview: 'chat', ddraft: '' });
       goBoard('collide');
       break;
     }
   }
   state.menu = null;
   render();
+}
+function goTracks(phase, tab) {
+  goBoard('collide');
+  Object.assign(state, { surface: 'tracks', track: 'r121', tphase: phase, ttab: tab, toolType: 'all', minSecs: 0 });
 }
 function trustModal() {
   modal(`<h2>Trust the packs this repo brings?</h2>
@@ -2704,32 +4695,74 @@ document.addEventListener('click', (e) => {
     case 'ask-undo': if (state.ask && state.ask.prev) state.filt = state.ask.prev; state.ask = null; break;
     case 'deps-off': state.filt.deps = false; break;
     case 'diff': diffModal(id, Number(v)); return;
-    case 'track': state.track = v; state.surface = 'tracks'; state.settings = false; break;
+    case 'track': Object.assign(state, { track: v, tphase: null, surface: 'tracks', settings: false }); break;
+    case 'phase': Object.assign(state, { track: v, tphase: id, surface: 'tracks', settings: false }); break;
     case 'ttab': state.ttab = v; break;
     case 'optimize': optimizeModal(v); return;
     case 'opt-go': optimizeWorking(v); return;
-    case 'opt-task': {
-      const o = OPTIMIZE[v], x = o.options[Number(id)];
-      const tid = fileTask(`Faster ${o.step}: ${x.title.toLowerCase()}`, `## Goal\n\n${x.how}\n\nFound by `
-        + `Optimize on Run R-121's Build phase. ${o.facts}\n\n## Notes\n\n- Saves ${x.saves}. Effort: ${x.effort}. `
-        + `Risk: ${x.risk}${x.src ? `\n- From [${x.src}](${x.src})` : ''}`);
+    case 'opt-back': optimizeResult(v); return;
+    case 'opt-tasks': {
+      const ids = picks().map((i) => fileOpt(OPTIMIZE[v], state.optCtx, i));
       closeModal();
-      toast(`Filed ${tid} in Backlog, with the research in its body. Nothing runs until you start it.`);
+      toast(`Filed ${words(ids)} in Backlog, with the research in ${ids.length > 1 ? 'each' : 'its'} body. `
+        + 'Nothing runs '
+        + 'until you start it.');
       break;
     }
-    case 'opt-comms': {
-      const o = OPTIMIZE[v];
+    case 'bake': bakeModal(v); return;
+    case 'bake-go': bakeWorking(v); return;
+    case 'bake-task': {
+      const o = OPTIMIZE[v], i = Number(id), [m, tests, , , detail] = o.bake.arms[i];
+      const tid = fileOpt(o, state.optCtx, i, `${fmt(m)} median against ${fmt(o.bake.base[0])} today, ${tests}. `
+        + detail);
       closeModal();
-      newSession(`Optimize: ${o.step}`, `Pick a way to speed up ${o.step}, then schedule it.`,
-        'Claude Code · sonnet', 'main checkout · edits no code',
-        [tl(clock(), `Find a faster way to run \`${o.step}\`.`,
-          130, [['Read', 6], ['WebSearch', 4]], `${o.options.length} options: ${o.options.map((x) => x.title)
-            .join('; ')}. Which should we try first? I can draft the task.`, 0.31)]);
-      toast('Opened a Comms session with the research.');
+      toast(`Filed ${tid} in Backlog, with the research and the bake-off in its body.`);
       break;
     }
+    case 'opt-comms':
+      closeModal();
+      optSession(v, id === 'bake');
+      toast('Opened a Comms session that says where it came from, what you saw, and the research.');
+      break;
     case 'comm': state.comm = v; break;
     case 'cview': state.cview = v; break;
+    case 'notes-open': notesModal(); return;
+    case 'pin': {
+      const s = curSess(), t = s.turns[Number(v)];
+      (s.pins ||= []).push({ turn: Number(v), text: t.result, at: t.at, pinnedAt: clock() });
+      toast('Pinned. It stays in Pinned, however long the conversation grows.');
+      break;
+    }
+    case 'unpin': curSess().pins.splice(Number(v), 1); closeModal(); break;
+    case 'unpin-turn': { const s = curSess(); s.pins = s.pins.filter((p) => p.turn !== Number(v)); break; }
+    case 'pin-open': pinModal(Number(v)); return;
+    case 'pin-task': fileTurnModal(curSess().pins[Number(v)].turn); return;
+    case 'diffv': state.diffView = v; diffModal(id, Number(el.dataset.x)); return;
+    case 'dock':
+      if (state.surface === 'comms' && !state.settings) { state.comm = 'desk'; state.dock = 'open'; break; }
+      state.dock = state.dock ? false : 'open';
+      break;
+    case 'dock-min': state.dock = state.dock === 'min' ? 'open' : 'min'; break;
+    case 'dock-close': state.dock = false; break;
+    case 'dock-comms': Object.assign(state, { surface: 'comms', comm: state.dockSess, settings: false }); break;
+    case 'dview': state.dview = v; break;
+    case 'dsend': {
+      const text = ($('#dmsg') && $('#dmsg').value.trim()) || '';
+      if (!text) return;
+      const s = dockSess();
+      s.live = true; s.last = clock();
+      s.turns.push(tl(clock(), text, 3, [['query', 1]], 'The mock does not run an agent. In the app the answer '
+        + 'arrives here, and Comms shows the same conversation.', 0));
+      state.ddraft = '';
+      break;
+    }
+    case 'discuss':
+      Object.assign(state, { dock: 'open', dockSess: 'desk', dview: 'chat' });
+      state.ddraft = `${state.ddraft ? `${state.ddraft} ` : ''}${id} `;
+      if (state.surface === 'comms') state.surface = 'field';
+      render();
+      { const m = $('#dmsg'); if (m) { m.focus(); m.setSelectionRange(m.value.length, m.value.length); } }
+      return;
     case 'newsess': newSessionModal(); return;
     case 'newsess-yes': {
       const tree = $('input[name=swhere]:checked').value === 'tree';
@@ -2738,7 +4771,15 @@ document.addEventListener('click', (e) => {
       closeModal();
       break;
     }
-    case 'endsess': { const s = state.comms.find((x) => x.id === state.comm); s.live = false; s.last = clock(); break; }
+    case 'endsess': endModal(); return;
+    case 'endsess-yes': {
+      const s = curSess(), del = $('#delpins') && $('#delpins').checked, n = (s.pins || []).length;
+      s.live = false; s.last = clock();
+      if (del) s.pins = [];
+      closeModal();
+      toast(`Ended "${s.title}".${del && n ? ` Deleted its ${n} pin${n === 1 ? '' : 's'}.` : ''}`);
+      break;
+    }
     case 'send': {
       const text = $('#cmsg').value.trim();
       if (!text) return;
@@ -2767,17 +4808,36 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'goal') { state.goal = e.target.value; render(); }
   if (e.target.id === 'ttype') { state.toolType = e.target.value; render(); }
   if (e.target.id === 'tmin') { state.minSecs = Number(e.target.value); render(); }
+  if (e.target.id === 'dsess') { state.dockSess = e.target.value; render(); }
+  if (e.target.id === 'optcap' || e.target.id === 'opttime') {
+    const cap = e.target.id === 'optcap';
+    state[cap ? 'optCap' : 'optTime'] = e.target.checked;
+    $(cap ? '#capv' : '#timev').classList.toggle('over', e.target.checked);
+    $(cap ? '#capnote' : '#timenote').hidden = !e.target.checked;
+  }
+  if (e.target.classList.contains('optpick')) {
+    const i = Number(e.target.value);
+    if (e.target.checked) state.optSel.add(i); else state.optSel.delete(i);
+    pickCount();
+  }
 });
 document.addEventListener('input', (e) => {
   const id = e.target.id;
-  if (id === 'cnotes' || id === 'cpurpose') {
-    const s = state.comms.find((x) => x.id === state.comm);
-    if (s) s[id === 'cnotes' ? 'notes' : 'purpose'] = e.target.value;
+  if (id === 'nwrite' || id === 'cpurpose') {
+    const s = curSess();
+    s[id === 'nwrite' ? 'notes' : 'purpose'] = e.target.value;
     state.saved = clock();
-    const c = $('#csaved');
-    if (c) c.textContent = `Saved on this Mac at ${state.saved}. Only you see them.`;
+    const words = `Saved on this Mac at ${state.saved}. Only you see them.`;
+    ['#csaved', '#nsaved'].forEach((sel) => { const c = $(sel); if (c) c.textContent = words; });
+    if (id === 'nwrite') {
+      const html = mdHtml(s.notes);
+      $('#nprev').innerHTML = html;
+      const p = $('.npv');
+      if (p) p.innerHTML = html || '<p class="muted">No notes yet. Open notes to write some, in Markdown.</p>';
+    }
     return;
   }
+  if (id === 'dmsg') { state.ddraft = e.target.value; return; }
   if (id !== 'ftext' && id !== 'cq') return;
   if (id === 'ftext') state.filt.text = e.target.value; else state.cq = e.target.value;
   const pos = e.target.selectionStart;
@@ -2785,10 +4845,22 @@ document.addEventListener('input', (e) => {
   const f = $(`#${id}`);
   if (f) { f.focus(); f.setSelectionRange(pos, pos); }
 });
+function placeTip(e) {
+  const t = $('#tip'), w = t.offsetWidth, ht = t.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY + 16;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+  if (y + ht > innerHeight - 8) y = e.clientY - ht - 12;
+  t.style.left = `${Math.max(8, x)}px`;
+  t.style.top = `${Math.max(8, y)}px`;
+}
 document.addEventListener('mouseover', (e) => {
   const n = e.target.closest && e.target.closest('.gnode');
   if (n) lightGraph(n.dataset.id);
+  const bar = e.target.closest && e.target.closest('[data-tip]'), tip = $('#tip');
+  if (bar && TIPS[bar.dataset.tip]) { tip.innerHTML = TIPS[bar.dataset.tip]; tip.hidden = false; placeTip(e); }
+  else if (!tip.hidden) tip.hidden = true;
 });
+document.addEventListener('mousemove', (e) => { if (!$('#tip').hidden) placeTip(e); });
 document.addEventListener('mouseout', (e) => {
   if (e.target.closest && e.target.closest('.gnode') && !(e.relatedTarget && e.relatedTarget.closest
     && e.relatedTarget.closest('.gnode'))) lightGraph(null);
@@ -2805,6 +4877,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && document.activeElement.id === 'askq') { runAsk(document.activeElement.value); return; }
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && document.activeElement.id === 'cmsg') {
     $('[data-act=send]').click(); return;
+  }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && document.activeElement.id === 'dmsg') {
+    $('[data-act=dsend]').click(); return;
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   const tab = { 1: 'field', 2: 'tracks', 3: 'queue', 4: 'planning', 5: 'comms' }[e.key];
@@ -2890,19 +4965,53 @@ function diffOf(path) {
   }
   return DIFFS[path];
 }
+let WHOLE = null;
+// The whole file after the change. A line that starts with "~" continues the line before it.
+function wholeOf(path) {
+  if (!WHOLE) {
+    WHOLE = {};
+    $('#whole-0178').textContent.split(/^### FILE /m).slice(1).forEach((chunk) => {
+      const nl = chunk.indexOf('\n'), out = [];
+      chunk.slice(nl + 1).replace(/\n+$/, '').split('\n').forEach((l) => {
+        if (l[0] === '~' && out.length) out[out.length - 1] += l.slice(1); else out.push(l);
+      });
+      WHOLE[chunk.slice(0, nl).trim()] = out;
+    });
+  }
+  return WHOLE[path];
+}
 function diffModal(id, i) {
-  const ch = CHANGES[id], f = ch.files[i];
-  const text = id === 'ts-0178-fw' && f.diff ? diffOf(f.path) : null;
+  const ch = CHANGES[id], f = ch.files[i], view = state.diffView;
+  const real = id === 'ts-0178-fw' && f.diff;
+  const text = real && view === 'changes' ? diffOf(f.path) : null;
+  const whole = real && view === 'whole' ? wholeOf(f.path) : null;
+  let n = 0;
   const body = text ? `<pre class="diff">${text.split('\n').map((l) => `<span class="${l.startsWith('@@') ? 'h'
     : l[0] === '+' ? 'a' : l[0] === '-' ? 'd' : ''}">${esc(l) || ' '}</span>`).join('')}</pre>`
-    : '<p class="muted">This mock carries the real diffs of six ts-0178 files only. In the app every file opens.</p>';
+    : whole ? `<pre class="diff whole" id="wholepre">${whole.map((l) => {
+      const k = l[0] === '-' ? 'd' : l[0] === '+' ? 'a' : '';
+      if (k !== 'd') n += 1;
+      return `<span class="${k}"><i>${k === 'd' ? '' : n}</i>${esc(l.slice(1)) || ' '}</span>`;
+    }).join('')}</pre><p class="muted" style="font-size:13px">${n} lines after the change. Green lines were added;
+      red lines were removed, and show where they were.</p>`
+    : `<p class="muted">This mock carries the ${view === 'whole' ? 'whole text of four' : 'real diffs of six'} ts-0178
+      files only. In the app every file opens both ways.</p>`;
   const nav = (j, w) => (j >= 0 && j < ch.files.length ? `<button class="btn" data-act="diff" data-id="${id}"
     data-v="${j}">${w}</button>` : '');
   modal(`<h2 class="mono" style="font-size:15px;overflow-wrap:anywhere">${esc(f.path)}</h2>
-    <p class="muted">${esc(id)} · ${esc(ch.where)} · <span class="add">+${f.add}</span> <span class="del">−${f.del}
-    </span> · file ${i + 1} of ${ch.files.length}</p>${body}
+    <div class="frow"><span class="muted">${esc(id)} · ${esc(ch.where)} · <span class="add">+${f.add}</span>
+      <span class="del">−${f.del}</span> · file ${i + 1} of ${ch.files.length}</span><span class="spacer"></span>
+      <span class="seg" role="group" aria-label="Show"><button data-act="diffv" data-v="changes" data-id="${id}"
+        data-x="${i}" aria-pressed="${view === 'changes'}">Changes</button><button data-act="diffv" data-v="whole"
+        data-id="${id}" data-x="${i}" aria-pressed="${view === 'whole'}">Whole file</button></span>${nm(29)}</div>
+    ${body}
     <div class="acts">${nav(i - 1, '‹ Previous file')}${nav(i + 1, 'Next file ›')}
       <button class="btn main" data-act="modal-close">Close</button></div>`, 'wide');
+  const pre = $('#wholepre');
+  if (pre) {
+    const first = pre.querySelector('.a, .d');
+    if (first) pre.scrollTop = Math.max(0, first.offsetTop - 60);
+  }
 }
 function fileTurnModal(i) {
   const s = state.comms.find((x) => x.id === state.comm), t = s.turns[i];
