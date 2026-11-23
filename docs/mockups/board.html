@@ -496,9 +496,38 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
   padding:8px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
 .dockc textarea{flex:1;border:1px solid var(--input);border-radius:var(--radius-sm);padding:6px 10px;height:38px;
   resize:none;background:var(--card)}
+/* Round 4: a task id peeks; a planning session beside its proposal. */
+.idref{color:var(--primary);border-bottom:1px dotted currentColor;cursor:pointer;border-radius:2px}
+.idref:hover,.idref:focus-visible{background:var(--primary-soft);outline:none}
+.peek{position:fixed;z-index:75;width:min(460px,calc(100vw - 24px));max-height:min(480px,72vh);display:flex;
+  flex-direction:column;background:var(--popover);border:1px solid var(--border);border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-lg);font-size:13.5px}
+.peek[hidden]{display:none}
+.peek.pinned{border-color:color-mix(in srgb,var(--primary) 45%,var(--border))}
+.peekh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px 6px}
+.peekh h3{flex-basis:100%;margin:0;font-size:15px;font-weight:650;line-height:1.3}
+.peekb{overflow:auto;padding:4px 12px 10px;min-height:0}
+.peekb h4{margin:10px 0 4px;font-size:13px}
+.peekb p,.peekb ul{margin:0 0 6px}
+.peekf{display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding:8px 12px}
+.psess{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px;align-items:start}
+.psess .convo{max-height:calc(100vh - 190px - var(--dockb,0px))}
+.psess .turns{overflow:auto;min-height:0}
+.meter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid
+  var(--border);font-size:13px}
+.meter .bar{width:120px}
+.wrote{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px}
+.wrote .lbl{color:var(--muted-foreground)}
+.ppanel{display:flex;flex-direction:column;gap:12px;padding:14px}
+.ppanel h3{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-foreground);
+  margin:0;display:flex;align-items:center;gap:8px}
+.ppanel .row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:3px 0}
+.ppanel .fid{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground);min-width:2.2em}
+.ppanel .isnew{background:color-mix(in srgb,var(--primary) 9%,transparent);border-radius:var(--radius-xs);
+  padding:3px 6px;margin:0 -6px}
 @media (max-width:1100px){.comms{grid-template-columns:230px minmax(0,1fr)}.comms .sidecard{grid-column:1 / -1}}
 @media (max-width:700px){.comms{grid-template-columns:1fr}.runrow{grid-template-columns:1fr}
-  .nwin{grid-template-columns:1fr}}
+  .nwin{grid-template-columns:1fr}.psess{grid-template-columns:1fr}}
 @media (max-width:900px){.drawer{position:fixed;inset:0 0 0 auto;width:min(460px,100%);z-index:35;
   box-shadow:var(--shadow-lg)}.tabs{margin-inline:0;order:3;width:100%;overflow-x:auto}}
 </style>
@@ -517,6 +546,7 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 </div>
 <section class="dock" id="dock" hidden aria-label="Docked session"></section>
 <div class="tip" id="tip" hidden role="tooltip"></div>
+<div class="peek" id="peek" hidden role="dialog" aria-label="Task peek"></div>
 <div class="overlay" id="overlay" hidden><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 <button class="mockbtn" id="mockbtn" data-act="mock" aria-expanded="false">Mock</button>
@@ -2977,6 +3007,8 @@ const state = {
   // Round 3: a phase of the run (null: the whole run), Optimize's picks, the diff view, and the dock.
   tphase: null, optCtx: null, optSel: new Set(), optCap: false, optTime: false, diffView: 'changes',
   dock: false, dockSess: 'desk', dview: 'chat', ddraft: '',
+  // Round 4: the planning session open on the Planning page, its panel's tab, its view, and its draft.
+  psess: null, ptab: 'plan', pview: 'chat', pdraft: '',
 };
 const board = () => state.boards[state.board];
 const view = () => board().views.find((v) => v.id === state.view) || board().views[0];
@@ -3116,6 +3148,24 @@ const NOTES = [
     + 'folded, results you can pin. Terminal is Claude Code itself, through the shim\'s terminal, as plan 9e has '
     + 'for the Desk. Recommendation: Chat by default and Terminal one click away, in Comms and in the dock.',
     'Alternative: the terminal only, as the plan has for the Desk.', 'new', 3],
+  ['A task id peeks', 'Any id in a body, a note or a result (ts-, sp-, qu-, pr-) is a link. Hover shows the task in '
+    + 'a small window: its state, title, what it waits on and its body, which scrolls. A click keeps it open; an id '
+    + 'inside it opens in the same window, with Back. Esc or a click away closes it. Recommendation: hover, and '
+    + 'click to keep.', 'Alternative: click only, no hover. Calmer, one more click each time.', 'new', 4],
+  ['Plan…: the session beside its proposal', 'The Planning page splits: the session on the left (Chat or '
+    + 'Terminal), the proposal on the right, following its file as the agent writes. Each reply lists what it '
+    + 'wrote. Writes need no approval: the proposal is a private draft until Share, and your own steps (answer, '
+    + 'keep, accept) stay yours. Recommendation: as drawn.', 'Alternative: the agent asks before each write. '
+    + 'Safer, much slower.', 'new', 4],
+  ['How the planning agent learns Collide', 'No skill today: the plan gives the workflow\'s prompt and the '
+    + '`collide guide` paragraph. A long chat can compact the first prompt away. Recommendation: a short charter in '
+    + 'the system prompt (it survives compaction), plus `collide guide plan`, built from the CLI\'s own tables so '
+    + 'it cannot drift.', 'Alternatives: a collide-plan skill in the planning pack (loads on demand, Claude only, '
+    + 'can drift from the CLI); MCP write tools (typed, but a second write path).', 'new', 4],
+  ['An idea in a planning chat', 'In scope, it becomes a feature (Unsorted if no section fits). Out of scope, a '
+    + 'follow-up: private, raised by the session, waiting for Keep or Drop. A choice for you becomes a question in '
+    + 'Decisions needed. Recommendation: as drawn.', 'Alternative: a "Parked ideas" part in the proposal, sorted '
+    + 'when it is accepted.', 'new', 4],
 ];
 
 /* ---------- top bar ---------- */
@@ -3540,8 +3590,8 @@ function emptyHtml() {
 
 /* ---------- drawer ---------- */
 function mdInline(s) {
-  // s is already escaped. Images never load; only http(s) links open, and they ask first.
-  return s
+  // s is already escaped. Images never load; only http(s) links open, and they ask first. Ids peek.
+  return idLinks(s
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, src) =>
@@ -3552,7 +3602,7 @@ function mdInline(s) {
         return `<a href="#" data-act="ext" data-href="${href}" title="Opens in your browser, after asking">${text}</a>`;
       }
       return `${text} <span class="gone">(link not opened: ${esc(raw.split(':')[0])}: links are never opened)</span>`;
-    });
+    }));
 }
 function mdHtml(src) {
   const lines = esc(src).split('\n');
@@ -3668,6 +3718,7 @@ function fieldsHtml(t, src) {
 
 /* ---------- planning ---------- */
 function planningHtml() {
+  if (state.psess && planSess()) return planSessionHtml();
   const tasks = visibleTasks();
   const epics = [...new Set(tasks.map((t) => t.epic).filter(Boolean))];
   const tiles = epics.map((e) => {
@@ -3686,12 +3737,18 @@ function planningHtml() {
     ['Settings', 'Settings view', 'GitHub source', 'no task yet', '', true],
     ['Sources', 'Issues as tasks', 'GitHub source', 'in a task', 'ts-0173-ku', false],
   ];
+  const ps = state.comms.find((x) => x.id === PLAN_SESSION.id);
+  const psRow = ps ? `<div class="lk"><span class="dot cat-backlog"></span><span class="grow">${esc(
+      findItem(ps.proposal).title)} <span class="muted" style="font-size:12.5px">· draft · private · 2 sections, 4
+      features · its session is ${ps.live ? 'live' : 'ended'}</span></span><button class="btn sm"
+      data-act="psess-open">Open session</button></div>` : '';
   return `<section class="panel card" style="max-width:none" aria-label="Planning">
     <div class="frow"><h1>Planning</h1><span class="chip">read only</span><span class="muted">What to build next, and
-      the decisions to make first. Changes are made in the files or by a planning session (Stage 9d).</span></div>
+      the decisions to make first. Changes are made in the files or by a planning session (Stage 9d).</span>
+      <span class="spacer"></span><button class="btn sm" data-act="plan">Plan…</button></div>
     <h2>Epics</h2><div class="tiles">${tiles}</div>
     <h2>Proposals</h2>
-    <div class="links">
+    <div class="links">${psRow}
       <div class="lk"><span class="dot cat-active"></span><span class="grow">Board UI before GitHub
         <span class="muted" style="font-size:12.5px">· draft · 3 sections, 4 features</span></span>
         <span class="chip info">${svg.branch} only on branch plan/ui-first</span></div>
@@ -4178,7 +4235,8 @@ function commsHtml() {
         ([n, c]) => `${c} ${n}`).join(', ') || 'thinking'} so far</div></div>`
         : `<div class="result"><div class="stamp">Result · ${addTime(t.at, t.secs)} · took ${fmt(t.secs)} ·
           $${t.cost.toFixed(2)}${pin ? ' · <span class="chip info">Pinned</span>' : ''}</div><div class="md">${
-          mdInline(esc(t.result))}</div><div class="acts"><button class="btn ghost sm" data-act="copy">Copy</button>
+          mdInline(esc(t.result))}</div>${wroteHtml(t)}<div class="acts"><button class="btn ghost sm"
+          data-act="copy">Copy</button>
           <button class="btn ghost sm" data-act="${pin ? 'unpin-turn' : 'pin'}" data-v="${i}">${pin ? 'Unpin'
           : 'Pin'}</button>${i === 1 && s.id === 'flaky' ? nm(31) : ''}<button class="btn ghost sm"
           data-act="file-turn" data-v="${i}">File as a task…</button></div></div>`}</div>`;
@@ -4228,7 +4286,9 @@ function commsHtml() {
           </button>${nm(30)}</h3><div class="npv md" data-act="notes-open" title="Open notes">${s.notes
           ? mdHtml(s.notes) : '<p class="muted">No notes yet. Open notes to write some, in Markdown.</p>'}</div>
           <div class="stamp" id="csaved">Saved on this Mac at ${state.saved}. Only you see them.</div></div>
-        <div><h3>Session</h3><dl class="kv">${from}<dt>Started</dt><dd>${esc(dayOf(s))} ${s.start}</dd>
+        <div><h3>Session</h3><dl class="kv">${from}${s.proposal ? `<dt>Plans</dt><dd>${idLinks(esc(s.proposal))}
+          · <button class="tlink" data-act="psess-open">Open on Planning</button></dd>` : ''}
+          <dt>Started</dt><dd>${esc(dayOf(s))} ${s.start}</dd>
           <dt>Last active</dt><dd>${s.live ? 'now' : s.last}</dd><dt>Messages</dt><dd>${s.turns.length}</dd>
           <dt>Agent</dt><dd>${esc(s.agent)}</dd><dt>Runs in</dt><dd>${esc(s.where)}</dd>
           <dt>Spent</dt><dd>$${spent.toFixed(2)}</dd></dl>
@@ -4320,6 +4380,271 @@ function dockHtml() {
     for="dmsg">Message</label><textarea id="dmsg" placeholder="Message ${esc(s.title)}${s.pinned
     ? '. It reads the board and runs, and edits no code' : ''}">${esc(state.ddraft)}</textarea>
     <button class="btn main sm" data-act="dsend">Send</button></div>`}`;
+}
+
+/* ---------- a task id peeks (round 4) ---------- */
+// Only text between tags is read, so a link's address and an attribute are left alone.
+const ID_RE = /(?<![\w/.#-])((?:ts|sp|qu|fx|pr)-\d{4}(?:-[a-z]{2})?)(?![\w-])/g;
+function idLinks(html) {
+  return html.split(/(<[^>]+>)/).map((part) => (part[0] === '<' ? part : part.replace(ID_RE,
+    '<span class="idref" role="button" tabindex="0" data-act="peek" data-id="$1" title="Peek at $1">$1</span>')))
+    .join('');
+}
+const allItems = () => [...board().tasks, ...Object.values(state.boards).flatMap((b) => b.tasks || []),
+  ...PLAN_ITEMS];
+const findItem = (id) => allItems().find((t) => t.id === id) || allItems().find((t) => t.id.startsWith(`${id}-`));
+let PEEK = { stack: [], pinned: false, at: null }, peekShow = 0, peekHide = 0;
+function peekHtml() {
+  const id = PEEK.stack[PEEK.stack.length - 1], t = findItem(id), prev = PEEK.stack[PEEK.stack.length - 2];
+  const back = prev ? `<button class="btn ghost sm" data-act="peek-back">‹ ${esc(prev)}</button>` : '';
+  const end = PEEK.pinned
+    ? `<button class="btn ghost sm" data-act="peek-close" aria-label="Close">${svg.close}</button>`
+    : '<span class="stamp">Click the id to keep this open</span>';
+  if (!t) {
+    return `<div class="peekh">${back}<span class="mono stamp">${esc(id)}</span><span class="spacer"></span>${end}
+      <h3>Not in this mock's data</h3></div><div class="peekb"><p class="muted">In the app every id on the board
+      peeks. One Collide cannot find says so, and names the sources it looked in.</p></div>`;
+  }
+  const ep = EPICS[t.epic];
+  const word = t.word || (t.kind === 'proposal' ? `proposal · ${t.status}` : t.status);
+  const waits = (t.blockedBy || []).map((b) => idLinks(esc(b))).join(', ');
+  return `<div class="peekh">${back}<span class="chip"><span class="dot cat-${catOf(t)}"></span>${esc(word)}</span>
+      <span class="mono stamp">${esc(t.id)}</span>${ep ? `<span class="stamp">${esc(ep.short)}</span>` : ''}
+      ${t.priv ? '<span class="chip">private</span>' : ''}<span class="spacer"></span>${end}
+      <h3>${esc(t.title)}</h3></div>
+    <div class="peekb md">${waits ? `<p class="stamp">Waits on ${waits}</p>` : ''}${typeof t.body === 'string'
+      ? mdHtml(t.body) : ''}</div>
+    <div class="peekf"><button class="btn sm" data-act="peek-open" data-id="${t.id}">Open in the drawer</button>
+      <button class="btn ghost sm" data-act="copy">Copy id</button><span class="spacer"></span>${nm(34)}</div>`;
+}
+function placePeek() {
+  const p = $('#peek'), r = PEEK.at, w = p.offsetWidth, ht = p.offsetHeight;
+  let x = Math.min(r.left, innerWidth - w - 12), y = r.bottom + 6;
+  if (y + ht > innerHeight - 12) y = Math.max(12, r.top - ht - 6);
+  p.style.left = `${Math.max(12, x)}px`;
+  p.style.top = `${y}px`;
+}
+function showPeek(el, pinned) {
+  clearTimeout(peekShow); clearTimeout(peekHide);
+  PEEK = { stack: [el.dataset.id], pinned, at: el.getBoundingClientRect() };
+  drawPeek();
+}
+function drawPeek() {
+  const p = $('#peek');
+  p.innerHTML = peekHtml();
+  p.classList.toggle('pinned', PEEK.pinned);
+  p.hidden = false;
+  placePeek();
+}
+function hidePeek() {
+  clearTimeout(peekShow); clearTimeout(peekHide);
+  PEEK = { stack: [], pinned: false, at: null };
+  $('#peek').hidden = true;
+}
+document.addEventListener('mouseover', (e) => {
+  const ref = e.target.closest && e.target.closest('.idref'), inPeek = e.target.closest && e.target.closest('#peek');
+  if (inPeek) { clearTimeout(peekHide); return; }
+  if (PEEK.pinned) return;
+  clearTimeout(peekShow);
+  if (ref) { clearTimeout(peekHide); peekShow = setTimeout(() => showPeek(ref, false), 350); return; }
+  if (!$('#peek').hidden) peekHide = setTimeout(hidePeek, 250);
+});
+document.addEventListener('click', (e) => {
+  if (!$('#peek').hidden && !e.target.closest('#peek, .idref')) hidePeek();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#peek').hidden) { hidePeek(); e.stopImmediatePropagation(); return; }
+  const ref = document.activeElement && document.activeElement.closest && document.activeElement.closest('.idref');
+  if (ref && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showPeek(ref, true); }
+}, true);
+
+/* ---------- Plan…: a planning session beside its proposal (round 4) ---------- */
+// What one Plan… session wrote through `collide`. Private until Share; made up for the mock.
+const PLAN_ITEMS = [
+  { id: 'pr-0011-cm', kind: 'proposal', title: 'Comms and the Desk', status: 'backlog', word: 'proposal · draft',
+    epic: 'ep-006-wq', src: 'plan', blockedBy: [], priv: true,
+    body: '## Goal\n\nSessions with an agent in one place, Comms, and the Desk docked on every page.\n\n## Features\n\n'
+      + '#### Comms\n\n- F1 Pins kept per session\n- F2 Notes in a window, in Markdown\n\n#### Desk\n\n'
+      + '- F3 Docked at the foot of every page\n- F4 Discuss puts ids in the Desk\'s input' },
+  { id: 'ts-0190-pn', title: 'Comms: a pinned result is kept for the life of its session', status: 'backlog',
+    epic: 'ep-006-wq', src: 'plan', blockedBy: [], priv: true,
+    body: '## Goal\n\nPin copies a result into the session\'s Pinned list, so a compaction never loses it. End asks '
+      + 'whether to delete the pins.\n\n## Success criteria\n\n- A pinned result is still there after the session '
+      + 'compacts.\n- End with the box ticked deletes the pins; unticked, they stay.\n\nImplements pr-0011-cm F1.' },
+  { id: 'ts-0191-dk', title: 'Desk: one session docked at the foot of every page', status: 'backlog',
+    epic: 'ep-006-wq', src: 'plan', blockedBy: [], priv: true,
+    body: '## Goal\n\nThe Desk (Stage 9e) docked on every page but Comms: the same session as the pinned one in '
+      + 'Comms.\n\n## Success criteria\n\n- Hide shrinks it to one line with the last result.\n- Discuss in the '
+      + 'drawer puts the task\'s id in its input.\n\nImplements pr-0011-cm F3. Its spend line waits on `qu-0012-sp`.' },
+  { id: 'qu-0012-sp', kind: 'question', title: 'Does the Desk\'s spend count toward the Queue\'s daily warning?',
+    status: 'backlog', word: 'question · open', epic: 'ep-006-wq', src: 'plan', blockedBy: [], priv: true,
+    body: 'The Desk runs all day. Its spend could join the board\'s one daily number, or have its own line.\n\n'
+      + '- **Recommendation:** its own line, so the Desk never eats a run\'s share of the warning.\n'
+      + '- **Alternative:** one total for the board.\n\nAnswer it in the Queue, under Decisions needed. Raised by '
+      + 'pr-0011-cm.' },
+  { id: 'ts-0192-ex', title: 'Comms: export a session as a Markdown file', status: 'backlog',
+    word: 'follow-up · private', epic: 'ep-006-wq', src: 'plan', blockedBy: [], priv: true,
+    body: 'An idea from the planning session for pr-0011-cm, outside that plan. Raised by the session, so it waits '
+      + 'in Follow-ups: Keep files it, Drop deletes it.\n\n## Goal\n\nSave a session\'s turns, notes and pins as one '
+      + 'Markdown file.' },
+];
+// One kind of thing a session wrote, as the receipt under its turn and the panel's rows.
+const WROTE = {
+  feature: ['Feature', (w) => `${w.id} · ${esc(w.title)} <span class="muted">(${esc(w.section)})</span>`],
+  task: ['Task', (w) => idLinks(esc(w.id))],
+  question: ['Question', (w) => `${idLinks(esc(w.id))} <span class="muted">in Decisions needed</span>`],
+  decision: ['Decision', (w) => `${w.id} · ${esc(w.title)}`],
+  assumption: ['Assumption', (w) => `${w.id} · ${esc(w.title)} <span class="chip warn">unverified</span>`],
+  followup: ['Follow-up', (w) => `${idLinks(esc(w.id))} <span class="muted">raised by this session</span>`],
+};
+const pc = (cmd) => `Bash collide ${cmd} · 1 s`;
+const PLAN_SESSION = {
+  id: 'plan-cm', title: 'Plan: Comms and the Desk', proposal: 'pr-0011-cm', agent: 'Claude Code · opus',
+  where: 'its own worktree · plan/comms-desk', day: 'Today', start: '10:02', last: '10:31', live: true,
+  sid: '5d07be12-plan', notes: '', pins: [],
+  purpose: 'Plan Comms and the Desk from the round 3 mock, into pr-0011-cm. Started with Plan… on Stage 6.',
+  turns: [
+    { ...tl('10:02', 'Plan Comms and the Desk from the round 3 mock. Start with what a person keeps from a '
+      + 'session.', 74, [['Bash', 6], ['Read', 3]], 'Comms is already a section on this board, so I reused it. Two '
+      + 'features: F1, pins kept per session, and F2, notes in a window. F1 has a task, ts-0190-pn. One choice is '
+      + 'yours: when a session ends, do its pins go too?', 0.21, [pc('sections'), pc('task pr-0011-cm'),
+      pc('task pr-0011-cm addFeature section=Comms title="Pins kept per session" summary="…"'),
+      pc('task pr-0011-cm addFeature section=Comms title="Notes in a window, in Markdown" summary="…"'),
+      pc('task create "Comms: a pinned result is kept for the life of its session" epic=ep-006-wq'),
+      pc('task pr-0011-cm link ts-0190-pn type=includes')]),
+    wrote: [{ k: 'feature', id: 'F1', title: 'Pins kept per session', section: 'Comms' },
+      { k: 'feature', id: 'F2', title: 'Notes in a window, in Markdown', section: 'Comms' },
+      { k: 'task', id: 'ts-0190-pn' }] },
+    { ...tl('10:09', 'Yes, delete them at End, but ask first. Unrelated idea: export a session as a Markdown file.',
+      41, [['Bash', 2], ['Edit', 1]], 'In the Decision log: pins go at End, after asking. Passed on: keep them '
+      + 'until you unpin them. Export is outside this plan, so it is a follow-up, ts-0192-ex, raised by this '
+      + 'session. It waits in Follow-ups for you to keep or drop.', 0.12, [pc('task pr-0011-cm'),
+      'Edit pr-0011-cm, Decision log · 1 s',
+      pc('task create "Comms: export a session as a Markdown file" epic=ep-006-wq')]),
+    wrote: [{ k: 'decision', id: 'D1', title: 'Pins go at End, after asking' },
+      { k: 'followup', id: 'ts-0192-ex' }] },
+    { ...tl('10:21', 'Now the Desk. It should be on every page.', 96, [['Bash', 7], ['Read', 4], ['Edit', 1]],
+      'A new section, Desk: F3, docked at the foot of every page, with ts-0191-dk; F4, Discuss puts ids in its '
+      + 'input, with no task yet. One choice is not mine to settle here: whether the Desk\'s spend counts toward '
+      + 'the Queue\'s daily warning. It is qu-0012-sp, in Decisions needed. I assumed Claude Code keeps '
+      + '`--disallowedTools` in an interactive session: unverified, so it is in the ledger.', 0.31,
+      [pc('sections'),
+        pc('task pr-0011-cm addFeature section=Desk title="Docked at the foot of every page" summary="…"'),
+        pc('task pr-0011-cm addFeature section=Desk title="Discuss puts ids in the Desk\'s input" summary="…"'),
+        pc('task create "Desk: one session docked at the foot of every page" epic=ep-006-wq'),
+        pc('task pr-0011-cm link ts-0191-dk type=includes'),
+        pc('task create "Does the Desk\'s spend count toward the Queue\'s daily warning?" kind=question'),
+        pc('task pr-0011-cm link qu-0012-sp type=includes'), 'Edit pr-0011-cm, Assumptions · 1 s']),
+    wrote: [{ k: 'feature', id: 'F3', title: 'Docked at the foot of every page', section: 'Desk' },
+      { k: 'feature', id: 'F4', title: 'Discuss puts ids in the Desk\'s input', section: 'Desk' },
+      { k: 'task', id: 'ts-0191-dk' }, { k: 'question', id: 'qu-0012-sp' },
+      { k: 'assumption', id: 'A1', title: 'Claude Code keeps --disallowedTools in an interactive session' }] },
+    { ...tl('10:31', 'Run a red-team pass on the draft.', 0, [['Agent', 1]], null, 0.2) },
+  ],
+};
+const wroteOf = (s, k) => s.turns.flatMap((t, i) => (t.wrote || []).filter((w) => !k || w.k === k)
+  .map((w) => ({ ...w, turn: i })));
+function wroteHtml(t) {
+  if (!t.wrote || !t.wrote.length) return '';
+  return `<div class="wrote"><span class="lbl">Wrote to Collide:</span>${t.wrote.map((w) => `<span class="chip">${
+    WROTE[w.k][0]} ${WROTE[w.k][1](w)}</span>`).join('')}${nm(35)}</div>`;
+}
+const planSess = () => state.comms.find((x) => x.id === state.psess);
+function planTurnHtml(t) {
+  const going = !t.result;
+  return `<div class="turn"><div class="stamp" style="align-self:flex-end">You · ${t.at}</div>
+    <div class="you">${mdInline(esc(t.you))}</div>
+    ${going ? `<div class="result going"><div class="stamp"><span class="livedot"></span> Working · ${t.tools.map(
+      ([n, c]) => `${c} ${n}`).join(', ')} so far</div></div>` : `<details class="work"><summary>Worked ${fmt(t.secs)}
+      · ${t.tools.map(([n, c]) => `${c} ${n}`).join(', ')}</summary><ul>${t.calls.map((c) => `<li>${esc(c)}</li>`)
+      .join('')}</ul></details><div class="result"><div class="stamp">Result · ${addTime(t.at, t.secs)} ·
+      $${t.cost.toFixed(2)}</div><div class="md">${mdInline(esc(t.result))}</div>${wroteHtml(t)}</div>`}</div>`;
+}
+function proposalPanel(s) {
+  const last = s.turns.length - 2;
+  const isNew = (w) => (w.turn === last ? ' isnew' : '');
+  const tag = (w) => (w.turn === last ? ' <span class="newtag">new</span>' : '');
+  const feats = wroteOf(s, 'feature'), tasks = wroteOf(s, 'task');
+  const taskOf = { F1: 'ts-0190-pn', F3: 'ts-0191-dk' };
+  const sections = [...new Set(feats.map((f) => f.section))];
+  const rows = (list, f) => list.map((w) => `<div class="row${isNew(w)}">${f(w)}${tag(w)}</div>`).join('');
+  const readiness = [
+    ['The Features part has no problems', true, 'enforced at proposed'],
+    ['No feature is Unsorted', true, ''],
+    ['Every feature has a task', false, `${feats.filter((f) => taskOf[f.id]).length} of ${feats.length}`],
+    ['No included question is open', false, 'qu-0012-sp; enforced at accepted'],
+    ['Each assumption is verified, or an accepted risk', false, 'A1 is unverified'],
+    ['A red-team pass has run', false, 'running now'],
+    ['Every decision names an alternative it passed on', true, ''],
+  ];
+  const plan = `${sections.map((sec) => `<div><h3>${esc(sec)}</h3>${rows(feats.filter((f) => f.section === sec),
+      (f) => `<span class="fid">${f.id}</span><span class="grow">${esc(f.title)}</span>${taskOf[f.id]
+        ? idLinks(esc(taskOf[f.id])) : '<span class="chip warn">no task yet</span>'}`)}</div>`).join('')}
+    <div><h3>Tasks · ${tasks.length}</h3>${rows(tasks, (w) => `${idLinks(esc(w.id))}<span class="grow">${esc(
+      findItem(w.id).title)}</span>`)}</div>
+    <div><h3>Questions · 1 open</h3>${rows(wroteOf(s, 'question'), (w) => `${idLinks(esc(w.id))}<span
+      class="grow">${esc(findItem(w.id).title)}</span><button class="btn ghost sm" data-act="toast" data-v="The Queue
+      opens on qu-0012-sp, under Decisions needed.">Answer in the Queue</button>`)}</div>
+    <div><h3>Follow-ups · not in this plan ${nm(37)}</h3>${rows(wroteOf(s, 'followup'), (w) => `${idLinks(esc(
+      w.id))}<span class="grow">${esc(findItem(w.id).title)}</span><button class="btn ghost sm" data-act="toast"
+      data-v="Kept: ts-0192-ex moves to the plan, private until Share.">Keep</button><button class="btn ghost sm"
+      data-act="toast" data-v="Dropped: ts-0192-ex is deleted.">Drop</button>`)}</div>
+    <div><h3>Readiness · advice</h3><div class="checks">${readiness.map(([l, ok, why]) => `<div class="row">
+      <span class="${ok ? 'add' : 'del'}">${ok ? svg.ok : '○'}</span><span class="grow">${esc(l)}${why
+      ? ` <span class="muted" style="font-size:12.5px">· ${idLinks(esc(why))}</span>` : ''}</span></div>`).join('')}
+      </div></div>`;
+  const quality = `<div><h3>Decision log</h3>${rows(wroteOf(s, 'decision'), (w) => `<span class="fid">${w.id}</span>
+      <span class="grow">${esc(w.title)}. <span class="muted">Passed on: keep them until you unpin them.</span>
+      </span>`)}</div>
+    <div><h3>Assumption ledger</h3>${rows(wroteOf(s, 'assumption'), (w) => `<span class="fid">${w.id}</span><span
+      class="grow">${esc(w.title)} <span class="chip warn">unverified</span></span><button class="btn ghost sm"
+      data-act="ptype" data-v="Draft a spike for A1.">Spike…</button>`)}</div>
+    <div><h3>Coverage</h3>${feats.map((f) => `<div class="row"><span class="fid">${f.id}</span><span
+      class="grow">${esc(f.title)}</span>${taskOf[f.id] ? idLinks(esc(taskOf[f.id])) : '<span class="chip warn">no '
+      + 'task</span>'}</div>`).join('')}</div>
+    <div><h3>Findings</h3><p class="muted" style="margin:0;font-size:13px"><span class="livedot"></span> The
+      red-team pass is reading the draft. It writes nothing; its report lands here.</p></div>`;
+  return `<section class="card ppanel" aria-label="Proposal ${esc(s.proposal)}">
+    <div class="frow"><b>${esc(findItem(s.proposal).title)}</b>${idLinks(esc(s.proposal))}<span class="chip">draft
+      </span><span class="chip">private</span><span class="spacer"></span><span class="seg" role="group"
+      aria-label="Show"><button data-act="ptab" data-v="plan" aria-pressed="${state.ptab === 'plan'}">Plan</button>
+      <button data-act="ptab" data-v="quality" aria-pressed="${state.ptab === 'quality'}">Quality</button></span></div>
+    <p class="muted" style="margin:0;font-size:13px">Follows the proposal's file as the agent writes. The buttons
+      type a request into the session; only your own steps (answer, keep, accept) write. ${nm(35)}</p>
+    ${state.ptab === 'plan' ? plan : quality}
+    <div class="frow"><button class="btn sm" data-act="ptype" data-v="Draft tasks for F2 and F4.">Ask for tasks for
+      F2 and F4</button><span class="spacer"></span><button class="btn main sm" disabled title="The agent moves it
+      to proposed when it is ready">Accept…</button></div></section>`;
+}
+function planSessionHtml() {
+  const s = planSess();
+  const spent = s.turns.reduce((a, t) => a + t.cost, 0);
+  const body = state.pview === 'term' ? `<div style="padding:12px 16px;overflow:auto">${termHtml(s)}</div>`
+    : `<div class="turns">${s.turns.map(planTurnHtml).join('')}</div>`;
+  return `<div class="banner"><span class="grow"><b>Plan… arrives in Stage 9d.</b> The session and its proposal are
+    made up. Everything it writes is private until Share. ${nm(36)}</span><button class="btn sm"
+    data-act="pclose">Back to Planning</button></div>
+    <div class="psess">
+      <section class="card convo" aria-label="${esc(s.title)}">
+        <div class="convh"><h1>${esc(s.title)}</h1><span class="chip info"><span class="livedot"></span>live</span>
+          <span class="stamp">${esc(s.agent)} · ${esc(s.where)}</span><span class="spacer"></span>
+          <span class="seg" role="group" aria-label="Show"><button data-act="pview" data-v="chat"
+          aria-pressed="${state.pview === 'chat'}">Chat</button><button data-act="pview" data-v="term"
+          aria-pressed="${state.pview === 'term'}">Terminal</button></span></div>
+        <div class="meter"><span>Spent $${spent.toFixed(2)} of the plan phase's $5.00</span><span class="bar"><i
+          style="width:${Math.round((100 * spent) / 5)}%"></i></span><span class="muted">29 min</span>
+          <span class="spacer"></span><button class="btn ghost sm" data-act="psess-comms">Open in Comms</button></div>
+        ${body}
+        ${state.pview === 'term' ? '' : `<div class="composer"><label class="sr" for="pmsg">Message</label><textarea
+          id="pmsg" placeholder="Message the planning session">${esc(state.pdraft)}</textarea><button class="btn main"
+          data-act="psend">Send</button></div>`}
+      </section>
+      ${proposalPanel(s)}
+    </div>`;
+}
+function startPlanSession() {
+  if (!state.comms.some((x) => x.id === PLAN_SESSION.id)) state.comms.push(JSON.parse(JSON.stringify(PLAN_SESSION)));
+  Object.assign(state, { psess: PLAN_SESSION.id, surface: 'planning', settings: false, ptab: 'plan', pview: 'chat' });
 }
 
 /* ---------- settings ---------- */
@@ -4438,6 +4763,8 @@ function mockHtml() {
       ${s('opt-comms', 'Comms from Optimize')}${s('whole', 'Diff: the whole file')}
       ${s('cnotes', 'Session notes window')}${s('pins', 'Pins in a session')}${s('dock', 'The Desk, docked')}
       ${s('dockterm', 'The Desk as a terminal')}</div>
+    <h3>Round 4</h3><div class="grid">${s('peek', 'Peek at a task id')}${s('plansess', 'Plan…: the session')}
+      ${s('plansess-q', 'Plan…: the Quality tab')}${s('plansess-term', 'Plan…: as a terminal')}</div>
     <h3>Live updates (watch)</h3><div class="grid">${s('sim-finish', 'ts-0178 goes to review')}
       ${s('sim-diverge', "A run's copy moves ts-0168")}</div>
     <h3>View</h3><div class="grid"><button class="btn sm" data-act="notes" aria-pressed="${state.notes}">
@@ -4452,6 +4779,7 @@ function mockHtml() {
 
 /* ---------- render ---------- */
 function render() {
+  hidePeek();
   notedCard = { 5: false, 6: false, 7: false };
   $('#crumb').innerHTML = crumbHtml();
   $('#tabs').innerHTML = state.screen === 'welcome' ? '' : tabsHtml();
@@ -4593,13 +4921,28 @@ function scenario(v) {
       goBoard('collide');
       Object.assign(state, { dock: 'open', dockSess: 'desk', dview: v === 'dock' ? 'chat' : 'term', ddraft: '' });
       break;
+    case 'plansess': case 'plansess-q': case 'plansess-term':
+      goBoard('collide');
+      startPlanSession();
+      Object.assign(state, { ptab: v === 'plansess-q' ? 'quality' : 'plan', pview: v === 'plansess-term'
+        ? 'term' : 'chat', pdraft: '' });
+      break;
+    case 'peek': {
+      goBoard('collide', 'all');
+      Object.assign(state, { layout: 'board', drawer: 'ts-0176-ds' });
+      render();
+      const ref = [...document.querySelectorAll('#drawer .idref')].find((r) => findItem(r.dataset.id));
+      if (ref) showPeek(ref, true);
+      return;
+    }
     case 'reset': {
       const notes = state.notes;
       state.boards = freshBoards();
       Object.assign(state, { layout: 'board', groupBy: 'auto', open: new Set(), shut: new Set(), notes,
         comms: JSON.parse(JSON.stringify(COMMS)), comm: 'flaky', cview: 'convo', track: 'r121', ttab: 'table',
         minSecs: 0, toolType: 'all', cq: '', tphase: null, optCtx: null, optSel: new Set(), optCap: false,
-        optTime: false, diffView: 'changes', dock: false, dockSess: 'desk', dview: 'chat', ddraft: '' });
+        optTime: false, diffView: 'changes', dock: false, dockSess: 'desk', dview: 'chat', ddraft: '',
+        psess: null, ptab: 'plan', pview: 'chat', pdraft: '' });
       goBoard('collide');
       break;
     }
@@ -4799,7 +5142,39 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'plan': planModal(); return;
-    case 'plan-yes': closeModal(); toast('In the app the session opens beside the Planning page.'); return;
+    case 'plan-yes': closeModal(); startPlanSession(); break;
+    case 'peek':
+      if (el.closest('#peek')) { PEEK.stack.push(id); PEEK.pinned = true; drawPeek(); } else showPeek(el, true);
+      return;
+    case 'peek-back': PEEK.stack.pop(); drawPeek(); return;
+    case 'peek-close': hidePeek(); return;
+    case 'peek-open':
+      hidePeek();
+      if (!byId(id)) {
+        toast(`In the app the drawer opens ${id}. This mock's drawer shows this board's tasks.`);
+        return;
+      }
+      state.drawer = id; break;
+    case 'ptab': state.ptab = v; break;
+    case 'pview': state.pview = v; break;
+    case 'pclose': state.psess = null; break;
+    case 'psess-open': startPlanSession(); break;
+    case 'psess-comms': Object.assign(state, { surface: 'comms', comm: state.psess, cview: 'convo' }); break;
+    case 'ptype':
+      Object.assign(state, { pview: 'chat', pdraft: `${state.pdraft ? `${state.pdraft} ` : ''}${v}` });
+      render();
+      { const m = $('#pmsg'); if (m) { m.focus(); m.setSelectionRange(m.value.length, m.value.length); } }
+      return;
+    case 'psend': {
+      const text = $('#pmsg').value.trim();
+      if (!text) return;
+      const s = planSess();
+      s.last = clock();
+      s.turns.push(tl(clock(), text, 4, [], 'The mock does not run an agent. In the app the answer arrives here, '
+        + 'and what it writes shows in the panel.', 0));
+      state.pdraft = '';
+      break;
+    }
     default: return;
   }
   render();
@@ -5049,8 +5424,9 @@ function addScratch() {
 }
 
 setInterval(() => { if (state.screen === 'board' && state.surface === 'field' && !state.settings) {
+  // A live tick leaves an open peek alone: in the app it re-reads the task it shows.
   const live = document.querySelector('.live');
-  if (live) render();
+  if (live && $('#peek').hidden) render();
 } }, 15000);
 render();
 </script>
