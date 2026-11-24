@@ -7,7 +7,10 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 25.** Revision 25 writes in the board the owner designed in a clickable mock over six rounds
+**Status: revision 26.** Revision 26 adds the in-app agent's screens to the board mock (round 7, notes 47-57) as
+Stage 6b's design reference: the chip sits on the surface the ask changed, and the ask box closes when an ask succeeds
+(owner, 2026-11-24).
+Revision 25 writes in the board the owner designed in a clickable mock over six rounds
 (Stage 6a). The board gains a graph beside the run order, a count of what each task holds up, labelled source fields
 and each task's changes. Comms lists every session with an agent, as a chat or as its terminal. Every question a run
 asks is kept with its task. Autopilot starts a view's tasks in order under caps, as the person's Launch, and lands a
@@ -3316,7 +3319,9 @@ code files. It presents what it is told, and the agent does the analysis (0.3 fo
   - A lens made from task text alone carries the flag below.
 - **The ask box.**
   - It shows one line per tool call as it happens, written by Collide from the call (`query tasks: 12 rows`,
-    `show_groups: 4 groups, 11 tasks`), then the chip. **Cancel** works while the ask runs.
+    `show_groups: 4 groups, 11 tasks`). **Cancel** works while the ask runs. The chip sits on the surface the ask
+    changed, above what it changed, and the box closes when the ask succeeds; a failure keeps the box open with its
+    text (revision 26; note 49).
   - A failure is plain text, never an empty box. The texts are: `the agent finished without changing the screen (N
     tool calls, none changed anything)`, `timed out after N s`, `stopped at the $X budget`, `cancelled`, `agent
     error: <the first line of its error>`, `<command> was not found on PATH`, `this agent cannot use HTTP MCP
@@ -4910,7 +4915,8 @@ Epic `ep-006-wq`, items lettered `6a` (part L).
 ### Stage 6b: The in-app agent
 
 **Goal**: The ask box, the endpoint and the Agents page work with Claude Code and one ACP agent, with every guard of
-0.2, 0.3, 0.7 and 0.9 tested. It changes nothing in a repo and starts no run.
+0.2, 0.3, 0.7 and 0.9 tested. It changes nothing in a repo and starts no run. The design reference is the board mock,
+`docs/mockups/board.html`, design notes 47-57 (round 7, 2026-11-24), read as for Stage 6a.
 
 - **The in-app agent on the Field** (owner, 2026-11-14; 0.2, 0.3, 0.7, 0.9, 0.11; S6's in-app agent section). It
   changes nothing in a repo and starts no run, so it belongs to a read-only board:
