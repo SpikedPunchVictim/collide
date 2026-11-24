@@ -7,7 +7,11 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 27.** Revision 27 splits Stage 6a into `ts-0179-ke` to `ts-0197-uj` and writes in the owner's
+**Status: revision 28.** Revision 28 splits Stage 6b into `ts-0198-tf` to `ts-0214-rz` with the owner's answers
+(2026-11-24): a real ACP agent comes for the ask box only, and file runs with one stay Deferred; `external` clients
+get 20 screen-changing calls a minute, shared; the HTTP server is std, with no new crate; and the four owner-run
+items carry their own spend caps, $2.25 in all.
+Revision 27 splits Stage 6a into `ts-0179-ke` to `ts-0197-uj` and writes in the owner's
 answers to the choices the split raised (2026-11-24): the trust prompt shows when the repo's `.collide/` brings
 packs, views or settings; Share with team writes `board.yaml` and the saved views; the filter bar has a Labels group;
 a collection can be a closure's goal; and the app adds `react-markdown`, `remark-gfm` and `tauri-plugin-dialog`.
@@ -1786,9 +1790,9 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
       (0.11) pass the snapshot's `--mcp-config` with `--strict-mcp-config`, so a worktree's `.mcp.json` servers that
       nobody approved do not load (measured S1 for plain `claude` in a worktree). The endpoint token is never in
       that file; the interactive session is given no UI-tools endpoint. The endpoint's other risk is a client the
-      user pasted a snippet into, so the endpoint has a per-client call limit for `external` callers, counted in the
-      shell (0.2), with its number set in Stage 6. There is one endpoint token for now, rotatable in Settings. Named
-      per-client tokens are not built (owner, 2026-11-14).
+      user pasted a snippet into, so the endpoint has a call limit for `external` callers, counted in the
+      shell (0.2): 20 screen-changing calls in a rolling 60 s, shared by every `external` caller (revision 28). There is
+      one endpoint token for now, rotatable in Settings. Named per-client tokens are not built (owner, 2026-11-14).
 - **Pack data.** Each pack gets a data directory per board under Collide's data directory, passed as
   `COLLIDE_PACK_DATA` and `ctx.dataDir`. That is where "a pack keeps its own files" (0.5). Each experiment arm gets
   its own copy, taken at the start, so a pack that keeps its state there is isolated without declaring anything
@@ -4437,7 +4441,8 @@ loop needs only Claude.
 **Status**: Complete (2026-11-16). Split on 2026-11-15 into `ts-0086-tm` to `ts-0092-tw` (revision 23 scope), in
 epic `ep-003-da`, built one at a time in id order (part L). Every item runs against a scripted fake ACP child, and the
 protocol is written by hand. A rebuilt session reports the writes it still owes (`take_owed_writes`) and the daemon
-sends them once. A real ACP agent, its first profile and an ACP agent in file runs come with Stage 6b.
+sends them once. A real ACP agent and its first profile come with Stage 6b, for the ask box; an ACP agent in file runs
+stays Deferred (owner, 2026-11-24).
 
 ## Stage 4: Pack loading, settings, plan adapter, corpus and views
 
@@ -4935,9 +4940,10 @@ built one at a time in id order (part L). It runs after `ts-0178-fw` and before 
 - **The in-app agent on the Field** (owner, 2026-11-14; 0.2, 0.3, 0.7, 0.9, 0.11; S6's in-app agent section). It
   changes nothing in a repo and starts no run, so it belongs to a read-only board:
   - **The endpoint** in the shell, with its guards, the endpoint token in the keychain, ask tokens and the
-    `ui_tools.*` methods (0.2). The HTTP server is a crate already in Tauri's dependency tree if one fits, and the
-    stage says which it picked. The window answers each JSON-RPC message with the MCP layer and the tools in
-    TypeScript, ported from S6's `exec.ts` and `mcp.ts`.
+    `ui_tools.*` methods (0.2). The HTTP server is std, with no new crate (`host/src/http_get.rs` chose none),
+    shared with the test bridge (revision 28). The shell answers `initialize`, `ping` and `tools/list` from the
+    manifest; the window answers `tools/call` with the tools in TypeScript, ported from S6's `exec.ts` and `mcp.ts`.
+    The limit for `external` callers is 20 screen-changing calls in a rolling 60 s, shared.
   - **The Field's tools:** `query` over tasks, `set_view` and `highlight` and `show_groups` on the Field, and `open`
     for the Field, Queue and Experiments. Each call is a typed reducer action with a snapshot Undo. Views, lenses,
     chips, **Save as View** (the chips' CEL, `layout.groupBy` and `layout.sort`) and **Save snapshot** are as 0.11
@@ -5034,8 +5040,12 @@ guards and both tokens; the manifest answers, the 202 and 405 cases and the cap;
 over the fake ACP child, including the realpath case; the flag over fake streams; the Agents page and its test action
 over a fake agent, with the probe; the secrets launch test; the real-agent contract test (opt-in), with a file
 planted outside every readable folder.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-006-wq`, items lettered `6b`
-(part L).
+**Status**: Not Started. Split into `ts-0198-tf` to `ts-0214-rz` (revision 28, 2026-11-24), in epic `ep-006-wq`,
+built one at a time in id order after `ts-0197-uj` (part L). Four are the owner's, each with its own spend cap: the
+measurements first (`ts-0198-tf`, $0.50), a look at the chip and the lens midway (`ts-0205-qh`, $0.25), the opt-in
+real-agent checks (`ts-0213-as`, $1.00) and the walkthrough (`ts-0214-rz`, $0.50). No builder starts a model: the
+opt-in checks are written and gated in `ts-0212-km`. If `ts-0198-tf` finds that `--restricted` confines reads, 0.3's
+pinned line and the launch-spec criterion add it, and the Agents page says "can read only these folders".
 
 ### Stage 6c: GitHub Projects v2
 

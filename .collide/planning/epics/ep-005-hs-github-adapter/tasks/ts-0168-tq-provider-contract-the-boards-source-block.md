@@ -5,7 +5,7 @@ status: ready
 title: "Provider contract: the board's source block, provenance and a stale cause"
 owners: []
 links:
-  - { type: blocked-by, to: ts-0167-jj }
+  - { type: blocked-by, to: ts-0214-rz }
 ---
 
 ## Goal

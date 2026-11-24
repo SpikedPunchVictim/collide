@@ -77,7 +77,7 @@ None by a build agent: this check is the owner's. The checklist names the automa
 - Stage 6a item (revision 25 scope, split 2026-11-24). Items of Stage 6a run one at a time, in id order, because they
   share `app/`, `core`, `host` and the generated files. The next item waits for this look.
 - Nothing here runs a real `claude` for a prompt. The probe runs `claude` only for its help and status, by the owner.
-- Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+- Owner decisions (2026-11-24): the owner took the recommendations at the split.
 
 ### Owner checklist
 

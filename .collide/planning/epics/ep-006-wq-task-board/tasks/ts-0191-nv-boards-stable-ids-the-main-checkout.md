@@ -95,4 +95,4 @@ Write these first.
   share `app/`, `core`, `host` and the generated files. No builder runs `tauri build`; the real picker is checked by
   the owner in `ts-0197-uj`.
 - Nothing here runs a real `claude`.
-- Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+- Owner decisions (2026-11-24): the owner took the recommendations at the split.

@@ -93,4 +93,4 @@ Write these first.
 - Stage 6a item (revision 25 scope, split 2026-11-24). Items of Stage 6a run one at a time, in id order, because they
   share `app/`, `core`, `host` and the generated files. No builder runs `tauri build`.
 - Nothing here runs a real `claude`: a run's workspace in the tests comes from the fake `claude` of `host/tests/`.
-- Owner decisions: none recorded yet. The recommendations stand until the owner answers at the split.
+- Owner decisions (2026-11-24): the owner took the recommendations at the split.
