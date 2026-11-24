@@ -1,9 +1,14 @@
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Frame } from './frame/Frame.tsx'
+import { TABS, type TabId } from './frame/tabs.ts'
 import { LoopPage } from './loop/LoopPage.tsx'
 import { useLoop } from './loop/useLoop.ts'
 import { type OwnerClient, createTauriOwner } from './owner/index.ts'
 
-// Until Stage 6a brings the tabs, the window is the one page of the thin loop (Stage 3c). `AppShell` and its surfaces
-// stay in the tree and are tested; Stage 6a shows them again, over the owner client.
+// The window is the board's frame (Stage 6a): the top bar and the five tabs. The thin loop's page (Stage 3c) stays
+// reachable from Queue and Tracks, with a way back, until Stage 9a replaces it. One loop serves both, so the board
+// chosen in the frame's menu is the board the loop page prompts, and nothing about a run resets when the page changes.
 const shellOwner = createTauriOwner()
 
 export interface AppProps {
@@ -13,5 +18,31 @@ export interface AppProps {
 
 export function App({ owner = shellOwner }: AppProps) {
   const { state, loop } = useLoop(owner)
-  return <LoopPage state={state} actions={loop} nowMs={Date.now()} />
+  const [tab, setTab] = useState<TabId>('field')
+  const [onLoopPage, setOnLoopPage] = useState(false)
+  if (onLoopPage) {
+    const from = TABS.find((entry) => entry.id === tab)?.name ?? 'the tabs'
+    return (
+      <>
+        <div className="mx-auto max-w-3xl px-4 pt-4">
+          <Button variant="ghost" size="sm" onClick={() => setOnLoopPage(false)}>
+            {`Back to ${from}`}
+          </Button>
+        </div>
+        <LoopPage state={state} actions={loop} nowMs={Date.now()} />
+      </>
+    )
+  }
+  return (
+    <Frame
+      tab={tab}
+      onTab={setTab}
+      boards={state.boards}
+      boardId={state.boardId}
+      folderProblems={state.folderProblems}
+      onChooseBoard={loop.chooseBoard}
+      onOpenFolder={loop.openFolder}
+      onOpenLoop={() => setOnLoopPage(true)}
+    />
+  )
 }

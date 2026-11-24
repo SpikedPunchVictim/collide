@@ -2,7 +2,8 @@
 // to a daemon of a temp root whose `claude` is fake Claude. Each test has a world of its own (`support/world.ts`).
 //
 // The page is driven by the roles and names it was built with. What happened to the repository is read with git, and
-// what the daemon holds with the owner's protocol through the bridge, never from the page.
+// what the daemon holds with the owner's protocol through the bridge, never from the page. The window opens on the
+// frame's Field (ts-0179-ke), so each test first goes where a person goes: Queue, then "Open the Loop page".
 import { type Page } from '@playwright/test'
 import { expect, test } from './support/fixtures.ts'
 import { adds, firstPhase, permissionPhase, resumedPhase } from './support/recordings.ts'
@@ -15,6 +16,12 @@ const WORDS = 'Also add b.txt'
 const REVIEW = /ready to review/i
 
 // ---- what a person does -------------------------------------------------------------------------------------------
+
+/** The loop page, reached through the frame: it is one button from Queue. */
+async function openLoopPage(page: Page) {
+  await page.getByRole('tab', { name: /^Queue/ }).click()
+  await page.getByRole('button', { name: 'Open the Loop page' }).click()
+}
 
 async function openRepository(page: Page, world: World) {
   await page.getByLabel('Folder path').fill(world.repo)
@@ -29,6 +36,7 @@ async function sendPrompt(page: Page, prompt = PROMPT) {
 
 /** The page after a prompt, with the repository open. */
 async function prompted(page: Page, world: World) {
+  await openLoopPage(page)
   // The chip shows once the page's first load has finished. A folder opened before then can be lost to that load, which
   // read the boards before it was opened (see Decisions in ts-0082-fp), so a person's first click is waited for here.
   await expect(page.getByRole('button', { name: /Claude version in use/ })).toBeVisible()
@@ -213,6 +221,7 @@ test('a page loaded again mid-run and at review shows the same run and the same 
 
   // Mid-run: the agent waits for an answer.
   await page.reload()
+  await openLoopPage(page)
   await expect(page.getByText('Wants to run a command')).toBeVisible()
   await expect(page.getByText('touch out.txt').first()).toBeVisible()
   expect(await runOnPage(page)).toBe(run)
@@ -227,6 +236,7 @@ test('a page loaded again mid-run and at review shows the same run and the same 
 
   // At review.
   await page.reload()
+  await openLoopPage(page)
   await expect(page.getByText(REVIEW).first()).toBeVisible()
   expect(await page.getByText(REVIEW).first().textContent()).toBe(shown)
   expect(await runOnPage(page)).toBe(run)

@@ -3,6 +3,7 @@
 // the test fail.
 import { type Page, expect, test as base } from '@playwright/test'
 import { Chrome } from './chrome.ts'
+import { type FakeSite, serveFakePage } from './fake-site.ts'
 import { type Plan, World } from './world.ts'
 
 interface Fixtures {
@@ -10,6 +11,10 @@ interface Fixtures {
   startWorld: (plan: Plan) => Promise<World>
   /** A page of Chrome on the bridge of `world`, with the token the bridge made for this run. */
   openPage: (world: World) => Promise<Page>
+  /** The page built over a fake owner, served from loopback (ts-0179-ke). It needs no daemon. */
+  fakeSite: FakeSite
+  /** A page of Chrome on the fake-owner page, playing the world named `world` (`test/support/worlds.ts`). */
+  openFake: (world: string) => Promise<Page>
 }
 
 export const test = base.extend<Fixtures>({
@@ -33,6 +38,28 @@ export const test = base.extend<Fixtures>({
       chrome ??= await Chrome.launch()
       const page = await chrome.context.newPage()
       await page.goto(`${world.url}/#token=${world.token}`)
+      return page
+    })
+    if (chrome !== null) {
+      const left = await (chrome as Chrome).close()
+      expect(left, 'nothing of Chrome is left running').toEqual([])
+    }
+  },
+
+  fakeSite: async ({}, use) => {
+    const dir = process.env.COLLIDE_FAKE_PAGE
+    if (dir === undefined) throw new Error('the fake-owner page was not built: global setup did not run')
+    const site = await serveFakePage(dir)
+    await use(site)
+    await site.close()
+  },
+
+  openFake: async ({ fakeSite }, use) => {
+    let chrome: Chrome | null = null
+    await use(async (world) => {
+      chrome ??= await Chrome.launch()
+      const page = await chrome.context.newPage()
+      await page.goto(`${fakeSite.url}/#world=${world}`)
       return page
     })
     if (chrome !== null) {

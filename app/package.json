@@ -9,6 +9,7 @@
     "test": "vitest run && playwright test",
     "test:unit": "vitest run",
     "test:browser": "playwright test",
+    "test:fake": "playwright test fake-",
     "tauri": "tauri"
   },
   "dependencies": {

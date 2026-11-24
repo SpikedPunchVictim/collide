@@ -5,5 +5,13 @@
     "types": ["vite/client"],
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src", "test", "browser", "vite.config.ts", "vite.bridge.config.ts", "playwright.config.ts"]
+  "include": [
+    "src",
+    "test",
+    "browser",
+    "vite.config.ts",
+    "vite.bridge.config.ts",
+    "vite.fake.config.ts",
+    "playwright.config.ts"
+  ]
 }

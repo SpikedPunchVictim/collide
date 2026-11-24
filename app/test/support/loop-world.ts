@@ -19,8 +19,8 @@ export type Item = QueueListResultOutput['items'][number]
 export type Run = RunGetResultOutput['summary']
 export type Diff = RunDiffResultOutput
 
-export function board(id: string, root: string): Board {
-  return { id, root, lines: [{ ref_name: 'main', root, trust: { state: 'trusted', hash: 'h' } }] }
+export function board(id: string, root: string, line = 'main'): Board {
+  return { id, root, lines: [{ ref_name: line, root, trust: { state: 'trusted', hash: 'h' } }] }
 }
 
 export function claude(over: Partial<Agent> = {}): Agent {
