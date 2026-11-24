@@ -530,6 +530,55 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
   .nwin{grid-template-columns:1fr}.psess{grid-template-columns:1fr}}
 @media (max-width:900px){.drawer{position:fixed;inset:0 0 0 auto;width:min(460px,100%);z-index:35;
   box-shadow:var(--shadow-lg)}.tabs{margin-inline:0;order:3;width:100%;overflow-x:auto}}
+/* Round 5: fold the filters, fold and size the task panel, a task that needs you, autopilot and groups. */
+.filters.fold{flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 14px}
+.dgrip{flex:0 0 6px;cursor:col-resize;touch-action:none}
+.dgrip:hover,.dgrip:focus-visible,.dgrip.drag{background:var(--primary-soft);outline:none}
+.dsh{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border-radius:var(--radius-xs)}
+.dsh:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.dsh .tw{display:inline-block;width:1em;color:var(--muted-foreground)}
+.ds.shut > :not(h3){display:none}
+.ds.shut h3{margin-bottom:0}
+.chip.ask{color:var(--waiting);border-color:color-mix(in srgb,var(--waiting) 45%,var(--border));font-weight:600;
+  background:color-mix(in srgb,var(--waiting) 10%,transparent)}
+.chip.hub{color:var(--cold);border-color:color-mix(in srgb,var(--cold) 35%,var(--border))}
+.chip .ic{width:13px;height:13px}
+.tc.needs{border-left:3px solid var(--waiting)}
+.qn{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin-left:4px;
+  border-radius:999px;font-size:11px;font-weight:700;background:var(--waiting);color:var(--card)}
+.qa{display:flex;flex-direction:column;gap:10px}
+.qi{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;display:flex;
+  flex-direction:column;gap:6px}
+.qi.open{border-color:color-mix(in srgb,var(--waiting) 50%,var(--border));
+  background:color-mix(in srgb,var(--waiting) 6%,var(--card))}
+.qi .ans{border-left:2px solid var(--done);padding-left:8px}
+.qi .opts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.qi textarea{border:1px solid var(--input);border-radius:var(--radius-xs);padding:6px 8px;background:var(--card);
+  color:inherit;font:inherit;resize:vertical;width:100%}
+.auto{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;border-radius:var(--radius-sm);
+  border:1px solid color-mix(in srgb,var(--primary) 35%,var(--border));background:var(--primary-soft);
+  font-size:13.5px;margin-bottom:12px}
+.unext{display:flex;flex-direction:column;gap:10px;max-width:980px}
+.ue{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:start;padding:12px 14px}
+.ue .pos{font-weight:700;color:var(--muted-foreground);font-variant-numeric:tabular-nums;padding-top:2px}
+.ue .main{display:flex;flex-direction:column;gap:6px;min-width:0}
+.ue .tasks{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
+.ue .acts{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.modal.tall{max-height:calc(100vh - 32px);overflow:auto}
+.modal input[type=number],.modal select,.t select{border:1px solid var(--input);border-radius:var(--radius-xs);
+  padding:5px 8px;background:var(--card);color:inherit}
+.radios{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:6px}
+.radios legend{font-weight:600;margin-bottom:4px}
+.radios label{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:start;padding:8px 10px;
+  border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13.5px}
+.radios label:has(input:checked){border-color:var(--primary);background:var(--primary-soft)}
+.pick{display:flex;flex-direction:column;gap:2px;max-height:200px;overflow:auto;border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:6px 8px}
+.pick label{display:flex;gap:8px;align-items:center;font-size:13.5px}
+.layer.l-pack{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 35%,var(--border))}
+@media (max-width:900px){.dgrip{display:none}}
+@media (max-width:700px){.ue{grid-template-columns:24px minmax(0,1fr)}
+  .ue .acts{grid-column:2;justify-content:flex-start}}
 </style>
 </head>
 <body>
@@ -542,6 +591,8 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 </header>
 <div class="stage">
   <main class="content" id="content"></main>
+  <div class="dgrip" id="dgrip" hidden role="separator" aria-orientation="vertical" aria-label="Task panel width"
+    aria-valuemin="360" tabindex="0" title="Drag to resize; double-click for 460 px"></div>
   <aside class="drawer" id="drawer" hidden aria-label="Task"></aside>
 </div>
 <section class="dock" id="dock" hidden aria-label="Docked session"></section>
@@ -2779,7 +2830,7 @@ function collideTasks() {
     if (t.id === 'ts-0168-tq') t.blockedBy = ['ts-0184-ow'];
     if (t.id === 'ts-0160-th') t.status = 'review';
   }
-  return [...tasks, ...DEMO_6A, HOSTILE, COLLISION];
+  return [...tasks, ...DEMO_6A.map((t) => ({ ...t })), { ...HOSTILE }, { ...COLLISION }];
 }
 
 const PANTRY_TRACKER = [
@@ -2969,6 +3020,8 @@ const COLLIDE_VIEWS = [
     test: (t) => t.epic === 'ep-006-wq', goal: 'ep-006-wq' },
   { id: 's5', name: 'Stage 5: GitHub', where: '"plan:ep-005-hs" in collections',
     test: (t) => t.epic === 'ep-005-hs', goal: 'ep-005-hs' },
+  { id: 'hubs', name: 'Bottlenecks', where: 'unblocks >= 3', test: (t) => isOpen(t) && hubCount(t) >= 3,
+    sort: (a, b) => hubCount(b) - hubCount(a) },
 ];
 
 function freshBoards() {
@@ -2995,6 +3048,48 @@ function freshBoards() {
   };
 }
 
+const clone = (x) => JSON.parse(JSON.stringify(x));
+// Round 5: every question a run asked about a task, with its answer (note 44). Made up for the mock.
+const QA = {
+  'ts-0178-fw': [
+    { at: 'Today 09:31', run: 'R-121', phase: 'Plan', kind: 'The agent asked', q: 'Should the Field\'s layout '
+      + 'choice live in the board\'s file or in your own settings?', a: 'The board\'s file, so a teammate\'s clone '
+      + 'opens the same layout.', by: 'You', when: 'Today 09:33' },
+    { at: 'Today 09:52', run: 'R-121', phase: 'Build', kind: 'The agent asked', q: 'Two tests in `board_view.rs` '
+      + 'expect the old column order. Update them, or keep the old order behind a setting?',
+      opts: ['Update the two tests', 'Keep the old order behind a setting'], a: null },
+  ],
+  'ts-0160-th': [
+    { at: 'Yesterday 15:12', run: 'R-119', phase: 'Build', kind: 'A step for a person', q: 'Start the daemon once '
+      + 'and confirm its log shows the new check.', a: 'Seen: the line is there.', by: 'You', when: 'Yesterday 15:20' },
+    { at: 'Yesterday 15:40', run: 'R-119', phase: 'Review', kind: 'A follow-up in review', q: 'The timing test is '
+      + 'flaky on a busy Mac. Raise its limit, or move it out of the default run?', a: 'Move it out of the default '
+      + 'run, and say so in its Built section.', by: 'You', when: 'Yesterday 16:02' },
+  ],
+};
+const AUTO_ASK = { at: 'Today 10:14', run: 'R-124', phase: 'Build', kind: 'The agent asked', q: 'The hostile body '
+  + 'needs a case over the 64 KiB cap. Add it as a second fixture, or grow this one?',
+  opts: ['A second fixture', 'Grow this one'], a: null };
+// Up next (Stage 11): what starts next, in order. A group is one entry (note 46).
+const MODES = {
+  together: ['Together', 'One run works every task on one branch: one test run, one review.'],
+  tested: ['Tested together', 'A run per task, each on its own branch; then one full test run of them merged on a '
+    + 'group branch. A failure is split in halves to find the task.'],
+  apart: ['Separately', 'A run per task, each tested and reviewed on its own.'],
+};
+const UP_NEXT = [
+  { kind: 'task', tasks: ['ts-0178-fw'], by: 'you' },
+  { kind: 'task', tasks: ['fx-0001-hb'], by: 'autopilot' },
+  { kind: 'group', name: 'Columns and filters', tasks: ['ts-0179-fd', 'ts-0180-fb'], mode: 'together', by: 'agent',
+    why: 'Both change the Field\'s header and its filter state. One branch saves a merge between them.' },
+  { kind: 'group', name: 'Drawer and settings', tasks: ['ts-0181-dr', 'ts-0182-st'], mode: 'tested', by: 'agent',
+    proposed: true, why: 'Separate code, one shared UI test suite of about 6 minutes.' },
+  { kind: 'task', tasks: ['ts-0183-ns'], by: 'autopilot' },
+  { kind: 'task', tasks: ['ts-0184-ow'], by: 'autopilot', human: true },
+];
+const AUTO = { on: false, view: 's6', group: 'propose', mode: 'together', cap: 2, spend: 20, accept: 'review',
+  ask: 'task' };
+
 /* ---------- state ---------- */
 const state = {
   boards: freshBoards(), board: 'collide', view: 'all', surface: 'field', layout: 'board', groupBy: 'auto',
@@ -3009,6 +3104,9 @@ const state = {
   dock: false, dockSess: 'desk', dview: 'chat', ddraft: '',
   // Round 4: the planning session open on the Planning page, its panel's tab, its view, and its draft.
   psess: null, ptab: 'plan', pview: 'chat', pdraft: '',
+  // Round 5: folded filters per board, shut panel parts, the panel's width, questions, autopilot, Up next.
+  ffold: new Set(), dshut: new Set(), dw: 460, qa: clone(QA), qkeep: 'task', qdraft: {}, auto: clone(AUTO),
+  unext: clone(UP_NEXT), overlap: false,
 };
 const board = () => state.boards[state.board];
 const view = () => board().views.find((v) => v.id === state.view) || board().views[0];
@@ -3158,14 +3256,54 @@ const NOTES = [
     + 'keep, accept) stay yours. Recommendation: as drawn.', 'Alternative: the agent asks before each write. '
     + 'Safer, much slower.', 'new', 4],
   ['How the planning agent learns Collide', 'No skill today: the plan gives the workflow\'s prompt and the '
-    + '`collide guide` paragraph. A long chat can compact the first prompt away. Recommendation: a short charter in '
+    + '`collide guide` paragraph. A long chat can compact the first prompt away. Decided: a short charter in '
     + 'the system prompt (it survives compaction), plus `collide guide plan`, built from the CLI\'s own tables so '
     + 'it cannot drift.', 'Alternatives: a collide-plan skill in the planning pack (loads on demand, Claude only, '
-    + 'can drift from the CLI); MCP write tools (typed, but a second write path).', 'new', 4],
+    + 'can drift from the CLI); MCP write tools (typed, but a second write path).', 'decided', 5],
   ['An idea in a planning chat', 'In scope, it becomes a feature (Unsorted if no section fits). Out of scope, a '
     + 'follow-up: private, raised by the session, waiting for Keep or Drop. A choice for you becomes a question in '
     + 'Decisions needed. Recommendation: as drawn.', 'Alternative: a "Parked ideas" part in the proposal, sorted '
     + 'when it is accepted.', 'new', 4],
+  ['The filters fold to one line', 'Fold, at the foot of the filters, leaves one line: the filters in force, '
+    + '"showing X of Y", and Clear. It stays folded for that board; the / key unfolds it and puts you in the '
+    + 'search. Recommendation: as drawn.', 'Alternative: the filters hide as you scroll the board down and come '
+    + 'back as you scroll up. No click, but the page moves under you.', 'new', 5],
+  ['The task panel: parts fold, and it is as wide as you drag it', 'Each part of the panel folds from its heading, '
+    + 'and stays folded for the next task. Drag the panel\'s left edge to widen it, from 360 px to 70% of the '
+    + 'window; arrow keys work on the edge, and a double-click goes back to 460 px. The width is yours, not the '
+    + 'task\'s. Recommendation: as drawn.', 'Alternative: three widths (S, M, L) on a button, and no folding.',
+  'new', 5],
+  ['A task that needs you', 'When a run waits on your answer, its card gets an amber edge and "Needs you", the Queue '
+    + 'tab counts it, and the panel puts the question first, with what the agent offers and a box for your answer. '
+    + 'Sending lets that run go on. Recommendation: as drawn.', 'Alternative: questions in the Queue only, and a '
+    + 'plain "Waiting" chip on the card.', 'new', 5],
+  ['Finding what holds up the most', 'Each open task counts the open tasks that wait on it, directly or through '
+    + 'others: `unblocks` in a view\'s expression. A card shows "Unblocks N" from 3 up, and the built-in '
+    + 'Bottlenecks view lists them, most first. The Graph shows the same links. Recommendation: as drawn.',
+  'Alternative: count direct dependents only. Simpler, but the first task of a long chain looks small.', 'new', 5],
+  ['Autopilot', 'You pick a view and caps (runs at once, spend per day). Turning it on is your Launch for the tasks '
+    + 'that view holds: Collide fills Up next from it, what holds up the most first, never before what a task '
+    + 'waits on has landed, and starts each entry in turn. The agent proposes groups; it still has no tool that '
+    + 'launches. Recommendation: as drawn. A plan change: Stage 11 has a person press Launch for each entry.',
+  'Alternative: an agent with a launch tool picks what runs next. More flexible; it drops the plan\'s guard that '
+    + 'no agent launches.', 'new', 5],
+  ['When an autopilot run finishes', 'It waits for your review, as any run does; entries that do not depend on it '
+    + 'go on meanwhile. Recommendation: as drawn.', 'Alternative: accept a run once every gate passes, and review '
+    + 'it later from its history. Faster; a wrong change lands before you see it.', 'new', 5],
+  ['Every question is kept with its task', 'Questions and answers, a part of the task panel: each question a run '
+    + 'asked (the agent\'s, a step for a person, a follow-up in review), with its run, phase and time, the answer, '
+    + 'and who gave it. Permission prompts are not in it: they stay in the run\'s record. Recommendation: as '
+    + 'drawn.', 'Alternative: questions live in the Queue\'s history only, searchable, not on the task.', 'new', 5],
+  ['Where questions and answers are kept', 'A setting, questions.keep, whose default the pack sets: in the task\'s '
+    + 'file (it goes with the repo), as question items (qu-) linked to the task, on this Mac only, or not kept '
+    + '(gone when the run ends). You can override it in Settings. Recommendation: collide/plan keeps them in the '
+    + 'task\'s file; a GitHub pack keeps them on this Mac, since an issue is not Collide\'s to write.',
+  'Alternative: one choice for all of Collide, not per pack.', 'new', 5],
+  ['Two ways to group tasks', 'Together: one run works every task on one branch, so one test run and one review. '
+    + 'Tested together: a run per task, each on its own branch with quick checks, then one full test run of them '
+    + 'merged; a failure is split in halves to find the task, like a merge queue. Separately is today. A group is '
+    + 'one entry in Up next. Recommendation: as drawn. Tested together is new to the plan.', 'Alternative: tested '
+    + 'together without the halving: on a failure, each task is tested alone.', 'new', 5],
 ];
 
 /* ---------- top bar ---------- */
@@ -3207,9 +3345,11 @@ function tabsHtml() {
   const tabs = [['field', 'Field', 'the whole board'], ['tracks', 'Tracks', "what's running now"],
     ['queue', 'Queue', 'what needs you'], ['planning', 'Planning', 'what to build next'],
     ['comms', 'Comms', 'sessions with an agent']];
-  return tabs.map(([id, name, sub], i) => `<button class="tab ${id === 'queue' ? 'later' : ''}"
+  const asks = asksOnBoard();
+  return tabs.map(([id, name, sub], i) => `<button class="tab ${id === 'queue' && !asks ? 'later' : ''}"
     data-act="tab" data-id="${id}" aria-pressed="${state.surface === id && !state.settings}"
-    title="${name}: ${sub} (key ${i + 1})">${name}<small>${sub}</small></button>`).join('') + nm(2);
+    title="${name}: ${sub} (key ${i + 1})"><span>${name}${id === 'queue' && asks ? `<span class="qn"
+    aria-label="${asks} waiting on you">${asks}</span>` : ''}</span><small>${sub}</small></button>`).join('') + nm(2);
 }
 function topRightHtml() {
   return `<button class="btn ghost sm" data-act="dock" aria-pressed="${!!state.dock}" title="The Desk, docked at the
@@ -3235,8 +3375,10 @@ function fieldHtml() {
   }
   if (!visibleTasks().length) return banners.join('') + emptyHtml();
   const tasks = applyFilters(inView);
-  const body = state.layout === 'board' ? boardHtml(tasks) : state.layout === 'graph' ? graphHtml() : runOrderHtml();
-  return banners.join('') + filtersHtml(inView, tasks) + viewbarHtml(tasks) + body;
+  if (view().sort) tasks.sort(view().sort);
+  const body = state.layout === 'next' ? upNextHtml() : state.layout === 'board' ? boardHtml(tasks)
+    : state.layout === 'graph' ? graphHtml() : runOrderHtml();
+  return banners.join('') + autoStripHtml() + filtersHtml(inView, tasks) + viewbarHtml(tasks) + body;
 }
 
 function groupMode(tasks) {
@@ -3263,6 +3405,7 @@ function celOf() {
   return parts.join('\n  && ') || 'true';
 }
 function filtersHtml(inView, shown) {
+  if (state.ffold.has(state.board)) return foldedFiltersHtml(inView, shown);
   const f = state.filt;
   const chip = (g, v, label, n) => `<button class="chipbtn" data-act="chip" data-g="${g}" data-v="${esc(v)}"
     aria-pressed="${f[g].has(v)}">${label} <span class="n">${n}</span></button>`;
@@ -3294,7 +3437,9 @@ function filtersHtml(inView, shown) {
       <span class="muted" style="font-size:13px">${any ? `Showing ${shown.length} of ${inView.length}` : ''}</span>
       <span class="spacer"></span>
       <button class="btn sm" data-act="clear" ${any ? '' : 'disabled'}>Clear filters</button>
-      <button class="btn sm" data-act="save-view" ${any ? '' : 'disabled'}>Save as a view…</button></div>
+      <button class="btn sm" data-act="save-view" ${any ? '' : 'disabled'}>Save as a view…</button>
+      <button class="btn ghost sm" data-act="ffold" aria-expanded="true" title="Fold the filters to one line"><span
+        style="display:inline-flex;transform:rotate(180deg)">${svg.down}</span>Fold</button>${nm(38)}</div>
     <details class="adv"><summary>Advanced: this view as an expression (CEL, read only)</summary>
       <div class="cel"><code>${esc(celOf())}</code></div></details>
   </section>`;
@@ -3391,11 +3536,14 @@ function viewbarHtml(tasks) {
     <span class="muted">${tasks.length} task${tasks.length === 1 ? '' : 's'}</span>
     <span class="live" title="The board follows the files as they change"><span class="dot"></span>Live ·
       updated ${ago < 5 ? 'just now' : ago + ' s ago'}${nm(14)}</span>
-    <span class="spacer"></span>
+    ${view().sort ? '<span class="muted" style="font-size:13px">Most held up first</span>' : ''}
+    <span class="spacer"></span><button class="btn sm${state.auto.on ? ' main' : ''}" data-act="auto"
+      title="Start the tasks of a view in order, under your caps">Autopilot${state.auto.on ? ': on' : '…'}</button>
     <span class="seg" role="group" aria-label="Layout"><button data-act="layout" data-v="board"
       aria-pressed="${state.layout === 'board'}">Board</button><button data-act="layout" data-v="run"
       aria-pressed="${state.layout === 'run'}">Run order</button><button data-act="layout" data-v="graph"
-      aria-pressed="${state.layout === 'graph'}">Graph</button></span>${nm(11)}
+      aria-pressed="${state.layout === 'graph'}">Graph</button><button data-act="layout" data-v="next"
+      aria-pressed="${state.layout === 'next'}">Up next · ${state.unext.length}</button></span>${nm(11)}
     ${state.layout === 'board' ? `<span class="seg" role="group" aria-label="Columns"><button data-act="group"
       data-v="status" aria-pressed="${mode === 'status'}">By status</button><button data-act="group"
       data-v="category" aria-pressed="${mode === 'category'}">By stage of work</button></span>` : ''}
@@ -3445,8 +3593,18 @@ function cardHtml(t, mode) {
   const c = catOf(t);
   const chips = [];
   if (mode !== 'status') chips.push(`<span class="chip st cat-${c}"><span class="dot"></span>${esc(t.status)}</span>`);
+  const asks = openQs(t).length;
+  if (asks) {
+    chips.unshift(`<span class="chip ask" title="A run waits for your answer">${svg.ask}Needs you${asks > 1
+      ? ` · ${asks}` : ''}</span>${noteOnce(40)}`);
+  }
   const waits = openBlockers(t).length;
   if (waits) chips.push(`<span class="chip">Waits on ${waits}</span>`);
+  const hub = isOpen(t) ? hubCount(t) : 0;
+  if (hub >= 3) {
+    chips.push(`<span class="chip hub" title="${hub} open tasks wait on this one, directly or through others">Unblocks
+      ${hub}</span>${noteOnce(41)}`);
+  }
   const dv = divergence(t);
   if (dv) chips.push(`<span class="chip warn" title="Another copy of the project has this task in another state">↗ ${
     esc(dv)}</span>${notedCard[6] ? '' : ((notedCard[6] = true), nm(6))}`);
@@ -3455,7 +3613,7 @@ function cardHtml(t, mode) {
   const epic = t.epic && EPICS[t.epic] ? ` · ${esc(EPICS[t.epic].short)}` : '';
   const first = notedCard[5] ? '' : ((notedCard[5] = true), nm(5));
   return `<button class="tc ${c === 'active' ? 'lit' : ''} ${c} ${state.drawer === t.id ? 'sel' : ''}
-    ${state.flash.has(t.id) ? 'flash' : ''}" data-act="open" data-id="${t.id}">
+    ${asks ? 'needs' : ''} ${state.flash.has(t.id) ? 'flash' : ''}" data-act="open" data-id="${t.id}">
     <span class="tc-t">${esc(t.title)}${first}</span>
     <span class="tc-m"><span>${esc(shortId(t.id))}${epic}</span></span>
     ${chips.length ? `<span class="tc-c">${chips.join('')}</span>` : ''}</button>`;
@@ -3660,7 +3818,7 @@ function drawerHtml(t) {
   const ch = CHANGES[t.id];
   return `<div class="dh"><div class="row"><span class="chip st cat-${c}"><span class="dot"></span>${esc(t.status)}
     </span><span class="muted" style="font-size:13px">${esc(CATS[c].sub)}</span><span class="spacer"></span>
-    <span class="muted mono" style="font-size:12.5px">${esc(t.id)}</span>
+    <span class="muted mono" style="font-size:12.5px">${esc(t.id)}</span>${nm(39)}
     <button class="btn ghost sm" data-act="close" aria-label="Close">${svg.close}</button></div>
     <h2>${esc(t.title)}${nm(8)}</h2>
     <div class="row muted" style="font-size:13px">Read only. ${t.src === 'plan'
@@ -3668,7 +3826,7 @@ function drawerHtml(t) {
       <span class="spacer"></span><button class="btn sm" data-act="discuss" data-id="${t.id}">Discuss with the Desk
       </button></div>
     </div>
-    <div class="db">
+    <div class="db">${openQs(t).length ? qaHtml(t) : ''}
       <section class="ds"><h3>Description</h3><div class="md">${mdHtml(t.body || '')}</div></section>
       ${src.links ? `<section class="ds"><h3>Waits on</h3>${waits.length
         ? `<div class="links">${waits.map(linkRow).join('')}</div>`
@@ -3681,6 +3839,7 @@ function drawerHtml(t) {
       <section class="ds"><h3>Part of</h3><div class="tc-c">${t.epic ? `<span class="chip info">${esc(
         EPICS[t.epic].name)}</span>` : ''}${views.map((v) => `<span class="chip">view: ${esc(v.name)}</span>`).join('')}
       </div></section>
+      ${openQs(t).length ? '' : qaHtml(t)}
       ${ch ? changesHtml(t, ch) : ''}
       ${src.fields.length ? fieldsHtml(t, src) : ''}
       ${src.scope === 'ref' ? `<section class="ds"><h3>In each copy of the project</h3><table class="t"><thead><tr>
@@ -4647,6 +4806,302 @@ function startPlanSession() {
   Object.assign(state, { psess: PLAN_SESSION.id, surface: 'planning', settings: false, ptab: 'plan', pview: 'chat' });
 }
 
+/* ---------- round 5: what holds up the most, questions with their task, autopilot and Up next ---------- */
+svg.ask = '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 '
+  + '2-3 3-3 3M12 17h.01"/></svg>';
+function noteOnce(n) {
+  if (notedCard[n]) return '';
+  notedCard[n] = true;
+  return nm(n);
+}
+// How many open tasks wait on each task, directly or through others (note 41). Worked out once per render.
+let HUBS = null;
+function hubCount(t) {
+  if (!HUBS) {
+    const rev = new Map();
+    for (const x of visibleTasks().filter(isOpen)) {
+      for (const d of x.blockedBy) (rev.get(d) || rev.set(d, []).get(d)).push(x.id);
+    }
+    HUBS = new Map();
+    for (const x of visibleTasks()) {
+      const seen = new Set();
+      const walk = (k) => (rev.get(k) || []).forEach((n) => { if (!seen.has(n)) { seen.add(n); walk(n); } });
+      walk(x.id);
+      HUBS.set(x.id, seen.size);
+    }
+  }
+  return HUBS.get(t.id) || 0;
+}
+const openQs = (t) => ((state.qa && state.qa[t.id]) || []).filter((q) => !q.a);
+const asksOnBoard = () => board().tasks.reduce((n, t) => n + openQs(t).length, 0);
+const KEEP = {
+  task: ['In the task\'s file', 'Kept in this task\'s file, under Questions. It goes with the repo, so a teammate '
+    + 'sees it too.'],
+  items: ['As question items', 'Each is kept as a question item (qu-), linked to this task. They show on Planning.'],
+  local: ['On this Mac', 'Kept in Collide\'s store on this Mac. Only you see it.'],
+  none: ['Not kept', 'Not kept: a question shows here only while its run lives.'],
+};
+const LIVE_RUNS = new Set(['R-121', 'R-124']);
+
+/* the filters, folded to one line (note 38) */
+function foldedFiltersHtml(inView, shown) {
+  const f = state.filt, parts = [];
+  if (f.stage.size) parts.push(`Stage: ${[...f.stage].map((e) => EPICS[e].short).join(', ')}`);
+  if (f.cat.size) parts.push(`Where it stands: ${[...f.cat].map((c) => CATS[c].word).join(', ')}`);
+  if (f.src.size) parts.push(`Comes from: ${[...f.src].map((s) => SOURCES[s].name).join(', ')}`);
+  if (f.text) parts.push(`Search: "${f.text}"`);
+  if (f.deps) parts.push('Has dependencies');
+  return `<section class="filters card fold" aria-label="Filters, folded">
+    <button class="btn ghost sm" data-act="ffold" aria-expanded="false" title="Show the filters (key /)"><span
+      style="display:inline-flex;transform:rotate(-90deg)">${svg.down}</span>Filters</button>
+    <span class="muted" style="font-size:13px;min-width:0">${parts.length ? `${esc(parts.join(' · '))} · showing
+      ${shown.length} of ${inView.length}` : `No filters · ${inView.length} tasks`}</span>
+    <span class="spacer"></span>${parts.length ? '<button class="btn sm" data-act="clear">Clear filters</button>'
+      : ''}${nm(38)}</section>`;
+}
+
+/* the task panel: each part folds from its heading (note 39) */
+function foldSections(html) {
+  const NM = /<span class="nm"[^>]*>\d+<\/span>/g;
+  return html.replace(/<section class="ds"><h3>([\s\S]*?)<\/h3>/g, (m, inner) => {
+    const key = inner.split('<')[0].trim();
+    const shut = state.dshut.has(key);
+    return `<section class="ds${shut ? ' shut' : ''}"><h3><button class="dsh" data-act="dsec" data-v="${key}"
+      aria-expanded="${!shut}"><span class="tw" aria-hidden="true">${shut ? '▸' : '▾'}</span>${inner.replace(NM,
+      '')}</button>${(inner.match(NM) || []).join('')}</h3>`;
+  });
+}
+
+/* questions and answers, kept with the task (notes 40, 44, 45) */
+function qaHtml(t) {
+  const list = (state.qa[t.id] || []).map((q, i) => ({ q, i }));
+  if (!list.length) return '';
+  const shown = list.filter(({ q }) => state.qkeep !== 'none' || !q.a || LIVE_RUNS.has(q.run));
+  const small = 'class="muted" style="font-size:12.5px"';
+  const item = ({ q, i }) => `<div class="qi ${q.a ? '' : 'open'}">
+    <div ${small}>${esc(q.kind)} · ${esc(q.run)}, ${esc(q.phase)} · ${esc(q.at)}</div>
+    <div>${mdInline(esc(q.q))}</div>
+    ${q.a ? `<div class="ans">${mdInline(esc(q.a))}<div ${small}>${esc(q.by)} answered, ${esc(q.when)}</div></div>`
+      : `${q.opts ? `<div class="opts"><span ${small}>The agent offers:</span>${q.opts.map((o) => `<button
+        class="btn sm" data-act="qpick" data-v="${i}" data-o="${esc(o)}">${esc(o)}</button>`).join('')}</div>` : ''}
+      <label class="sr" for="qans-${i}">Your answer</label><textarea id="qans-${i}" rows="2"
+        placeholder="Your answer. The run goes on when you send it.">${esc(state.qdraft[`${t.id}:${i}`] || '')
+        }</textarea>
+      <div class="opts"><button class="btn sm main" data-act="qsend" data-id="${t.id}" data-v="${i}">Send answer
+        </button><span ${small}>Only this run waits; the others go on.</span></div>`}</div>`;
+  const n = openQs(t).length;
+  return `<section class="ds"><h3>Questions and answers${n ? ` <span class="qn">${n}</span>` : ''}${nm(44)}</h3>
+    <div class="qa">${shown.length ? shown.map(item).join('') : '<span class="muted">None kept.</span>'}
+      <div class="opts"><span ${small}>${esc(KEEP[state.qkeep][1])}</span><button class="btn ghost sm"
+        data-act="qkeep-set">Change where they are kept</button>${nm(45)}</div></div></section>`;
+}
+function qkeepRow(name, key) {
+  const pack = state.qkeep === 'task';
+  return `<tr><td><b>${esc(name)}</b><br><span class="mono muted" style="font-size:12px">${esc(key)}</span></td>
+    <td><label class="sr" for="qkeep">${esc(name)}</label><select id="qkeep">${Object.entries(KEEP).map(([k, [w]]) =>
+      `<option value="${k}" ${k === state.qkeep ? 'selected' : ''}>${esc(w)}</option>`).join('')}</select>
+      <div class="muted" style="font-size:12.5px;margin-top:4px">${esc(KEEP[state.qkeep][1])} Permission answers
+      stay in the run's record.</div></td>
+    <td><span class="layer l-${pack ? 'pack' : 'user'}">${pack ? 'Pack: collide/plan' : 'You'}</span>${nm(45)}</td>
+    </tr>`;
+}
+function queueHtml() {
+  const rows = board().tasks.flatMap((t) => openQs(t).map((q) => ({ t, q })));
+  const cut = (s) => (s.length > 96 ? `${s.slice(0, 95)}…` : s).replace(/`/g, '');
+  return `<section class="panel card center"><h1>Queue ${nm(2)}</h1><p>Every decision waiting on you, longest wait
+    first.</p>${rows.length ? `<div class="links">${rows.map(({ t, q }) => `<button class="lk" data-act="qopen"
+      data-id="${t.id}"><span class="chip ask">${svg.ask}Question</span><span class="grow">${esc(t.title)}<span
+      class="muted" style="display:block;font-size:12.5px">${esc(q.run)}, ${esc(q.phase)} · ${esc(q.at)} ·
+      ${esc(cut(q.q))}</span></span><span class="muted mono" style="font-size:12.5px">${esc(shortId(t.id))}</span>
+      </button>`).join('')}</div>` : '<p class="muted">Nothing waits on you.</p>'}
+    <p class="muted">The full Queue arrives in Stage 9a: permission requests, failures, usage limits. A question shows
+      here and on its task.</p></section>`;
+}
+
+/* autopilot (notes 42, 43) */
+function autoStripHtml() {
+  const a = state.auto;
+  if (!a.on) return '';
+  const v = board().views.find((x) => x.id === a.view);
+  const asks = asksOnBoard();
+  return `<div class="auto" role="status"><span class="live"><span class="dot"></span></span>
+    <b>${a.paused ? 'Autopilot paused' : 'Autopilot on'}</b><span>${esc(v ? v.name : a.view)}</span>
+    <span class="muted">· 2 running of ${a.cap} · $3.10 of $${a.spend} today</span>${asks ? `<span class="chip ask">${
+      svg.ask}${asks} question${asks === 1 ? '' : 's'} for you</span>` : ''}
+    <span class="spacer"></span><button class="btn sm" data-act="layout" data-v="next">Up next</button>
+    <button class="btn sm" data-act="auto-pause">${a.paused ? 'Resume' : 'Pause'}</button>
+    <button class="btn sm" data-act="auto">Settings…</button><button class="btn sm" data-act="auto-stop">Stop</button>
+    ${nm(42)}</div>`;
+}
+function autoModal() {
+  const a = state.auto;
+  const opens = (v) => visibleTasks().filter(v.test).filter(isOpen).length;
+  const radio = (name, val, cur, label, sub) => `<label><input type="radio" name="${name}" value="${val}"
+    ${val === cur ? 'checked' : ''}><span><b>${label}</b><br><span class="muted">${sub}</span></span></label>`;
+  modal(`<h2>Autopilot for ${esc(board().name)}${nm(42)}</h2>
+    <p>Autopilot keeps Up next full from one view and starts each entry in turn, under your caps. Turning it on is
+      your Launch for the tasks that view holds; no agent can launch. A run still stops for your questions.</p>
+    <label for="aview">Tasks from</label><select id="aview">${board().views.map((v) => `<option value="${v.id}"
+      ${v.id === a.view ? 'selected' : ''}>${esc(v.name)} · ${opens(v)} open</option>`).join('')}</select>
+    <p class="muted" style="font-size:13px">Order: what holds up the most goes first, and a task never starts before
+      what it waits on has landed. Collide works the order out from the links; the agent does not choose it.</p>
+    <fieldset class="radios"><legend>Groups</legend>
+      ${radio('agroup', 'propose', a.group, 'The agent proposes groups; you accept each', 'Recommended. Until you '
+        + 'accept, its tasks run one by one.')}
+      ${radio('agroup', 'auto', a.group, 'Use the agent\'s groups without asking', 'It changes how tasks are tested '
+        + 'and reviewed, not which ones start.')}
+      ${radio('agroup', 'none', a.group, 'No groups', 'One run per task.')}</fieldset>
+    <label for="amode">A new group runs</label><select id="amode">${Object.entries(MODES).map(([k, [w]]) =>
+      `<option value="${k}" ${k === a.mode ? 'selected' : ''}>${w}</option>`).join('')}</select>
+    <div class="frow"><label>Runs at once <input type="number" id="acap" min="1" max="8" value="${a.cap}"
+      style="width:64px"></label><label>Spend per day, USD <input type="number" id="aspend" min="1"
+      value="${a.spend}" style="width:80px"></label></div>
+    <fieldset class="radios"><legend>When a run finishes${nm(43)}</legend>
+      ${radio('aaccept', 'review', a.accept, 'Wait for your review', 'Recommended. What does not depend on it goes '
+        + 'on meanwhile.')}
+      ${radio('aaccept', 'gates', a.accept, 'Accept it when every gate passes', 'You review later, from the task\'s '
+        + 'history. A failed gate still stops it.')}</fieldset>
+    <fieldset class="radios"><legend>When a run asks you something</legend>
+      ${radio('aask', 'task', a.ask, 'Pause that run and mark its task', 'Recommended. The others go on; the card '
+        + 'shows Needs you, and the Queue counts it.')}
+      ${radio('aask', 'all', a.ask, 'Pause autopilot until you answer', 'Nothing new starts while a question '
+        + 'waits.')}</fieldset>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+      <button class="btn main" data-act="auto-yes">${a.on ? 'Save' : 'Start autopilot'}</button></div>`, 'tall');
+}
+function startAutopilot() {
+  const pick = (n) => (document.querySelector(`input[name=${n}]:checked`) || {}).value;
+  const was = state.auto.on;
+  Object.assign(state.auto, { on: true, paused: false, view: $('#aview').value, group: pick('agroup'),
+    mode: $('#amode').value, cap: Number($('#acap').value) || 2, spend: Number($('#aspend').value) || 20,
+    accept: pick('aaccept'), ask: pick('aask') });
+  closeModal();
+  if (state.auto.group === 'auto') state.unext.forEach((e) => { delete e.proposed; });
+  if (was) { toast('Autopilot: settings saved.'); return; }
+  const t = byId('fx-0001-hb');
+  if (t && catOf(t) !== 'active') {
+    t.status = 'active';
+    (state.qa[t.id] ||= []).push(clone(AUTO_ASK));
+    flash(t.id);
+  }
+  state.layout = 'next';
+  toast('Autopilot is on. It started fx-0001 as run R-124; R-121 goes on.');
+}
+
+/* Up next: what starts next, in order; a group is one entry (note 46) */
+function entryState(e, i) {
+  const ts = e.tasks.map(byId).filter(Boolean);
+  const asks = ts.reduce((n, t) => n + openQs(t).length, 0);
+  if (ts.some((t) => catOf(t) === 'active')) return asks ? ['ask', 'Running · needs you'] : ['info', 'Running'];
+  if (e.proposed) return ['warn', 'Proposed by the agent: keep it, or split it'];
+  const out = ts.flatMap(openBlockers).filter((b) => !e.tasks.includes(b.id));
+  if (out.length) {
+    return ['', `Waits until ${shortId(out[0].id)} lands${out.length > 1 ? ` and ${out.length - 1} more` : ''}`];
+  }
+  if (i === 0 || state.overlap) return ['good', `Starts when a slot is free (${state.auto.cap} at once)`];
+  return ['', 'Starts when the one before it lands'];
+}
+function upNextHtml() {
+  const a = state.auto;
+  const rows = state.unext.map((e, i) => {
+    const ts = e.tasks.map(byId).filter(Boolean);
+    const [cls, word] = entryState(e, i);
+    const running = cls === 'ask' || cls === 'info';
+    const by = { you: 'Added by you', autopilot: 'Added by autopilot', agent: 'Grouped by the agent' }[e.by];
+    const head = e.kind === 'group' ? `<b>${esc(e.name)}</b> <span class="chip info" title="${esc(
+      MODES[e.mode][1])}">${MODES[e.mode][0]}</span>` : `<b>${esc(ts[0] ? ts[0].title : e.tasks[0])}</b>`;
+    const how = e.kind !== 'group' ? '' : e.mode === 'tested' ? 'Each task: its own run and branch, quick checks '
+      + 'only. Then one full test run of them merged; a failure is split in halves to find the task.'
+      : e.mode === 'together' ? 'One run, one branch, one test run, one review. They land together.'
+        : 'A run per task, each tested and reviewed on its own.';
+    const modes = e.kind !== 'group' ? '' : `<label class="sr" for="um-${i}">How ${esc(e.name)} runs</label>
+      <select class="umode" id="um-${i}" data-v="${i}">${Object.entries(MODES).map(([k, [w]]) => `<option
+        value="${k}" ${k === e.mode ? 'selected' : ''}>${w}</option>`).join('')}</select>`;
+    return `<div class="ue card"><span class="pos">${i + 1}</span><div class="main">
+      <div class="frow" style="gap:8px">${head}<span class="chip ${cls}">${cls === 'ask' ? svg.ask : ''}${esc(word)}
+        </span>${e.human ? '<span class="chip warn">A step for you</span>' : ''}</div>
+      <div class="tasks">${ts.map((t) => `<span><span class="dot cat-${catOf(t)}"></span> ${idLinks(esc(t.id))}${
+        e.kind === 'group' ? ` ${esc(t.title)}` : ''}</span>`).join('')}</div>
+      ${how ? `<div class="muted" style="font-size:13px">${esc(how)}</div>` : ''}
+      ${e.why ? `<div class="muted" style="font-size:13px">Why: ${esc(e.why)}</div>` : ''}
+      <div class="muted" style="font-size:12.5px">${by}</div></div>
+      <div class="acts">${modes}${e.proposed ? `<button class="btn sm main" data-act="ue-keep" data-v="${i}">Keep
+        </button>` : ''}${e.kind === 'group' ? `<button class="btn ghost sm" data-act="ue-split" data-v="${i}">Split
+        </button>` : ''}<button class="btn ghost sm" data-act="ue-up" data-v="${i}" aria-label="Move up"
+        ${running || i === 0 ? 'disabled' : ''}>↑</button><button class="btn ghost sm" data-act="ue-down"
+        data-v="${i}" aria-label="Move down" ${running || i === state.unext.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="btn ghost sm" data-act="ue-x" data-v="${i}" ${running ? 'disabled title="It is running: stop '
+          + 'it from Tracks"' : ''} aria-label="Remove from Up next">${svg.close}</button></div></div>`;
+  }).join('');
+  const v = board().views.find((x) => x.id === a.view);
+  return `<div class="unext"><p class="muted" style="max-width:80ch;margin:0">What starts next, in
+    order. An entry is a task or a group; each starts once the one before it has landed. ${a.on
+      ? `Autopilot adds open tasks from ${esc(v ? v.name : a.view)} as entries land.`
+      : 'Autopilot is off: you add entries, and adding one is your Launch.'}${nm(46)}</p>
+    <div class="frow" style="gap:8px"><button class="btn sm" data-act="overlap" aria-pressed="${state.overlap}">Overlap
+      what is independent: ${state.overlap ? 'on' : 'off'}</button><button class="btn sm" data-act="grp">Group
+      tasks…</button></div>${rows || '<p class="muted">Nothing is up next.</p>'}</div>`;
+}
+function grpEst(n) {
+  const row = (k, tests, reviews, lands) => `<tr><td><b>${MODES[k][0]}</b></td><td>${tests}</td><td>${reviews}</td>
+    <td>${lands}</td></tr>`;
+  return `<div style="overflow-x:auto"><table class="t"><thead><tr><th>For ${n} tasks</th><th>Full test runs</th>
+    <th>Reviews</th><th>Lands</th></tr></thead><tbody>
+    ${row('apart', `${n}, about ${n * 6} min`, n, 'one at a time')}
+    ${row('together', '1, about 6 min', 1, 'all at once')}
+    ${row('tested', '1, about 6 min; more on a failure', n, 'all at once, once the group passes')}
+    </tbody></table></div><p class="muted" style="font-size:12.5px;margin:0">A full test run of this repo takes about
+    6 minutes (from its last 10 runs). The mock's numbers are made up.</p>`;
+}
+function grpModal(pre = ['ts-0181-dr', 'ts-0182-st']) {
+  const open = visibleTasks().filter(view().test).filter((t) => isOpen(t) && catOf(t) !== 'active');
+  modal(`<h2>Group tasks${nm(46)}</h2><p class="muted">A group is one entry in Up next. Pick how it is worked and
+    tested.</p><label for="gname">Name</label><input type="text" id="gname" value="Drawer and settings">
+    <fieldset class="radios"><legend>Tasks</legend><div class="pick">${open.map((t) => `<label><input
+      type="checkbox" class="gpick" value="${t.id}" ${pre.includes(t.id) ? 'checked' : ''}><span class="mono
+      muted">${esc(shortId(t.id))}</span> ${esc(t.title)}</label>`).join('')}</div></fieldset>
+    <fieldset class="radios"><legend>How it is worked and tested</legend>${Object.entries(MODES).map(([k, [w, d]]) =>
+      `<label><input type="radio" name="gmode" value="${k}" ${k === 'tested' ? 'checked' : ''}><span><b>${w}</b><br>
+      <span class="muted">${esc(d)}</span></span></label>`).join('')}</fieldset>
+    <div id="gest">${grpEst(pre.length)}</div>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+      <button class="btn main" data-act="grp-yes">Add to Up next</button></div>`, 'tall');
+}
+(() => {
+  // The task panel's left edge: drag it, use the arrow keys on it, or double-click it for 460 px (note 39).
+  const g = $('#dgrip');
+  const setW = (w) => {
+    const max = Math.max(360, Math.round(innerWidth * 0.7));
+    state.dw = Math.min(max, Math.max(360, Math.round(w)));
+    $('#drawer').style.flexBasis = `${state.dw}px`;
+    g.setAttribute('aria-valuenow', String(state.dw));
+  };
+  g.addEventListener('pointerdown', (e) => {
+    g.setPointerCapture(e.pointerId);
+    g.classList.add('drag');
+    e.preventDefault();
+  });
+  g.addEventListener('pointermove', (e) => {
+    if (g.classList.contains('drag')) setW($('.stage').getBoundingClientRect().right - e.clientX);
+  });
+  const end = (e) => {
+    if (!g.classList.contains('drag')) return;
+    g.classList.remove('drag');
+    try { g.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  };
+  g.addEventListener('pointerup', end);
+  g.addEventListener('pointercancel', end);
+  g.addEventListener('dblclick', () => setW(460));
+  g.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 120 : 40;
+    if (e.key === 'ArrowLeft') setW(state.dw + step);
+    else if (e.key === 'ArrowRight') setW(state.dw - step);
+    else if (e.key === 'Home') setW(460);
+    else return;
+    e.preventDefault();
+  });
+})();
+
 /* ---------- settings ---------- */
 const SETTINGS = [
   ['Free disk space to keep', 'disk.floor_gib', '5 GiB', 'default', null],
@@ -4654,6 +5109,7 @@ const SETTINGS = [
   ['Spend cap for one Ask', 'ask.budget_usd', '$0.25', 'repo', '$0.50'],
   ['Time limit for one Ask', 'ask.timeout_s', '120 s', 'user', null],
   ['Check for new Claude Code versions', 'claude.check_published', 'On, daily and at start', 'default', null],
+  ['Where questions and answers are kept', 'questions.keep', '', 'pack', null],
 ];
 function settingsHtml() {
   const b = board();
@@ -4662,9 +5118,10 @@ function settingsHtml() {
   let body = '';
   if (state.stab === 'general') {
     body = `<p class="muted">Each setting shows the value in use and where it came from. This repo's file wins over
-      yours; yours wins over the default. ${nm(12)}</p>
+      yours; yours wins over a pack's; a pack's wins over the default. ${nm(12)}</p>
       <div style="overflow-x:auto"><table class="t"><thead><tr><th>Setting</th><th>Value in use</th><th>Set in</th>
-      </tr></thead><tbody>${SETTINGS.map(([name, key, val, layer, over]) => `<tr><td><b>${esc(name)}</b><br>
+      </tr></thead><tbody>${SETTINGS.map(([name, key, val, layer, over]) => key === 'questions.keep'
+      ? qkeepRow(name, key) : `<tr><td><b>${esc(name)}</b><br>
       <span class="mono muted" style="font-size:12px">${esc(key)}</span></td><td>${esc(val)}${over
         ? `<br><span class="over">${esc(over)}</span> <span class="muted" style="font-size:12.5px">yours, overridden
         by this repo</span>` : ''}</td><td><span class="layer l-${layer}">${layerWord[layer]}</span></td></tr>`)
@@ -4765,6 +5222,10 @@ function mockHtml() {
       ${s('dockterm', 'The Desk as a terminal')}</div>
     <h3>Round 4</h3><div class="grid">${s('peek', 'Peek at a task id')}${s('plansess', 'Plan…: the session')}
       ${s('plansess-q', 'Plan…: the Quality tab')}${s('plansess-term', 'Plan…: as a terminal')}</div>
+    <h3>Round 5</h3><div class="grid">${s('fold', 'Filters folded')}${s('dfold', 'Task panel: folded, wide')}
+      ${s('needs', 'A task that needs you')}${s('queue', 'Queue: what waits on you')}${s('hubs', 'Bottlenecks')}
+      ${s('auto-setup', 'Autopilot: set up')}${s('auto-on', 'Autopilot: running')}${s('upnext', 'Up next')}
+      ${s('grouping', 'Group tasks')}${s('qkeep', 'Where answers are kept')}</div>
     <h3>Live updates (watch)</h3><div class="grid">${s('sim-finish', 'ts-0178 goes to review')}
       ${s('sim-diverge', "A run's copy moves ts-0168")}</div>
     <h3>View</h3><div class="grid"><button class="btn sm" data-act="notes" aria-pressed="${state.notes}">
@@ -4780,6 +5241,7 @@ function mockHtml() {
 /* ---------- render ---------- */
 function render() {
   hidePeek();
+  HUBS = null;
   notedCard = { 5: false, 6: false, 7: false };
   $('#crumb').innerHTML = crumbHtml();
   $('#tabs').innerHTML = state.screen === 'welcome' ? '' : tabsHtml();
@@ -4792,12 +5254,14 @@ function render() {
   else if (state.surface === 'planning') html = planningHtml();
   else if (state.surface === 'tracks') html = tracksHtml();
   else if (state.surface === 'comms') html = commsHtml();
-  else html = laterHtml(state.surface);
+  else html = state.surface === 'queue' ? queueHtml() : laterHtml(state.surface);
   $('#content').innerHTML = html;
   const t = state.drawer && byId(state.drawer);
   const d = $('#drawer');
   d.hidden = !t || state.screen === 'welcome';
-  if (t) d.innerHTML = drawerHtml(t);
+  if (t) d.innerHTML = foldSections(drawerHtml(t));
+  $('#dgrip').hidden = d.hidden;
+  d.style.flexBasis = `${state.dw}px`;
   const dk = $('#dock');
   const docked = !!state.dock && state.screen === 'board' && (state.settings || state.surface !== 'comms');
   dk.hidden = !docked;
@@ -4935,6 +5399,30 @@ function scenario(v) {
       if (ref) showPeek(ref, true);
       return;
     }
+    case 'fold': goBoard('collide', 'all'); state.layout = 'board'; state.ffold.add('collide'); break;
+    case 'dfold':
+      goBoard('collide', 's6');
+      Object.assign(state, { layout: 'board', drawer: 'ts-0178-fw', dw: 640,
+        dshut: new Set(['Description', 'Waits on', 'Part of']) });
+      break;
+    case 'needs':
+      goBoard('collide', 'open');
+      Object.assign(state, { layout: 'board', drawer: 'ts-0178-fw', dshut: new Set() });
+      break;
+    case 'queue': goBoard('collide'); state.surface = 'queue'; break;
+    case 'hubs': goBoard('collide', 'hubs'); state.layout = 'board'; break;
+    case 'auto-setup': goBoard('collide', 's6'); state.layout = 'board'; render(); autoModal(); return;
+    case 'auto-on':
+      goBoard('collide', 's6');
+      if (!state.auto.on) { render(); autoModal(); startAutopilot(); }
+      state.layout = 'next';
+      break;
+    case 'upnext': goBoard('collide', 's6'); state.layout = 'next'; break;
+    case 'grouping': goBoard('collide', 's6'); state.layout = 'next'; render(); grpModal(); return;
+    case 'qkeep':
+      if (state.screen !== 'board' || board().missing) goBoard('collide');
+      Object.assign(state, { settings: true, stab: 'general', drawer: null });
+      break;
     case 'reset': {
       const notes = state.notes;
       state.boards = freshBoards();
@@ -4942,7 +5430,8 @@ function scenario(v) {
         comms: JSON.parse(JSON.stringify(COMMS)), comm: 'flaky', cview: 'convo', track: 'r121', ttab: 'table',
         minSecs: 0, toolType: 'all', cq: '', tphase: null, optCtx: null, optSel: new Set(), optCap: false,
         optTime: false, diffView: 'changes', dock: false, dockSess: 'desk', dview: 'chat', ddraft: '',
-        psess: null, ptab: 'plan', pview: 'chat', pdraft: '' });
+        psess: null, ptab: 'plan', pview: 'chat', pdraft: '', ffold: new Set(), dshut: new Set(), dw: 460,
+        qa: clone(QA), qkeep: 'task', qdraft: {}, auto: clone(AUTO), unext: clone(UP_NEXT), overlap: false });
       goBoard('collide');
       break;
     }
@@ -5175,11 +5664,89 @@ document.addEventListener('click', (e) => {
       state.pdraft = '';
       break;
     }
+    case 'ffold':
+      if (state.ffold.has(state.board)) state.ffold.delete(state.board); else state.ffold.add(state.board);
+      break;
+    case 'dsec': {
+      if (state.dshut.has(v)) state.dshut.delete(v); else state.dshut.add(v);
+      render();
+      const back = [...document.querySelectorAll('#drawer .dsh')].find((x) => x.dataset.v === v);
+      if (back) back.focus();
+      return;
+    }
+    case 'qpick': {
+      const ta = $(`#qans-${v}`);
+      if (ta) { ta.value = el.dataset.o; state.qdraft[`${state.drawer}:${v}`] = ta.value; ta.focus(); }
+      return;
+    }
+    case 'qsend': {
+      const ta = $(`#qans-${v}`);
+      const text = ta ? ta.value.trim() : '';
+      if (!text) { toast('Write an answer, or pick one the agent offers.'); return; }
+      const q = state.qa[id][Number(v)];
+      Object.assign(q, { a: text, by: 'You', when: `Today ${clock()}` });
+      delete state.qdraft[`${id}:${v}`];
+      const kept = { task: 'in the task\'s file', items: 'as a question item', local: 'on this Mac' }[state.qkeep];
+      toast(`Sent to ${q.run}; it goes on. ${kept ? `Kept ${kept}.` : 'Not kept once the run ends.'}`);
+      break;
+    }
+    case 'qkeep-set': Object.assign(state, { settings: true, stab: 'general', drawer: null }); break;
+    case 'qopen': state.drawer = id; break;
+    case 'auto': autoModal(); return;
+    case 'auto-yes': startAutopilot(); break;
+    case 'auto-pause':
+      state.auto.paused = !state.auto.paused;
+      toast(state.auto.paused ? 'Autopilot paused: nothing new starts; runs that started go on.'
+        : 'Autopilot goes on.');
+      break;
+    case 'auto-stop':
+      Object.assign(state.auto, { on: false, paused: false });
+      toast('Autopilot is off. Runs that started go on; Up next stays as it is.');
+      break;
+    case 'ue-up': case 'ue-down': {
+      const i = Number(v), j = act === 'ue-up' ? i - 1 : i + 1, u = state.unext;
+      if (j < 0 || j >= u.length) return;
+      [u[i], u[j]] = [u[j], u[i]];
+      break;
+    }
+    case 'ue-x': state.unext.splice(Number(v), 1); toast('Removed from Up next. The task stays on the board.'); break;
+    case 'ue-keep': delete state.unext[Number(v)].proposed; toast('Group kept. It runs as one entry.'); break;
+    case 'ue-split': {
+      const grp = state.unext[Number(v)];
+      state.unext.splice(Number(v), 1, ...grp.tasks.map((x) => ({ kind: 'task', tasks: [x], by: 'you' })));
+      toast(`${grp.name}: split into ${grp.tasks.length} entries.`);
+      break;
+    }
+    case 'overlap': state.overlap = !state.overlap; break;
+    case 'grp': grpModal(); return;
+    case 'grp-yes': {
+      const ids = [...document.querySelectorAll('.gpick:checked')].map((x) => x.value);
+      if (ids.length < 2) { toast('Pick two tasks or more for a group.'); return; }
+      const mode = document.querySelector('input[name=gmode]:checked').value;
+      const name = $('#gname').value.trim() || 'A group';
+      state.unext = state.unext.map((x) => ({ ...x, tasks: x.tasks.filter((k) => !ids.includes(k)) }))
+        .filter((x) => x.tasks.length);
+      state.unext.push({ kind: 'group', name, tasks: ids, mode, by: 'you' });
+      state.layout = 'next';
+      closeModal();
+      toast(`${name}: added to Up next, ${MODES[mode][0].toLowerCase()}.`);
+      break;
+    }
     default: return;
   }
   render();
 });
 document.addEventListener('change', (e) => {
+  if (e.target.id === 'qkeep') { state.qkeep = e.target.value; render(); return; }
+  if (e.target.classList.contains('umode')) {
+    state.unext[Number(e.target.dataset.v)].mode = e.target.value;
+    render();
+    return;
+  }
+  if (e.target.classList.contains('gpick')) {
+    $('#gest').innerHTML = grpEst(document.querySelectorAll('.gpick:checked').length);
+    return;
+  }
   if (e.target.id === 'goal') { state.goal = e.target.value; render(); }
   if (e.target.id === 'ttype') { state.toolType = e.target.value; render(); }
   if (e.target.id === 'tmin') { state.minSecs = Number(e.target.value); render(); }
@@ -5212,6 +5779,7 @@ document.addEventListener('input', (e) => {
     }
     return;
   }
+  if (id.startsWith('qans-')) { state.qdraft[`${state.drawer}:${id.slice(5)}`] = e.target.value; return; }
   if (id === 'dmsg') { state.ddraft = e.target.value; return; }
   if (id !== 'ftext' && id !== 'cq') return;
   if (id === 'ftext') state.filt.text = e.target.value; else state.cq = e.target.value;
@@ -5259,7 +5827,11 @@ document.addEventListener('keydown', (e) => {
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   const tab = { 1: 'field', 2: 'tracks', 3: 'queue', 4: 'planning', 5: 'comms' }[e.key];
   if (tab && state.screen === 'board') { state.surface = tab; state.settings = false; render(); }
-  if (e.key === '/') { const f = $('#ftext'); if (f) { e.preventDefault(); f.focus(); } }
+  if (e.key === '/') {
+    if (state.ffold.has(state.board) && state.surface === 'field') { state.ffold.delete(state.board); render(); }
+    const f = $('#ftext');
+    if (f) { e.preventDefault(); f.focus(); }
+  }
   if ((e.key === 'Enter' || e.key === ' ') && document.activeElement.matches('.col.shut')) {
     e.preventDefault(); document.activeElement.click();
   }
@@ -5426,7 +5998,9 @@ function addScratch() {
 setInterval(() => { if (state.screen === 'board' && state.surface === 'field' && !state.settings) {
   // A live tick leaves an open peek alone: in the app it re-reads the task it shows.
   const live = document.querySelector('.live');
-  if (live && $('#peek').hidden) render();
+  // Nor does it take your place in a box you type in, or an edge you drag.
+  const busy = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('#dgrip').classList.contains('drag');
+  if (live && $('#peek').hidden && !busy) render();
 } }, 15000);
 render();
 </script>
