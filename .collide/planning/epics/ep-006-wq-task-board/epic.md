@@ -20,4 +20,5 @@ The read-only desktop task board, which ends Milestone A: the Field, filter bar,
 
 ## Notes
 
-Items are lettered `6a` to `6c` and are not split yet. Split them when Stage 5 nears done (0.10).
+Items are lettered `6a` to `6c`. Stage 6a is split into `ts-0179-ke` to `ts-0197-uj` (revision 27), built one at a
+time in id order, before Stage 5 (owner, 2026-11-21). Stage 6b is split next; 6c is split when Stage 5 nears done.

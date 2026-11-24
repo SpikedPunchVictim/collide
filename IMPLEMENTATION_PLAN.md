@@ -7,7 +7,11 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 26.** Revision 26 adds the in-app agent's screens to the board mock (round 7, notes 47-57) as
+**Status: revision 27.** Revision 27 splits Stage 6a into `ts-0179-ke` to `ts-0197-uj` and writes in the owner's
+answers to the choices the split raised (2026-11-24): the trust prompt shows when the repo's `.collide/` brings
+packs, views or settings; Share with team writes `board.yaml` and the saved views; the filter bar has a Labels group;
+a collection can be a closure's goal; and the app adds `react-markdown`, `remark-gfm` and `tauri-plugin-dialog`.
+Revision 26 adds the in-app agent's screens to the board mock (round 7, notes 47-57) as
 Stage 6b's design reference: the chip sits on the surface the ask changed, and the ask box closes when an ask succeeds
 (owner, 2026-11-24).
 Revision 25 writes in the board the owner designed in a clickable mock over six rounds
@@ -2529,6 +2533,8 @@ layout: { default: board, groupBy: category }
     T-01-046).
   - `follow: depends_on` walks the dependency links, `blocked-by` and `depends_on`, except a link marked
     `blocking: false`: the same set as the `deps` variable (`ts-0118-wp`).
+  - **The goal** is a task key, or a collection key whose open tasks are all goals (revision 27; note 11). The
+    Field's run order and graph pick an epic of the shown tasks as the goal of a view with none.
   - **A done goal** is the whole closure: the goal is a member, nothing is walked from it, and it is no step. The
     generator walks nothing from it either (no open run; its former dependencies are stranded). A dropped goal is the
     same (`ts-0147-ve`).
@@ -2536,6 +2542,7 @@ layout: { default: board, groupBy: category }
     no `include`): the view has no members, the CLI exits 10, and the message names the goal. The generator stops with
     an error the same way. A view with a `where` or an `include` beside the closure keeps its other members and counts
     the goal in `goal_unmatched`, so one stale goal does not hide a view that has other parts (`ts-0147-ve`).
+- **`layout.default`** is `board`, `run-order` or `graph` (revision 25; note 11).
 - A view is a lens owned by Collide. It never writes membership into a source. Where the source has the grouping (a
   collection), the view reads it, so membership stays the source's truth. `include` and `exclude` cover the
   hand-picked subsets the source does not encode.
@@ -2942,14 +2949,14 @@ Details:
   answers; Changes, the task's runs and their files; Fields from the source; each copy, with divergence, collisions
   and other lines' states; then Details for engineers (the source, file, raw frontmatter). A part the source has no
   notion of is left out: a source with no blocking link type has no Waits on or Unblocks (0.10), and a global source
-  has one copy. The source's operations show as forms, and Create opens the same form. The body is **sanitized
-  markdown** (R5): raw HTML off, `javascript:`, `file:` and `data:` links removed, images from remote hosts not
-  loaded, and an external link opens in the browser after a confirmation (0.9). Any other place that shows a task's
-  or an agent's text follows the same rule.
+  has one copy. The source's operations show as forms, and Create opens the same form (Stage 9a; the drawer is read-only
+  before). The body is **sanitized markdown** (R5): raw HTML off, `javascript:`, `file:` and `data:` links removed,
+  images from remote hosts not loaded, and an external link opens in the browser after a confirmation (0.9). Any other
+  place that shows a task's or an agent's text follows the same rule.
 - **Filter bar → view.** Typing a filter in the Field is an ad-hoc view, and saving it writes a view file. CEL is
-  never the only way in: chips in plain words (by stage, where a task stands, where it comes from) write the CEL for
-  you, and the expression is shown read-only under Advanced (revision 25; note 9). **Describe what to show** turns
-  words into chips with the in-app agent (Stage 6b; note 16).
+  never the only way in: chips in plain words (by stage, where a task stands, where it comes from, its labels) write the
+  CEL for you, and the expression is shown read-only under Advanced (revision 25; note 9). **Describe what to show**
+  turns words into chips with the in-app agent (Stage 6b; note 16).
 - **Drill-down from a phase segment.** An **activity digest** comes first: files touched, commands with exit
   codes, tests, gate verdicts, the phase report rendered as a document, and the diff. The raw transcript and the
   terminal sit behind a toggle.
@@ -3196,7 +3203,7 @@ Details:
     (otherwise a hint);
   - default model aliases (`fast` → sonnet, `strong` → opus), editable later;
   - board settings stay per user until **Share with team** writes `.collide/` into the repo (`collide init`);
-  - a trust prompt only for packs from the repo or ones the user adds;
+  - a trust prompt when the repo's `.collide/` brings packs, views or settings (0.9), or the user adds a pack;
   - source auth when a source needs it, e.g. `gh auth refresh -s project` with the account to use.
 - **Line selector** (owner, 2026-11-15; revision 22). One menu in the top bar, visible on every surface (S6 Q4,
   default `top`), lists every open board (one repository each) and, under each, its lines (0.12). The person picks
@@ -4812,8 +4819,9 @@ the mock, not from this plan.
 
 - The Tauri shell: one `rpc` command and one event channel, forwarding to the owner's socket and adding the token
   (0.2). Stage 3c built the minimal form. The webview's CSP and Tauri capabilities are set here (0.9; R5): the
-  capabilities are `rpc` and one event channel, and nothing else. The UI's client speaks the owner's JSON-RPC
-  (handshake, reconnect), so it also runs in a browser against a fake owner.
+  capabilities are `rpc` and one event channel, and nothing else. Methods the shell answers itself
+  (`shell.open_external`, `shell.pick_folder`) ride `rpc`, like `ui_tools.*`. The UI's client speaks the owner's
+  JSON-RPC (handshake, reconnect), so it also runs in a browser against a fake owner.
 - **Tabs** (0.11; note 2): all five, with their subtitles and keys. Field and Planning work. Queue and Comms say what
   arrives and in which stage (9a, 9b); Tracks shows a still preview of its design, with no data.
 - **Field:** views; board, run-order and graph layouts (0.11; note 11); live updates from `watch`; divergence and
@@ -4856,11 +4864,14 @@ the mock, not from this plan.
   This repo (0.7); a value the repo overrides shows beside it, struck out. Secrets show Set or Not set, never the
   value, and are set into the keychain from here. The Agents page is part of it (6b).
 - **No-setup open** (0.11): any git repo opens with the built-in packs and the default aliases. Board settings stay
-  per user until Share with team writes `.collide/`. First run is one page of checks (note 13): `claude` installed
+  per user until Share with team writes `.collide/`. Share with team writes `board.yaml` and the person's saved
+  views of the board; settings follow when per-board settings exist. On a shared board, each personal view has its
+  own Share with team (revision 27). First run is one page of checks (note 13): `claude` installed
   and logged in, and a git repo. A failing check names its fix, with a copy button. A logged-out `claude` does not
   block opening a board; a folder that is not a git repo does, and offers Make it one (`git init`). The trust prompt
-  appears only for repo packs. The GitHub source and the optional `gh` check arrive with the `github` pack in Stage
-  5 (owner, 2026-11-21: 6a and 6b run before it).
+  appears when the repo's `.collide/` brings packs, views or settings (0.9), and names what it brings (revision 27). The
+  GitHub source and the optional `gh` check arrive with the `github` pack in Stage 5 (owner, 2026-11-21: 6a and 6b run
+  before it).
 - **Empty board** (0.11; note 13): Plan it first, shown first, which says it arrives in 9d until then; Start with a
   task, which makes a scratch task (built in 3c; launching from the board arrives in 9a); the detected sources; and
   Add a pack.
@@ -4872,7 +4883,7 @@ the mock, not from this plan.
 
 **Success Criteria**:
 - **A missing board** (0.2; revision 22): a board whose repository folder was moved shows as missing with
-  "locate", deletes nothing, and after "locate" shows its tasks and Up next list as they were.
+  "locate", deletes nothing, and after "locate" shows its tasks as they were, and from Stage 11 its Up next list.
 - S6 scenario 2, and scenario 1 up to the board, pass as UI tests ported from S6's pilots against the real app, each
   completing and detecting its end state. The owner's walkthrough of both is recorded as owner judgement in the
   stage's task item, which lists what to record: the owner's time per scenario beside S6's advisory limit, the
@@ -4909,8 +4920,11 @@ Columns from a fixture source's declared statuses, and from categories for a mix
 `bottlenecks` against hand counts; run order and graph against the closure; the drawer's parts per source; Changes
 from phase heads and from commits; the filter fold and the id peek in a browser.
 Planning: planning-view counts against the CLI; the branch-only chip.
-**Status**: Not Started. The design is settled in the board mock (revision 25), and the stage is ready to split.
-Epic `ep-006-wq`, items lettered `6a` (part L).
+**Status**: Not Started. Split into `ts-0179-ke` to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`,
+built one at a time in id order (part L). It runs after `ts-0178-fw` and before Stage 5. Nothing in it runs a real
+`claude`. The owner's midway look is `ts-0185-ge`; the S6 walkthrough and the bundled-app checks are the owner's, in
+`ts-0197-uj`. New dependencies (owner, 2026-11-24): `react-markdown` 10.1.0 and `remark-gfm` 4.0.1 (`ts-0183-ee`),
+`tauri-plugin-dialog` 2.x (`ts-0191-nv`).
 
 ### Stage 6b: The in-app agent
 
