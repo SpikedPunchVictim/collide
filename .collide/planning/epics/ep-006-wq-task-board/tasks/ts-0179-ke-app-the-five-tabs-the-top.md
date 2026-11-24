@@ -1,7 +1,7 @@
 ---
 id: ts-0179-ke
 kind: task
-status: ready
+status: done
 title: "App: the five tabs, the top bar and a fake-owner browser page"
 owners: []
 links:
