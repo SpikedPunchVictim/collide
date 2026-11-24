@@ -33,6 +33,9 @@ pub const OUTPUTS_MAX_BYTES: usize = 64 * 1024;
 /// `backlog`, so a gate can refuse a link that goes nowhere. `feature` is set for a link whose type targets a feature
 /// of a proposal (`F2`, from `pr-0003-km#F2`): `key`, `kind`, `status` and `category` are then the proposal's, and
 /// `missing` says that the proposal is not held or has no such feature. It is left out for a link to an item.
+/// `title` is the other task's title, which only `task.get` fills, for the drawer. It is task text, so a hook's input
+/// never has it (0.5: task text reaches a hook only through the fields a pack asks for), and a link that is `missing`
+/// has none.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HookLink {
@@ -48,6 +51,8 @@ pub struct HookLink {
     pub missing: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// One entry of `tasks[]`: the fields and the path of a task, never its body, and its links. It is not the

@@ -635,12 +635,13 @@ impl Sources {
             .lines()
             .for_sources(board, tools)
             .map_err(line_failed)?;
+        let planned = plan(&current.line).sources;
         Ok(BoardPlan {
-            sources: plan(&current.line)
-                .sources
-                .into_iter()
-                .map(|planned| planned.name)
+            packs: planned
+                .iter()
+                .map(|source| (source.name.clone(), source.pack.clone()))
                 .collect(),
+            sources: planned.into_iter().map(|source| source.name).collect(),
             checkout_filter: current.line.board.checkout_filter.clone(),
         })
     }
@@ -680,6 +681,8 @@ impl Sources {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoardPlan {
     pub sources: Vec<String>,
+    /// The pack that provides each of `sources`, by source name.
+    pub packs: BTreeMap<String, String>,
     pub checkout_filter: CheckoutFilter,
 }
 

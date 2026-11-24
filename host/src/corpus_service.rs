@@ -205,6 +205,8 @@ struct State {
     /// Why the last look could not read the board's line or list its checkouts, so its sources are not known. A look
     /// that reads both clears it.
     unread: Option<String>,
+    /// The pack that provides each source of the board's line, as the last look read the line. Scratch has none.
+    packs: BTreeMap<String, String>,
 }
 
 struct Inner {
@@ -281,6 +283,16 @@ impl BoardCorpus {
                 .filter(|name| name.as_str() != scratch::SOURCE)
                 .count() as u32;
             result.sources_unread = state.unread.clone();
+            // A source that never started has declared nothing this run (`not_started`), so its columns are not shown.
+            result.sources.retain(|source| {
+                !result
+                    .not_started
+                    .iter()
+                    .any(|not| not.source == source.name)
+            });
+            for source in &mut result.sources {
+                source.pack = state.packs.get(&source.name).cloned();
+            }
         }
         result
     }
@@ -586,7 +598,10 @@ impl Inner {
             .board_plan(self.board_ref(), &(self.config.tools)());
         let mut unread = None;
         let (names, exclude) = match &plan {
-            Ok(plan) => (plan.sources.clone(), plan.checkout_filter.exclude.clone()),
+            Ok(plan) => {
+                locked(&self.state).packs = plan.packs.clone();
+                (plan.sources.clone(), plan.checkout_filter.exclude.clone())
+            }
             Err(error) => {
                 self.log(&format!("its sources are not read: {error:?}"));
                 unread = Some(source_text(error));
@@ -912,6 +927,7 @@ impl Inner {
             }
         };
         self.note_read();
+        locked(&self.state).packs = plan.packs.clone();
         let changed = {
             let state = locked(&self.state);
             state.checkouts != checkouts

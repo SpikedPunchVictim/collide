@@ -391,6 +391,14 @@ fn answer_kind(answer: &QueueAnswer) -> AnswerKind {
     }
 }
 
+/// Where a run id (`run-<ms>-<n>`) falls in the order runs were made, so the newest sorts last. An id of another shape
+/// sorts before every such id.
+fn run_order(run: &str) -> (u64, u64) {
+    let mut parts = run.strip_prefix("run-").unwrap_or("").splitn(2, '-');
+    let mut next = || parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
+    (next(), next())
+}
+
 impl FileRuns {
     /// The runs of an earlier daemon are read back from the store, so the end of a phase that finished while no daemon
     /// ran still ends its run. A context that cannot be read is logged and left out.
@@ -443,6 +451,29 @@ impl FileRuns {
         );
         let path = self.config.workspaces_dir.join(name);
         path.is_dir().then_some(path)
+    }
+
+    /// The run whose workspace is the worktree at `path`, or `None` when no run's is (the owner records each run's
+    /// workspace, so a worktree someone else made has no run). When a re-prompt took over a worktree, several runs
+    /// share it and the newest is named: the run that most recently worked in it.
+    pub fn run_of_workspace(&self, path: &Path) -> Option<String> {
+        let wanted = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        // The table's lock is let go before any run's is taken: a start holds its run's lock and then takes the
+        // table's, so taking them the other way round could deadlock. `recover` does the same.
+        let runs: Vec<(String, Arc<Mutex<Live>>)> = locked(&self.live)
+            .iter()
+            .map(|(run, live)| (run.clone(), live.clone()))
+            .collect();
+        runs.into_iter()
+            .filter(|(_, live)| {
+                let folder = self
+                    .config
+                    .workspaces_dir
+                    .join(locked(live).ctx.workspace_name());
+                std::fs::canonicalize(&folder).unwrap_or(folder) == wanted
+            })
+            .map(|(run, _)| run)
+            .max_by_key(|run| run_order(run))
     }
 
     /// The Queue items, those of `run` when it is given.
@@ -1720,6 +1751,24 @@ mod tests {
         assert_eq!(uuid.as_bytes()[14], b'4');
         assert!(matches!(uuid.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
         assert_ne!(uuid, new_uuid().unwrap());
+    }
+
+    #[test]
+    fn run_ids_order_by_the_time_and_then_the_count_not_by_their_text() {
+        let mut ids = [
+            "run-1700000000001-9",
+            "run-1700000000000-10",
+            "run-1700000000001-10",
+        ];
+        ids.sort_by_key(|run| run_order(run));
+        assert_eq!(
+            ids,
+            [
+                "run-1700000000000-10",
+                "run-1700000000001-9",
+                "run-1700000000001-10"
+            ]
+        );
     }
 
     #[test]

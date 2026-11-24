@@ -33,10 +33,13 @@ use crate::change::{FieldDiff, ItemState, Rename};
 use crate::feature::parse_feature_target;
 use crate::hook::HookLink;
 use crate::item::{Category, KindDecl, Link, LinkDir, LinkTarget, LinkTypeDecl, StatusDecl};
-use crate::owner::task::{StaleSource, TaskCopy, TaskGetResult, TaskListResult};
+use crate::owner::task::{
+    BoardSource, DivergentCopy, StaleSource, TaskCopy, TaskDivergence, TaskGetResult,
+    TaskListResult,
+};
 use crate::provider::{
-    ChangeCause, Collection, CollectionsChanged, InitializeResult, ListResult, ProviderEvent,
-    RemovedCause, Task, TaskChanged, TaskCollision, TaskInvalid, TaskRemoved,
+    ChangeCause, Collection, CollectionsChanged, FieldDecl, InitializeResult, ListResult,
+    ProviderEvent, RemovedCause, Scope, Task, TaskChanged, TaskCollision, TaskInvalid, TaskRemoved,
 };
 use crate::ready::UnknownTarget;
 use crate::short_id;
@@ -158,7 +161,12 @@ pub enum Applied {
 
 #[derive(Debug, Clone)]
 struct SourceState {
+    scope: Scope,
+    id_pattern: String,
+    short_id_pattern: String,
     statuses: Vec<StatusDecl>,
+    category_status: BTreeMap<Category, String>,
+    fields: Vec<FieldDecl>,
     kinds: Vec<KindDecl>,
     /// The link types the source declared, in its order.
     links: Vec<LinkTypeDecl>,
@@ -175,7 +183,12 @@ struct SourceState {
 impl SourceState {
     fn new(init: &InitializeResult) -> SourceState {
         let mut state = SourceState {
+            scope: init.scope,
+            id_pattern: String::new(),
+            short_id_pattern: String::new(),
             statuses: Vec::new(),
+            category_status: BTreeMap::new(),
+            fields: Vec::new(),
             kinds: Vec::new(),
             links: Vec::new(),
             feature_links: BTreeSet::new(),
@@ -189,7 +202,12 @@ impl SourceState {
     }
 
     fn declare(&mut self, init: &InitializeResult) {
+        self.scope = init.scope;
+        self.id_pattern = init.id_pattern.clone();
+        self.short_id_pattern = init.short_id_pattern.clone();
         self.statuses = init.statuses.clone();
+        self.category_status = init.category_status.clone();
+        self.fields = init.fields.clone();
         self.kinds = init.kinds.clone();
         self.links = init.links.clone();
         self.feature_links = init
@@ -313,6 +331,8 @@ fn empty_list() -> TaskListResult {
         invalid: Vec::new(),
         next_cursor: None,
         divergent: Vec::new(),
+        divergence: Vec::new(),
+        sources: Vec::new(),
         collisions: Vec::new(),
         stale_sources: Vec::new(),
         not_started: Vec::new(),
@@ -917,6 +937,7 @@ impl Corpus {
             links: Vec::new(),
             ops: Vec::new(),
             link_types: Vec::new(),
+            views: Vec::new(),
         };
         match self.lookup(query) {
             Found::None => nothing,
@@ -933,7 +954,7 @@ impl Corpus {
             Found::One(key) => TaskGetResult {
                 task: Some(self.shown(&self.entries[&key]).clone()),
                 copies: self.copies_of(&key),
-                links: self.links_of(&key),
+                links: self.titled(self.links_of(&key)),
                 link_types: self.link_types_of(&key),
                 ..nothing
             },
@@ -968,6 +989,8 @@ impl Corpus {
                 .collect(),
             next_cursor: None,
             divergent: Vec::new(),
+            divergence: Vec::new(),
+            sources: Vec::new(),
             collisions: Vec::new(),
             stale_sources: Vec::new(),
             not_started: Vec::new(),
@@ -1022,6 +1045,8 @@ impl Corpus {
         result.next_cursor = next_cursor;
         if first {
             result.divergent = self.divergent_keys();
+            result.divergence = self.divergence_entries();
+            result.sources = self.declarations();
             result.collisions = self.collisions();
             result.stale_sources = self
                 .stale_sources()
@@ -1079,6 +1104,49 @@ impl Corpus {
     /// The keys the ready rule lists.
     fn ready_ids(&self) -> BTreeSet<String> {
         self.readiness().ready
+    }
+
+    /// What each declared source gave at `initialize`, for the Field: the statuses in the source's order, its fields
+    /// and its id patterns, in source-name order. `pack` is the caller's to set, since the corpus does not know packs.
+    pub fn declarations(&self) -> Vec<BoardSource> {
+        self.sources
+            .iter()
+            .map(|(name, state)| BoardSource {
+                name: name.clone(),
+                pack: None,
+                scope: state.scope,
+                statuses: state.statuses.clone(),
+                category_status: state.category_status.clone(),
+                fields: state.fields.clone(),
+                blocking_links: state.links.iter().any(|decl| decl.blocking),
+                id_pattern: state.id_pattern.clone(),
+                short_id_pattern: state.short_id_pattern.clone(),
+            })
+            .collect()
+    }
+
+    /// The divergent keys with the copies that differ, in key order and then checkout order. `run` is the caller's to
+    /// set, since the corpus does not know which run made a workspace.
+    pub fn divergence_entries(&self) -> Vec<TaskDivergence> {
+        self.entries
+            .keys()
+            .filter_map(|key| {
+                let copies: Vec<DivergentCopy> = self
+                    .divergences_of(key)
+                    .into_iter()
+                    .map(|found| DivergentCopy {
+                        checkout: found.checkout,
+                        status: found.state.status,
+                        category: found.state.category,
+                        run: None,
+                    })
+                    .collect();
+                (!copies.is_empty()).then(|| TaskDivergence {
+                    key: key.clone(),
+                    copies,
+                })
+            })
+            .collect()
     }
 
     fn divergent_keys(&self) -> Vec<String> {
@@ -1193,6 +1261,7 @@ impl Corpus {
             stale: self.is_stale(&entry.source),
             missing,
             feature,
+            title: None,
         }
     }
 
@@ -1223,6 +1292,7 @@ impl Corpus {
                     category: Category::Backlog,
                     missing: true,
                     feature: out.feature,
+                    title: None,
                 },
             });
         }
@@ -1241,6 +1311,19 @@ impl Corpus {
                         out.feature,
                     ));
                 }
+            }
+        }
+        links
+    }
+
+    /// `links` with the title of each other task that the corpus holds. A link that is `missing` has none. Only
+    /// `task.get` asks: a title is task text, which a hook is not given (`HookLink.title`).
+    fn titled(&self, mut links: Vec<HookLink>) -> Vec<HookLink> {
+        for link in &mut links {
+            if !link.missing
+                && let Some(entry) = self.entries.get(&link.key)
+            {
+                link.title = Some(self.shown(entry).title.clone());
             }
         }
         links

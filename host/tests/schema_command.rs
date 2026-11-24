@@ -397,7 +397,8 @@ fn schema_lists_the_hook_input_result_and_report_line() {
     assert_eq!(
         keys(&types, "HookLink"),
         [
-            "category", "dir", "feature", "key", "kind", "missing", "stale", "status", "type"
+            "category", "dir", "feature", "key", "kind", "missing", "stale", "status", "title",
+            "type"
         ]
     );
     // `ReportLine` is one object per kind, so the listing shows the keys of all six together.

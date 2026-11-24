@@ -24,6 +24,15 @@ test('a provider with one kind and no links needs neither `kinds` nor `links`', 
   expect([result.scope, noScope]).toHaveLength(2)
 })
 
+test('a field may declare a string label, and no other label', () => {
+  const base = { scope: 'ref' as const, idPattern: '^a$', shortIdPattern: '^b$', statuses: [], capabilities: {} }
+  const labelled: InitializeResultInput = { ...base, fields: [{ id: 'story_points', type: 'number', label: 'Points' }] }
+  const plain: InitializeResultInput = { ...base, fields: [{ id: 'epic', type: 'string' }] }
+  // @ts-expect-error a label is a string.
+  const numeric: InitializeResultInput = { ...base, fields: [{ id: 'epic', type: 'string', label: 7 }] }
+  expect([labelled, plain, numeric]).toHaveLength(3)
+})
+
 test('an apply result is ok, conflict or refused, each with its own payload', () => {
   const refused: ApplyResultOutput = { outcome: 'refused', message: 'illegal transition' }
   // @ts-expect-error a refusal carries a message.

@@ -1401,3 +1401,119 @@ fn the_part_problem_counts_are_in_the_schemas_and_are_not_required() {
         assert!(!required.contains(&json!(key)), "{file} {key}");
     }
 }
+
+// What the Field needs from each source and copy (ts-0180-ad).
+
+fn task_list_with(extra: Value) -> Value {
+    let mut doc = json!({ "tasks": [task()] });
+    doc.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    doc
+}
+
+fn eight_status_source() -> Value {
+    let names = [
+        ("idea", "backlog"),
+        ("triage", "backlog"),
+        ("ready", "ready"),
+        ("doing", "active"),
+        ("in_review", "review"),
+        ("qa", "review"),
+        ("done", "done"),
+        ("dropped", "dropped"),
+    ];
+    json!({
+        "name": "plan",
+        "pack": "collide/plan",
+        "scope": "ref",
+        "statuses": names
+            .iter()
+            .map(|(name, category)| json!({ "name": name, "category": category }))
+            .collect::<Vec<_>>(),
+        "category_status": { "active": "doing", "review": "in_review" },
+        "fields": [{ "id": "story_points", "type": "number", "filterable": true, "label": "Points" }],
+        "blocking_links": true,
+        "id_pattern": "^ts-[0-9]{4}-[a-z]{2}$",
+        "short_id_pattern": "^[0-9]+$"
+    })
+}
+
+#[test]
+fn a_task_list_result_carries_the_sources_and_the_divergence_and_round_trips() {
+    use collide_core::owner::task::TaskListResult;
+    let wire = task_list_with(json!({
+        "divergent": ["plan:ts-0001"],
+        "divergence": [{ "key": "plan:ts-0001", "copies": [
+            { "checkout": "/ws/R-121", "status": "in_review", "category": "review", "run": "R-121" },
+            { "checkout": "/ws/mine", "status": "doing", "category": "active" }
+        ] }],
+        "sources": [eight_status_source()]
+    }));
+    let got: TaskListResult = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(got.sources[0].statuses.len(), 8);
+    assert_eq!(got.sources[0].fields[0].label.as_deref(), Some("Points"));
+    assert_eq!(got.divergence[0].copies[0].run.as_deref(), Some("R-121"));
+    assert_eq!(got.divergence[0].copies[1].run, None);
+    let written = serde_json::to_value(&got).unwrap();
+    assert!(contains(&written, &wire), "{written}");
+}
+
+#[test]
+fn a_task_list_result_written_before_the_sources_reads_with_none() {
+    use collide_core::owner::task::TaskListResult;
+    let got: TaskListResult = serde_json::from_value(task_list_with(json!({}))).unwrap();
+    assert!(got.sources.is_empty() && got.divergence.is_empty());
+}
+
+#[test]
+fn the_new_list_types_refuse_a_key_they_do_not_know() {
+    use collide_core::owner::task::{BoardSource, DivergentCopy, TaskDivergence};
+    let mut source = eight_status_source();
+    source["colour"] = json!("red");
+    assert!(serde_json::from_value::<BoardSource>(source).is_err());
+    let copy = json!({ "checkout": "/ws", "status": "doing", "category": "active", "extra": 1 });
+    assert!(serde_json::from_value::<DivergentCopy>(copy).is_err());
+    let divergence = json!({ "key": "plan:ts-0001", "copies": [], "extra": 1 });
+    assert!(serde_json::from_value::<TaskDivergence>(divergence).is_err());
+}
+
+#[test]
+fn a_task_get_result_carries_the_views_and_the_link_titles_and_leaves_them_out_when_empty() {
+    let link = json!({
+        "type": "blocked-by", "dir": "out", "key": "plan:ts-0002", "kind": "task", "status": "ready",
+        "category": "ready", "stale": false, "missing": false, "title": "The other task"
+    });
+    let wire = task_get_with(json!({ "links": [link], "views": ["ready", "collide/plan/spikes"] }));
+    let got: TaskGetResult = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(got.views, ["ready", "collide/plan/spikes"]);
+    assert_eq!(got.links[0].title.as_deref(), Some("The other task"));
+    let written = serde_json::to_value(&got).unwrap();
+    assert!(contains(&written, &wire), "{written}");
+
+    let older: TaskGetResult = serde_json::from_value(task_get_with(json!({}))).unwrap();
+    assert!(older.views.is_empty());
+    assert!(serde_json::to_value(&older).unwrap().get("views").is_none());
+}
+
+#[test]
+fn the_new_wire_keys_are_in_the_schemas_and_a_reader_need_not_have_them() {
+    let files = schema::registry().render();
+    let list_out: Value = serde_json::from_str(&files["TaskListResult.output.json"]).unwrap();
+    let list_in: Value = serde_json::from_str(&files["TaskListResult.input.json"]).unwrap();
+    let required = list_in["required"].as_array().cloned().unwrap_or_default();
+    for key in ["sources", "divergence"] {
+        assert!(list_out["properties"].get(key).is_some(), "{key}");
+        assert!(list_in["properties"].get(key).is_some(), "{key}");
+        assert!(!required.contains(&json!(key)), "{key}");
+    }
+    let source = &list_out["$defs"]["BoardSource"];
+    assert!(source["properties"].get("fields").is_some());
+    let get: Value = serde_json::from_str(&files["TaskGetResult.output.json"]).unwrap();
+    assert!(get["properties"].get("views").is_some());
+    assert!(
+        get["$defs"]["HookLink"]["properties"]
+            .get("title")
+            .is_some()
+    );
+}

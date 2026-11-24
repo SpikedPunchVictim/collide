@@ -85,6 +85,9 @@ pub struct FieldDecl {
     pub field_type: String,
     #[serde(default)]
     pub filterable: bool,
+    /// What the drawer calls the field (0.10, revision 25). Left out, the app reads the id in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// What the provider can do beyond `initialize`, `list`, `get` and `apply`.

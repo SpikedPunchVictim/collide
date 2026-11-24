@@ -19,6 +19,7 @@ mod canary;
 mod capabilities;
 mod contract;
 mod discard;
+mod divergence_run;
 mod event_stream;
 mod fake;
 mod fake_claude;

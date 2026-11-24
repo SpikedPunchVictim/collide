@@ -25,6 +25,9 @@
 //   fail-list     when it exists, `list` answers a JSON-RPC error
 //   die-on-list   when it exists, `list` ends the process with no reply
 //   fail-get      when it exists, `get` answers a JSON-RPC error
+//
+// The pack setting `declare`, when it has a value, is JSON that replaces keys of `initialize`'s answer (`statuses`,
+// `fields`, `categoryStatus`), and a status it declares has the category it gives.
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -40,7 +43,12 @@ const say = (message) => process.stdout.write(`${JSON.stringify(message)}\n`)
 const log = (line) => appendFileSync(join(DATA, 'calls.log'), `${line}\n`)
 
 const CATEGORY = { todo: 'ready', doing: 'active', done: 'done' }
-const state = (status) => ({ status, category: CATEGORY[status] ?? 'backlog' })
+// A test that wants another declaration gives the pack's `declare` setting: JSON for the keys of `initialize`'s answer
+// to replace (`statuses`, `fields`, `categoryStatus`). A status it declares has the category it gives.
+const declared = () => (init?.config?.declare ? JSON.parse(init.config.declare) : {})
+const categoryOf = (status) =>
+  declared().statuses?.find((one) => one.name === status)?.category ?? CATEGORY[status] ?? 'backlog'
+const state = (status) => ({ status, category: categoryOf(status) })
 
 const files = (checkout) => {
   const out = []
@@ -144,6 +152,23 @@ const apply = (params) => {
   return [{ outcome: 'ok', task: written, version: next, files: [written.path], items: [effect] }, null]
 }
 
+const BASE = {
+  scope: 'ref',
+  idPattern: '^[a-z0-9-]+$',
+  shortIdPattern: '^[0-9]+$',
+  statuses: [
+    { name: 'todo', category: 'ready' },
+    { name: 'doing', category: 'active' },
+    { name: 'done', category: 'done' },
+  ],
+  ops: [{ name: 'setStatus' }],
+  links: [
+    { name: 'blocked-by', dir: 'out', blocking: true, inverse: 'blocks' },
+    { name: 'covers', dir: 'out', blocking: false, target: 'feature', inverse: 'covered by' },
+  ],
+  capabilities: { watch: WATCH, preview: false },
+}
+
 const answer = (method, params) => {
   switch (method) {
     case 'initialize':
@@ -151,25 +176,7 @@ const answer = (method, params) => {
       // init.json first: a test that sees the start in `started` finds the settings of that start.
       writeFileSync(join(DATA, 'init.json'), JSON.stringify(params))
       appendFileSync(join(DATA, 'started'), `${process.pid}\n`)
-      return [
-        {
-          scope: 'ref',
-          idPattern: '^[a-z0-9-]+$',
-          shortIdPattern: '^[0-9]+$',
-          statuses: [
-            { name: 'todo', category: 'ready' },
-            { name: 'doing', category: 'active' },
-            { name: 'done', category: 'done' },
-          ],
-          ops: [{ name: 'setStatus' }],
-          links: [
-            { name: 'blocked-by', dir: 'out', blocking: true, inverse: 'blocks' },
-            { name: 'covers', dir: 'out', blocking: false, target: 'feature', inverse: 'covered by' },
-          ],
-          capabilities: { watch: WATCH, preview: false },
-        },
-        null,
-      ]
+      return [{ ...BASE, ...declared() }, null]
     case 'list':
       return list(params)
     case 'get':

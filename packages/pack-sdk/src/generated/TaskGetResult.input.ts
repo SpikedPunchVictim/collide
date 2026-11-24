@@ -28,7 +28,8 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
  * keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first. `links` are the task's
  * links one hop out in both directions, as a hook reads them (0.5). `ops` are the ops its source declares for its
  * kind: what `collide task <id> <op>` maps its words to. `link_types` are the link types its source declares, so a
- * reader can name the other end of a link (`inverse`). All three are additive.
+ * reader can name the other end of a link (`inverse`). `views` are the names of the board's views that hold the task,
+ * as `task.list` evaluates them. All four are additive.
  */
 export interface TaskGetResult {
   ambiguous?: string[]
@@ -40,6 +41,7 @@ export interface TaskGetResult {
   ops?: OpDecl[]
   runs?: string[]
   task?: Task | null
+  views?: string[]
 }
 /**
  * `task.collision`: one short id at different paths in several checkouts. It is a collision, never a divergence.
@@ -102,6 +104,9 @@ export interface LinkTypeDecl {
  * `backlog`, so a gate can refuse a link that goes nowhere. `feature` is set for a link whose type targets a feature
  * of a proposal (`F2`, from `pr-0003-km#F2`): `key`, `kind`, `status` and `category` are then the proposal's, and
  * `missing` says that the proposal is not held or has no such feature. It is left out for a link to an item.
+ * `title` is the other task's title, which only `task.get` fills, for the drawer. It is task text, so a hook's input
+ * never has it (0.5: task text reaches a hook only through the fields a pack asks for), and a link that is `missing`
+ * has none.
  */
 export interface HookLink {
   category: Category
@@ -112,6 +117,7 @@ export interface HookLink {
   missing?: boolean
   stale: boolean
   status: string
+  title?: string | null
   type: string
 }
 /**

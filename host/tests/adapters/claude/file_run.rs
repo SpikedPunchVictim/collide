@@ -73,6 +73,8 @@ pub(super) struct Setup {
     pub(super) published: Option<collide_host::claude_versions::PublishedChoice>,
     /// The recording a phase started with `--resume` plays (a re-prompt), in place of the one given to `Fixture::new`.
     pub(super) resumed: Option<PathBuf>,
+    /// How often a board's corpus reads its checkouts again (the daemon's own, 10 s, when not set).
+    pub(super) corpus_recheck: Option<Duration>,
 }
 
 pub(super) struct Fixture {
@@ -143,6 +145,9 @@ fn daemon_options(root: &TempRoot, shell: &Path, home: &Path, setup: Setup) -> D
     ];
     if let Some(free) = setup.free {
         options.free_space = free;
+    }
+    if let Some(recheck) = setup.corpus_recheck {
+        options.corpus_recheck = recheck;
     }
     if let Some(published) = setup.published {
         options.claude_published = published;

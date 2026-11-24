@@ -51,6 +51,83 @@
       ],
       "type": "object"
     },
+    "BoardSource": {
+      "additionalProperties": false,
+      "description": "What the Field draws from one started source of the board (0.10, Task sources; 0.11, the Field): its statuses in\nthe order the source declared them, each with its category, the status a category write produces, its fields with\ntheir labels, and its id patterns. `pack` is the pack that provides it, left out for the built-in scratch source.\n`blocking_links` says whether any of its link types blocks: a source with none has no Waits on and Unblocks.",
+      "properties": {
+        "blocking_links": {
+          "default": false,
+          "type": "boolean"
+        },
+        "category_status": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "active": {
+              "type": "string"
+            },
+            "backlog": {
+              "type": "string"
+            },
+            "done": {
+              "type": "string"
+            },
+            "dropped": {
+              "type": "string"
+            },
+            "ready": {
+              "type": "string"
+            },
+            "review": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FieldDecl"
+          },
+          "type": "array"
+        },
+        "id_pattern": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pack": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "short_id_pattern": {
+          "type": "string"
+        },
+        "statuses": {
+          "items": {
+            "$ref": "#/$defs/StatusDecl"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "scope",
+        "statuses",
+        "category_status",
+        "fields",
+        "blocking_links",
+        "id_pattern",
+        "short_id_pattern"
+      ],
+      "type": "object"
+    },
     "Category": {
       "description": "The category every source status maps to, so views and columns work across sources (0.10).",
       "enum": [
@@ -283,6 +360,33 @@
       ],
       "type": "object"
     },
+    "DivergentCopy": {
+      "additionalProperties": false,
+      "description": "One copy of a task, in a workspace, that differs from the copy at the root it was forked from. `run` is the run\nwhose workspace the checkout is, when it is one: a checkout that no run made (a worktree of the person's own) has\nnone.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "checkout": {
+          "type": "string"
+        },
+        "run": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkout",
+        "status",
+        "category"
+      ],
+      "type": "object"
+    },
     "Evidence": {
       "additionalProperties": false,
       "description": "One entry of an `Evidence:` label. `status` is the status of the item it names, when the scan has it. `proposal`\nis the proposal of a feature.",
@@ -362,6 +466,35 @@
       "required": [
         "line",
         "reason"
+      ],
+      "type": "object"
+    },
+    "FieldDecl": {
+      "additionalProperties": false,
+      "description": "A source field. `type` is the provider's own name for the type, such as `string` or `checklist`.",
+      "properties": {
+        "filterable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "description": "What the drawer calls the field (0.10, revision 25). Left out, the app reads the id in words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "filterable"
       ],
       "type": "object"
     },
@@ -567,6 +700,14 @@
       ],
       "type": "object"
     },
+    "Scope": {
+      "description": "Whether one task has one state (`global`) or one state per checkout (`ref`).",
+      "enum": [
+        "global",
+        "ref"
+      ],
+      "type": "string"
+    },
     "StaleSource": {
       "additionalProperties": false,
       "description": "A source whose last answer may be out of date, and why (`source.stale`, or a provider that is gone).",
@@ -581,6 +722,23 @@
       "required": [
         "source",
         "reason"
+      ],
+      "type": "object"
+    },
+    "StatusDecl": {
+      "additionalProperties": false,
+      "description": "One status of a kind and the category it maps to.",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "category"
       ],
       "type": "object"
     },
@@ -792,6 +950,26 @@
       ],
       "type": "object"
     },
+    "TaskDivergence": {
+      "additionalProperties": false,
+      "description": "A key whose copy in a workspace differs from the copy at its root, with each such copy (\"Review in Run R-121\").",
+      "properties": {
+        "copies": {
+          "items": {
+            "$ref": "#/$defs/DivergentCopy"
+          },
+          "type": "array"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "copies"
+      ],
+      "type": "object"
+    },
     "TaskInvalid": {
       "additionalProperties": false,
       "description": "`task.invalid`: something the source could not read as a task. Core turns it into a Queue item. `checkout` is\nnull for a source that is not ref-scoped.",
@@ -956,7 +1134,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`), `sources_started` and\n`sources_unread` come with the first page only. They are additive: a reader that does not know them reads the rest.",
+  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `divergence`, `collisions`, `stale_sources`, `not_started`,\n`sources`), `sources_started` and `sources_unread` come with the first page only. They are additive: a reader that\ndoes not know them reads the rest. `divergent` is the keys alone, which the CLI prints; `divergence` says how\neach differs.\n`sources` are the sources of the board that started, in name order: a source that did not is in `not_started`.",
   "properties": {
     "collections": {
       "default": [],
@@ -970,6 +1148,14 @@
       "description": "The keys that are at different paths in different checkouts.",
       "items": {
         "$ref": "#/$defs/TaskCollision"
+      },
+      "type": "array"
+    },
+    "divergence": {
+      "default": [],
+      "description": "The same keys, each with the copies that differ: their status, category and checkout, and their run.",
+      "items": {
+        "$ref": "#/$defs/TaskDivergence"
       },
       "type": "array"
     },
@@ -1006,6 +1192,14 @@
       "default": false,
       "description": "The first listing of a source is still running, so the tasks are what the last run cached, or fewer.",
       "type": "boolean"
+    },
+    "sources": {
+      "default": [],
+      "description": "What each started source declared, for the Field's columns and the drawer's fields.",
+      "items": {
+        "$ref": "#/$defs/BoardSource"
+      },
+      "type": "array"
     },
     "sources_started": {
       "default": 0,
@@ -1051,6 +1245,8 @@
     "collections",
     "invalid",
     "divergent",
+    "divergence",
+    "sources",
     "collisions",
     "stale_sources",
     "not_started",

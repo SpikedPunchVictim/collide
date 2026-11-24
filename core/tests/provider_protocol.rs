@@ -115,6 +115,50 @@ fn an_initialize_result_may_declare_a_link_that_targets_a_feature() {
 }
 
 #[test]
+fn a_field_that_declares_a_label_returns_it_and_one_without_returns_none() {
+    let mut doc = initialize_result();
+    doc["fields"] = json!([
+        { "id": "story_points", "type": "number", "filterable": true, "label": "Points" },
+        { "id": "epic", "type": "string", "filterable": true }
+    ]);
+    let result: InitializeResult = round_trip(doc);
+    assert_eq!(result.fields[0].label.as_deref(), Some("Points"));
+    assert_eq!(result.fields[1].label, None);
+}
+
+#[test]
+fn a_field_without_a_label_writes_no_label_key() {
+    let result: InitializeResult = serde_json::from_value(initialize_result()).unwrap();
+    let written = serde_json::to_value(&result).unwrap();
+    assert!(written["fields"][0].get("label").is_none(), "{written}");
+}
+
+#[test]
+fn a_field_label_that_is_not_a_string_is_refused_and_an_unknown_field_key_still_is() {
+    let mut label = initialize_result();
+    label["fields"][0]["label"] = json!(7);
+    refused::<InitializeResult>(label);
+    let mut extra = initialize_result();
+    extra["fields"][0]["colour"] = json!("red");
+    refused::<InitializeResult>(extra);
+}
+
+#[test]
+fn the_field_label_is_in_the_initialize_schema_and_is_not_required() {
+    let files = schema::registry().render();
+    let schema: Value = serde_json::from_str(&files["InitializeResult.input.json"]).unwrap();
+    let field = &schema["$defs"]["FieldDecl"];
+    assert!(field["properties"].get("label").is_some(), "{field}");
+    let required = field["required"].as_array().cloned().unwrap_or_default();
+    assert!(!required.contains(&json!("label")), "{required:?}");
+    assert!(
+        field["properties"]["label"]["type"]
+            .to_string()
+            .contains("string")
+    );
+}
+
+#[test]
 fn list_params_and_result_round_trip() {
     round_trip::<ListParams>(json!({}));
     round_trip::<ListParams>(json!({ "checkout": "main", "cursor": "c-2" }));

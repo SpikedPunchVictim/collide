@@ -2591,3 +2591,243 @@ fn a_change_that_brings_an_over_cap_task_makes_it_invalid_and_a_fixed_one_brings
         "the path is fixed, so the item is cleared"
     );
 }
+
+// --- what the Field needs from each source and copy (ts-0180-ad) ---
+
+use collide_core::provider::FieldDecl;
+
+/// A source with eight statuses, two of them in `review`, two fields (one with a label) and one blocking link.
+fn eight_init() -> collide_core::provider::InitializeResult {
+    let names = [
+        ("idea", Category::Backlog),
+        ("triage", Category::Backlog),
+        ("ready", Category::Ready),
+        ("doing", Category::Active),
+        ("in_review", Category::Review),
+        ("qa", Category::Review),
+        ("done", Category::Done),
+        ("dropped", Category::Dropped),
+    ];
+    let mut init = default_initialize();
+    init.scope = Scope::Ref;
+    init.statuses = names
+        .iter()
+        .map(|(name, category)| StatusDecl {
+            name: (*name).into(),
+            category: *category,
+        })
+        .collect();
+    init.category_status = [(Category::Active, "doing"), (Category::Review, "in_review")]
+        .iter()
+        .map(|(category, name)| (*category, (*name).to_string()))
+        .collect();
+    init.fields = vec![
+        FieldDecl {
+            id: "story_points".into(),
+            field_type: "number".into(),
+            filterable: true,
+            label: Some("Points".into()),
+        },
+        FieldDecl {
+            id: "epic".into(),
+            field_type: "string".into(),
+            filterable: false,
+            label: None,
+        },
+    ];
+    init.links = vec![LinkTypeDecl {
+        blocking: true,
+        ..link_type("blocked-by", LinkTarget::Item)
+    }];
+    init.id_pattern = "^ts-[0-9]{4}$".into();
+    init.short_id_pattern = "^[0-9]+$".into();
+    init
+}
+
+fn first_page(corpus: &Corpus) -> TaskListResult {
+    corpus.list(&ListFilter::default(), &Page::default())
+}
+
+#[test]
+fn a_source_with_eight_statuses_two_in_review_is_listed_with_the_eight_in_order_and_their_categories()
+ {
+    let mut corpus = Corpus::default();
+    corpus.declare_source("eight", &eight_init());
+
+    let listed = first_page(&corpus);
+
+    assert_eq!(listed.sources.len(), 1);
+    let source = &listed.sources[0];
+    assert_eq!(source.name, "eight");
+    assert_eq!(source.scope, Scope::Ref);
+    let statuses: Vec<(&str, Category)> = source
+        .statuses
+        .iter()
+        .map(|decl| (decl.name.as_str(), decl.category))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            ("idea", Category::Backlog),
+            ("triage", Category::Backlog),
+            ("ready", Category::Ready),
+            ("doing", Category::Active),
+            ("in_review", Category::Review),
+            ("qa", Category::Review),
+            ("done", Category::Done),
+            ("dropped", Category::Dropped),
+        ]
+    );
+    assert_eq!(source.category_status[&Category::Review], "in_review");
+    assert_eq!(source.id_pattern, "^ts-[0-9]{4}$");
+    assert_eq!(source.short_id_pattern, "^[0-9]+$");
+}
+
+#[test]
+fn a_field_that_declares_a_label_lists_it_and_a_field_without_lists_none() {
+    let mut corpus = Corpus::default();
+    corpus.declare_source("eight", &eight_init());
+
+    let fields = &first_page(&corpus).sources[0].fields;
+
+    assert_eq!(fields[0].id, "story_points");
+    assert_eq!(fields[0].label.as_deref(), Some("Points"));
+    assert_eq!(fields[1].id, "epic");
+    assert_eq!(fields[1].label, None);
+}
+
+#[test]
+fn a_source_says_whether_any_of_its_link_types_blocks() {
+    let mut corpus = Corpus::default();
+    corpus.declare_source("eight", &eight_init());
+    let mut plain = eight_init();
+    plain.links = vec![link_type("relates-to", LinkTarget::Item)];
+    corpus.declare_source("plain", &plain);
+    plain.links = Vec::new();
+    corpus.declare_source("none", &plain);
+
+    let blocking: Vec<(String, bool)> = first_page(&corpus)
+        .sources
+        .into_iter()
+        .map(|source| (source.name, source.blocking_links))
+        .collect();
+
+    assert_eq!(
+        blocking,
+        [
+            ("eight".to_string(), true),
+            ("none".to_string(), false),
+            ("plain".to_string(), false)
+        ]
+    );
+}
+
+#[test]
+fn a_redeclared_source_lists_what_it_declared_last_and_a_later_page_lists_none() {
+    let mut corpus = Corpus::default();
+    corpus.declare_source("eight", &eight_init());
+    let mut renamed = eight_init();
+    renamed.statuses[2].name = "queued".into();
+    corpus.declare_source("eight", &renamed);
+
+    let first = first_page(&corpus);
+    assert_eq!(first.sources[0].statuses[2].name, "queued");
+
+    let cursor = "eight:1\n".to_string();
+    let later = corpus.list(
+        &ListFilter::default(),
+        &Page {
+            limit: None,
+            cursor: Some(&cursor),
+        },
+    );
+    assert!(later.sources.is_empty());
+}
+
+#[test]
+fn a_status_write_in_a_workspace_gives_a_divergence_entry_naming_its_status_category_and_checkout()
+{
+    let tasks = [
+        at("T-01", "ready", ROOT),
+        at("T-01", "in_review", WS_A),
+        at("T-01", "doing", WS_B),
+        at("T-02", "ready", ROOT),
+        at("T-02", "ready", WS_A),
+    ];
+    let corpus = plan_corpus(&tasks, &[ROOT, WS_A, WS_B]);
+
+    let listed = first_page(&corpus);
+
+    assert_eq!(listed.divergent, ["plan:T-01"]);
+    assert_eq!(listed.divergence.len(), 1);
+    let entry = &listed.divergence[0];
+    assert_eq!(entry.key, "plan:T-01");
+    let copies: Vec<(&str, &str, Category, Option<&str>)> = entry
+        .copies
+        .iter()
+        .map(|copy| {
+            (
+                copy.checkout.as_str(),
+                copy.status.as_str(),
+                copy.category,
+                copy.run.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        copies,
+        [
+            (WS_A, "in_review", Category::Review, None),
+            (WS_B, "doing", Category::Active, None)
+        ]
+    );
+}
+
+#[test]
+fn a_board_with_no_divergence_lists_none() {
+    let corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    assert!(first_page(&corpus).divergence.is_empty());
+}
+
+#[test]
+fn task_get_links_carry_the_other_tasks_title_and_a_missing_link_carries_none() {
+    let both = with_link(
+        with_link(at("T-01", "doing", ROOT), "blocked-by", "gh:acme/edge#7"),
+        "blocked-by",
+        "T-404",
+    );
+    let plan = [
+        both,
+        with_link(at("T-02", "ready", ROOT), "blocked-by", "T-01"),
+    ];
+    let mut corpus = plan_corpus(&plan, &[ROOT]);
+    corpus.declare_source("gh", &gh_init());
+    let list = ListResult {
+        tasks: vec![gh_task(7, "open")],
+        collections: vec![],
+        invalid: vec![],
+        next_cursor: None,
+    };
+    corpus.load("gh", None, list).unwrap();
+
+    let got = corpus.get("plan:T-01");
+
+    let out = link(&got.links, LinkDir::Out, "gh:acme/edge#7");
+    assert_eq!(out.title.as_deref(), Some("an issue"));
+    let incoming = link(&got.links, LinkDir::In, "plan:T-02");
+    assert_eq!(incoming.title.as_deref(), Some("title of T-02"));
+    let gone = link(&got.links, LinkDir::Out, "plan:T-404");
+    assert!(gone.missing);
+    assert_eq!(gone.title, None);
+}
+
+#[test]
+fn a_hooks_links_never_carry_a_title() {
+    let corpus = two_sources();
+    assert!(
+        corpus
+            .links_of("plan:T-01")
+            .iter()
+            .all(|link| link.title.is_none())
+    );
+}

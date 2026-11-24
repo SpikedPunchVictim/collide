@@ -58,6 +58,10 @@ export interface Capabilities {
 export interface FieldDecl {
   filterable?: boolean
   id: string
+  /**
+   * What the drawer calls the field (0.10, revision 25). Left out, the app reads the id in words.
+   */
+  label?: string | null
   type: string
 }
 /**

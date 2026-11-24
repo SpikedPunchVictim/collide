@@ -66,6 +66,22 @@ test('initialize passes the pack settings to the handler and answers with its re
   expect(await client.close()).toEqual([])
 })
 
+test('a field that declares a label keeps it through initialize, and one without has none', async () => {
+  const fields = [
+    { id: 'story_points', type: 'number', filterable: true, label: 'Points' },
+    { id: 'epic', type: 'string', filterable: true },
+  ]
+  const client = connect({
+    ...handlers,
+    initialize: (params) => ({ ...(handlers.initialize(params) as object), fields }) as never,
+  })
+  client.send(request(1, 'initialize', { config: {}, root: '/work/repo' }))
+  const reply = await client.next()
+  expect(reply.result.fields).toEqual(fields)
+  expect(reply.result.fields[1]).not.toHaveProperty('label')
+  await client.close()
+})
+
 test('list answers with the handler result', async () => {
   const client = connect(handlers)
   client.send(request(2, 'list', { checkout: 'main' }))

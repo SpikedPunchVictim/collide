@@ -644,6 +644,7 @@ fn empty_get() -> TaskGetResult {
         links: Vec::new(),
         ops: Vec::new(),
         link_types: Vec::new(),
+        views: Vec::new(),
     }
 }
 

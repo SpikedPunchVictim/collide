@@ -3123,6 +3123,12 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
         },
     );
     result.view = through.map(|(report, _)| report);
+    // The run whose workspace a divergent copy's checkout is: only the workspace owner knows.
+    for entry in &mut result.divergence {
+        for copy in &mut entry.copies {
+            copy.run = shared.file_runs.run_of_workspace(Path::new(&copy.checkout));
+        }
+    }
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
@@ -3408,8 +3414,33 @@ fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::V
         result.latest_run = rows.iter().find_map(latest_of);
         result.runs = rows.into_iter().map(|row| row.run).collect();
         result.ops = ops_of(shared, &params.board, &root, task);
+        let key = task.key.clone();
+        result.views = views_holding(shared, &params.board, &root, &key)?;
     }
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// The names of the board's views that hold the task `key`, in the order `task.views` lists them. Each view is
+/// evaluated as `task.list` evaluates it, so it has the same budgets and the same cache; a view that failed to load or
+/// to run holds nothing. A line that does not load has no views to name, and does not fail the task's own answer.
+fn views_holding(
+    shared: &Shared,
+    board: &str,
+    root: &str,
+    key: &str,
+) -> Result<Vec<String>, RpcError> {
+    let service = corpus_of(shared, board, root)?;
+    let Ok(BoardViews { loaded, .. }) = loaded_views(shared, board, root, &service) else {
+        return Ok(Vec::new());
+    };
+    Ok(loaded
+        .iter()
+        .filter(|one| {
+            viewed(shared, board, &service, one)
+                .is_ok_and(|result| result.members.iter().any(|member| member == key))
+        })
+        .map(|one| one.view.name.clone())
+        .collect())
 }
 
 /// The ops the task's source declares for its kind, or none when the source cannot say (a source that is gone is the
@@ -3441,6 +3472,7 @@ fn empty_get() -> TaskGetResult {
         links: Vec::new(),
         ops: Vec::new(),
         link_types: Vec::new(),
+        views: Vec::new(),
     }
 }
 

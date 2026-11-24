@@ -3162,3 +3162,195 @@ fn a_changed_item_keeps_the_collections_that_collections_changed_gave_it() {
     assert_eq!(list.tasks[0].collections, ["epic-a"]);
     assert_eq!(rig.cache(&board).tasks[0].task.collections, ["epic-a"]);
 }
+
+// ---- what the Field needs from each source and copy (ts-0180-ad) --------------------------------------------------
+
+/// A source that declares eight statuses, two of them in `review`, and two fields, one with a `label`. The pack's
+/// `declare` setting is what the provider answers `initialize` with in their place (see the fixture's header).
+const EIGHT: Src = Src {
+    pack: "octo",
+    source: "eight",
+    watch: false,
+    page: 100,
+    config: concat!(
+        "config:\n  declare:\n    type: string\n    default: '",
+        r#"{"statuses":[{"name":"idea","category":"backlog"},{"name":"triage","category":"backlog"},"#,
+        r#"{"name":"queued","category":"ready"},{"name":"doing","category":"active"},"#,
+        r#"{"name":"in_review","category":"review"},{"name":"qa","category":"review"},"#,
+        r#"{"name":"done","category":"done"},{"name":"dropped","category":"dropped"}],"#,
+        r#""categoryStatus":{"ready":"queued","active":"doing","review":"in_review"},"#,
+        r#""fields":[{"id":"story_points","type":"number","filterable":true,"label":"Points"},"#,
+        r#"{"id":"epic","type":"string","filterable":true}]}"#,
+        "'\n"
+    ),
+};
+
+fn source_named<'a>(
+    list: &'a TaskListResult,
+    name: &str,
+) -> &'a collide_core::owner::task::BoardSource {
+    list.sources
+        .iter()
+        .find(|source| source.name == name)
+        .unwrap_or_else(|| panic!("no source {name} in {:?}", list.sources))
+}
+
+#[test]
+fn a_source_with_eight_statuses_is_listed_with_its_order_categories_fields_labels_and_pack() {
+    use collide_core::item::Category;
+    let rig = rig();
+    let board = rig.board_with(&[&EIGHT], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "qa", "v1");
+
+    let list = rig.list_until(&board, "the source lists its task", |list| {
+        !list.tasks.is_empty()
+    });
+
+    let source = source_named(&list, "eight");
+    assert_eq!(source.pack.as_deref(), Some("octo"));
+    assert_eq!(source.scope, collide_core::provider::Scope::Ref);
+    let statuses: Vec<(&str, Category)> = source
+        .statuses
+        .iter()
+        .map(|decl| (decl.name.as_str(), decl.category))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            ("idea", Category::Backlog),
+            ("triage", Category::Backlog),
+            ("queued", Category::Ready),
+            ("doing", Category::Active),
+            ("in_review", Category::Review),
+            ("qa", Category::Review),
+            ("done", Category::Done),
+            ("dropped", Category::Dropped),
+        ]
+    );
+    assert_eq!(source.category_status[&Category::Review], "in_review");
+    assert_eq!(source.fields[0].label.as_deref(), Some("Points"));
+    assert_eq!(source.fields[1].label, None);
+    assert!(source.blocking_links, "the fixture declares `blocked-by`");
+    assert_eq!(source.id_pattern, "^[a-z0-9-]+$");
+    assert_eq!(source.short_id_pattern, "^[0-9]+$");
+    assert_eq!(
+        list.tasks[0].state.category,
+        Category::Review,
+        "the task has the declared category"
+    );
+}
+
+#[test]
+fn the_scratch_source_is_listed_like_any_other_and_a_source_that_did_not_start_is_left_out() {
+    let rig = rig();
+    rig.pack(&EIGHT);
+    rig.board_yaml(&["octo"], "");
+    rig.f().commit();
+    let board = rig.f().board();
+
+    let list = rig.settled(&board);
+
+    // The line is not trusted, so its pack did not start: `not_started` says why, and `sources` has no word of it.
+    assert!(
+        list.not_started
+            .iter()
+            .any(|source| source.source == "eight")
+    );
+    let names: Vec<&str> = list
+        .sources
+        .iter()
+        .map(|source| source.name.as_str())
+        .collect();
+    assert_eq!(names, ["scratch"], "{:?}", list.sources);
+    let scratch = source_named(&list, "scratch");
+    assert_eq!(scratch.pack, None);
+    assert_eq!(scratch.scope, collide_core::provider::Scope::Global);
+    assert!(scratch.statuses.len() >= 5, "{:?}", scratch.statuses);
+    assert!(
+        !scratch.blocking_links,
+        "scratch tasks have no dependencies"
+    );
+
+    rig.trust(&board);
+    let list = rig.list_until(&board, "the source starts once it is trusted", |list| {
+        list.sources.iter().any(|source| source.name == "eight")
+    });
+    let names: Vec<&str> = list
+        .sources
+        .iter()
+        .map(|source| source.name.as_str())
+        .collect();
+    assert_eq!(names, ["eight", "scratch"]);
+}
+
+#[test]
+fn a_status_write_in_a_worktree_gives_a_divergence_entry_naming_its_status_and_checkout_and_no_run()
+{
+    use collide_core::item::Category;
+    let rig = rig();
+    let board = rig.board_with(&[&EIGHT], "");
+    let root = rig.root();
+    let other = rig.worktree("wt-a", "feature/a", true);
+    rig.task(&root, "1.json", "1", "idea", "v1");
+    rig.task(&other, "1.json", "1", "qa", "v2");
+    rig.task(&root, "2.json", "2", "idea", "v1");
+    rig.task(&other, "2.json", "2", "idea", "v1");
+
+    let list = rig.list_until(&board, "the divergence shows", |list| {
+        !list.divergence.is_empty()
+    });
+
+    assert_eq!(
+        list.divergent,
+        ["eight:1"],
+        "the key list the CLI prints is as it was"
+    );
+    assert_eq!(list.divergence.len(), 1);
+    let entry = &list.divergence[0];
+    assert_eq!(entry.key, "eight:1");
+    assert_eq!(entry.copies.len(), 1);
+    let copy = &entry.copies[0];
+    assert_eq!(copy.checkout, other.display().to_string());
+    assert_eq!(
+        (copy.status.as_str(), copy.category),
+        ("qa", Category::Review)
+    );
+    assert_eq!(copy.run, None, "no run made this worktree");
+}
+
+#[test]
+fn task_get_on_a_scratch_task_lists_only_the_views_that_hold_it() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let held = rig.create_scratch(&board, "held by a repo view");
+    let plain = rig.create_scratch(&board, "held by none but ready");
+    rig.f().write(
+        ".collide/views/mine.yaml",
+        &format!("name: mine\ninclude: [{held}]\n"),
+    );
+    rig.f().commit();
+    rig.trust(&board);
+    rig.list_until(&board, "both scratch tasks list", |list| {
+        list.tasks.len() == 2
+    });
+    let get = |id: &str| -> TaskGetResult {
+        rpc(
+            &rig,
+            "task.get",
+            &TaskGetParams {
+                board: board.clone(),
+                id: id.to_string(),
+                checkout: None,
+            },
+        )
+        .unwrap()
+    };
+
+    // Both are ready; only the first is named by the repo's view. `mine` is listed once the view's file is read.
+    let first = get(&held);
+    let second = get(&plain);
+
+    assert_eq!(first.views, ["ready", "mine"]);
+    assert_eq!(second.views, ["ready"]);
+}

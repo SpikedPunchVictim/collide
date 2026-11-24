@@ -1,7 +1,7 @@
 ---
 id: ts-0180-ad
 kind: task
-status: ready
+status: done
 title: "Wire: what the Field needs from each source and copy"
 owners: []
 links:
@@ -94,3 +94,64 @@ Write these first.
   share `app/`, `core`, `host` and the generated files. No builder runs `tauri build`.
 - Nothing here runs a real `claude`: a run's workspace in the tests comes from the fake `claude` of `host/tests/`.
 - Owner decisions (2026-11-24): the owner took the recommendations at the split.
+
+### Built
+
+All additive; no UI, and the CLI's text output is unchanged (`--json` prints the daemon's answer, so it carries the
+new keys).
+
+- `FieldDecl.label` (`core/src/provider.rs`): an optional string, left out of the wire when it is not set.
+- `TaskListResult.sources` (`BoardSource`: name, pack, scope, statuses in order with categories, `category_status`,
+  fields with labels, `blocking_links`, `id_pattern`, `short_id_pattern`). The corpus fills it from what each source
+  declared; the host fills `pack` from the board's line and leaves out a source that did not start (`not_started`
+  already says why). Scratch is listed like any other source, with no pack. It rides the first page only.
+- `TaskListResult.divergence` (`TaskDivergence`: key, and for each other copy its status, category, checkout and
+  `run`). `divergent` is as it was. The host fills `run` from `FileRuns::run_of_workspace`, which asks the workspace
+  owner for the run whose worktree the checkout is, and leaves it out when no run's is. When a re-prompt took over a
+  worktree and several runs share it, the newest is named.
+- `TaskGetResult.views`: the names of the board's views that hold the task, in the order `task.views` lists them,
+  each evaluated through the same cache and budgets as `task.list` (`views_holding` in `host/src/daemon.rs`). A view
+  that failed to load or run holds nothing, and a line that does not load gives an empty list; neither fails the get.
+- `HookLink.title`, filled only by `task.get` for a link that is not missing. Hooks never get one, so task text still
+  does not reach a hook.
+- Generated files re-made with `pnpm gen`, never edited by hand.
+
+Tests (red at runtime before the change, unless noted):
+
+- core `corpus.rs`: the eight-status source, labels, blocking links, redeclare and later page, workspace divergence,
+  no divergence, link titles (a missing link has none), a hook's links never have a title.
+- core `owner_protocol.rs`, `provider_protocol.rs`: serde of the new keys, absent keys read as empty,
+  `deny_unknown_fields` still holding, a non-string `label` refused, the keys in the schemas and not required on input.
+- pack-sdk: `define-provider.test.ts` (label through `initialize`) and `provider-types.test.ts`. The SDK passes the
+  declaration through, so the only red here is the type check; the runtime test is green from the start.
+- host `daemon_corpus.rs`: the eight-status source with pack, order, categories, labels (red: pack was missing); the
+  scratch source and a source that did not start; a status write in a worktree (green at once: no run made it);
+  `task.get` on a scratch task lists only the views that hold it.
+- host `daemon_plan_task_get.rs`: a plan task held by two views lists both (red); a task no view holds; link titles.
+- host `adapters/claude/divergence_run.rs`: a task file changed in a run's own worktree names the run (red). It uses a
+  repo pack over files and the fake `claude`.
+- host `file_run.rs` unit test: run ids order by time, then count.
+
+- Review fix (2026-11-24): `FileRuns::run_of_workspace` now lets go of the run table's lock before it takes each run's
+  lock, as `recover` does. A start holds its run's lock and then takes the table's, so the first form could deadlock a
+  `task.list` against a start that fails.
+
+### Decisions for the owner
+
+- The run of a checkout, as recommended: the workspace owner is asked. Recommendation: keep it. Open point: when
+  several runs share one worktree (a re-prompt), I name the newest. Alternative: name all of them as a list. A
+  list costs a wire change now for a case the Field shows as one badge.
+- `sources` rides the first page only. Recommendation: keep; the Field's columns do not change page to page. A client
+  that pages from a cursor reads it from its first call.
+- A source that did not start is left out of `sources`, so the Field has no columns for it. Alternative: list it with
+  its statuses from the last start. Recommendation: leave it out until a source can say what it declared last.
+- `task.get` `views` names a view by its full name (`collide/plan/spikes`). Recommendation: keep; it is what
+  `task.list --view` echoes.
+- `pack` on a source is the pack name from the line, so it is `collide/plan` for the plan source.
+
+### Not done, by design
+
+- No UI, no `board.sources` method, and no change to the CLI's text output.
+- The pack SDK does not check `label` beyond its type; the daemon's decoder (`core`) refuses a non-string one.
+- `packs/plan` declares no fields yet, so no labels. Giving it some is for the item that shows the drawer's Fields.
+- Hooks get no link titles, on purpose.

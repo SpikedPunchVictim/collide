@@ -8,8 +8,10 @@
 
 use crate::change::{ItemState, LatestRun};
 use crate::hook::HookLink;
-use crate::item::{LinkTypeDecl, OpDecl};
-use crate::provider::{ApplyParams, ApplyResult, Collection, Task, TaskCollision, TaskInvalid};
+use crate::item::{Category, LinkTypeDecl, OpDecl, StatusDecl};
+use crate::provider::{
+    ApplyParams, ApplyResult, Collection, FieldDecl, Scope, Task, TaskCollision, TaskInvalid,
+};
 use crate::ready::UnknownTarget;
 use crate::view::View;
 use schemars::JsonSchema;
@@ -62,9 +64,55 @@ pub struct NotStartedSource {
     pub reason: String,
 }
 
+/// What the Field draws from one started source of the board (0.10, Task sources; 0.11, the Field): its statuses in
+/// the order the source declared them, each with its category, the status a category write produces, its fields with
+/// their labels, and its id patterns. `pack` is the pack that provides it, left out for the built-in scratch source.
+/// `blocking_links` says whether any of its link types blocks: a source with none has no Waits on and Unblocks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardSource {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<String>,
+    pub scope: Scope,
+    pub statuses: Vec<StatusDecl>,
+    #[serde(default)]
+    pub category_status: BTreeMap<Category, String>,
+    #[serde(default)]
+    pub fields: Vec<FieldDecl>,
+    #[serde(default)]
+    pub blocking_links: bool,
+    pub id_pattern: String,
+    pub short_id_pattern: String,
+}
+
+/// One copy of a task, in a workspace, that differs from the copy at the root it was forked from. `run` is the run
+/// whose workspace the checkout is, when it is one: a checkout that no run made (a worktree of the person's own) has
+/// none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DivergentCopy {
+    pub checkout: String,
+    pub status: String,
+    pub category: Category,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+}
+
+/// A key whose copy in a workspace differs from the copy at its root, with each such copy ("Review in Run R-121").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskDivergence {
+    pub key: String,
+    pub copies: Vec<DivergentCopy>,
+}
+
 /// `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
-/// lists (`collections`, `invalid`, `divergent`, `collisions`, `stale_sources`, `not_started`), `sources_started` and
-/// `sources_unread` come with the first page only. They are additive: a reader that does not know them reads the rest.
+/// lists (`collections`, `invalid`, `divergent`, `divergence`, `collisions`, `stale_sources`, `not_started`,
+/// `sources`), `sources_started` and `sources_unread` come with the first page only. They are additive: a reader that
+/// does not know them reads the rest. `divergent` is the keys alone, which the CLI prints; `divergence` says how
+/// each differs.
+/// `sources` are the sources of the board that started, in name order: a source that did not is in `not_started`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskListResult {
@@ -78,6 +126,12 @@ pub struct TaskListResult {
     /// The keys on the board whose copy in a workspace differs from the copy at its root.
     #[serde(default)]
     pub divergent: Vec<String>,
+    /// The same keys, each with the copies that differ: their status, category and checkout, and their run.
+    #[serde(default)]
+    pub divergence: Vec<TaskDivergence>,
+    /// What each started source declared, for the Field's columns and the drawer's fields.
+    #[serde(default)]
+    pub sources: Vec<BoardSource>,
     /// The keys that are at different paths in different checkouts.
     #[serde(default)]
     pub collisions: Vec<TaskCollision>,
@@ -181,7 +235,8 @@ pub struct TaskCopy {
 /// keys, so the caller asks for the suffix. `runs` are the ids of the task's runs, newest first. `links` are the task's
 /// links one hop out in both directions, as a hook reads them (0.5). `ops` are the ops its source declares for its
 /// kind: what `collide task <id> <op>` maps its words to. `link_types` are the link types its source declares, so a
-/// reader can name the other end of a link (`inverse`). All three are additive.
+/// reader can name the other end of a link (`inverse`). `views` are the names of the board's views that hold the task,
+/// as `task.list` evaluates them. All four are additive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskGetResult {
@@ -203,6 +258,8 @@ pub struct TaskGetResult {
     pub ops: Vec<OpDecl>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub link_types: Vec<LinkTypeDecl>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<String>,
 }
 
 /// `task.apply` params (`collide task <id> <op>`, `collide task new`, `collide task reid`, and the drawer's forms):
