@@ -20,7 +20,7 @@
 <style>
 :root{
   --radius:14px;--radius-sm:10px;--radius-xs:7px;
-  --background:#f8f6f2;--foreground:#1f1b16;--card:#ffffff;--popover:#ffffff;
+  --background:#f8f6f2;--foreground:#1f1b16;--card:#ffffff;--bar:#efe9e0;--popover:#ffffff;
   --primary:#4f46e5;--primary-foreground:#ffffff;--primary-soft:#ecebfd;
   --secondary:#f1ede6;--secondary-foreground:#3b352d;
   --muted:#f3efe9;--muted-foreground:#675f55;--accent:#ebe6de;
@@ -38,7 +38,7 @@
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --background:#171513;--foreground:#f3efe9;--card:#211f1c;--popover:#292623;
+  --background:#171513;--foreground:#f3efe9;--card:#211f1c;--bar:#181614;--popover:#292623;
   --primary:#8b93f8;--primary-foreground:#14122e;--primary-soft:#2c2e5e;
   --secondary:#2c2925;--secondary-foreground:#e8e2d8;--muted:#1d1b18;--muted-foreground:#aea699;--accent:#36322d;
   --destructive:#f0605d;--border:#3a3631;--input:#4b463f;--ring:#8b93f8;
@@ -47,7 +47,7 @@
   --shadow:0 1px 2px rgb(0 0 0 / .4);--shadow-card:0 1px 2px rgb(0 0 0 / .35),0 8px 28px rgb(0 0 0 / .35);
   --shadow-lg:0 16px 48px rgb(0 0 0 / .6);color-scheme:dark}}
 :root[data-theme="dark"]{
-  --background:#171513;--foreground:#f3efe9;--card:#211f1c;--popover:#292623;
+  --background:#171513;--foreground:#f3efe9;--card:#211f1c;--bar:#181614;--popover:#292623;
   --primary:#8b93f8;--primary-foreground:#14122e;--primary-soft:#2c2e5e;
   --secondary:#2c2925;--secondary-foreground:#e8e2d8;--muted:#1d1b18;--muted-foreground:#aea699;--accent:#36322d;
   --destructive:#f0605d;--border:#3a3631;--input:#4b463f;--ring:#8b93f8;
@@ -221,7 +221,7 @@ details.adv .cel code{background:none;padding:0;white-space:pre}
   display:flex;flex-direction:column;gap:8px;z-index:2}
 .dh .row{display:flex;align-items:center;gap:8px}
 .dh h2{font-size:19px;font-weight:650;line-height:1.3}
-.db{padding:14px 18px 40px;display:flex;flex-direction:column;gap:20px}
+.db{padding:0 0 40px;display:flex;flex-direction:column}
 .ds h3{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-foreground);
   font-weight:600;margin-bottom:8px;display:flex;align-items:center}
 .md{line-height:1.6;max-width:65ch}
@@ -534,11 +534,26 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .filters.fold{flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 14px}
 .dgrip{flex:0 0 6px;cursor:col-resize;touch-action:none}
 .dgrip:hover,.dgrip:focus-visible,.dgrip.drag{background:var(--primary-soft);outline:none}
-.dsh{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border-radius:var(--radius-xs)}
-.dsh:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
-.dsh .tw{display:inline-block;width:1em;color:var(--muted-foreground)}
-.ds.shut > :not(h3){display:none}
-.ds.shut h3{margin-bottom:0}
+/* A part of the task panel: the whole bar is the button that folds it, darker than what it holds (note 39) */
+.db > .ds{border-bottom:1px solid var(--border)}
+.db > .ds > h3{margin:0;background:var(--bar);font-size:13.5px;text-transform:none;letter-spacing:0;
+  color:var(--foreground);gap:6px}
+.db > .ds > h3 .nm{margin-right:14px}
+.dsh,.db details.eng summary{all:unset;box-sizing:border-box;flex:1;min-width:0;cursor:pointer;display:flex;
+  align-items:center;gap:10px;padding:10px 18px;font-weight:600}
+.dsh:hover,.db details.eng summary:hover{background:color-mix(in srgb,var(--foreground) 5%,var(--bar))}
+.dsh:focus-visible,.db details.eng summary:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
+.dsh .dt,.db details.eng .dt{flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ic.si{width:15px;height:15px;color:var(--muted-foreground);flex:none}
+.ic.tw{color:var(--muted-foreground);flex:none;transition:transform .15s}
+.ds.shut .ic.tw,.db details.eng:not([open]) .ic.tw{transform:rotate(-90deg)}
+@media (prefers-reduced-motion: reduce){.ic.tw{transition:none}}
+.dsb{padding:14px 18px 18px;border-top:1px solid var(--border)}
+.ds.shut > .dsb{display:none}
+.db details.eng summary{background:var(--bar);font-size:13.5px;color:var(--foreground)}
+.db details.eng summary::-webkit-details-marker{display:none}
+.db details.eng[open] summary{border-bottom:1px solid var(--border)}
+.db details.eng > :not(summary){margin:14px 18px}
 .chip.ask{color:var(--waiting);border-color:color-mix(in srgb,var(--waiting) 45%,var(--border));font-weight:600;
   background:color-mix(in srgb,var(--waiting) 10%,transparent)}
 .chip.hub{color:var(--cold);border-color:color-mix(in srgb,var(--cold) 35%,var(--border))}
@@ -579,6 +594,24 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 @media (max-width:900px){.dgrip{display:none}}
 @media (max-width:700px){.ue{grid-template-columns:24px minmax(0,1fr)}
   .ue .acts{grid-column:2;justify-content:flex-start}}
+/* Autopilot settings: a popover under the button that opened it (note 42) */
+.popat{position:relative;display:inline-flex}
+.pop.apop{left:auto;right:0;width:min(460px,calc(100vw - 32px));max-height:min(74vh,620px);overflow:auto;
+  padding:14px 16px;display:flex;flex-direction:column;gap:12px;font-size:var(--fs-sm);font-weight:400;
+  text-align:left;color:var(--foreground)}
+.apop h3{font-size:var(--fs-base);font-weight:650;display:flex;align-items:center;gap:6px}
+.apop p{margin:0;font-size:13px;color:var(--muted-foreground);line-height:1.5}
+.agrid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 12px;align-items:baseline}
+.agrid select{width:100%;min-width:0}
+.agrid input[type=number]{width:72px}
+.apop input[type=number],.apop select{border:1px solid var(--input);border-radius:var(--radius-xs);
+  padding:5px 8px;background:var(--card);color:inherit;font:inherit}
+.apop .acts{display:flex;justify-content:flex-end;gap:8px}
+.acol{display:flex;flex-direction:column;gap:8px;min-width:0}
+.acheck{display:flex;align-items:flex-start;gap:8px;cursor:pointer}
+.acheck input{margin-top:3px;flex:none}
+.apop .hint{display:block;font-size:12.5px;color:var(--muted-foreground)}
+@media (max-width:520px){.agrid{grid-template-columns:minmax(0,1fr);gap:4px}.agrid select{margin-bottom:6px}}
 </style>
 </head>
 <body>
@@ -3087,7 +3120,7 @@ const UP_NEXT = [
   { kind: 'task', tasks: ['ts-0183-ns'], by: 'autopilot' },
   { kind: 'task', tasks: ['ts-0184-ow'], by: 'autopilot', human: true },
 ];
-const AUTO = { on: false, view: 's6', group: 'propose', mode: 'together', cap: 2, spend: 20, accept: 'review',
+const AUTO = { on: false, view: 's6', group: 'propose', mode: 'together', cap: 2, spend: 20, all: true, land: true,
   ask: 'task' };
 
 /* ---------- state ---------- */
@@ -3268,11 +3301,12 @@ const NOTES = [
     + '"showing X of Y", and Clear. It stays folded for that board; the / key unfolds it and puts you in the '
     + 'search. Recommendation: as drawn.', 'Alternative: the filters hide as you scroll the board down and come '
     + 'back as you scroll up. No click, but the page moves under you.', 'new', 5],
-  ['The task panel: parts fold, and it is as wide as you drag it', 'Each part of the panel folds from its heading, '
-    + 'and stays folded for the next task. Drag the panel\'s left edge to widen it, from 360 px to 70% of the '
+  ['The task panel: parts fold, and it is as wide as you drag it', 'Each part of the panel sits under a bar, '
+    + 'darker than the part, with an icon and its name. A click anywhere on the bar folds the part, and it stays '
+    + 'folded for the next task. Drag the panel\'s left edge to widen it, from 360 px to 70% of the '
     + 'window; arrow keys work on the edge, and a double-click goes back to 460 px. The width is yours, not the '
     + 'task\'s. Recommendation: as drawn.', 'Alternative: three widths (S, M, L) on a button, and no folding.',
-  'new', 5],
+  'changed', 6],
   ['A task that needs you', 'When a run waits on your answer, its card gets an amber edge and "Needs you", the Queue '
     + 'tab counts it, and the panel puts the question first, with what the agent offers and a box for your answer. '
     + 'Sending lets that run go on. Recommendation: as drawn.', 'Alternative: questions in the Queue only, and a '
@@ -3281,29 +3315,33 @@ const NOTES = [
     + 'others: `unblocks` in a view\'s expression. A card shows "Unblocks N" from 3 up, and the built-in '
     + 'Bottlenecks view lists them, most first. The Graph shows the same links. Recommendation: as drawn.',
   'Alternative: count direct dependents only. Simpler, but the first task of a long chain looks small.', 'new', 5],
-  ['Autopilot', 'You pick a view and caps (runs at once, spend per day). Turning it on is your Launch for the tasks '
-    + 'that view holds: Collide fills Up next from it, what holds up the most first, never before what a task '
-    + 'waits on has landed, and starts each entry in turn. The agent proposes groups; it still has no tool that '
-    + 'launches. Recommendation: as drawn. A plan change: Stage 11 has a person press Launch for each entry.',
+  ['Autopilot', 'You pick a view and caps (runs at once, spend a day). "Every task in this view" is on by default: '
+    + 'turning Autopilot on is then your Launch for the tasks the view holds, and Collide fills Up next from it, '
+    + 'what holds up the most first, never before what a task waits on has landed. Off, it starts only what you '
+    + 'add to Up next. Its settings open in a popover under the button. The agent proposes groups; it still has '
+    + 'no tool that launches. Decided: as drawn, with the checkbox. A plan change: Stage 11 has a person press '
+    + 'Launch for each entry.',
   'Alternative: an agent with a launch tool picks what runs next. More flexible; it drops the plan\'s guard that '
-    + 'no agent launches.', 'new', 5],
-  ['When an autopilot run finishes', 'It waits for your review, as any run does; entries that do not depend on it '
-    + 'go on meanwhile. Recommendation: as drawn.', 'Alternative: accept a run once every gate passes, and review '
-    + 'it later from its history. Faster; a wrong change lands before you see it.', 'new', 5],
+    + 'no agent launches.', 'decided', 6],
+  ['When an autopilot run finishes', 'It waits for your review, unless its workflow\'s review round is all '
+    + 'automated (an agent reviews, every gate is a check, no step for a person); then it lands when that round '
+    + 'passes. A checkbox in Autopilot\'s settings, on by default, turns the exception off. Entries that do not '
+    + 'depend on it go on meanwhile. Decided: as drawn.', 'Alternative: accept a run once every gate passes, '
+    + 'with no review round. Faster; a wrong change lands before anyone reads it.', 'decided', 6],
   ['Every question is kept with its task', 'Questions and answers, a part of the task panel: each question a run '
     + 'asked (the agent\'s, a step for a person, a follow-up in review), with its run, phase and time, the answer, '
     + 'and who gave it. Permission prompts are not in it: they stay in the run\'s record. Recommendation: as '
     + 'drawn.', 'Alternative: questions live in the Queue\'s history only, searchable, not on the task.', 'new', 5],
-  ['Where questions and answers are kept', 'A setting, questions.keep, whose default the pack sets: in the task\'s '
-    + 'file (it goes with the repo), as question items (qu-) linked to the task, on this Mac only, or not kept '
-    + '(gone when the run ends). You can override it in Settings. Recommendation: collide/plan keeps them in the '
-    + 'task\'s file; a GitHub pack keeps them on this Mac, since an issue is not Collide\'s to write.',
-  'Alternative: one choice for all of Collide, not per pack.', 'new', 5],
+  ['Where questions and answers are kept', 'A setting, questions.keep: in the task\'s notes, on the task itself '
+    + '(the default), as question items (qu-) linked to the task, on this Mac only, or not kept (gone when the run '
+    + 'ends). A pack sets its default with a hook in its pack.yaml; a source that needs your say, such as Beads, '
+    + 'asks you once. You can override it in Settings. Decided: the task\'s notes by default, and a hook for the '
+    + 'pack.', 'Alternative: one choice for all of Collide, not per pack.', 'decided', 6],
   ['Two ways to group tasks', 'Together: one run works every task on one branch, so one test run and one review. '
     + 'Tested together: a run per task, each on its own branch with quick checks, then one full test run of them '
     + 'merged; a failure is split in halves to find the task, like a merge queue. Separately is today. A group is '
-    + 'one entry in Up next. Recommendation: as drawn. Tested together is new to the plan.', 'Alternative: tested '
-    + 'together without the halving: on a failure, each task is tested alone.', 'new', 5],
+    + 'one entry in Up next. Decided: as drawn; Tested together is new to the plan.', 'Alternative: tested '
+    + 'together without the halving: on a failure, each task is tested alone.', 'decided', 6],
 ];
 
 /* ---------- top bar ---------- */
@@ -3537,8 +3575,10 @@ function viewbarHtml(tasks) {
     <span class="live" title="The board follows the files as they change"><span class="dot"></span>Live ·
       updated ${ago < 5 ? 'just now' : ago + ' s ago'}${nm(14)}</span>
     ${view().sort ? '<span class="muted" style="font-size:13px">Most held up first</span>' : ''}
-    <span class="spacer"></span><button class="btn sm${state.auto.on ? ' main' : ''}" data-act="auto"
-      title="Start the tasks of a view in order, under your caps">Autopilot${state.auto.on ? ': on' : '…'}</button>
+    <span class="spacer"></span><span class="popat"><button class="btn sm${state.auto.on ? ' main' : ''}"
+      data-act="menu" data-menu="auto" aria-haspopup="dialog" aria-expanded="${state.menu === 'auto'}"
+      title="Start the tasks of a view in order, under your caps">Autopilot${state.auto.on ? ': on' : '…'}</button>${
+      state.menu === 'auto' ? autoPopHtml() : ''}</span>
     <span class="seg" role="group" aria-label="Layout"><button data-act="layout" data-v="board"
       aria-pressed="${state.layout === 'board'}">Board</button><button data-act="layout" data-v="run"
       aria-pressed="${state.layout === 'run'}">Run order</button><button data-act="layout" data-v="graph"
@@ -3844,7 +3884,8 @@ function drawerHtml(t) {
       ${src.fields.length ? fieldsHtml(t, src) : ''}
       ${src.scope === 'ref' ? `<section class="ds"><h3>In each copy of the project</h3><table class="t"><thead><tr>
         <th>Copy</th><th>Status</th><th></th></tr></thead><tbody>${copyRows}</tbody></table></section>` : ''}
-      <details class="eng"><summary>Details for engineers: source, file and raw fields</summary>
+      <details class="eng"><summary>${secIcon('Details')}<span class="dt">Details for engineers<span
+        class="muted" style="font-weight:400">source, file and raw fields</span></span>${CHEV}</summary>
         <dl class="kv"><dt>Source</dt><dd>${esc(src.name)} · ${esc(src.pack)}</dd>
         <dt>${t.src === 'plan' ? 'File' : 'Reads'}</dt><dd class="mono">${esc(file)}</dd>
         <dt>Copies</dt><dd>${src.scope === 'ref' ? 'one per checkout: it lives in the repo'
@@ -4835,8 +4876,8 @@ function hubCount(t) {
 const openQs = (t) => ((state.qa && state.qa[t.id]) || []).filter((q) => !q.a);
 const asksOnBoard = () => board().tasks.reduce((n, t) => n + openQs(t).length, 0);
 const KEEP = {
-  task: ['In the task\'s file', 'Kept in this task\'s file, under Questions. It goes with the repo, so a teammate '
-    + 'sees it too.'],
+  task: ['In the task\'s notes', 'Kept in the task\'s notes, on the task itself (in a plan file, its Notes part). '
+    + 'It goes where the task goes.'],
   items: ['As question items', 'Each is kept as a question item (qu-), linked to this task. They show on Planning.'],
   local: ['On this Mac', 'Kept in Collide\'s store on this Mac. Only you see it.'],
   none: ['Not kept', 'Not kept: a question shows here only while its run lives.'],
@@ -4860,15 +4901,29 @@ function foldedFiltersHtml(inView, shown) {
       : ''}${nm(38)}</section>`;
 }
 
-/* the task panel: each part folds from its heading (note 39) */
+/* the task panel: each part has a bar that folds it (note 39) */
+const SEC_IC = {
+  Questions: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4M12 17h.01"/>',
+  Description: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h4"/>',
+  Waits: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  Unblocks: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  Part: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+  Changes: '<path d="M12 4v8M8 8h8M8 19h8"/>',
+  Fields: '<path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+  In: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+  Details: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
+};
+const secIcon = (key) => `<svg class="ic si" viewBox="0 0 24 24" aria-hidden="true">${SEC_IC[key.split(' ')[0]]
+  || ''}</svg>`;
+const CHEV = '<svg class="ic tw" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 function foldSections(html) {
   const NM = /<span class="nm"[^>]*>\d+<\/span>/g;
-  return html.replace(/<section class="ds"><h3>([\s\S]*?)<\/h3>/g, (m, inner) => {
+  return html.replace(/<section class="ds"><h3>([\s\S]*?)<\/h3>([\s\S]*?)<\/section>/g, (m, inner, body) => {
     const key = inner.split('<')[0].trim();
     const shut = state.dshut.has(key);
     return `<section class="ds${shut ? ' shut' : ''}"><h3><button class="dsh" data-act="dsec" data-v="${key}"
-      aria-expanded="${!shut}"><span class="tw" aria-hidden="true">${shut ? '▸' : '▾'}</span>${inner.replace(NM,
-      '')}</button>${(inner.match(NM) || []).join('')}</h3>`;
+      aria-expanded="${!shut}">${secIcon(key)}<span class="dt">${inner.replace(NM, '')}</span>${CHEV}</button>${
+      (inner.match(NM) || []).join('')}</h3><div class="dsb">${body}</div></section>`;
   });
 }
 
@@ -4901,7 +4956,8 @@ function qkeepRow(name, key) {
     <td><label class="sr" for="qkeep">${esc(name)}</label><select id="qkeep">${Object.entries(KEEP).map(([k, [w]]) =>
       `<option value="${k}" ${k === state.qkeep ? 'selected' : ''}>${esc(w)}</option>`).join('')}</select>
       <div class="muted" style="font-size:12.5px;margin-top:4px">${esc(KEEP[state.qkeep][1])} Permission answers
-      stay in the run's record.</div></td>
+      stay in the run's record. A pack sets the default with a hook in its pack.yaml, or asks you once, as a Beads
+      pack would.</div></td>
     <td><span class="layer l-${pack ? 'pack' : 'user'}">${pack ? 'Pack: collide/plan' : 'You'}</span>${nm(45)}</td>
     </tr>`;
 }
@@ -4925,57 +4981,55 @@ function autoStripHtml() {
   const v = board().views.find((x) => x.id === a.view);
   const asks = asksOnBoard();
   return `<div class="auto" role="status"><span class="live"><span class="dot"></span></span>
-    <b>${a.paused ? 'Autopilot paused' : 'Autopilot on'}</b><span>${esc(v ? v.name : a.view)}</span>
+    <b>${a.paused ? 'Autopilot paused' : 'Autopilot on'}</b><span>${a.all ? esc(v ? v.name : a.view)
+      : 'Up next only'}</span>
     <span class="muted">· 2 running of ${a.cap} · $3.10 of $${a.spend} today</span>${asks ? `<span class="chip ask">${
       svg.ask}${asks} question${asks === 1 ? '' : 's'} for you</span>` : ''}
     <span class="spacer"></span><button class="btn sm" data-act="layout" data-v="next">Up next</button>
     <button class="btn sm" data-act="auto-pause">${a.paused ? 'Resume' : 'Pause'}</button>
-    <button class="btn sm" data-act="auto">Settings…</button><button class="btn sm" data-act="auto-stop">Stop</button>
+    <span class="popat"><button class="btn sm" data-act="menu" data-menu="auto-s" aria-haspopup="dialog"
+      aria-expanded="${state.menu === 'auto-s'}">Settings…</button>${state.menu === 'auto-s' ? autoPopHtml() : ''}
+    </span><button class="btn sm" data-act="auto-stop">Stop</button>
     ${nm(42)}</div>`;
 }
-function autoModal() {
+function autoPopHtml() {
   const a = state.auto;
   const opens = (v) => visibleTasks().filter(v.test).filter(isOpen).length;
-  const radio = (name, val, cur, label, sub) => `<label><input type="radio" name="${name}" value="${val}"
-    ${val === cur ? 'checked' : ''}><span><b>${label}</b><br><span class="muted">${sub}</span></span></label>`;
-  modal(`<h2>Autopilot for ${esc(board().name)}${nm(42)}</h2>
-    <p>Autopilot keeps Up next full from one view and starts each entry in turn, under your caps. Turning it on is
-      your Launch for the tasks that view holds; no agent can launch. A run still stops for your questions.</p>
-    <label for="aview">Tasks from</label><select id="aview">${board().views.map((v) => `<option value="${v.id}"
-      ${v.id === a.view ? 'selected' : ''}>${esc(v.name)} · ${opens(v)} open</option>`).join('')}</select>
-    <p class="muted" style="font-size:13px">Order: what holds up the most goes first, and a task never starts before
-      what it waits on has landed. Collide works the order out from the links; the agent does not choose it.</p>
-    <fieldset class="radios"><legend>Groups</legend>
-      ${radio('agroup', 'propose', a.group, 'The agent proposes groups; you accept each', 'Recommended. Until you '
-        + 'accept, its tasks run one by one.')}
-      ${radio('agroup', 'auto', a.group, 'Use the agent\'s groups without asking', 'It changes how tasks are tested '
-        + 'and reviewed, not which ones start.')}
-      ${radio('agroup', 'none', a.group, 'No groups', 'One run per task.')}</fieldset>
-    <label for="amode">A new group runs</label><select id="amode">${Object.entries(MODES).map(([k, [w]]) =>
-      `<option value="${k}" ${k === a.mode ? 'selected' : ''}>${w}</option>`).join('')}</select>
-    <div class="frow"><label>Runs at once <input type="number" id="acap" min="1" max="8" value="${a.cap}"
-      style="width:64px"></label><label>Spend per day, USD <input type="number" id="aspend" min="1"
-      value="${a.spend}" style="width:80px"></label></div>
-    <fieldset class="radios"><legend>When a run finishes${nm(43)}</legend>
-      ${radio('aaccept', 'review', a.accept, 'Wait for your review', 'Recommended. What does not depend on it goes '
-        + 'on meanwhile.')}
-      ${radio('aaccept', 'gates', a.accept, 'Accept it when every gate passes', 'You review later, from the task\'s '
-        + 'history. A failed gate still stops it.')}</fieldset>
-    <fieldset class="radios"><legend>When a run asks you something</legend>
-      ${radio('aask', 'task', a.ask, 'Pause that run and mark its task', 'Recommended. The others go on; the card '
-        + 'shows Needs you, and the Queue counts it.')}
-      ${radio('aask', 'all', a.ask, 'Pause autopilot until you answer', 'Nothing new starts while a question '
-        + 'waits.')}</fieldset>
-    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
-      <button class="btn main" data-act="auto-yes">${a.on ? 'Save' : 'Start autopilot'}</button></div>`, 'tall');
+  const sel = (id, cur, opts) => `<select id="${id}">${opts.map(([v, w]) => `<option value="${v}"
+    ${v === cur ? 'selected' : ''}>${esc(w)}</option>`).join('')}</select>`;
+  return `<div class="pop apop" role="dialog" aria-label="Autopilot for ${esc(board().name)}">
+    <h3>Autopilot${nm(42)}</h3>
+    <p>Starts Up next from one view, under your caps: what holds up the most first, never before what a task waits
+      on has landed. Turning it on is your Launch for that view; no agent launches.</p>
+    <div class="agrid">
+      <label for="aview">Tasks from</label><div class="acol">${sel('aview', a.on ? a.view : state.view,
+        board().views.map((v) => [v.id, `${v.name} · ${opens(v)} open`]))}<label class="acheck"><input
+        type="checkbox" id="aall" ${a.all ? 'checked' : ''}><span>Every task in this view<span class="hint">Off:
+        only what you add to Up next</span></span></label></div>
+      <label for="agroup">Groups</label>${sel('agroup', a.group, [['propose', 'Agent proposes; you keep each'],
+        ['auto', 'Agent\'s groups, no asking'], ['none', 'None: one run per task']])}
+      <label for="amode">A new group runs</label>${sel('amode', a.mode, Object.entries(MODES).map(([k, [w]]) =>
+        [k, w]))}
+      <label for="acap">Runs at once</label><span><input type="number" id="acap" min="1" max="8"
+        value="${a.cap}"></span>
+      <label for="aspend">Spend a day, USD</label><span><input type="number" id="aspend" min="1"
+        value="${a.spend}"></span>
+      <span>When a run finishes${nm(43)}</span><label class="acheck"><input type="checkbox" id="aland" ${a.land
+        ? 'checked' : ''}><span>Land it if its review round is all automated<span class="hint">Otherwise it waits
+        for your review</span></span></label>
+      <label for="aask">When a run asks you</label>${sel('aask', a.ask, [['task', 'Pause that run, mark its task'],
+        ['all', 'Pause all until you answer']])}
+    </div>
+    <div class="acts"><button class="btn sm" data-act="menu-close">Cancel</button>
+      <button class="btn sm main" data-act="auto-yes">${a.on ? 'Save' : 'Start autopilot'}</button></div></div>`;
 }
 function startAutopilot() {
-  const pick = (n) => (document.querySelector(`input[name=${n}]:checked`) || {}).value;
+  const val = (id) => $(`#${id}`).value;
   const was = state.auto.on;
-  Object.assign(state.auto, { on: true, paused: false, view: $('#aview').value, group: pick('agroup'),
-    mode: $('#amode').value, cap: Number($('#acap').value) || 2, spend: Number($('#aspend').value) || 20,
-    accept: pick('aaccept'), ask: pick('aask') });
-  closeModal();
+  Object.assign(state.auto, { on: true, paused: false, view: val('aview'), group: val('agroup'), mode: val('amode'),
+    cap: Number(val('acap')) || 2, spend: Number(val('aspend')) || 20, ask: val('aask'), all: $('#aall').checked,
+    land: $('#aland').checked });
+  state.menu = null;
   if (state.auto.group === 'auto') state.unext.forEach((e) => { delete e.proposed; });
   if (was) { toast('Autopilot: settings saved.'); return; }
   const t = byId('fx-0001-hb');
@@ -5036,7 +5090,8 @@ function upNextHtml() {
   const v = board().views.find((x) => x.id === a.view);
   return `<div class="unext"><p class="muted" style="max-width:80ch;margin:0">What starts next, in
     order. An entry is a task or a group; each starts once the one before it has landed. ${a.on
-      ? `Autopilot adds open tasks from ${esc(v ? v.name : a.view)} as entries land.`
+      ? (a.all ? `Autopilot adds open tasks from ${esc(v ? v.name : a.view)} as entries land.`
+        : 'Autopilot starts what you add, in turn; it adds nothing itself.')
       : 'Autopilot is off: you add entries, and adding one is your Launch.'}${nm(46)}</p>
     <div class="frow" style="gap:8px"><button class="btn sm" data-act="overlap" aria-pressed="${state.overlap}">Overlap
       what is independent: ${state.overlap ? 'on' : 'off'}</button><button class="btn sm" data-act="grp">Group
@@ -5273,6 +5328,12 @@ function render() {
   }
   document.body.style.setProperty('--dockb', `${docked ? dk.offsetHeight : 0}px`);
   $('#tip').hidden = true;
+  const ap = $('.apop');
+  if (ap) { // under its button, inside the window
+    const r = ap.parentElement.getBoundingClientRect();
+    const left = Math.max(16, Math.min(r.right - ap.offsetWidth, innerWidth - 16 - ap.offsetWidth));
+    Object.assign(ap.style, { left: `${left - r.left}px`, right: 'auto' });
+  }
   document.body.classList.toggle('notes', state.notes);
   $('#mock').hidden = !state.mock;
   $('#mockbtn').setAttribute('aria-expanded', String(state.mock));
@@ -5411,10 +5472,14 @@ function scenario(v) {
       break;
     case 'queue': goBoard('collide'); state.surface = 'queue'; break;
     case 'hubs': goBoard('collide', 'hubs'); state.layout = 'board'; break;
-    case 'auto-setup': goBoard('collide', 's6'); state.layout = 'board'; render(); autoModal(); return;
+    case 'auto-setup':
+      goBoard('collide', 's6');
+      Object.assign(state, { layout: 'board', menu: 'auto' });
+      render();
+      return;
     case 'auto-on':
       goBoard('collide', 's6');
-      if (!state.auto.on) { render(); autoModal(); startAutopilot(); }
+      if (!state.auto.on) { state.menu = 'auto'; render(); startAutopilot(); }
       state.layout = 'next';
       break;
     case 'upnext': goBoard('collide', 's6'); state.layout = 'next'; break;
@@ -5465,7 +5530,17 @@ document.addEventListener('click', (e) => {
   const { act, id, v, g } = el.dataset;
   const b = board();
   switch (act) {
-    case 'menu': state.menu = state.menu === el.dataset.menu ? null : el.dataset.menu; break;
+    case 'menu':
+      state.menu = state.menu === el.dataset.menu ? null : el.dataset.menu;
+      if (/^auto/.test(state.menu || '')) setTimeout(() => $('#aview').focus());
+      break;
+    case 'menu-close': {
+      const m = state.menu;
+      state.menu = null;
+      render();
+      $(`[data-menu="${m}"]`).focus();
+      return;
+    }
     case 'board': goBoard(id); break;
     case 'view': state.view = id; state.goal = null; state.menu = null; resetFilters(); break;
     case 'tab': state.surface = id; state.settings = false; break;
@@ -5686,13 +5761,12 @@ document.addEventListener('click', (e) => {
       const q = state.qa[id][Number(v)];
       Object.assign(q, { a: text, by: 'You', when: `Today ${clock()}` });
       delete state.qdraft[`${id}:${v}`];
-      const kept = { task: 'in the task\'s file', items: 'as a question item', local: 'on this Mac' }[state.qkeep];
+      const kept = { task: 'in the task\'s notes', items: 'as a question item', local: 'on this Mac' }[state.qkeep];
       toast(`Sent to ${q.run}; it goes on. ${kept ? `Kept ${kept}.` : 'Not kept once the run ends.'}`);
       break;
     }
     case 'qkeep-set': Object.assign(state, { settings: true, stab: 'general', drawer: null }); break;
     case 'qopen': state.drawer = id; break;
-    case 'auto': autoModal(); return;
     case 'auto-yes': startAutopilot(); break;
     case 'auto-pause':
       state.auto.paused = !state.auto.paused;
@@ -5812,7 +5886,7 @@ document.addEventListener('keydown', (e) => {
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
   if (e.key === 'Escape') {
     if (!$('#overlay').hidden) closeModal();
-    else if (state.menu) { state.menu = null; render(); }
+    else if (state.menu) { const m = state.menu; state.menu = null; render(); $(`[data-menu="${m}"]`)?.focus(); }
     else if (state.drawer) { state.drawer = null; render(); }
     else if (state.settings) { state.settings = false; render(); }
     return;
@@ -5998,8 +6072,9 @@ function addScratch() {
 setInterval(() => { if (state.screen === 'board' && state.surface === 'field' && !state.settings) {
   // A live tick leaves an open peek alone: in the app it re-reads the task it shows.
   const live = document.querySelector('.live');
-  // Nor does it take your place in a box you type in, or an edge you drag.
-  const busy = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('#dgrip').classList.contains('drag');
+  // Nor does it take your place in a box you type in, an edge you drag, or a menu you have open.
+  const busy = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('#dgrip').classList.contains('drag')
+    || !!state.menu;
   if (live && $('#peek').hidden && !busy) render();
 } }, 15000);
 render();
