@@ -42,7 +42,11 @@ What this adds. Tests only, and fixes for what they find (each fix is small or b
   stale source with cause `auth`, and `queue.list` has one item. Fixing the fake and answering `Retry` clears it.
 - A pull request is listed and read-only, an issue of a repo that is not the origin is listed and not launchable with
   its reason, and a scope failure names the fix.
-- A board with no GitHub block runs no `gh`.
+- A board with no GitHub block and no GitHub `origin` runs no `gh`. A clone whose `origin` is on GitHub, with no
+  `.collide/` and the fake `gh` logged in, opens with its origin's issues; logged out, with a hint (revision 25).
+- A fake issue whose body holds raw HTML, a `javascript:` link, a `file:` link and an image that fetches a remote URL
+  is shown in the drawer as text: nothing runs, nothing is fetched, and the CSP blocks the image (6a's check, in its
+  GitHub form; revision 25).
 - The test of the settings: `collide config set collide/github.account <name>` reaches the fake `gh` as `--user <name>`
   and the provider restarts once.
 

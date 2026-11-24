@@ -7,7 +7,13 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 24.** Revision 24 files what a run finds as private items linked to the task that raised them and
+**Status: revision 25.** Revision 25 writes in the board the owner designed in a clickable mock over six rounds
+(Stage 6a). The board gains a graph beside the run order, a count of what each task holds up, labelled source fields
+and each task's changes. Comms lists every session with an agent, as a chat or as its terminal. Every question a run
+asks is kept with its task. Autopilot starts a view's tasks in order under caps, as the person's Launch, and lands a
+run itself only when its review round is all automated; a group can be tested together, as a merge queue does
+(owner, 2026-11-24).
+Revision 24 files what a run finds as private items linked to the task that raised them and
 reviewed beside its diff, teaches the user's own Claude Code session the CLI with `collide guide`, plans the Desk (one
 docked Claude Code session per board that coordinates work and edits no code), adds Spike… beside Plan…, and lets a
 person continue a session as a spike, a planning session or a task without losing its conversation (owner, 2026-11-18).
@@ -1672,6 +1678,19 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     4. the run's profile, if it has one (below).
   - Collide's own settings (concurrency cap, metrics level, retention, default model aliases) use the same layers
     and the same files. Collide marks its machine-dependent keys, such as the concurrency cap, `overridable`.
+  - **`questions.keep`** (owner, 2026-11-24; revision 25; notes 44 and 45) is one of Collide's own settings, per
+    source: where the questions a run asks, and their answers, are kept (0.8, Stage 9a). `notes`, the default, writes
+    them on the task itself; `items` files each as a question item linked to the task; `local` keeps them in
+    Collide's store on this machine; `none` keeps them only while the run lives. A pack sets the first layer's value
+    for its own source on the provider entry, and `ask` says the source needs the user's say:
+
+    ```yaml
+    providers:
+      beads: { script: providers/beads.ts, questions: ask }   # notes | items | local | none | ask
+    ```
+
+    With `ask`, and no value in either file, Collide asks once per board, as a Queue item, and writes the answer to
+    the user's file. Until then it keeps that source's questions `local`. The exact keys are an item decision.
   - Some keys are per user by nature and are refused in the repo file: secrets, trust entries, source accounts,
     personal views, and an agent's kind, command, arguments, model, environment, secrets, folders and tool kinds
     (below).
@@ -1920,6 +1939,15 @@ Agent-side config (Claude Code hooks, skills, plugins, the repo's `.claude/`) is
     under `orchard/loop`, and a mixed view's group launch says so per task.
   - **Workflow ops address status categories** (`setStatus { category: active }`). Each provider maps a category to
     the status it writes (0.10), so one workflow's ops work for any source it accepts.
+  - **`group: tested`** (owner, 2026-11-24; revision 25) joins `per_task` and `whole` (Stage 11). A workflow that
+    allows it names one full test run with `groupTest:`, a hook run on the merged group branch that answers `ok` or
+    `fail`.
+  - **`autoLand:`** (owner, 2026-11-24; revision 25) says the workflow's review round is all automated, and names the
+    outcomes that pass it: `autoLand: { outcomes: [closed] }`. Load refuses it, naming the reason, unless the table
+    has an `agent` or `fanout` phase whose role is `readOnly` (the reviewer, as Orchard's `review`) and no `human`
+    phase. Autopilot may land a run of such a workflow without a person's review (Stage 11). The built-in
+    `collide/review` declares `autoLand: { outcomes: [closed] }` (owner, 2026-11-24).
+  - The exact names of `groupTest` and `autoLand` are item decisions.
 
 Example: the Orchard pack (Stages 7–10, with `metrics` and `experiment` used from Stages 13–15).
 
@@ -2133,6 +2161,10 @@ Collide plays the lead, so it does all four, through the pack.
   - sandbox workspaces, declared outputs, final reports, gate results, labels;
   - `ask_human` events with their cause;
   - a resumed phase keeps its key and directory, and the earlier attempt's files move to `attempt-<n>/`.
+- **Question** (owner, 2026-11-24; revision 25; note 44): each question a run asks a person, kept with its task. Its
+  kind (`ask_human`, a `human` phase, or a question in review's follow-ups), the task, run, phase and round, when it
+  was asked, the text and the tokens offered, the answer, who answered and when. A permission prompt is not a
+  question: it stays in the run's record. Where the record is kept follows `questions.keep` (0.7).
 - **History:** prompts and hooks see `history[]` (earlier phases: kind, round, heads, artifact paths, verdicts) and
   `round.base` / `round.head` / `chain.base`.
 - **Workspace:** a git checkout (`path`, `gitDir`; 0.1). It lives longer than any run, and keeps its workspace state
@@ -2309,14 +2341,18 @@ Why the plan adapter parses files itself:
   - `templateFields`: the name and regex of each field templates may use (0.5)
   - `statuses`, each with a category, and for each category the status a category write produces (plan:
     `active → doing`, `review → in_review`; GitHub: from the status mapping in `board.yaml`)
-  - `fields`: id, type, filterable
+  - `fields`: id, type, filterable, and an optional label (revision 25; note 18). `FieldDecl` in
+    `core/src/provider.rs` gains `label: Option<String>`. The drawer shows the label, or the id in words when there is
+    none (`story_points` reads "Story points")
   - `ops`, each with a JSON Schema for its arguments and the checkouts it may target
   - capabilities: `watch`, `create`, `collections`, and the optional `preview`
   - `kinds` (owner, 2026-11-13), each with its statuses and their categories, its transitions, its ops (each with
     the category it moves to, if any) and optional role tags, which core treats as plain strings. A provider with
     one kind may omit `kinds`
   - `links`: the link types it holds, their direction, whether they block, and whether their target is an item or a
-    feature (revision 14)
+    feature (revision 14). This is the source-level flag of note 18 (revision 25): a source whose `links` has no
+    `LinkTypeDecl` (`core/src/item.rs`) with `blocking: true`, as scratch tasks, has no dependencies, and the drawer
+    leaves out Waits on and Unblocks for its tasks
 - `list({ checkout?, cursor? })` returns tasks, collections and `invalid[]`, each item it could not read as
   `{path, checkout, reason}`, the shape of `task.invalid` (owner, 2026-11-14). `get({ id, checkout? })` returns the
   task, or no task when no item has that id: a missing id is an answer, not an error (owner, 2026-11-14).
@@ -2469,6 +2505,9 @@ layout: { default: board, groupBy: category }
 - **Fields:**
   - Normalized fields are always present: `key`, `source`, `title`, `status`, `category`, `labels` (empty when a
     source has none), `collections`, `deps`, `author`.
+  - Core derives `unblocks` (revision 25; note 41): how many open tasks wait on the task, directly or through other
+    open tasks, each counted once, over the same links as `deps`. Core computes it with the corpus and binds it as a
+    per-task number, so a view tests it as it tests `deps`.
   - Source-specific fields live under `fields.*` and are tested with `has(fields.x)`.
   - An evaluation error, or a task that runs out of its step budget (0.9), excludes the task and is counted on the
     view, not hidden.
@@ -2499,11 +2538,13 @@ layout: { default: board, groupBy: category }
   hand-picked subsets the source does not encode.
 - A view's `workflow:` resolves on the line it launches on. It is an error if that line lacks the workflow.
 - Launching from a view starts a group run of its `ready` tasks (Stage 11). A dependent starts only once its
-  dependencies are done at the base ref, merged by `integrate`, not merely started earlier.
+  dependencies are done at the base ref, merged by `integrate`, not merely started earlier. Turning Autopilot on for a
+  view is a Launch of its open tasks under the same rule (Stage 11; revision 25).
 - **Built-in and pack views** (`ts-0135-cx`). Core holds `ready`: the tasks the slice's `--ready` lists (the same
   readiness rule), in the corpus's order, with a `blocked-by` cycle in the report's `cycle` and an unknown blocker in
   its `unknown_blockers`. It has no `where`, its source is `builtin`, and it comes first, so a file or pack view named
-  `ready` is listed with an error. `collide/plan` declares `spikes` and `decisions-needed` (`queue: true`: an open
+  `ready` is listed with an error. Core also holds `bottlenecks` (revision 25; note 41): open tasks with
+  `unblocks >= 3`, the most first. `collide/plan` declares `spikes` and `decisions-needed` (`queue: true`: an open
   question, or a proposal that is `proposed`), listed as `collide/plan/spikes` and `collide/plan/decisions-needed`. A
   view may be named by the part after its last `/` when one view has it, or when only one of those that do comes from a
   pack that supplies a source of the board; otherwise the error names them all. The daemon resolves the name, so the app
@@ -2757,8 +2798,11 @@ layout: { default: board, groupBy: category }
 Collide is not a chat app. Its objects are tasks, runs, phases, gates, workspaces and decisions; conversation is a
 detail inside a phase. No chat bubbles, no centred conversation column, no sidebar of chats.
 
-The sessions a person talks to (New session, Plan…, Spike… and the Desk) are Claude Code's own terminal, docked beside
-Collide's objects, not a chat surface Collide draws, so the stance holds (revision 24).
+The sessions a person talks to (New session, Plan…, Spike… and the Desk) are Claude Code's own sessions, docked beside
+Collide's objects (revision 24). From revision 25 (owner, 2026-11-24; notes 19 and 33) Comms lists them, and shows
+each as a chat drawn from its transcript or as its terminal, one click apart. The chat is a view of the same session,
+not a second conversation, and it sits beside a run's objects rather than in place of them; so the stance narrows to
+this: no conversation stands in for a task, a run or a decision.
 
 **Who it is for** (owner, 2026-11-15; revision 17). Collide is a higher-level development environment, used by
 product managers as well as engineers. It must not read as an IDE:
@@ -2768,20 +2812,25 @@ product managers as well as engineers. It must not read as an IDE:
   away, behind a disclosure, a tab or a toggle, never removed;
 - monospace is for code, commands and output, not for the interface around them.
 
-Three surfaces, one keystroke apart:
+Five tabs, keys 1 to 5:
 
 **Tab names and subtitles** (owner, 2026-11-15; revision 19). Each tab shows its name with a plain subtitle beneath
 it, so a person who has not learned the names can still find their way: **Field**, "the whole board"; **Tracks**,
-"what's running now"; **Queue**, "what needs you"; and **Planning** (the Planning view below), "what to build next".
-The names stay; the subtitles are the audience rule above applied to navigation.
+"what's running now"; **Queue**, "what needs you"; **Planning** (the Planning view below), "what to build next"; and
+**Comms**, "sessions with an agent" (revision 25; note 2). The names stay; the subtitles are the audience rule above
+applied to navigation. A tab whose stage has not shipped says which stage brings it (Stage 6a).
 
-- **Field:** the corpus through a view, laid out as a board or a run order.
+- **Field:** the corpus through a view, laid out as a board, a run order or a graph (revision 25; note 11). Run
+  order and graph show the same open tasks toward one goal, in the same steps (0.10's `closure`): run order as
+  numbered steps, step 1 what can start now; the graph as the steps in columns, with a line from each blocker to
+  what it holds up.
   - Tasks are the primary objects. A task being worked on has a lit border (the prototype board's), in the state
     colour. Colour never says which run it is: a run is named by its label (below).
   - The main action is: select tasks, then Launch.
   - A read-only Field ships first (Stage 6); Launch arrives with the run UI (Stage 9).
-  - An empty board still offers a way in: a prompt box (type a task, then Launch), **New session**, the sources
-    Collide detected, and Add a pack.
+  - An empty board still offers a way in (revision 25; note 13): **Plan it first**, a planning session (Plan…,
+    below), shown first because most people start there; **Start with a task**, a scratch task; the sources Collide
+    found; and Add a pack. New session is on Comms.
   - **Home is the Field** (owner, 2026-11-13; from the Field-first mockup). Its weakness is that a decision sits one step
     from its cause. The menu bar badge and notifications cover most of that (below).
 - **Tracks:** every live run as a horizontal track of phase segments (provision → build → brief → review ×2 →
@@ -2808,7 +2857,8 @@ The names stay; the subtitles are the audience rule above applied to navigation.
   - **Up next** (owner, 2026-11-15; revision 21; ships in Stage 11). Below the live runs, in both layouts: the
     tasks and groups waiting to start, in the person's order, each with what it waits on; one list per board
     (revision 22). The tab named Queue stays
-    "what needs you", so this list is never called a queue.
+    "what needs you", so this list is never called a queue. **Autopilot** starts the list under caps, and can fill
+    it from a view (Stage 11; revision 25; note 42).
   - **The Timeline's real-time axis**, not equal-width phase columns (owner, 2026-11-13; from the Tracks-first
     mockup). A segment's width is its duration. The axis has:
     - a now line and the usage-limit reset line;
@@ -2831,7 +2881,9 @@ The names stay; the subtitles are the audience rule above applied to navigation.
     - integrates and take-overs waiting on an acknowledgement because their range edits the agent tool's config
       (0.3);
     - runs waiting on an acknowledgement because an integrate changed a working-copy pack they load (0.7);
-    - disabled observers and finished runs to review.
+    - disabled observers and finished runs to review;
+    - questions a run asks, also shown first in the task's drawer, whose card says "Needs you" (revision 25;
+      note 40).
   - **Layout** (owner, 2026-11-13; from the Queue-first mockup): a list grouped by kind, and a detail pane. It is
     not a narrow rail, because a permission request with untrusted arguments needs the room. The pane shows:
     - the exact command or arguments, with untrusted ones flagged (0.9), or "input not available until approved"
@@ -2882,13 +2934,19 @@ The names stay; the subtitles are the audience rule above applied to navigation.
 
 Details:
 
-- **Task drawer:** body, dependencies (both directions), collections, per-checkout state with divergence and
-  collisions, other lines' states, the task's runs, and the source's operations as forms. Create opens the same
-  form. The body is **sanitized markdown** (R5): raw HTML off, `javascript:`, `file:` and `data:` links removed,
-  images from remote hosts not loaded, and an external link opens in the browser after a confirmation (0.9). Any
-  other place that shows a task's or an agent's text follows the same rule.
+- **Task drawer** (revision 25; note 8), beside the board, in this order: the task's open questions, when a run is
+  waiting on one; the description; Waits on and Unblocks; Part of (its epic, collections and views); Questions and
+  answers; Changes, the task's runs and their files; Fields from the source; each copy, with divergence, collisions
+  and other lines' states; then Details for engineers (the source, file, raw frontmatter). A part the source has no
+  notion of is left out: a source with no blocking link type has no Waits on or Unblocks (0.10), and a global source
+  has one copy. The source's operations show as forms, and Create opens the same form. The body is **sanitized
+  markdown** (R5): raw HTML off, `javascript:`, `file:` and `data:` links removed, images from remote hosts not
+  loaded, and an external link opens in the browser after a confirmation (0.9). Any other place that shows a task's
+  or an agent's text follows the same rule.
 - **Filter bar → view.** Typing a filter in the Field is an ad-hoc view, and saving it writes a view file. CEL is
-  never the only way in: chips for collection, status, label and source write the CEL for you.
+  never the only way in: chips in plain words (by stage, where a task stands, where it comes from) write the CEL for
+  you, and the expression is shown read-only under Advanced (revision 25; note 9). **Describe what to show** turns
+  words into chips with the in-app agent (Stage 6b; note 16).
 - **Drill-down from a phase segment.** An **activity digest** comes first: files touched, commands with exit
   codes, tests, gate verdicts, the phase report rendered as a document, and the diff. The raw transcript and the
   terminal sit behind a toggle.
@@ -2928,7 +2986,9 @@ Details:
       the "unattributed" row, so it adds to 100% of wall time. A share of plain wall-clock time is not shown, because
       it passes 100% when calls overlap;
   - a timeline with one row per tool type on the run's real-time axis. Colour stays reserved for state, so rows, not
-    hues, tell the types apart;
+    hues, tell the types apart. Each call is a bar; hovering it names the tool and command, call k of n, the phase,
+    start, end, duration and result, and a failed call is marked. Phase starts are marked on the axis (revision 25;
+    note 26);
   - **three time totals shown apart** (S6): the wall time of the phase, the sum of its calls, and the union of its
     calls (the time with at least one running). They differ once calls run in parallel or nest. The span model needs
     a parent id for this (0.13);
@@ -2940,7 +3000,16 @@ Details:
   - a table row filters the timeline to that tool, and a bar scrolls the output pane to that call;
   - each phase's times are labelled exact (telemetry) or approximate (stream timing). Measured S8: the stream is
     within 150 ms of the span for an unqueued call, and wrong by the whole wait for a call queued behind another
-    (0.13).
+    (0.13);
+  - in Tracks, each phase in a run's row is its own button, which shows the breakdown and the timeline for that phase
+    alone; a click elsewhere on the row shows the whole run, with a Phases column. The row links its task, which
+    opens the drawer beside Tracks (revision 25; note 25);
+  - **Optimize…** on a row of the breakdown (revision 25; notes 24, 27 and 28; Stage 9c). An agent reads the
+    timings, the commands, the workflow step and the repo's build and test settings, may search the web, and comes
+    back with options, each with its effort, saving, risk and sources. It changes nothing and starts no run. The
+    person picks one or more: Schedule files a task for each; Bake-off races the picks against today's way (Stage
+    15); Discuss opens a Comms session with all of it. Two checkboxes, off each time it opens, lift its spend cap
+    and its time limit; the repo's budget still applies (0.7).
 - **Talking to an agent is the exception.** You either intervene (send a note to the running phase) or take over
   (interactive `--resume` in a terminal). The ask box (below) is a request that changes the screen, not a
   conversation with a run.
@@ -2962,7 +3031,9 @@ Details:
   `collide/plan`'s planning workflow. The run belongs to the proposal, not to a scratch task:
   - the proposal goes in the epic it was started from, the task's epic, or `ep-000` from the Planning view. Started
     from a task, it links `informs` to that task;
-  - the conversation is the run's terminal; there is no chat surface. The workflow's prompt names the proposal and
+  - the conversation is the run's session, shown as a chat or as its terminal (Comms, below; revision 25). The
+    Planning page puts the session on the left and the proposal on the right, and each reply lists what it wrote
+    (note 35). The workflow's prompt names the proposal and
     the CLI ops the agent writes with: `create` into the private root, then `link` from the proposal
     (`includes`), for tasks, spikes and questions. `collide` is on the session's `PATH` (R5): Collide puts a
     directory with the `collide` binary first on `PATH` for this session, because the agent's Bash would otherwise
@@ -2985,7 +3056,7 @@ Details:
     conversation;
   - everything stays private until Share (0.10). A diff in the session's worktree goes to review, as for New
     session;
-  - **a panel beside the terminal** (revision 18) follows the proposal's files live. Its Plan tab shows the
+  - **a panel beside the session** (revision 18) follows the proposal's files live. Its Plan tab shows the
     proposal and its status, the features, the spikes, the questions, the tasks and the Readiness checklist. Its
     Quality tab shows the coverage map, the Decision log, the Assumption ledger, the findings and each spike's
     pre-registration. Its buttons type a request into the terminal and write nothing themselves, except a
@@ -3053,7 +3124,7 @@ Details:
   - until Stage 9d, an agent can make the item with `collide task create`, but the conversation does not come along.
 - **The Desk** (owner, 2026-11-18; revision 24; Stage 9e): one long-lived interactive Claude Code session per board,
   docked at the bottom of every page, in the main checkout. It coordinates work and edits no code; code work is still a
-  run, with a worktree and review:
+  run, with a worktree and review. The dock opens on it, and Comms lists it pinned (revision 25; note 20):
   - it runs through the shim's terminal, as take-over does (S2), in 9b's terminal view, and survives closing the app and
     a daemon restart. It is not a run: it has its own shim folder under the board, no task, worktree or gates, and no
     stop sweeps it. It uses the board's Claude entry under `config: user`, as New session does, so the user's skills and
@@ -3073,6 +3144,22 @@ Details:
   - the pane shows spend from telemetry (0.13) and follows the session id across `/clear`, as take-over does. Nothing
     stops it, because the person is at the keyboard; the Queue warns past a daily figure, whose default is set at the
     split.
+- **Comms** (owner, 2026-11-24; revision 25; notes 19, 21, 22, 28, 30, 31 and 33; Stage 9b): every session with an
+  agent on the board, by day, the Desk pinned first. New session starts one here. A session:
+  - shows as **Chat** (the default), drawn from its transcript: each message, the work folded to one line, and each
+    result with its time and cost; as **Inputs and results**, a table of when, what was asked, what came back, how
+    long and the cost; or as its **Terminal**, Claude Code itself through the shim's terminal. A message typed in
+    Chat goes to the same session, as if typed in the terminal (unmeasured until Stage 9b);
+  - has the person's own notes: what the session is for, and free notes in Markdown, kept on this machine with the
+    session and saved as typed. They open in a larger window, the Markdown beside the result;
+  - keeps **pins**: Pin copies a result into the session's Pinned list, which stays however long the conversation
+    grows or is compacted. A pin opens, copies, or files as a task. Ending a session asks to delete its pins, ticked
+    by default;
+  - says where it came from when Optimize or Discuss opened it: its name gives the step, the run and the phase, and
+    its notes start with what the person saw, the research with its sources, and the bake-off if there was one.
+
+  The **dock** shows one session at the foot of any page, so a person can talk to it while looking at the board. It
+  opens on the Desk, offers every session, and hides on Comms, which shows the same session larger.
 - **Menu bar** (owner, 2026-11-13). Closing the window leaves Collide in the menu bar, so the Queue stays in sight
   while runs go on:
   - the icon shows the live runs and a badge with the Queue count, and the menu shows the cache closest to going
@@ -3099,10 +3186,11 @@ Details:
   - The expected duration appears only once three or more earlier runs of that workflow have timings; otherwise it
     says "unknown".
 - **First run works with no pack and no tasks** (owner, 2026-11-13). Any git repo opens with no setup:
-  - checks: `claude` is installed and logged in; the folder is a git repo (if not, Collide offers `git init`); `gh`
-    is optional;
-  - the built-in packs (0.4), plus a GitHub source when `origin` is on GitHub and `gh` is logged in (otherwise a
-    hint);
+  - checks, on one page (revision 25; note 13): `claude` is installed and logged in; the folder is a git repo; and,
+    from Stage 5, `gh`, which is optional. A failing check names its fix, with a copy button. A logged-out `claude`
+    does not block opening a board; a folder that is not a git repo does, and offers Make it one (`git init`);
+  - the built-in packs (0.4), plus, from Stage 5, a GitHub source when `origin` is on GitHub and `gh` is logged in
+    (otherwise a hint);
   - default model aliases (`fast` → sonnet, `strong` → opus), editable later;
   - board settings stay per user until **Share with team** writes `.collide/` into the repo (`collide init`);
   - a trust prompt only for packs from the repo or ones the user adds;
@@ -3200,7 +3288,8 @@ code files. It presents what it is told, and the agent does the analysis (0.3 fo
     `phase:<name>`, the seconds a run spent in that phase, with a missing value last. `group_by` is status
     (the source's own), category, epic, label or source. A `window` is two clock times such as `09:15`.
   - **No tool launches, accepts, edits or deletes in v0.** A group the agent shows is a selection a person can launch
-    from the Field (Stage 11), and the agent has no tool for it. Tools that act are deferred (Deferred).
+    from the Field, add to Up next, or keep in Autopilot's list (Stage 11), and the agent has no tool for it. Tools
+    that act are deferred (Deferred).
 - **A view and a lens are two things** (S6 proposal 2). Keeping them apart means a saved View never silently holds an
   agent's guess.
   - A **view** is typed state: filter, sort and grouping on the Field, and filter, sort and window on Tracks. It stays
@@ -4676,6 +4765,9 @@ Projects keys.
   and `comment`. Versions are per item (0.10). A stale version is detected before the write and returns `conflict`.
 - **Provenance:** `author_association` per task, for 0.9's trust rules.
 - Any protocol change this adapter forces goes back into 0.10 and the plan adapter.
+- **No-setup open's GitHub source** (0.11; moved from 6a, owner, 2026-11-21; revision 25). A board whose
+  `board.yaml` names no repos takes its `origin` repository as its GitHub source when `origin` is on GitHub and `gh`
+  is logged in, and shows a hint otherwise. The first-run page gains the optional `gh` check. Built in `ts-0172-xc`.
 
 **Success Criteria**:
 - An issue edit appears within 60 s (measured).
@@ -4683,14 +4775,21 @@ Projects keys.
 - A write with a stale version is detected before the write and returns `conflict`.
 - A deleted issue leaves the corpus within one reconcile interval.
 - A view over both plan and GitHub tasks lists both.
+- A clone whose `origin` is on GitHub, with no `.collide/` and `gh` logged in, opens with its origin's issues. With
+  `gh` logged out it opens with a hint. A board with no repos and no GitHub `origin` runs no `gh` (`ts-0176-ds`).
+- A fake issue whose body holds the hostile set of 6a's criterion (raw HTML, a `javascript:` link, a `file:` link, a
+  remote image) reaches the drawer as text under the same CSP (`ts-0176-ds`).
 
 **Tests**: Recorded GitHub fixtures (no network in CI); scope check; per-item version conflict tests; reconcile
-removal; PR items; category mapping; mixed-source view test.
+removal; PR items; category mapping; mixed-source view test; the no-setup source from `origin`; the hostile issue
+body.
 **Status**: Not Started. Split into `ts-0168-tq` to `ts-0177-hd` (revision 24 scope, 2026-11-21), in epic `ep-005-hs`,
 built one at a time in id order (part L). It runs after Stage 6b. Nothing in it runs a real `claude`, reaches GitHub
 or reads a token: its tests use recorded fixtures, a fake `gh` on the test's own `PATH` and a fake API on loopback.
 The criteria that need real GitHub (the 60 s measurement, a real close, delete, transfer, expiry and scope failure)
-are the owner's, in `ts-0177-hd`.
+are the owner's, in `ts-0177-hd`. Revision 25 adds the no-setup GitHub source and the `gh` check (`ts-0172-xc`) and
+the hostile issue body (`ts-0176-ds`); both items say so, and their "runs no `gh`" now holds for a board with no repos
+and no GitHub `origin`.
 
 
 ## Stage 6: Task board (read-only desktop)
@@ -4702,27 +4801,64 @@ keeps the epic `ep-006-wq`, with its items grouped by letter.
 ### Stage 6a: The board
 
 **Goal**: The Field, filter bar, drawer, settings and no-setup open, over the corpus, live. Stage 3c built a minimal
-shell and window; this finishes them.
+shell and window; this finishes them. The design reference is the board mock, `docs/mockups/board.html`, design notes
+1-46 (owner, six rounds to 2026-11-24). "Note N" below is its note; the look (colour, shading, spacing) is taken from
+the mock, not from this plan.
 
 - The Tauri shell: one `rpc` command and one event channel, forwarding to the owner's socket and adding the token
   (0.2). Stage 3c built the minimal form. The webview's CSP and Tauri capabilities are set here (0.9; R5): the
   capabilities are `rpc` and one event channel, and nothing else. The UI's client speaks the owner's JSON-RPC
   (handshake, reconnect), so it also runs in a browser against a fake owner.
-- **Field:** views; board and run-order layouts; live updates from `watch`; divergence and collision chips.
-  Board columns come from the declared statuses, by status or by category (0.10, revision 23). Stage 2's fixed
-  category columns go.
-- **Filter bar:** chips that write CEL; saving a view writes a view file.
-- **Task drawer, read-only:** body, dependencies both ways, collections, per-checkout state.
-- **Line selector** (0.11): every open board with its default line. Switching swaps views and workflows in place
-  and stops nothing.
-- **Settings:** each key's effective value and the layer it came from (0.7). Secrets are set into the keychain from
-  here. The Agents page is part of it (6b).
-- **No-setup open** (0.11): any git repo opens with the built-in packs, a GitHub source when `origin` is on GitHub
-  and `gh` is logged in, and the default aliases. Board settings stay per user until Share with team writes
-  `.collide/`. First-run checks: `claude` installed and logged in, a git repo (else offer `git init`), `gh` optional.
-  The trust prompt appears only for repo packs.
-- **Empty board:** a prompt box that creates a scratch task (built in 3c; launching from the board arrives in 9a), New
-  session (9b), the detected sources, and Add a pack.
+- **Tabs** (0.11; note 2): all five, with their subtitles and keys. Field and Planning work. Queue and Comms say what
+  arrives and in which stage (9a, 9b); Tracks shows a still preview of its design, with no data.
+- **Field:** views; board, run-order and graph layouts (0.11; note 11); live updates from `watch`; divergence and
+  collision chips. Board columns come from the declared statuses, by status or by category (0.10, revision 23).
+  Stage 2's fixed category columns go.
+  - A column's header is the status name, with its category in words beneath (note 3). Done and Dropped start
+    folded, showing their count, and the fold is kept per view (note 4).
+  - A card shows its title, then its short id and stage. A chip shows only when it says something (note 5): the
+    status, in category columns; Waits on N; Unblocks N, from 3 up (0.10; note 41); a copy that differs, named with
+    its state and where it is ("Review in Run R-121"; note 6); and a shared id ("Same id in 2 copies"; note 7),
+    never shown as a difference, with both copies in the drawer.
+  - The graph lights a task's lines, and dims the rest, while the pointer is on it. Core's `bottlenecks` view
+    (0.10) is listed with the others.
+  - Live updates are quiet: a changed card flashes once and the Live stamp updates, with no toast (note 14).
+- **Filter bar** (0.11; notes 9, 10 and 38): chips in plain words that write the CEL, shown read-only under
+  Advanced. Saving a view writes a personal view file, and Share with team writes it to `.collide/views/`. Fold
+  leaves one line, with the filters in force, "showing X of Y" and Clear; it stays folded for that board, and `/`
+  unfolds it into the search.
+- **Task drawer, read-only** (0.11; notes 8, 17, 18, 29, 34 and 39): beside the board, its parts in 0.11's order.
+  6a builds the description, Waits on and Unblocks, Part of, Changes, Fields from the source, each copy and Details
+  for engineers; the questions come in 9a, and Discuss with the Desk in 9e.
+  - Each part sits under a bar that folds it, and the fold holds for the next task. The person drags the drawer's
+    edge, or moves it with the arrow keys, between the mock's limits; a double-click resets it. The width is the
+    person's, not the task's.
+  - **Changes** (note 17): a run's changes come from the heads it records per phase (0.8), so a worktree, the
+    person's checkout and a line all work, and an active task shows its edits as they land. Work done outside a run
+    is found by the commits that name the task's id. Before Stage 9 the runs are those the CLI and the thin loop
+    (3c) start, and a run's entry links to Tracks once 9b ships.
+  - A file opens its diff, on its changes, or on the whole file after them, numbered, with added and removed lines
+    marked and scrolled to the first change (note 29).
+  - **Fields from the source** (note 18): its declared fields (0.10), each named by its `label`, or by its id in
+    words.
+  - **An id peeks** (note 34): any item id in a body, a note or a result is a link. Hovering shows the item in a
+    small window: its state, title, what it waits on and its body, which scrolls. A click keeps it open, an id in it
+    opens in the same window with Back, and Esc or a click away closes it.
+- **Line selector** (0.11): every open board with its default line, at the top left beside the view picker
+  (note 1). Switching swaps views and workflows in place and stops nothing. A missing board's row says "folder not
+  found" (note 15).
+- **Settings** (note 12): one table. Each key shows its effective value and its layer as a badge: Default, You or
+  This repo (0.7); a value the repo overrides shows beside it, struck out. Secrets show Set or Not set, never the
+  value, and are set into the keychain from here. The Agents page is part of it (6b).
+- **No-setup open** (0.11): any git repo opens with the built-in packs and the default aliases. Board settings stay
+  per user until Share with team writes `.collide/`. First run is one page of checks (note 13): `claude` installed
+  and logged in, and a git repo. A failing check names its fix, with a copy button. A logged-out `claude` does not
+  block opening a board; a folder that is not a git repo does, and offers Make it one (`git init`). The trust prompt
+  appears only for repo packs. The GitHub source and the optional `gh` check arrive with the `github` pack in Stage
+  5 (owner, 2026-11-21: 6a and 6b run before it).
+- **Empty board** (0.11; note 13): Plan it first, shown first, which says it arrives in 9d until then; Start with a
+  task, which makes a scratch task (built in 3c; launching from the board arrives in 9a); the detected sources; and
+  Add a pack.
 - **Planning** (owner, 2026-11-13): a read-only planning view; links both ways in the drawer; checklists shown
   read-only; the branch-only chip; and the view's Features (0.11; revision 14): features by section across
   proposals, with their derived state and tasks, and near-duplicate sections flagged.
@@ -4738,7 +4874,17 @@ shell and window; this finishes them.
   errors, and what was awkward (R5). S6's thresholds are advisory (Stage 1).
 - A fresh git repo with no `.collide/`, on a machine profile with no Collide config, opens to a board with no setup
   step. Share with team writes `.collide/`, and a second clone opens with it after the trust prompt.
-- A folder that is not a git repo offers `git init`. A missing or logged-out `claude` is named, with the fix.
+- A folder that is not a git repo does not open, and offers Make it one. A missing or logged-out `claude` is named
+  with its fix and a copy button, and the board still opens.
+- **Run order and graph** (note 11): for a view with a closure on the fixture board, both show the tasks and steps
+  of `collide tasks --view`, and the graph draws one line for each blocking link among them.
+- **Unblocks** (note 41): on a fixture where three open tasks wait on one task and two more wait on one of those
+  three, one of them by two paths, its `unblocks` is 5, and a done task in a chain stops the walk. `bottlenecks`
+  lists it first, its card shows Unblocks 5, and a task with 2 shows no chip.
+- **Drawer** (notes 8 and 18): a plan task shows every part in 0.11's order; a scratch task shows no Waits on or
+  Unblocks. A fixture source whose field declares `label` shows it, and one without shows the id in words.
+- **Changes** (note 17): a CLI run's phase heads list its files with their diffs, while the run is active and after,
+  and a commit made by hand that names the task's id is listed too.
 - The MVP view in the app lists the same tasks as `collide tasks --view edge-mvp`.
 - A `plan set` in a worktree shows as a divergence chip within the watch debounce plus the 10 s recheck.
 - A key set in both settings files shows the repo's value, labelled as coming from the repo.
@@ -4748,16 +4894,18 @@ shell and window; this finishes them.
   the plan source shows the six categories, each card with its own status name.
 - A proposal shared on a branch and checked out as a worktree shows its items with the branch-only chip. The
   planning view's counts match the CLI's, and its sections and their feature counts match `collide sections --json`.
-- A recorded GitHub issue whose body holds raw HTML, a `javascript:` link, a `file:` link and an image that fetches a
-  remote URL is shown in the drawer as text: nothing runs, nothing is fetched, and the CSP blocks the image. An
-  external link asks before it opens (R5).
+- A fixture task whose body holds raw HTML, a `javascript:` link, a `file:` link and an image that fetches a remote
+  URL is shown in the drawer as text: nothing runs, nothing is fetched, and the CSP blocks the image. An external
+  link asks before it opens (R5). The GitHub-issue form of this check is Stage 5's (`ts-0176-ds`).
 
 **Tests**: Reducers over provider notifications; view save round-trip; the no-setup open and first-run checks; the
-settings view; the hostile-issue fixture in a browser, against the CSP; one Playwright smoke run of scenarios 1 and 2.
-Columns from a fixture source's declared statuses, and from categories for a mixed view.
+settings view; the hostile-body fixture in a browser, against the CSP; one Playwright smoke run of scenarios 1 and 2.
+Columns from a fixture source's declared statuses, and from categories for a mixed view. Core's `unblocks` and
+`bottlenecks` against hand counts; run order and graph against the closure; the drawer's parts per source; Changes
+from phase heads and from commits; the filter fold and the id peek in a browser.
 Planning: planning-view counts against the CLI; the branch-only chip.
-**Status**: Not Started. Items from revision 13, not yet split into items. Epic `ep-006-wq`, items lettered `6a`
-(part L).
+**Status**: Not Started. The design is settled in the board mock (revision 25), and the stage is ready to split.
+Epic `ep-006-wq`, items lettered `6a` (part L).
 
 ### Stage 6b: The in-app agent
 
@@ -4777,6 +4925,11 @@ Planning: planning-view counts against the CLI; the branch-only chip.
   - **The ask box** in the top bar, with one line per call, the chip, Cancel, the failure texts and the "no files were
     read" flag (0.11). `ask.start`, `ask.cancel` and `ask.test` go to the daemon. The Claude adapter's `ask` launch
     spec and the ACP engine's ask profile for opencode are built here, on Stage 3's traits, with no new trait (0.3).
+  - **Describe what to show** (revision 25; note 16): a box in the filter bar that starts an ask scoped to the
+    Field's view. The ask agent (haiku by default) answers with `set_view`, so its words become the filter bar's
+    chips, with the expression under Advanced and the count. The person keeps it, undoes it or saves it as a view.
+    What a view cannot express, such as a comparison with the rest of the corpus (0.10), the agent says plainly,
+    with the nearest view it can make.
   - **The Agents page** in Settings (0.7): the entries with each field's source, the words for folders and tool kinds
     and for budget and timeout, **Test this agent**, the endpoint card with Rotate, per-agent last use and spend this
     week, the snippets for external clients, the choice of the ask agent, and Claude's two version chips (0.3).
@@ -4851,6 +5004,9 @@ Planning: planning-view counts against the CLI; the branch-only chip.
     listener and its permission configuration. If `--restricted` confines reads, the pinned line adopts it and its
     criterion above changes with it.
   - **The secrets launch test:** a seeded secret reaches the agent's environment and appears in no file, argv or log.
+  - **Describe what to show** (note 16): over a fake agent, a request becomes chips and the CEL they write, with the
+    count; Keep, Undo and Save as View act as for any ask; and a request a view cannot express shows the agent's
+    statement and the nearest view, with no chip the agent did not set.
   - The owner's walkthrough also lists what to record: time, errors and what was awkward (R5).
 
 **Tests**: In-app agent: the ported reducer and tool tests; the endpoint against a fake window, in Rust, with the
@@ -5159,8 +5315,9 @@ is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path
   taken from the view's `profile:`. **Use working copy** on a repo pack whose folder in the user's checkout
   differs from the ref (0.7). The
   drawer's operation forms, create, and Record.
-- **Launch from a prompt:** the empty board's prompt box creates a scratch task and launches the board's default
-  workflow on it (`collide/quick` with no pack), through the engine. Stage 3c's hard-coded sequence is removed here.
+- **Launch from a prompt:** Start with a task on the empty board (0.11) creates a scratch task, and Launch runs the
+  board's default workflow on it (`collide/quick` with no pack), through the engine. Stage 3c's hard-coded sequence
+  is removed here.
 - **Cold resume:** a phase with `on_cold: fresh` that resumes after its cache expired starts a new session from the
   handoff note (0.3).
 - **Review and accept a single run** (moved here from the integration stage; owner, 2026-11-13): diff, then accept,
@@ -5173,6 +5330,20 @@ is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path
 - **Follow-ups on review** (revision 24; 0.10): "Follow-ups (n)" beside the diff, each with Keep, Dismiss or Discuss
   (Discuss from Stage 9e). A question that needs a person is answered there or in "Decisions needed", and while the run
   is still in review, **Re-prompt with the answer** sends the answer on.
+- **Questions on the task** (revision 25; notes 40, 44 and 45; 0.8). When a run waits on a person's answer, its card
+  says Needs you, the Queue counts it, and the drawer puts the question first, with what the agent offers and a box
+  for the answer. Sending it lets the run go on, as an answer in the Queue does. Every question a run asks is kept as
+  a Question (0.8) and listed in the drawer's Questions and answers, with its run, phase, time, answer and who
+  answered; a permission prompt stays in the run's record. It is written when it is answered, or when its run ends
+  unanswered, where `questions.keep` says (0.7):
+  - `notes`: on the task, through a source op. The markdown provider appends it to the task's Notes section, with a
+    new op whose name is an item decision; the GitHub provider uses `comment` (Stage 5);
+  - `items`: a question item (`qu-`) linked to the task and resolved with the answer, shown on Planning;
+  - `local`: Collide's store, on this machine only;
+  - `none`: shown while its run lives, then gone.
+
+  A source with no op for `notes`, or no question kind for `items`, keeps them `local`, and Settings says so. A
+  pack's `ask` raises its Queue item once per board at the pack's first load.
 - **Reattach after the app restarts.** The app finds the daemon's runs and shows them as they were.
 - **Queue:**
   - permission requests, `ask_human` with its cause, `human` phases, each with its `show:` list; `unverified`
@@ -5207,6 +5378,12 @@ is reviewed and accepted. This replaces 3c's hard-coded sequence and accept path
   root under its id; answering the question and Re-prompt with the answer starts the next run with the answer in its
   prompt.
 - A Queue item's context view opens with `i` and makes no model request.
+- **Questions** (notes 40, 44 and 45): a fake-adapter run at `ask_human` marks its card Needs you and puts the
+  question first in the drawer, and an answer sent there resumes the run and clears the Queue item. With
+  `questions.keep` at each value, the run's `ask_human`, a `human` phase and a follow-up question end up in the plan
+  task's Notes section (a comment on a fake GitHub issue), as linked `qu-` items resolved with their answers, in the
+  store only, or nowhere once the run ends. A permission answer is in none of them. A fake pack with
+  `questions: ask` raises one Queue item per board, and the answer lands in the user's file.
 - A usage limit from the fake adapter appears in the Queue with its reset time, and the run resumes after it
   without a click. The Queue shows the resume's cache-write cost.
 - A fake-adapter phase with `on_cold: fresh`, resumed after the cache TTL, starts a new session whose first prompt is
@@ -5232,7 +5409,13 @@ New session and the menu bar.
 - **Agent output and tool-call time breakdown** (0.11; part K): the output pane on selecting a track, a phase or a
   task with a run, live and paged; the breakdown table and timeline per track or phase, with the tool-type,
   minimum-duration and time-window filters and their CEL; a bar opens its call in the output pane. The window
-  matches overlapping calls, and totals count only the time inside it (part L).
+  matches overlapping calls, and totals count only the time inside it (part L). A phase in a run's row shows that
+  phase alone, the rest of the row the whole run, and the row opens its task's drawer beside Tracks (note 25); a
+  bar's tooltip names its call (note 26).
+- **Comms and the dock** (0.11; revision 25; notes 19, 21, 22, 30, 31 and 33): the fifth tab, its list by day,
+  Chat, Inputs and results and Terminal, the person's notes, pins, and the dock on every page. Chat is drawn from the
+  transcript the shim keeps, and a message typed there is written to the session's terminal. New session starts
+  from Comms and shows in Tracks as before. Until Stage 9e the dock opens on the newest live session.
 - **Take over:** the phase's session opens in a terminal through the owner's PTY (S2), with xterm's DOM renderer.
   Closing the terminal detaches and reopening replays the shim's buffer. `claude`'s exit or **End take-over** ends
   the phase and runs its gates. Live cost from telemetry, with a Queue warning at the phase budget, and the session
@@ -5261,6 +5444,12 @@ New session and the menu bar.
   mid-take-over and relaunching returns to the same session with its output replayed, as S2 measured. After a
   `/clear`, a headless resume uses the new session id.
 - A take-over past its phase budget raises a Queue warning, from telemetry, and keeps running.
+- **Comms** (notes 19, 31 and 33): a New session shows in Comms as Chat, drawn from its transcript, and as its
+  terminal one click away. A message typed in Chat is answered in the same session, and the terminal shows both. A
+  pin survives a `/compact`, and ending the session offers to delete its pins, ticked. Notes typed before an app
+  restart are still there, and none of them is in the repo.
+- **Drill-in** (notes 25 and 26): on a fixture run, a phase shows its calls alone and the rest of the row the whole
+  run. A bar's tooltip gives its call k of n and its result, and a failed call is marked.
 - **Telemetry and interactive launches** (R5): the OTLP receiver refuses a request with a foreign `Host`, a missing or
   wrong run token, or a body over the cap, and it is bound to `127.0.0.1` (`lsof`). A New session's `claude` argv holds
   `--strict-mcp-config` and no endpoint token. A user's own `OTEL_EXPORTER_OTLP_ENDPOINT` is seen before the strip and
@@ -5295,11 +5484,23 @@ real Claude (opt-in in CI, like the contract test).
   - comparing two finished runs;
   - annotations;
   - JSONL/CSV export.
+- **Optimize…** (0.11; revision 25; notes 24, 27 and 28), on a row of the breakdown. Its agent uses the board's
+  Claude entry on a read-only line, the ask's read tools plus web search, with no write tool and no Bash (0.3), so it
+  changes nothing and starts no run. It answers with options, each with its effort, saving, risk and sources. The
+  person picks one or more: Schedule files a task for each, with the research; Discuss opens a Comms session as 0.11
+  says; Bake-off appears with Stage 15. "No spend cap" and "No time limit" are off each time it opens; with them on,
+  the repo's budget still applies, and the agent runs until it is done or the person stops it. Where Schedule files
+  a task, and the shape the agent's options come back in, are item decisions.
 
 **Success Criteria**:
 - S6 scenario 6 passes as a UI test ported from S6's pilots, in the real app with the fake adapter, and the owner's
   walkthrough is recorded as owner judgement in the stage's task item.
 - The critical path matches hand-built fixtures with known answers, including a fan-out and a human wait.
+- **Optimize** (notes 24, 27 and 28): over a fake agent on a fixture row, the launch line holds no write tool and no
+  Bash, the options show with their sources, and the repo and the store of runs are unchanged. Two picks and
+  Schedule file two tasks; Discuss opens a Comms session named for the step, the run and the phase, its notes holding
+  what was seen and the sources. With No spend cap on and a repo budget set, the repo's budget stops it; both boxes
+  are off when it opens again.
 - **Metrics with no pack, real Claude:** the finished run of scenario 1 shows tokens, cache hit rate, CPU time, peak
   memory, disk and its context findings. An imported history shows the same for past sessions, and the store holds
   no prompt, reply or tool text (checked by searching it for seeded strings).
@@ -5329,7 +5530,16 @@ surfaces together.
     phase that approves it; run; verify; decide, with a `human` phase whose `show:` is the record and the result
     set against the kill criterion; write back through the source's ops;
   - Plan… (0.11): a New session on a new private proposal, from the Planning view, an epic or a task, with the
-    planning workflow's prompt; proposal statuses and the person-only ops (0.10);
+    planning workflow's prompt; proposal statuses and the person-only ops (0.10). The Planning page puts the session
+    on the left and the proposal on the right, and each reply lists what it wrote (revision 25; note 35). The
+    agent's writes need no approval: the proposal is a private draft until Share, and the person's own steps (answer,
+    keep, accept) stay the person's;
+  - **how the planning agent learns Collide** (revision 25; note 36, decided): a short charter in the session's
+    system prompt, which survives compaction, plus `collide guide plan`, a topic of `collide guide` (Stage 4c) built
+    from the CLI's own tables so it cannot drift. The charter names the proposal, the person-only ops and the topic;
+  - **an idea in a planning chat** (revision 25; note 37): in scope, it becomes a feature, Unsorted if no section
+    fits; out of scope, a follow-up raised by the proposal (0.10), private until Keep or Dismiss; a choice for the
+    person, a question in "Decisions needed". The planning prompt says so;
   - task points fired from UI writes; the Queue lane from a view; checklist marking in the drawer, with agent
     suggestions shown with their evidence;
   - features (0.11; revision 14): Sort, with `query` and `show_groups` learning the features surface; its chips,
@@ -5397,6 +5607,11 @@ surfaces together.
     The breakdown puts the red-team pass's spend under its own part;
   - approving a spike's pre-registration writes `preregistered:`, and an edit to the part after that shows as an
     amendment. The decide step shows the result beside the kill criterion.
+- **Plan… learns Collide** (notes 35 to 37): with the fake adapter, a Plan… launch line carries the charter, and it
+  is still in the system prompt after a scripted `/compact`. `collide guide plan` prints the planning commands from
+  the CLI's own table, and a test fails when a command is added without it. A scripted in-scope idea becomes an
+  Unsorted feature, an out-of-scope one a private follow-up raised by the proposal, and a choice a question in
+  "Decisions needed". An agent write shows in the proposal pane within the watch debounce, and the reply lists it.
 
 **Tests**: The in-app agent's Tracks tools over the nine-run fixture and the real-agent contract test (opt-in).
 Planning: the spike workflow end to end with the fake adapter; Plan… with the fake adapter scripting the CLI
@@ -5414,7 +5629,8 @@ owner, 2026-11-18; revision 24).
 - **The Desk** (0.11): the pane on every page, through the shim's terminal; its launch line (no `Edit`, `Write` or
   `NotebookEdit`; `Bash(collide:*)` allowed); the turn-end check of the main checkout; the Desk caller (0.2); "from the
   Desk" labels and the Tracks highlight; Discuss; the spend display, and the Queue's daily warning, whose default is set
-  at the split. One Desk per board.
+  at the split. One Desk per board. The dock opens on it, Comms lists it pinned (9b), and Discuss with the Desk in a
+  task's drawer puts the task's id in its input (revision 25; note 20).
 
 **Success Criteria**:
 - With the fake adapter scripting a Desk session: `collide run` from the Desk starts a run labelled "from the Desk" and
@@ -5425,6 +5641,8 @@ owner, 2026-11-18; revision 24).
   running.
 - Discuss on a finished run puts a line with the ids and the handoff note's path in the Desk's input, sends nothing, and
   holds no task text.
+- The dock opens on the Desk on every page, and Comms lists it pinned: one session in both (note 20). Discuss with the
+  Desk in a drawer puts the task's id in its input and sends nothing.
 - The daemon tells the Desk from the CLI and from a run's agent by process tree (0.2); a process with both markers is a
   run's agent.
 
@@ -5487,20 +5705,60 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 - Review and accept per run as in Stage 9, for every run of a group.
 - **A group from a lens** (owner, 2026-11-14; 0.11). Grouping tasks to run together is an option, and the in-app agent
   proposes the groups. A group on the Field's lens selects its tasks and opens the group-run preview above. The agent
-  has no tool for it: a person presses Launch, and the lens stays as the agent made it.
+  has no tool for it: a person's Launch starts it (Launch, Add to Up next, or Autopilot below), and the lens stays as
+  the agent made it.
 - **Up next** (owner, 2026-11-15; revision 21; 0.11). An ordered list of entries waiting to start, kept by the
   daemon in the store, so it survives a restart. One list per board (owner, revision 22).
   - An entry is a task, or a group: an epic, a view or a hand-picked selection. A person adds entries in the order
     they want (the Field: select, then Add to Up next; the CLI: `collide next add|list|move|remove`), and may
-    reorder or remove an entry until it starts. Adding is the person's Launch: the in-app agent may propose an
-    order, as it proposes groups, but has no tool to add one.
+    reorder or remove an entry until it starts. Adding is the person's Launch, and so is turning Autopilot on for a
+    view (below). The in-app agent may propose an order or a group, which shows in the list as proposed until a
+    person keeps or splits it, but no agent has a tool that adds or starts an entry. Each entry says who added it:
+    the person, Autopilot, or the agent (revision 25; note 42).
   - The next entry starts once the one before it has landed (integrated, by the rule above; for a workflow whose
     `landing` is `observed`, merged as Collide sees it on the line's ref, 0.4), so each builds on the last. A switch
     on the list lets independent entries overlap, up to the concurrency cap.
-  - A group is one entry. Its tasks run as a group run (above): in parallel under the cap, in the order their
-    `blocked-by` links give. The list moves on once every task of the group has landed.
+  - A group is one entry, worked in one of three modes picked when it is added (revision 25; note 46). The Group
+    tasks… dialog shows, for each mode, the group's full test runs, reviews and lands, timed from the repo's last
+    test runs:
+    - **Separately** (`per_task`): a group run (above), each task tested, reviewed and landed on its own, in parallel
+      under the cap in the order their `blocked-by` links give;
+    - **Together** (`whole`): one run on one branch for every task, so one test run, one review and one land;
+    - **Tested together** (`tested`): a run per task on its own branch, with the workflow's own checks and review,
+      and nothing lands yet. Collide then merges the branches onto a group branch from the line's ref, in
+      `blocked-by` order, and runs the workflow's `groupTest` (0.7) there once. On `ok`, each run lands through its
+      `integrate`, in that order. On `fail`, Collide tests each half of the set merged, and halves the half that
+      fails, until one task fails alone, as a merge queue does. That task's entry pauses with a Queue item naming the
+      test run; the rest are tested together again without it, and land. A merge conflict on the group branch is a
+      Queue item, as one found before `integrate` is.
+
+    The list moves on once every task of the group has landed.
   - A run of an entry that fails, is stopped or is refused pauses the list and raises a Queue item. Nothing after
     it starts until the person resumes, skips or removes that entry.
+- **Autopilot** (owner, 2026-11-24; revision 25; notes 42 and 43). A switch on Up next, one per board, kept by the
+  daemon with the list. Its settings open under the switch:
+  - a view, and two caps: runs at once (no more than the app's concurrency cap) and spend a day, in USD;
+  - **Every task in this view**, on by default. Turning Autopilot on is then the person's Launch for every open task
+    the view holds. Collide fills Up next from it as entries land: the most `unblocks` first (0.10), ties in the
+    view's order, and a task starts only once what it waits on has landed (above). It leaves out a private item (a
+    follow-up no one has kept, 0.10), and a task from an untrusted author waits for the person's confirmation (0.9).
+    Off, Autopilot starts only the entries a person adds, and adds none;
+  - **Groups**: the agent proposes them, each a proposed entry the person keeps or splits (the default); the agent's
+    groups are kept without asking; or none, one run per task. The agent groups only tasks the person's Launch
+    already covers. **A new group runs** sets the mode of a kept group (default Together);
+  - **When a run asks you**: pause that run and mark its task, so the rest go on (the default); or pause every run
+    until the person answers;
+  - spend a day counts the spend of Autopilot's runs since local midnight (0.13). At the cap Autopilot starts nothing
+    more that day and says so on Up next; runs already going go on under their own budgets;
+  - turning Autopilot on, and changing its view or caps, is a person-only op (0.10): a run's agent is refused, and the
+    Desk's request waits as a one-click confirmation in the Queue. Turning it off starts nothing; live runs go on.
+- **When an Autopilot run finishes** (note 43), it waits for the person's review, as in Stage 9, and entries that do
+  not depend on it go on. The exception is a workflow that declares `autoLand` (0.7), once its review round passes:
+  the run ended with an outcome `autoLand` names; it reached no `ask_human` and no `human` phase; every gate answered
+  `ok`, none `unverified` or proceeded by a person (0.5); and no required checklist item is open. Collide then accepts
+  it in 0.4's order with no person's review, and records it as landed by Autopilot for the person who turned it on. A
+  refusal or a conflict on the way goes to the Queue, as for any accept. Autopilot's checkbox "Land it if its review
+  round is all automated", on by default, turns the exception off, and then every run waits for review.
 - **Orchard's `session` workflow, for real** (0.4, 0.7; revision 22): once, with the owner, on a small group. Its
   label passes `dev worktree new`'s check, its worktrees are attached with their tasks, its merges land them, and Up
   next moves on. Whether the lead's one label fits review records that name the reviewer that ran is checked here.
@@ -5510,7 +5768,9 @@ recorded in a spike folder under `.collide/planning/spikes/`.
   as `COLLIDE_GROUP` beside the run's other context variables: the group's name and kind, the source's own handle
   for it (an epic id, a collection), its tasks in order with their status, which of them this run is for, and the
   branch and commit each earlier task landed as. A workflow may declare `group: per_task` (one run for each task,
-  the default) or `group: whole` (one run given the whole group), for a pack whose rules work on a group at once.
+  the default), `group: whole` (one run given the whole group), for a pack whose rules work on a group at once, or
+  `group: tested` (above; revision 25). A list names every mode it takes, the first its default
+  (`group: [per_task, tested]`), and a group entry offers only those. The list form is an item decision.
 - Syncing (0.4): how far each workspace's base is behind its line's ref (the conflict check before `integrate`
   ships in Stage 9); a pack's `sync` implementation, run as a `script` phase or before `integrate`.
 - The two integrate implementations:
@@ -5547,6 +5807,18 @@ recorded in a spike folder under `.collide/planning/spikes/`.
   that is not `ready`, as it does for any selection. The tool list of 0.11 has no tool that launches (a test counts
   the five names). The owner asks the Field request on the fixture board and launches one group the agent found,
   recorded as owner judgement in the stage's task item.
+- **Autopilot** (revision 25), on a fixture view of six linked tasks with fake runs:
+  - with Every task on and runs at once 2, Up next fills the most `unblocks` first, at most two run at once, and no
+    task starts before what it waits on has landed. With it off, nothing starts until a person adds an entry;
+  - at a spend a day of $1 with fake runs of $0.40, the third run does not start, and Up next says why;
+  - turning it on from a run's agent is refused; from the Desk it waits as a Queue confirmation;
+  - a proposed group starts only once a person keeps it, and Split makes one entry per task.
+- **Landing without review**: a fake workflow with `autoLand`, a `readOnly` reviewer and an `ok` gate lands under
+  Autopilot with no Review item, and the record names Autopilot. With the checkbox off it waits for review, as does a
+  run that reached `ask_human` or had an `unverified` gate. Load refuses `autoLand` on a workflow with a `human` phase
+  or with no `readOnly` role, naming the reason.
+- **Tested together**: four fake tasks, one of which makes a fake `groupTest` fail on the merged branch. The
+  halving names that task, its entry pauses with a Queue item, and the other three land after one more passing run.
 - A failing gate on `run.before_integrate` blocks accept, and the Queue says why.
 - S6 scenarios 3 and 5 pass as UI tests ported from S6's pilots, in the real app at full scope (group launch,
   accept), and the owner's walkthrough is recorded as owner judgement in the stage's task item.
@@ -5559,7 +5831,8 @@ recorded in a spike folder under `.collide/planning/spikes/`.
 
 **Tests**: Order, readiness and cycle tests; conflict-to-Queue test; implementation resolution per workflow; the lens
 group to preview path; the merge-tree conflict check; both integrate implementations against fixtures;
-untrusted-author gate.
+untrusted-author gate. Autopilot's fill order, caps and person-only switch; the `autoLand` load checks and land rule;
+the halving on a fake `groupTest`.
 Planning: the merge cases, one per row of the merge table; verify verdicts; `wait` on linked questions.
 **Status**: Not Started. Items from revision 13, not yet split into items.
 
@@ -5767,6 +6040,11 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   until they finish. Their claims show side by side as agreed, split or raised by one agent, and a split or a
   claim raised by one agent can be added to the spike as a check. A split is a reason to test, not a vote. It
   waits for this stage's comparison.
+- **Bake-off** (owner, 2026-11-24; revision 25; note 32), from Optimize (Stage 9c). An agent prepares each pick on its
+  own branch under the experiment prefix. Each pick then runs against today's way on the same code, as its own
+  8-pair `crossover` after a warm-up pair, so several picks are several two-arm experiments, never one test of more
+  than two arms. The result says, per pick, whether it was faster and by how much, from the exact crossover test,
+  labelled "on this task", and whether the same tests ran in both arms.
 
 **Success Criteria**:
 - **Positive control:** arm B is arm A plus a known `sleep 60` in a dev CLI step that `ws-create` runs. The
@@ -5801,6 +6079,9 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **Bench:** `collide bench` on the fixture pack's `workspace.create`, with B adding `sleep 2`, gives a verdict from
   its default 10-pair crossover and shows the A/A pairs.
 - **Estimate:** the preview of an 8-pair Orchard crossover shows its expected duration from earlier runs, in days.
+- **Bake-off** (note 32): two picks on a fake where one is 30 s faster and the other no different run as two 8-pair
+  crossovers, each after a warm-up pair. The first gets a verdict, labelled "on this task"; the second gets "no
+  verdict". A pick whose arm ran fewer tests is marked so, beside its result.
 - S6 scenario 7 passes as a UI test ported from S6's pilot, and the owner's walkthrough is recorded as owner
   judgement in the stage's task item (S6's threshold is advisory).
 
@@ -5837,8 +6118,8 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **A local REST API** for external tools (CI, chat bots, team dashboards) to read or control Collide: when one
   needs it (owner, 2026-11-13: not now). Until then, `collide … --json` is the query interface. The UI-tools endpoint
   (0.2) is not that API: it changes the open window's view and reads what the window holds, and it cannot act.
-- **More task operations:** GitHub `create` and `setFields`, and plan notes: when a user needs them in the UI. They
-  are not needed in Milestone A.
+- **More task operations:** GitHub `create` and `setFields`, and plan notes beyond a run's questions (Stage 9a writes
+  those; revision 25): when a user needs them in the UI. They are not needed in Milestone A.
 - **Moving a scratch task into a source** (GitHub `create`, plan `create`): when a user wants a scratch task tracked
   by the team. The move op that Share adds for planning (the second-pack stage) is the mechanism.
 - **Points for foreign changes** (a teammate, a pull, a hand edit, a bot): when a team needs a reaction that the
@@ -5861,7 +6142,8 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **Tools that act** (launch, accept, edit, delete; owner, 2026-11-14): when the owner has launched groups from a
   lens by hand in real use (Stage 11) and wants the agent to do the last step. The token the endpoint needs exists
   from Stage 6, so the older condition is met. The first such tool would not launch: it would open the run preview
-  with the selection filled in, so a person still presses Launch. Accept, edit and delete each need their own design
+  with the selection filled in, so the Launch stays a person's (Launch, Add to Up next or Autopilot, Stage 11).
+  Accept, edit and delete each need their own design
   and a confirmation that the agent cannot answer (0.9).
 - **Pack-supplied agent entries and a profile per kind of work** (S6's list for a real Settings page): when a pack
   author wants to ship a recommended ask agent, or the owner wants one agent for asks and another for plans. In v0
@@ -5886,7 +6168,6 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   decision stays deferred while question items and a `wait` phase serve planning (owner, 2026-11-13).
 - **When a pack outside this repo and the Orchard repo exists:**
   - a table layout;
-  - a full dependency-graph layout (run order ships in Stage 6);
   - a third-party provider contract suite;
   - freezing `collide/v1`.
 - **Cross-source dependencies** (a GitHub issue waiting on a plan task) and cross-board launch for multi-repo
@@ -5993,7 +6274,11 @@ what changed in time, resources and outcome, and nothing outside the experiment 
 - **Packs from anywhere run as the user.** A `git:` pack is someone else's code, and its hooks run with the user's
   rights. Mitigation: trust per tree id, with the hooks, providers and observers listed; a new tree id asks again
   with the diff; no package-manager source in v0, so no dependency chain (0.7, 0.9).
-- **Cost:** `--max-budget-usd` per role. A concurrency cap.
+- **Cost:** `--max-budget-usd` per role. A concurrency cap. Autopilot's runs at once and spend a day (Stage 11).
+- **Autopilot can land work no person read** (owner, 2026-11-24; revision 25). Mitigations: only a workflow that
+  declares `autoLand` lands without review, and load refuses it with a `human` phase or no `readOnly` reviewer (0.7);
+  any `ask_human`, `unverified` gate or open checklist item sends the run to review; the checkbox turns it off; the
+  record names Autopilot; and an untrusted author's task never starts unconfirmed (0.9, Stage 11).
 - **Usage limits.** Parallel runs share one account, so they hit limits together. Runs pause rather than fail (0.3),
   but a busy day can stall every run until the reset.
 - **GitHub writes race.** There are no conditional writes, so a conflict check narrows the window but cannot close
@@ -6042,7 +6327,9 @@ what changed in time, resources and outcome, and nothing outside the experiment 
   - a `show_groups` chip carries "No files were read" when the ask read nothing;
   - Undo restores the screen, and a lens is a timestamped snapshot, never a View, so it cannot pass as a fact;
   - invented ids are rejected, never repaired;
-  - the agent has no tool that launches, and a person presses Launch (Stage 11);
+  - no agent has a tool that launches. A run starts only from a person's Launch: Launch, Add to Up next, or turning
+    Autopilot on for a view, which is a person-only op; the agent's groups only regroup tasks that Launch covers
+    (Stage 11);
   - the opt-in real-agent contract tests re-run on any change of model or prompt, and record their pass counts.
 - **The UI-tools endpoint is a new local door** (owner, 2026-11-14). Any process that holds a token can change what
   the window shows. Mitigations: 127.0.0.1 only, Host and Origin checks, a token from day one (the endpoint token in
@@ -6958,3 +7245,28 @@ selector.
   person's `conclude`; Share moves rather than copies, and Keep lands in the same epic's folder and is refused for a
   proposal or an item linked to a private one; the Desk is not a run, and its turn-end check leaves out Collide's own
   writes.
+
+**Revision 25, 2026-11-24 (owner).** The board mock, written into the plan.
+- **The ask:** the plan text for the board the owner designed in a clickable mock over six rounds (Stage 6a cites it,
+  with its design notes 1-46), so that Stage 6a can be split; and (2026-11-21) Stages 6a and 6b run before Stage 5, so
+  6a needs no `github` pack.
+- **What was there:** four tabs; a Field of board and run order, with a graph deferred; a drawer of body, dependencies,
+  collections and copies; an empty board with a prompt box and New session; sessions shown only as Claude Code's
+  terminal; questions kept in the Queue and the run's record only; Up next started by a person's Launch for each entry,
+  with `group: per_task | whole`; and no way to land a run without a person's review.
+- **Owner's choices:** run order and graph both in 6a (note 11); Comms as a fifth tab with a dock, each session a chat
+  or its terminal (notes 19 and 33); every question kept with its task, under `questions.keep` with a pack's default
+  (notes 44 and 45); Autopilot, whose "Every task in this view" makes turning it on the person's Launch for the view,
+  under runs at once and spend a day, with no agent tool that launches (note 42); a finished Autopilot run waits for
+  review unless its workflow's review round is all automated, behind a checkbox on by default (note 43);
+  `collide/review` declares `autoLand`, so it lands out of the box (2026-11-24); `group: tested`, a merge queue that
+  halves a failing set (note 46); a charter plus `collide guide plan` for the planning agent (note 36); and no-setup
+  open's GitHub source, the `gh` check and the hostile-issue check moved to Stage 5. Changed: 0.7, 0.8, 0.10, 0.11,
+  Stage 5, Stage 6a, Stage 6b, Stage 9a to 9e, Stage 11, Stage 15, Deferred and Risks.
+- **Choices made:** a source has no links when its `links` declares no blocking type, so no new field; "all automated"
+  is a workflow key, `autoLand`, that load checks (a `readOnly` reviewer, no `human` phase), and a run lands by it only
+  with no `ask_human`, no `unverified` gate and no open required checklist item; turning Autopilot on is a person-only
+  op; at its spend cap Autopilot starts nothing more and lets live runs finish; it leaves out follow-ups no one has
+  kept; a pack's question default is a key on its provider entry, not a hook script; `notes` and `items` fall back to
+  `local` where a source cannot hold them; `unblocks` counts open tasks through open tasks; Optimize's agent gets web
+  search and no write tool; Tracks, Queue and Comms appear in 6a and say which stage brings them.

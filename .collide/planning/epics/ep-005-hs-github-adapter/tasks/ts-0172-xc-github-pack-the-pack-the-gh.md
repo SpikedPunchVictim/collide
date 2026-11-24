@@ -37,8 +37,11 @@ What this adds.
   `not_planned`), the fields `repo`, `number`, `url`, `state_reason`, `launchable` and `launch_reason`, the ops
   `setStatus` and `comment` (declared; `ts-0175-gz` implements them), and `capabilities.watch` true, with no `create`,
   `collections` or `preview`. `list` answers an empty list and `get` answers none until `ts-0173-ku`.
-- A board with no repos: the provider answers an empty list, runs no `gh`, makes no request and is never stale. Opening
-  any board with no `sources.github` block costs nothing and shows no error (0.11, no-setup open).
+- A board with no repos and no GitHub `origin`: the provider answers an empty list, runs no `gh`, makes no request and
+  is never stale. Opening such a board costs nothing and shows no error (0.11, no-setup open).
+- No-setup open's GitHub source (moved from 6a; revision 25): a board whose `board.yaml` names no repos takes its
+  `origin` repository as its source when `origin` is on GitHub and `gh` is logged in, and shows a hint otherwise. The
+  first-run page gains the optional `gh` check (`CheckId::GhLoggedIn` in `core/src/owner/board.rs`).
 - The token: `src/gh.ts` runs `gh auth token --user <account>` with `node:child_process` `execFile` (no shell), with
   the provider's own `PATH`. An unset `account` runs `gh auth token` for the account `gh` has active. The token stays
   in memory, never in a log, an error, the pack data or a task. A failure gives cause `auth` and the words "run `gh
@@ -70,7 +73,9 @@ What this adds.
 ## Success criteria
 
 - `collide/github` is a built-in: `names()` has three, the bundle is built, and a board with no `sources.github`
-  block lists it with no tasks, no stale mark and no `gh` call (the fake `gh`'s log is empty).
+  block and no GitHub `origin` lists it with no tasks, no stale mark and no `gh` call (the fake `gh`'s log is empty).
+- A board with no repos whose `origin` is on GitHub lists the origin's issues with the fake `gh` logged in; with it
+  logged out, it shows the hint, not a stale source. The first-run page's `gh` check passes and fails with the fake.
 - `initialize` returns the declared contract, which the protocol's schema accepts, and `collide config get
   collide/github.account` shows it as a per-user setting.
 - With a fake `gh`, the token is read with `--user <account>`; with no account, without it. A failing `gh` gives a stale
