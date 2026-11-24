@@ -22,6 +22,6 @@ agent (6b), and then GitHub Projects v2 (6c).
 
 ## Notes
 
-Items are lettered `6a` to `6c`. Stage 6a is split into `ts-0179-ke` to `ts-0197-uj` (revision 27), built one at a
-time in id order, before Stage 5 (owner, 2026-11-21). Stage 6b is split into `ts-0198-tf` to `ts-0214-rz` (revision 28),
-after 6a. Stage 6c is split when Stage 5 nears done.
+Items are lettered `6a` to `6c`. Stage 6a is split into `ts-0179-ke` to `ts-0197-uj` (revision 27), built one at a time
+in id order, before Stage 5 (owner, 2026-11-21); `ts-0215-gt` (revision 29) runs between `ts-0196-uw` and `ts-0197-uj`.
+Stage 6b is split into `ts-0198-tf` to `ts-0214-rz` (revision 28), after 6a. Stage 6c is split when Stage 5 nears done.

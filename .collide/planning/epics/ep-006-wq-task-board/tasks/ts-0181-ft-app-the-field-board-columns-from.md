@@ -98,4 +98,7 @@ Write these first.
 - Stage 6a item (revision 25 scope, split 2026-11-24). Items of Stage 6a run one at a time, in id order, because they
   share `app/`, `core`, `host` and the generated files. No builder runs `tauri build`.
 - Nothing here runs a real `claude`.
+- Carry (revision 29, Stage 6a's Named actions): make one list of the app's named actions, each with its key, and bind
+  keys from it. Move `ts-0179-ke`'s keys 1 to 5 into it. Later items add their keys to the list. The palette (9d) and
+  the in-app agent's tools (6b) use these names.
 - Owner decisions (2026-11-24): the owner took the recommendations at the split.

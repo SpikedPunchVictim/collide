@@ -7,7 +7,12 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 28.** Revision 28 splits Stage 6b into `ts-0198-tf` to `ts-0214-rz` with the owner's answers
+**Status: revision 29.** Revision 29 takes four ideas from a study of Woolshed, a closed-source app that runs several
+coding agents in one window (`docs/research/woolshed.md`; owner, 2026-11-24). Tracks marks a session that stopped since
+the person last looked (Stage 9b). A menu item and its key start the window with defaults and can set the person's files
+aside (Stage 6a, `ts-0215-gt`). The app's actions are named in one list that keys, the palette and the agent share (6a,
+9d). `collide guide` gains topics for writing packs and views (Stage 12).
+Revision 28 splits Stage 6b into `ts-0198-tf` to `ts-0214-rz` with the owner's answers
 (2026-11-24): a real ACP agent comes for the ask box only, and file runs with one stay Deferred; `external` clients
 get 20 screen-changing calls a minute, shared; the HTTP server is std, with no new crate; and the four owner-run
 items carry their own spend caps, $2.25 in all.
@@ -4829,6 +4834,9 @@ the mock, not from this plan.
   JSON-RPC (handshake, reconnect), so it also runs in a browser against a fake owner.
 - **Tabs** (0.11; note 2): all five, with their subtitles and keys. Field and Planning work. Queue and Comms say what
   arrives and in which stage (9a, 9b); Tracks shows a still preview of its design, with no data.
+- **Named actions** (revision 29; `docs/research/woolshed.md`): each action the UI binds to a key has a name in one list
+  in the app, with its key, and keys are bound from that list. The command palette (9d) lists the same names, and the
+  in-app agent's tools (6b) use a name where they do the same thing.
 - **Field:** views; board, run-order and graph layouts (0.11; note 11); live updates from `watch`; divergence and
   collision chips. Board columns come from the declared statuses, by status or by category (0.10, revision 23).
   Stage 2's fixed category columns go.
@@ -4868,6 +4876,11 @@ the mock, not from this plan.
 - **Settings** (note 12): one table. Each key shows its effective value and its layer as a badge: Default, You or
   This repo (0.7); a value the repo overrides shows beside it, struck out. Secrets show Set or Not set, never the
   value, and are set into the keychain from here. The Agents page is part of it (6b).
+- **Start with defaults** (revision 29; `docs/research/woolshed.md`): an item in the app menu, with its key, reloads the
+  window with the built-in packs, views and settings, and none of the person's stored UI state. It works when the page
+  is blank, since the shell owns it. The mode is the window's: other clients are unchanged, and the window saves nothing
+  while in it. A banner offers Start normally and Reset…, which lists the person's Collide files and moves them into a
+  dated folder beside them. Reset deletes nothing and touches no repo file and no secret.
 - **No-setup open** (0.11): any git repo opens with the built-in packs and the default aliases. Board settings stay
   per user until Share with team writes `.collide/`. Share with team writes `board.yaml` and the person's saved
   views of the board; settings follow when per-board settings exist. On a shared board, each personal view has its
@@ -4909,6 +4922,10 @@ the mock, not from this plan.
 - The MVP view in the app lists the same tasks as `collide tasks --view edge-mvp`.
 - A `plan set` in a worktree shows as a divergence chip within the watch debounce plus the 10 s recheck.
 - A key set in both settings files shows the repo's value, labelled as coming from the repo.
+- **Start with defaults** (revision 29): with a user settings file that does not parse, a personal view that does not
+  compile and a user pack whose folder is gone, the window opens the board with the built-in packs and views, the banner
+  and the fixture's tasks. Settings shows every key at Default. A CLI client connected at the same time still sees the
+  person's settings and their problems. Reset… moves the files it listed and deletes none.
 - The UI's tests run in a browser against a fake owner, with no Tauri.
 - **Statuses as data** (revision 23). A fixture source with eight statuses, two of them mapped to `review`, shows
   eight columns in its order. Renaming its statuses changes the columns with no code change. A view mixing it with
@@ -4923,13 +4940,14 @@ the mock, not from this plan.
 settings view; the hostile-body fixture in a browser, against the CSP; one Playwright smoke run of scenarios 1 and 2.
 Columns from a fixture source's declared statuses, and from categories for a mixed view. Core's `unblocks` and
 `bottlenecks` against hand counts; run order and graph against the closure; the drawer's parts per source; Changes
-from phase heads and from commits; the filter fold and the id peek in a browser.
+from phase heads and from commits; the filter fold and the id peek in a browser; Start with defaults over a broken
+fixture, per connection, and Reset's move.
 Planning: planning-view counts against the CLI; the branch-only chip.
-**Status**: Not Started. Split into `ts-0179-ke` to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`,
-built one at a time in id order (part L). It runs after `ts-0178-fw` and before Stage 5. Nothing in it runs a real
-`claude`. The owner's midway look is `ts-0185-ge`; the S6 walkthrough and the bundled-app checks are the owner's, in
-`ts-0197-uj`. New dependencies (owner, 2026-11-24): `react-markdown` 10.1.0 and `remark-gfm` 4.0.1 (`ts-0183-ee`),
-`tauri-plugin-dialog` 2.x (`ts-0191-nv`).
+**Status**: Not Started. Split into `ts-0179-ke` to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`, built
+one at a time in id order (part L), with `ts-0215-gt` (revision 29) between `ts-0196-uw` and `ts-0197-uj`. It runs after
+`ts-0178-fw` and before Stage 5. Nothing in it runs a real `claude`. The owner's midway look is `ts-0185-ge`; the S6
+walkthrough and the bundled-app checks are the owner's, in `ts-0197-uj`. New dependencies (owner, 2026-11-24):
+`react-markdown` 10.1.0 and `remark-gfm` 4.0.1 (`ts-0183-ee`), `tauri-plugin-dialog` 2.x (`ts-0191-nv`).
 
 ### Stage 6b: The in-app agent
 
@@ -5436,6 +5454,11 @@ New session and the menu bar.
 - **Tracks:** live runs as phase tracks with meters, including provisioning. A phase opens to its activity digest,
   report and diff, with the transcript and terminal behind a toggle. Provisioning progress from `progress` report
   lines. Dependency and build folders are collapsed with counts; lock files are always shown (0.11).
+- **Done since you looked** (revision 29; `docs/research/woolshed.md`): each session counts its turns, and a turn ends
+  when the agent stops and waits. The app records the turn a person has seen only while its window is in front and that
+  session's track, output or chat is on screen, at most once a turn. A session that stopped since then is marked on
+  Tracks and in Comms until it is seen, and Mark unread sets it back one turn. The daemon keeps the seen turn, so every
+  window agrees, and the last write wins.
 - **Agent output and tool-call time breakdown** (0.11; part K): the output pane on selecting a track, a phase or a
   task with a run, live and paged; the breakdown table and timeline per track or phase, with the tool-type,
   minimum-duration and time-window filters and their CEL; a bar opens its call in the output pane. The window
@@ -5474,6 +5497,9 @@ New session and the menu bar.
   mid-take-over and relaunching returns to the same session with its output replayed, as S2 measured. After a
   `/clear`, a headless resume uses the new session id.
 - A take-over past its phase budget raises a Queue warning, from telemetry, and keeps running.
+- **Done since you looked** (revision 29): a fixture session that stops while the window is hidden, or behind another
+  app, is marked on Tracks and in Comms. Showing its output clears the mark, Mark unread brings it back, and a second
+  window shows the same. A session that stops while it is on screen is never marked.
 - **Comms** (notes 19, 31 and 33): a New session shows in Comms as Chat, drawn from its transcript, and as its
   terminal one click away. A message typed in Chat is answered in the same session, and the terminal shows both. A
   pin survives a `/compact`, and ending the session offers to delete its pins, ticked. Notes typed before an app
@@ -5495,7 +5521,8 @@ New session and the menu bar.
 links, a 10 MB result); the breakdown's filters (a 2 s minimum and a clock window, counted against a fixture) and
 wall-clock against summed time with parallel calls; a call that starts before the window counted, with only its
 in-window time in the total; the notification text builder; the daemon restart back-off; take-over and New session with
-real Claude (opt-in in CI, like the contract test).
+real Claude (opt-in in CI, like the contract test). The seen-turn rule: window in front, on screen, once a turn,
+last write wins (revision 29).
 **Status**: Not Started. Items from revision 13, not yet split into items.
 
 ### Stage 9c: Metrics, import, compare and export
@@ -5554,7 +5581,7 @@ surfaces together.
     sort value on each row. `highlight` marks runs, and `open` opens a run, a Queue item or an experiment.
   - A Tracks view saves as a personal view in the board's settings, with its filter and sort, and not its window
     (0.11).
-- Command palette. Owner logs viewable.
+- Command palette, listing Stage 6a's named actions (revision 29). Owner logs viewable.
 - **Planning** (owner, 2026-11-13):
   - `collide/plan/spike` in a private proposal: pre-register, with its kill criterion (revision 18) and a `human`
     phase that approves it; run; verify; decide, with a `human` phase whose `show:` is the record and the result
@@ -5884,6 +5911,10 @@ Planning: the merge cases, one per row of the merge table; verify verdicts; `wai
   way to test their packs without going through the UI, so this is a first-class CLI path for pack authors, usable
   in CI, and is scoped from that ask when this stage is split into items. Stage 10's tests already run the Orchard
   pack's `pack test` with fakes, so the basic command may have to land by Stage 10; settle it when Stage 10 is split.
+- **`collide guide pack` and `collide guide view`** (revision 29; `docs/research/woolshed.md`): topics of `collide
+  guide` (Stage 4c) for an agent asked to write a pack or a view: the manifest, the SDK's types, the CEL a view takes,
+  and the commands that check them. They are built from the installed version's schemas and SDK, as the command list is,
+  so they cannot drift.
 - `collide pack update <name> [--to <ref>]`, and update trust: show a diff of the changed pack (manifest, workflow
   graph, hooks), board config, settings or views before re-approving.
 - Observers per 0.4: delivery, acknowledgement, restart, the disabled-observer Queue item, and a fixture observer

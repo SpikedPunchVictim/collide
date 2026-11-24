@@ -5,7 +5,7 @@ status: ready
 title: "Owner check: the board and S6's walkthrough"
 owners: []
 links:
-  - { type: blocked-by, to: ts-0196-uw }
+  - { type: blocked-by, to: ts-0215-gt }
 ---
 
 ## Goal
@@ -64,7 +64,8 @@ None by a build agent: this check is the owner's. The checklist names the automa
     it.
   - **Scenario 2.** The S2 fixture board of `ts-0196-uw`; the chips; Save as a view "Slow spots". Time it.
   - **Bundled-app checks.** The CSP (the webview's console with the hostile fixture task); the capability list; an
-    external link; the folder picker; Copy; a secret set and removed.
+    external link; the folder picker; Copy; a secret set and removed; Start with defaults from the app menu and from
+    its key with the page broken by a fixture, then Reset… (`ts-0215-gt`, revision 29).
   - **Record.** The times beside the limits, the errors, what was awkward, and the date.
 - **Owner's choice: the S2 board for the walkthrough.** Recommend the fixture board of `ts-0196-uw`, so the five
   targets are known. Alternative: a copy of a real board with labels added by hand.
