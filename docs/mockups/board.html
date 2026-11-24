@@ -612,6 +612,50 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .acheck input{margin-top:3px;flex:none}
 .apop .hint{display:block;font-size:12.5px;color:var(--muted-foreground)}
 @media (max-width:520px){.agrid{grid-template-columns:minmax(0,1fr);gap:4px}.agrid select{margin-bottom:6px}}
+/* Round 7: Ask (6b), a lens, the chip, the Agents page and the endpoint */
+.pop.askpop{width:min(540px,calc(100vw - 32px))}
+.askpop .ask input{min-width:0}
+.calls{list-style:none;margin:0;padding:8px 10px;display:flex;flex-direction:column;gap:3px;font-size:13px;
+  background:var(--muted);border-radius:var(--radius-xs);max-height:220px;overflow:auto}
+.calls li{display:grid;grid-template-columns:48px minmax(0,1fr);gap:8px}
+.calls .t{color:var(--muted-foreground);font-size:12px;text-align:right}
+.calls li.read{color:var(--muted-foreground)}
+.calls li.change{font-weight:600}
+.calls li.end{color:var(--muted-foreground);font-style:italic}
+.flag{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;border-radius:var(--radius-sm);
+  font-size:13px;line-height:1.45;background:color-mix(in srgb,var(--waiting) 10%,var(--card));
+  border:1px solid color-mix(in srgb,var(--waiting) 35%,var(--border))}
+.flag.bad{background:color-mix(in srgb,var(--failed) 8%,var(--card));
+  border-color:color-mix(in srgb,var(--failed) 35%,var(--border))}
+.flag .grow{flex:1;min-width:200px}
+.achip{padding:12px 14px;display:flex;flex-direction:column;gap:8px;font-size:var(--fs-sm)}
+.achip pre{margin:0;background:var(--code-bg);padding:6px 8px;border-radius:var(--radius-xs);overflow-x:auto;
+  font-size:12.5px}
+.achip .by{font-size:12.5px}
+.said{color:var(--muted-foreground);line-height:1.5}
+.said b{color:var(--foreground);font-weight:600}
+.col.lens .why{font-size:12.5px;color:var(--muted-foreground);line-height:1.45;margin-top:4px}
+.col.lens .why .who{font-weight:600;color:var(--waiting)}
+.col.lens.rest{opacity:.62}
+.col.lens > .btn{align-self:flex-start}
+.tc.hl{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary),var(--shadow)}
+.agents{display:flex;flex-direction:column;gap:12px}
+.agent{padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.agent h3{font-size:var(--fs-base);font-weight:600;margin:6px 0 0}
+.agent p{margin:0;line-height:1.5}
+.agent .can{font-size:var(--fs-sm)}
+#askag{border:1px solid var(--input);border-radius:var(--radius-xs);padding:5px 8px;background:var(--card);
+  color:inherit;font:inherit;max-width:100%}
+.tres{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border);padding-top:8px}
+.tlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.tlist li{display:flex;gap:8px;align-items:flex-start}
+.tlist .ok{color:var(--done)}.tlist .no{color:var(--failed)}.tlist .nr{color:var(--muted-foreground)}
+pre.snip{margin:0;background:var(--code-bg);padding:8px 10px;border-radius:var(--radius-xs);overflow-x:auto;
+  font-size:12.5px;white-space:pre}
+.modal .hint{display:block;font-size:12.5px;color:var(--muted-foreground)}
+.modal .radios{display:flex;flex-direction:column;gap:8px}
+/* A narrow window: settings' column shrinks to fit, and a wide table or snippet scrolls inside it */
+.setgrid > *{min-width:0}
 </style>
 </head>
 <body>
@@ -2333,6 +2377,8 @@ const svg = {
   dash: '<svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
   branch: '<svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><circle cx="6" cy="6" r="2"/>'
     + '<circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10a6 6 0 0 1-6 6H8"/></svg>',
+  spark: '<svg class="ic" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>'
+    + '<path d="M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg>',
 };
 
 /* ---------- the model: categories, sources ---------- */
@@ -3124,6 +3170,96 @@ const AUTO = { on: false, view: 's6', group: 'propose', mode: 'together', cap: 2
   ask: 'task' };
 
 /* ---------- state ---------- */
+/* Round 7: what the in-app agent's asks do in the mock (6b). Made up; the times are S6's measured ranges. */
+const ASKS = [
+  { q: 'tasks that would change the same files', re: /same (files|code)|together/, kind: 'lens', tool: 'show_groups',
+    title: 'Tasks that would change the same files', reads: 12, secs: 21.4, cost: '$0.006',
+    words: 'Grouped by the files each task would change, from reading the code. The reason is under each group.',
+    steps: [[2.4, 'query tasks: {n} rows, no bodies'], [3.9, 'Read core/src/provider.rs', 'read'],
+      [5.2, 'Grep "source" in host/src: 31 matches', 'read'], [6.8, 'Read host/src/sources.rs', 'read'],
+      [8.1, 'Read core/src/settings.rs', 'read'], [9.0, 'Glob app/src/components/field/*: 9 files', 'read'],
+      [11.6, 'Read 9 more files', 'read'], [12.9, 'query tasks: 4 rows, with bodies (ids named)'],
+      [20.3, 'show_groups: 4 groups, 12 tasks', 'change'], [21.4, 'Finished: 21.4 s, $0.006, 12 files read', 'end']],
+    groups: [
+      { name: 'Sources in the daemon', ids: ['ts-0168-tq', 'ts-0170-gh', 'ts-0171-ds'],
+        reason: 'All three change how the daemon holds a source, in host/src/sources.rs and host/src/daemon.rs. '
+          + 'ts-0168 also changes core/src/provider.rs under them.' },
+      { name: 'The GitHub pack', ids: ['ts-0172-xc', 'ts-0173-ku', 'ts-0174-wf', 'ts-0175-gz'],
+        reason: 'All four write the GitHub pack, which is not in packs/ yet, and share its API client. ts-0174 and '
+          + 'ts-0175 both touch its ETag cache.' },
+      { name: 'Settings', ids: ['ts-0169-mn', 'ts-0182-st'],
+        reason: 'Both change core/src/settings.rs: one adds a per-user key, the other reads the layer of each key.' },
+      { name: 'The Field', ids: ['ts-0179-fd', 'ts-0180-fb', 'ts-0181-dr'],
+        reason: 'All three edit app/src/components/field/: the columns, the filter bar and the drawer.' },
+    ] },
+  { q: 'what should I work on next?', re: /next/, kind: 'lens', tool: 'show_groups', title: 'What to work on next',
+    reads: 0, secs: 15.9, cost: '$0.003', words: 'Ordered by what each task waits on: the first group unblocks most.',
+    steps: [[2.2, 'query tasks: {n} rows, no bodies'], [3.1, 'query tasks: {n} rows, fields: depends_on, status'],
+      [14.6, 'show_groups: 3 groups, 6 tasks', 'change'], [15.9, 'Finished: 15.9 s, $0.003, no files read', 'end']],
+    groups: [
+      { name: 'Finish first', ids: ['ts-0178-fw'],
+        reason: 'It is being worked on, and ts-0179 and ts-0182 wait on it.' },
+      { name: 'Then, side by side', ids: ['ts-0179-fd', 'ts-0182-st'],
+        reason: 'Each waits only on ts-0178, and neither waits on the other.' },
+      { name: 'After those', ids: ['ts-0180-fb', 'ts-0181-dr', 'ts-0183-ns'],
+        reason: 'Each waits on one of the two above, or on a task that does. ts-0181 also waits on fx-0001.' },
+    ] },
+  { q: 'which tasks touch settings?', re: /settings/, kind: 'mark', tool: 'highlight',
+    title: 'Tasks that touch settings',
+    reads: 2, secs: 9.4, cost: '$0.002', ids: ['ts-0169-mn', 'ts-0182-st', 'ts-0183-ns'],
+    words: 'These change core/src/settings.rs or host/src/settings_files.rs. ts-0183 writes the board\'s settings '
+      + 'when you Share.',
+    steps: [[2.3, 'query tasks: {n} rows, no bodies'],
+      [4.0, 'Grep "settings" in core/src and host/src: 12 files', 'read'],
+      [5.5, 'Read core/src/settings.rs', 'read'], [6.9, 'Read host/src/settings_files.rs', 'read'],
+      [8.8, 'highlight: 3 tasks, nothing hidden', 'change'], [9.4, 'Finished: 9.4 s, $0.002, 2 files read', 'end']] },
+  { q: 'only Stage 5, grouped by status', re: /stage 5|only/, kind: 'view', tool: 'set_view',
+    title: 'Stage 5 by status',
+    reads: 0, secs: 4.0, cost: '$0.001', words: '',
+    steps: [[2.1, 'query tasks: {n} rows, no bodies'], [3.4, 'set_view: epic ep-005-hs, grouped by status', 'change'],
+      [4.0, 'Finished: 4.0 s, $0.001', 'end']] },
+  { q: 'summarise yesterday\'s runs', re: /yesterday|summar/, kind: 'none',
+    fail: 'the agent finished without changing the screen (2 tool calls, none changed anything)',
+    words: 'Six runs ran yesterday; four landed and two stopped in Test. There is nothing to show on the board '
+      + 'for this.',
+    steps: [[2.5, 'query runs: 6 rows'], [3.8, 'query runs: 2 rows, with each phase\'s seconds'],
+      [7.2, 'Finished: 7.2 s, $0.002, the screen unchanged', 'end']] },
+];
+const ASK_MISS = { kind: 'none', fail: 'the agent finished without changing the screen (1 tool call, none changed '
+  + 'anything)', words: 'I could not tell what to show for that. Ask for groups, marks or a view of these tasks.',
+  steps: [[2.2, 'query tasks: {n} rows, no bodies'], [5.1, 'Finished: 5.1 s, $0.001, the screen unchanged', 'end']] };
+// The agents of the Agents page, with the layer each value comes from (0.7).
+const AGENTS = {
+  'claude-haiku': { kind: 'claude-code', word: 'Claude Code', note: 'built in', model: 'haiku', outcome: 'ok',
+    tested: 'Today 09:58', timeout: ['120 s', 'user', 'From ask.timeout_s in your file.'],
+    budget: ['$0.25 an ask', 'repo', 'From this repo\'s ask.budget_usd. A team\'s cap wins over the agent\'s own.'],
+    used: 'Today 10:12 · 23 asks this week · $0.11', versions: true,
+    fields: [['kind', 'claude-code', 'default'], ['model', 'haiku', 'default'], ['config', 'none', 'default'],
+      ['read', '[<board root>]', 'default'], ['tools', '[read, search]', 'default'],
+      ['timeout_s', '120, from ask.timeout_s', 'user'], ['budget_usd', '0.25, from ask.budget_usd', 'repo']] },
+  'local-opencode': { kind: 'acp', word: 'ACP agent', note: 'opencode acp', model: 'ollama/qwen2.5:7b', outcome: 'red',
+    command: 'opencode', timeout: ['300 s', 'user', 'From this agent\'s timeout_s in your file.'], budget: null,
+    secret: ['SOME_API_KEY', 'opencode-key'], used: 'Yesterday 16:20 · 4 asks this week · spend not reported',
+    fields: [['kind', 'acp', 'user'], ['command', 'opencode', 'user'], ['args', '[acp]', 'user'],
+      ['model', 'ollama/qwen2.5:7b', 'user'], ['env', 'OPENCODE_DISABLE_CLAUDE_CODE: "1"', 'user'],
+      ['secrets', 'SOME_API_KEY: opencode-key (a keychain item)', 'user'], ['read', '[<board root>]', 'default'],
+      ['tools', '[read, search]', 'default'], ['timeout_s', '300', 'user']] },
+  'my-client': { kind: 'external', word: 'A client you run', note: 'Collide launches nothing', seen: 'acme-mcp 0.4',
+    used: 'Last seen today 09:30 · 41 calls this week · spend not reported', fields: [['kind', 'external', 'user']] },
+};
+const AGENT_TESTS = {
+  ok: [[true, 'Reached Collide\'s endpoint with the ask\'s token'], [true, 'First tool call after 2.4 s'],
+    [true, 'Finished after 4.0 s'], [true, 'Cost: $0.0009'],
+    [true, 'In effect: reads ~/projects/collide; tools read and search'],
+    [true, 'Confined: asked to write a file and run true in a scratch folder, it did neither']],
+  red: [[true, 'Reached Collide\'s endpoint with the ask\'s token'], [true, 'First tool call after 6.8 s'],
+    [true, 'Finished after 11.2 s'], [null, 'Cost: not reported'],
+    [true, 'In effect: reads ~/projects/collide; tools read and search'],
+    [false, 'Not confined: it wrote a file and ran true in the scratch folder']],
+};
+const TOKENS = ['ct_5e0a9b7c41d2e8f6a3b1c93f9a', 'ct_9c2d7e1f04b6a8c3d5e7a71bd', 'ct_0b8e3a6d2c9f1e7a4b5d6c02e'];
+const EP_URL = 'http://127.0.0.1:47613/mcp';
+const LAST_CALL = 'Today 09:30 · query · from my-client';
 const state = {
   boards: freshBoards(), board: 'collide', view: 'all', surface: 'field', layout: 'board', groupBy: 'auto',
   filt: { stage: new Set(), cat: new Set(), src: new Set(), text: '', deps: false },
@@ -3140,6 +3276,9 @@ const state = {
   // Round 5: folded filters per board, shut panel parts, the panel's width, questions, autopilot, Up next.
   ffold: new Set(), dshut: new Set(), dw: 460, qa: clone(QA), qkeep: 'task', qdraft: {}, auto: clone(AUTO),
   unext: clone(UP_NEXT), overlap: false,
+  // Round 7: the ask, the lens, marks and chip, snapshots, the agents, the endpoint's token and snippet.
+  ak: null, akUnread: false, lens: null, chip: null, hl: null, snaps: [], askAgent: 'claude-haiku',
+  agents: clone(AGENTS), atest: {}, tok: TOKENS[0], tokShow: false, snip: 'claude', lastCall: LAST_CALL,
 };
 const board = () => state.boards[state.board];
 const view = () => board().views.find((v) => v.id === state.view) || board().views[0];
@@ -3342,6 +3481,67 @@ const NOTES = [
     + 'merged; a failure is split in halves to find the task, like a merge queue. Separately is today. A group is '
     + 'one entry in Up next. Decided: as drawn; Tested together is new to the plan.', 'Alternative: tested '
     + 'together without the halving: on a failure, each task is tested alone.', 'decided', 6],
+  ['Ask, in the top bar', 'An Ask button on every page opens a box under it: type a request, or pick an example. '
+    + 'It names the agent and what it can do. While it works, one line per step, written by Collide from the call '
+    + '(query tasks: 19 rows; Read core/src/settings.rs; show_groups: 4 groups). Cancel stops it. Close the box and '
+    + 'the ask goes on; the button says it is still asking. It is not a chat: each ask starts fresh. Recommendation: '
+    + 'as drawn.', 'Alternative: a wide input always open in the top bar. One click less; it takes the room the tabs '
+    + 'need, and on a phone it does not fit.', 'new', 7],
+  ['A lens: the agent\'s groups on the Field', 'When the agent groups tasks, the Field draws each group as a column: '
+    + 'its name, then the agent\'s reason under it, marked as the agent\'s. What it left out sits in a dimmed Not '
+    + 'grouped column. A lens does not follow the tasks: a card stays where the agent put it and shows its state now. '
+    + 'A group can go to Up next as one entry (Stage 11). Recommendation: as drawn.', 'Alternative: keep the status '
+    + 'columns and tint each card by its group, with a legend. Shows where each task stands; the reasons have '
+    + 'nowhere to sit.', 'new', 7],
+  ['The chip: what changed, and who said so', 'Above what an ask changed, a chip. Its first line is Collide\'s own, '
+    + 'from the call: "4 groups, 12 tasks; 7 not grouped", or the expression a view became. Under it, the agent\'s '
+    + 'title and words, marked unverified. Then who and when: the agent and model, the time, how long, the cost, the '
+    + 'files read. Undo puts the Field back, for the last change only; a change of yours ends it. Save snapshot keeps '
+    + 'a lens; Save as a view keeps a view. Recommendation: the chip sits on the page it changed, and the Ask box '
+    + 'closes when the ask succeeds.', 'Alternative: the chip stays in the Ask box, as the plan reads now. One place '
+    + 'for everything; the box covers the lens it explains.', 'new', 7],
+  ['No files were read', 'When an ask draws groups without reading a file, the chip says so in amber: "No files '
+    + 'were read in this ask. These groups come from task text alone." Collide checks what the agent did, not what '
+    + 'it says. It blocks nothing, since a question about order needs no code. For a client you run yourself, the '
+    + 'chip says its reads are not visible. Recommendation: as drawn; try "what should I work on next?".',
+  'Alternative: refuse a lens from text alone when the request names files or code. Safer; Collide would have to '
+    + 'judge the words of the request.', 'new', 7],
+  ['Snapshots in the view menu', 'Save snapshot keeps a lens, yours only. It lists in the view menu under '
+    + 'Snapshots, with when it was saved and which agent made it. Opening one draws the lens as it was; its chip '
+    + 'says the tasks may have changed since. Recommendation: as drawn.', 'Alternative: snapshots in a list of their '
+    + 'own, on the Planning page. Keeps the view menu to views; one more place to look.', 'new', 7],
+  ['When an ask fails', 'The Ask box stays open and says what went wrong in plain words: "the agent finished '
+    + 'without changing the screen (2 tool calls, none changed anything)", "timed out after 120 s", "cancelled". '
+    + 'The agent\'s closing words show under it, marked as the agent\'s. A change made before the failure keeps its '
+    + 'chip and its Undo. If the box was closed, the Ask button carries a red dot. Recommendation: as drawn; try '
+    + '"summarise yesterday\'s runs".', 'Alternative: a toast for the failure. Lighter; it is gone before you have '
+    + 'read why.', 'new', 7],
+  ['Marked tasks', 'An ask can mark tasks without hiding any: a ring on each card, and a chip with the agent\'s '
+    + 'note. Recommendation: as drawn; try "which tasks touch settings?".', 'Alternative: marked cards also move to '
+    + 'the top of their columns. Easier to find on a long board; the order you set changes under you.', 'new', 7],
+  ['Two boxes: Describe what to show, and Ask', 'Describe what to show (note 16) stays in the filter bar: it only '
+    + 'writes filters, answers in about a second and reads no files. Ask is in the top bar on every page, may read '
+    + 'the code, and can group, mark, open or set a view. Recommendation: keep both.', 'Alternative: one box, Ask, '
+    + 'and the filter bar loses its words. One place to type; a quick filter waits on a slower agent.', 'new', 7],
+  ['The Agents page', 'In Settings, Agents: which agent the Ask box uses, then a card per agent: Claude Code (built '
+    + 'in), an ACP agent, and a client you run. Each card says in words what it can do ("starts in '
+    + '~/projects/collide; it can read and search there; it cannot write or run commands"), its timeout and budget '
+    + 'with where each comes from, and when it was last used with its spend this week. Claude\'s card shows two '
+    + 'versions, in use and published. Every value\'s source is under Details. Recommendation: as drawn.',
+  'Alternative: one table, a row per agent and a column per field. Compact; the words for what an agent can do '
+    + 'do not fit in a cell.', 'new', 7],
+  ['Test this agent', 'Runs the smallest ask and lists what it found: the endpoint reached, the first tool call and '
+    + 'the finish in seconds, the cost or "not reported", and whether it is confined: the test asks it to write a '
+    + 'file and run a command in a scratch folder. An agent that can is red. It cannot be the ask agent until you '
+    + 'acknowledge it, and the Ask box warns while it is in use. Recommendation: as drawn; test the ACP agent.',
+  'Alternative: refuse an agent that is not confined, with no acknowledging. Safer; opencode as it comes could '
+    + 'then never be the ask agent.', 'new', 7],
+  ['The endpoint and its token', 'A card for Collide\'s endpoint, the address an agent calls: whether a window is '
+    + 'connected, and the last call. The token is masked, with Reveal, Copy and Rotate; Rotate asks first and names '
+    + 'the clients that will stop working. Snippets for a client you run are made from the real address and token: '
+    + 'Claude Code, JSON, opencode, or the address with the token in it. Beside Rotate: a snippet puts the token in a '
+    + 'file Collide does not control. Recommendation: as drawn, under the agents.', 'Alternative: the endpoint on a '
+    + 'page of its own in Settings. Easier to find; it serves only agents.', 'new', 7],
 ];
 
 /* ---------- top bar ---------- */
@@ -3375,7 +3575,8 @@ function popHtml() {
     const rows = board().views.map((v) => `<button class="opt" data-act="view" data-id="${v.id}"
       aria-current="${v.id === view().id}"><span class="grow">${esc(v.name)}<span class="sub mono">${esc(v.where)}
       </span></span>${v.mine ? '<span class="chip">yours</span>' : ''}</button>`).join('');
-    return `<div class="pop" role="menu" style="left:auto;right:0"><h4>Views of ${esc(board().name)}</h4>${rows}</div>`;
+    return `<div class="pop" role="menu" style="left:auto;right:0"><h4>Views of ${esc(board().name)}</h4>${rows}
+      ${snapsHtml()}</div>`;
   }
   return '';
 }
@@ -3390,7 +3591,8 @@ function tabsHtml() {
     aria-label="${asks} waiting on you">${asks}</span>` : ''}</span><small>${sub}</small></button>`).join('') + nm(2);
 }
 function topRightHtml() {
-  return `<button class="btn ghost sm" data-act="dock" aria-pressed="${!!state.dock}" title="The Desk, docked at the
+  return askBtnHtml()
+    + `<button class="btn ghost sm" data-act="dock" aria-pressed="${!!state.dock}" title="The Desk, docked at the
     foot of every page">${svg.chat}Desk</button><button class="btn ghost sm" data-act="settings"
     aria-pressed="${state.settings}">${svg.gear}Settings
     </button><button class="btn ghost sm" data-act="theme" aria-label="Switch light and dark">${svg.moon}</button>`;
@@ -3414,9 +3616,10 @@ function fieldHtml() {
   if (!visibleTasks().length) return banners.join('') + emptyHtml();
   const tasks = applyFilters(inView);
   if (view().sort) tasks.sort(view().sort);
-  const body = state.layout === 'next' ? upNextHtml() : state.layout === 'board' ? boardHtml(tasks)
-    : state.layout === 'graph' ? graphHtml() : runOrderHtml();
-  return banners.join('') + autoStripHtml() + filtersHtml(inView, tasks) + viewbarHtml(tasks) + body;
+  const body = state.layout === 'next' ? upNextHtml() : state.layout === 'board' ? (state.lens ? lensHtml(inView)
+    : boardHtml(tasks)) : state.layout === 'graph' ? graphHtml() : runOrderHtml();
+  return banners.join('') + autoStripHtml() + filtersHtml(inView, tasks) + viewbarHtml(tasks) + achipHtml()
+    + body;
 }
 
 function groupMode(tasks) {
@@ -3653,7 +3856,8 @@ function cardHtml(t, mode) {
   const epic = t.epic && EPICS[t.epic] ? ` · ${esc(EPICS[t.epic].short)}` : '';
   const first = notedCard[5] ? '' : ((notedCard[5] = true), nm(5));
   return `<button class="tc ${c === 'active' ? 'lit' : ''} ${c} ${state.drawer === t.id ? 'sel' : ''}
-    ${asks ? 'needs' : ''} ${state.flash.has(t.id) ? 'flash' : ''}" data-act="open" data-id="${t.id}">
+    ${asks ? 'needs' : ''} ${state.flash.has(t.id) ? 'flash' : ''} ${marked(t) ? 'hl' : ''}" data-act="open"
+    data-id="${t.id}">
     <span class="tc-t">${esc(t.title)}${first}</span>
     <span class="tc-m"><span>${esc(shortId(t.id))}${epic}</span></span>
     ${chips.length ? `<span class="tc-c">${chips.join('')}</span>` : ''}</button>`;
@@ -5200,8 +5404,7 @@ function settingsHtml() {
       <td><span class="chip info">Set</span></td><td><button class="btn sm" data-act="secret">Replace…</button></td>
       </tr></tbody></table>`;
   } else {
-    body = `<p>The agents you bring: Claude Code, an ACP agent, or an external one that connects to Collide.</p>
-      <p class="muted">This page arrives with the in-app agent, in Stage 6b.</p>`;
+    body = agentsHtml();
   }
   return `<section class="panel card" style="max-width:1000px" aria-label="Settings">
     <div class="frow"><h1>Settings</h1><span class="muted">for ${esc(b.name)}</span><span class="spacer"></span>
@@ -5258,6 +5461,415 @@ function missingHtml() {
   </section>`;
 }
 
+/* ---------- Ask: the in-app agent (6b; round 7) ---------- */
+const ASK_SPEED = 5; // the mock runs an ask five times faster than the times it shows
+let askTimers = [];
+const marked = (t) => !!state.hl && state.hl.ids.includes(t.id);
+const agentNow = () => state.agents[state.askAgent];
+const nView = () => visibleTasks().filter(view().test).length;
+function agentWord(id, a) { return `${id} (${a.word}${a.model ? `, ${a.model}` : ''})`; }
+function askBtnHtml() {
+  const k = state.ak;
+  const run = k && k.phase === 'run';
+  return `<span class="popat"><button class="btn sm" data-act="menu" data-menu="ask" aria-haspopup="dialog"
+    aria-expanded="${state.menu === 'ask'}" title="Ask an agent to show you something on this board">${run
+      ? '<span class="livedot"></span>Asking…' : `${svg.spark}Ask`}${state.akUnread ? '<span class="dot" '
+      + 'style="color:var(--failed)" title="The last ask failed"></span>' : ''}</button>${state.menu === 'ask'
+      ? askPopHtml() : ''}</span>`;
+}
+function askPopHtml() {
+  const k = state.ak;
+  const ag = agentNow();
+  const run = k && k.phase === 'run';
+  const tries = `<div class="fgroup"><span class="lbl">Try</span>${ASKS.map((a) => `<button class="btn ghost sm"
+    data-act="ak-ex" data-v="${esc(a.q)}">${esc(a.q)}</button>`).join('')}</div>`;
+  const lines = k && k.lines.length ? `<ol class="calls" aria-label="What the agent did">${k.lines.map(([s, w, c]) =>
+    `<li class="${c || ''}"><span class="t mono">${s.toFixed(1)} s</span><span>${esc(w)}</span></li>`).join('')}</ol>`
+    : '';
+  let foot = '';
+  if (run) {
+    foot = `<div class="acts"><span class="live"><span class="dot"></span>${esc(state.askAgent)} is working</span>
+      <span class="spacer"></span><button class="btn sm" data-act="ak-cancel">Cancel</button></div>`;
+  } else if (k && k.phase === 'fail') {
+    foot = `<div class="flag bad" role="status"><span class="grow"><b>${esc(k.fail)}</b>${k.kept ? '. The change it '
+      + 'made before this keeps its chip and its Undo.' : ''}</span>${k.fail.startsWith('this agent')
+      ? '<button class="btn sm" data-act="ak-agents">Agents…</button>' : ''}${nm(52)}</div>${k.words
+      ? `<div class="said"><span class="chip warn">The agent's words, unverified</span> ${esc(k.words)}</div>` : ''}`;
+  }
+  return `<div class="pop apop askpop" role="dialog" aria-label="Ask an agent">
+    <h3>Ask${nm(47)}<span class="newtag" title="The in-app agent, Stage 6b">6b</span></h3>
+    <div class="ask"><label class="sr" for="akq">Ask</label><input id="akq" type="text" autocomplete="off"
+      placeholder="Ask for groups, marks or a view of this board" value="${esc(k ? k.q : '')}" ${run ? 'disabled'
+      : ''}><button class="btn sm main" data-act="ak-go" ${run ? 'disabled' : ''}>Ask</button></div>
+    <p>${esc(agentWord(state.askAgent, ag))}. It can read and search this board's folder; it cannot write or run
+      commands. It changes only what this window shows, and each ask starts fresh.</p>
+    ${ag.red && ag.ack ? `<div class="flag bad">${esc(state.askAgent)} is not confined: its own settings let it write
+      and run commands. You acknowledged this at ${esc(ag.ack)}.</div>` : ''}
+    ${lines}${foot}${run ? '' : tries}
+    <p>Describe what to show, on the Field, only writes filters.${nm(54)}</p></div>`;
+}
+function stopAsk() { askTimers.forEach(clearTimeout); askTimers = []; }
+function bigAsk(q, instant = false) {
+  q = q.trim();
+  if (!q) return;
+  stopAsk();
+  const ag = agentNow();
+  if (ag.red && !ag.ack) {
+    state.ak = { q, phase: 'fail', lines: [], fail: 'this agent is not confined; acknowledge it in Agents first' };
+    render();
+    return;
+  }
+  const spec = ASKS.find((a) => a.re.test(q.toLowerCase())) || ASK_MISS;
+  state.ak = { q, phase: 'run', lines: [] };
+  state.akUnread = false;
+  const step = (i) => {
+    const st = spec.steps[i];
+    state.ak.lines.push([st[0], st[1].replace('{n}', String(nView())), st[2]]);
+    if (st[2] === 'change') applyAsk(spec, q);
+    if (i === spec.steps.length - 1) endAsk(spec);
+  };
+  if (instant) { spec.steps.forEach((_, i) => step(i)); return; }
+  render();
+  spec.steps.forEach((st, i) => askTimers.push(setTimeout(() => { step(i); render(); }, st[0] * 1000 / ASK_SPEED)));
+}
+function applyAsk(spec, q) {
+  const f = state.filt;
+  const prev = { filt: { ...f, stage: new Set(f.stage), cat: new Set(f.cat), src: new Set(f.src) },
+    groupBy: state.groupBy, layout: state.layout, lens: state.lens, hl: state.hl,
+    chip: state.chip ? { ...state.chip, undo: false } : null };
+  Object.assign(state, { settings: false, surface: 'field', drawer: null });
+  const inView = visibleTasks().filter(view().test);
+  const c = { q, kind: spec.kind, title: spec.title, words: spec.words, by: agentWord(state.askAgent, agentNow()),
+    at: clock(), secs: spec.secs, cost: spec.cost, reads: spec.reads, prev, undo: true };
+  if (spec.kind === 'lens') {
+    const ids = spec.groups.flatMap((g) => g.ids);
+    const rest = inView.filter((t) => !ids.includes(t.id)).length;
+    Object.assign(state, { lens: { title: spec.title, groups: clone(spec.groups) }, hl: null, layout: 'board' });
+    c.stmt = `${spec.groups.length} groups, ${ids.length} tasks; ${rest} not grouped`;
+  } else if (spec.kind === 'mark') {
+    state.hl = { ids: [...spec.ids] };
+    c.stmt = `Marked ${spec.ids.length} tasks; nothing is hidden`;
+  } else {
+    state.filt = { stage: new Set(['ep-005-hs']), cat: new Set(), src: new Set(), text: '', deps: false };
+    Object.assign(state, { groupBy: 'status', lens: null, layout: 'board' });
+    c.stmt = `Stage 5 only, grouped by status: ${applyFilters(inView).length} of ${inView.length} tasks`;
+    c.expr = `${celOf()}\nlayout.groupBy: status`;
+  }
+  state.chip = c;
+  state.lastCall = `Today ${c.at} · ${spec.tool} · from ${state.askAgent}`;
+  state.ak.kept = true;
+}
+function endAsk(spec) {
+  const k = state.ak;
+  if (spec.fail) {
+    Object.assign(k, { phase: 'fail', fail: spec.fail, words: spec.words });
+    if (state.menu !== 'ask') state.akUnread = true;
+    return;
+  }
+  k.phase = 'done';
+  if (state.menu === 'ask') state.menu = null;
+}
+function cancelAsk() {
+  stopAsk();
+  if (state.ak && state.ak.phase === 'run') Object.assign(state.ak, { phase: 'fail', fail: 'cancelled' });
+}
+function undoAsk() {
+  const p = state.chip && state.chip.prev;
+  if (!p) return;
+  Object.assign(state, { filt: p.filt, groupBy: p.groupBy, layout: p.layout, lens: p.lens, hl: p.hl, chip: p.chip });
+  toast('Undone: the Field is as it was before the ask.');
+}
+function achipHtml() {
+  const c = state.chip;
+  if (!c) return '';
+  const acts = [];
+  if (c.undo) acts.push('<button class="btn sm" data-act="ak-undo">Undo</button>');
+  else if (c.ended) acts.push('<span class="muted" style="font-size:12.5px">Undo ended: you changed the view</span>');
+  if (c.kind === 'lens' && !c.snap) {
+    acts.push(c.saved ? `<span class="chip good">${svg.ok}Saved as a snapshot</span>`
+      : '<button class="btn sm" data-act="snap">Save snapshot…</button>');
+  }
+  if (c.kind === 'view') {
+    acts.push('<button class="btn sm" data-act="save-view">Save as a view…</button>',
+      '<button class="btn sm main" data-act="ak-keep">Keep</button>');
+  }
+  if (c.kind === 'lens') acts.push('<button class="btn sm ghost" data-act="ak-close">Close the lens</button>');
+  if (c.kind === 'mark') acts.push('<button class="btn sm ghost" data-act="ak-close">Clear the marks</button>');
+  const reads = c.reads === null ? 'its reads are not visible' : c.reads ? `${c.reads} files read` : 'no files read';
+  const flag = c.kind !== 'lens' ? '' : c.reads === 0 ? `<div class="flag" role="note"><span class="grow"><b>No files
+    were read in this ask.</b> These groups come from task text alone.</span>${nm(50)}</div>` : c.reads === null
+    ? '<div class="flag" role="note">This client\'s reads are not visible to Collide.</div>' : '';
+  const word = c.snap ? 'Snapshot' : { lens: 'Lens', mark: 'Marked', view: 'View' }[c.kind];
+  return `<section class="achip card" aria-label="What the ask changed">
+    <div class="frow"><span class="chip info">${word}</span><b>${esc(c.stmt)}</b>${nm(c.kind === 'mark' ? 53 : 49)}
+      <span class="spacer"></span>${acts.join('')}</div>
+    ${c.expr ? `<pre class="mono">${esc(c.expr)}</pre>` : ''}
+    <div class="said"><span class="chip warn">The agent's words, unverified</span> <b>${esc(c.title)}</b>${c.words
+      ? `. ${esc(c.words)}` : ''}</div>
+    <div class="muted by">${esc(c.by)} · asked at ${esc(c.at)}: “${esc(c.q)}” · ${c.secs} s · ${esc(c.cost)} ·
+      ${reads}</div>
+    ${c.snap ? `<div class="muted by">Snapshot “${esc(c.snap.name)}”, saved at ${esc(c.snap.at)}. It does not follow
+      the tasks: each card sits where the agent put it and shows its state now.</div>` : ''}${flag}</section>`;
+}
+function lensHtml(inView) {
+  const L = state.lens;
+  const ids = new Set(L.groups.flatMap((g) => g.ids));
+  const rest = inView.filter((t) => !ids.has(t.id));
+  const cols = L.groups.map((g, i) => {
+    const ts = g.ids.map(byId).filter(Boolean);
+    return `<section class="col lens" aria-label="${esc(g.name)}"><div class="colh"><div class="grow">
+      <div class="name">${esc(g.name)}${i === 0 ? nm(48) : ''}</div><div class="why"><span class="who">Agent:</span>
+      ${esc(g.reason)}</div></div><span class="count">${ts.length}</span></div>
+      ${ts.map((t) => cardHtml(t, 'category')).join('')}
+      <button class="btn sm" data-act="lens-next" data-v="${i}" title="Up next arrives in Stage 11">Add to Up next as
+      a group</button></section>`;
+  });
+  cols.push(`<section class="col lens rest" aria-label="Not grouped"><div class="colh"><div class="grow">
+    <div class="name">Not grouped</div><div class="sub">The agent left these out</div></div>
+    <span class="count">${rest.length}</span></div>${rest.map((t) => cardHtml(t, 'category')).join('')
+    || '<div class="empty">Nothing here</div>'}</section>`);
+  return `<div class="cols">${cols.join('')}</div>`;
+}
+function lensToNext(i) {
+  const g = state.lens.groups[i];
+  state.unext = state.unext.map((x) => ({ ...x, tasks: x.tasks.filter((k) => !g.ids.includes(k)) }))
+    .filter((x) => x.tasks.length);
+  state.unext.push({ kind: 'group', name: g.name, tasks: [...g.ids], mode: 'together', by: 'agent' });
+  toast(`${g.name}: added to Up next as one group, worked together. Change how in Up next.`);
+}
+function snapsHtml() {
+  const mine = state.snaps.filter((s) => s.board === state.board);
+  if (!mine.length) return '';
+  return `<hr><h4>Snapshots, yours${nm(51)}</h4>${mine.map((s) => `<button class="opt" data-act="snap-open"
+    data-id="${s.id}"><span class="grow">${esc(s.name)}<span class="sub">a lens · saved ${esc(s.at)} · by
+    ${esc(s.chip.by)}</span></span></button>`).join('')}`;
+}
+function snapModal() {
+  modal(`<h2>Save this lens as a snapshot</h2><label for="snapname">Name</label><input type="text" id="snapname"
+    value="${esc(state.chip.title)}" autocomplete="off">
+    <p class="muted">A snapshot keeps these ${state.lens.groups.length} groups and the agent's reasons as they are
+      now. It does not follow the tasks: a task that changes stays where the agent put it. It is yours only, kept in
+      this board's data folder, and it is never a view. It lists in the view menu.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="snap-yes">Save snapshot</button></div>`);
+}
+function saveSnap() {
+  const c = state.chip;
+  const name = $('#snapname').value.trim() || c.title;
+  const { prev, ...kept } = c;
+  void prev;
+  state.snaps.push({ id: `sn${state.snaps.length + 1}`, board: state.board, name, at: clock(),
+    lens: clone(state.lens), chip: clone(kept) });
+  c.saved = true;
+  closeModal();
+  toast(`Saved the snapshot "${name}". It lists in the view menu.`);
+}
+function openSnap(id) {
+  const s = state.snaps.find((x) => x.id === id);
+  Object.assign(state, { lens: clone(s.lens), hl: null, layout: 'board', surface: 'field', settings: false,
+    drawer: null, menu: null, chip: { ...clone(s.chip), undo: false, snap: { name: s.name, at: s.at } } });
+}
+
+/* ---------- Settings, Agents (6b; round 7) ---------- */
+const LAYER_AG = { default: 'Built in', user: 'You', repo: 'This repo' };
+const layAg = (l) => `<span class="layer l-${l}">${LAYER_AG[l]}</span>`;
+function canWords(a) {
+  const f = `<code>${esc(board().folder)}</code>`;
+  if (a.kind === 'claude-code') {
+    return `Starts in ${f}, this board's folder. It can read and search there; it cannot write or run commands.`;
+  }
+  if (a.kind === 'acp') {
+    return `Starts in ${f}. Collide lets it read and search there, and refuses a request to write or run a command.
+      Its own settings decide what it can do without asking: Test shows it.`;
+  }
+  return 'Collide launches nothing: a client you run calls the endpoint below with its token. Collide cannot see '
+    + 'what it reads.';
+}
+function agentStatus(id, a) {
+  if (a.kind === 'external') {
+    return `<span class="chip warn" title="The name it gave when it connected">calls itself ${esc(a.seen)};
+      unverified</span>`;
+  }
+  if (state.atest[id] === 'run') return '<span class="chip"><span class="livedot"></span>Testing…</span>';
+  if (a.red) {
+    return a.ack ? `<span class="chip warn">Not confined · you acknowledged it at ${esc(a.ack)}</span>`
+      : '<span class="chip bad">Not confined</span>';
+  }
+  if (a.failed) return '<span class="chip bad">Test failed</span>';
+  return a.tested ? `<span class="chip good">${svg.ok}Tested ${esc(a.tested)}</span>` : '<span class="chip">Not tested'
+    + '</span>';
+}
+function agentCardHtml(id, a) {
+  const r = state.atest[id];
+  const res = r && r !== 'run' ? `<div class="tres" role="status"><b>Test, at ${esc(r.at)}</b><ul class="tlist">${
+    r.rows.map(([ok, w]) => `<li><span class="${ok === null ? 'nr' : ok ? 'ok' : 'no'}">${ok === null ? svg.dash
+      : ok ? svg.ok : svg.no}</span><span>${esc(w)}</span></li>`).join('')}</ul>${a.red && !a.ack ? `<div
+    class="flag bad"><span class="grow">This agent is not confined; its own settings let it write and run commands.
+    It cannot be the ask agent until you acknowledge it.</span><button class="btn sm" data-act="ag-ack"
+    data-id="${esc(id)}">Acknowledge…</button></div>` : ''}</div>` : '';
+  const kv = [];
+  if (a.model) kv.push(['Model', esc(a.model)]);
+  if (a.kind !== 'external') {
+    kv.push(['Timeout', `${esc(a.timeout[0])} ${layAg(a.timeout[1])}<br><span class="muted">${esc(a.timeout[2])}
+      </span>`]);
+    kv.push(['Budget', a.budget ? `${esc(a.budget[0])} ${layAg(a.budget[1])}<br><span class="muted">${
+      esc(a.budget[2])}</span>` : '<span class="muted">None. This repo\'s $0.25 an ask does not reach it: budget: '
+      + 'Claude Code only; ACP and External agents get a timeout only.</span>']);
+  }
+  if (a.secret) {
+    kv.push(['Secrets', `<code>${a.secret[0]}</code> from the keychain item <code>${a.secret[1]}</code>
+      <span class="chip info">set</span> <button class="btn sm ghost" data-act="secret">Replace…</button>`]);
+  }
+  kv.push([a.kind === 'external' ? 'Seen' : 'Last used', esc(a.used)]);
+  if (a.versions) {
+    kv.push(['claude', `<span class="chip" title="The claude on your PATH">2.1.330 in use</span>
+      <span class="chip" title="The latest on npm; stable is 2.1.330; checked today at 09:00">2.1.334 published
+      </span>`]);
+  }
+  const det = `<details class="eng"><summary>Details: each value and where it comes from</summary>
+    <div style="overflow-x:auto"><table class="t"><thead><tr><th>Field</th><th>Value</th><th>Set in</th></tr></thead>
+    <tbody>${a.fields.map(([k, val, l]) => `<tr><td class="mono">${esc(k)}</td><td class="mono">${esc(val)}</td>
+    <td>${layAg(l)}</td></tr>`).join('')}</tbody></table></div></details>`;
+  return `<article class="agent card" aria-label="${esc(id)}">
+    <div class="frow"><b>${esc(id)}</b><span class="chip">${esc(a.word)} · ${esc(a.note)}</span>${agentStatus(id, a)}
+      ${state.askAgent === id ? '<span class="chip info">The Ask box uses it</span>' : ''}<span class="spacer"></span>
+      ${a.kind === 'external' ? '' : `<button class="btn sm" data-act="ag-test" data-id="${esc(id)}" ${r === 'run'
+        ? 'disabled' : ''}>Test this agent</button>${id === 'claude-haiku' ? nm(56) : ''}`}</div>
+    <p class="can">${canWords(a)}</p>
+    <dl class="kv">${kv.map(([k, val]) => `<dt>${k}</dt><dd>${val}</dd>`).join('')}</dl>${res}${det}</article>`;
+}
+function agentsHtml() {
+  const ags = Object.entries(state.agents);
+  const opts = ags.filter(([, a]) => a.kind !== 'external').map(([id, a]) => `<option value="${esc(id)}"
+    ${id === state.askAgent ? 'selected' : ''}>${esc(id)} · ${esc(a.word)}${a.red && !a.ack ? ' · not confined'
+    : ''}</option>`).join('');
+  return `<h2>Agents${nm(55)}</h2>
+    <p class="muted">The agents Collide can ask. Each one reads, and changes only what this window shows: none writes
+      a file or starts a run. They live in your own settings. This repo's file may set only a budget and a timeout
+      for every ask.</p>
+    <div class="frow"><label for="askag"><b>The Ask box uses</b></label><select id="askag">${opts}</select></div>
+    <div class="agents">${ags.map(([id, a]) => agentCardHtml(id, a)).join('')}</div>
+    <div><button class="btn sm" data-act="ag-add">Add an agent…</button></div>
+    ${endpointHtml()}`;
+}
+function testAgent(id, instant = false) {
+  const done = () => {
+    const a = state.agents[id];
+    const rows = AGENT_TESTS[a.outcome] || [[true, 'Reached Collide\'s endpoint with the ask\'s token'],
+      [false, `${a.command} was not found on PATH`]];
+    state.atest[id] = { at: clock(), rows };
+    if (a.outcome === 'red') a.red = true;
+    else if (a.outcome === 'ok') a.tested = `Today ${clock()}`;
+    else a.failed = true;
+  };
+  if (instant) { done(); return; }
+  state.atest[id] = 'run';
+  setTimeout(() => { done(); render(); }, 1200);
+}
+function ackModal(id) {
+  modal(`<h2>Use ${esc(id)} though it is not confined?</h2>
+    <p>Its own settings let it write files and run commands. Collide tells it to only read, and cannot stop it for
+      an ACP agent.</p>
+    <ul><li>It gets no task body from a source you have not trusted.</li><li>The Ask box warns while it is in use.
+      </li><li>Your acknowledgement is kept with the agent, in your settings.</li></ul>
+    <p class="muted">To confine it, change its own permission settings, then test it again.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="ag-ack-yes" data-id="${esc(id)}">Acknowledge</button></div>`);
+}
+function pickAskAgent(id) {
+  const a = state.agents[id];
+  if (a.red && !a.ack) { toast('this agent is not confined; acknowledge it in Agents first'); render(); return; }
+  state.askAgent = id;
+  render();
+  toast(`The Ask box uses ${id} from now on.`);
+}
+function addAgentModal() {
+  modal(`<h2>Add an agent</h2><div class="radios">
+    <label class="acheck"><input type="radio" name="agkind" value="acp" checked><span>ACP agent<span class="hint">
+      Collide starts it and talks to it over ACP</span></span></label>
+    <label class="acheck"><input type="radio" name="agkind" value="external"><span>A client you run<span
+      class="hint">Collide starts nothing; you paste a snippet into it</span></span></label></div>
+    <label for="agname">Name</label><input type="text" id="agname" value="my-agent" autocomplete="off">
+    <label for="agcmd">Command, for an ACP agent</label><input type="text" id="agcmd" value="my-agent acp"
+      autocomplete="off">
+    <p class="muted">It may read this board's folder, with the tools read and search. It goes into your own settings
+      file, never this repo's: a command in a committed file would run on a teammate's Mac.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="ag-add-yes">Add</button></div>`);
+}
+function addAgent() {
+  const kind = document.querySelector('input[name=agkind]:checked').value;
+  const id = ($('#agname').value.trim() || 'my-agent').replace(/[^\w.-]/g, '-');
+  const [command, ...args] = ($('#agcmd').value.trim() || id).split(/\s+/);
+  state.agents[id] = kind === 'external' ? { kind, word: 'A client you run', note: 'Collide launches nothing',
+    seen: 'nothing yet', used: 'Not seen yet', fields: [['kind', 'external', 'user']] }
+    : { kind, word: 'ACP agent', note: [command, ...args].join(' '), model: '', outcome: 'missing', command,
+      timeout: ['120 s', 'user', 'From ask.timeout_s in your file.'], budget: null, used: 'Not used yet',
+      fields: [['kind', 'acp', 'user'], ['command', command, 'user'], ['args', `[${args.join(', ')}]`, 'user'],
+        ['read', '[<board root>]', 'default'], ['tools', '[read, search]', 'default'],
+        ['timeout_s', '120, from ask.timeout_s', 'user']] };
+  closeModal();
+  toast(`Added ${id} to your settings. Test it before you ask with it.`);
+}
+function snipText(k, tok) {
+  const hdr = `"headers": { "Authorization": "Bearer ${tok}" }`;
+  if (k === 'claude') {
+    return `claude mcp add --transport http collide ${EP_URL} \\\n  --header "Authorization: Bearer ${tok}"`;
+  }
+  if (k === 'json') {
+    return `{\n  "mcpServers": {\n    "collide": {\n      "type": "http",\n      "url": "${EP_URL}",\n`
+      + `      ${hdr}\n    }\n  }\n}`;
+  }
+  if (k === 'opencode') {
+    return `{\n  "mcp": {\n    "collide": {\n      "type": "remote",\n      "url": "${EP_URL}",\n`
+      + `      ${hdr}\n    }\n  }\n}`;
+  }
+  return `${EP_URL}/${tok}`;
+}
+function endpointHtml() {
+  const tok = state.tokShow ? state.tok : `${state.tok.slice(0, 3)}${'•'.repeat(18)}${state.tok.slice(-4)}`;
+  const tabs = [['claude', 'Claude Code'], ['json', 'JSON'], ['opencode', 'opencode'], ['url', 'Address only']];
+  return `<h2 id="ep">Collide's endpoint${nm(57)}</h2>
+    <article class="agent card" aria-label="Collide's endpoint">
+      <p class="muted">Where an agent calls Collide's five tools. It listens on this Mac only, and every call needs a
+        token.</p>
+      <dl class="kv"><dt>Address</dt><dd><code>${EP_URL}</code></dd>
+        <dt>Window</dt><dd><span class="chip good">${svg.ok}Connected: this window</span></dd>
+        <dt>Last call</dt><dd>${esc(state.lastCall)}</dd>
+        <dt>Token</dt><dd><code>${esc(tok)}</code></dd></dl>
+      <div class="frow"><button class="btn sm" data-act="tok-show">${state.tokShow ? 'Hide' : 'Reveal'}</button>
+        <button class="btn sm" data-act="toast" data-v="Copied the token.">Copy</button>
+        <button class="btn sm" data-act="tok-rotate">Rotate…</button></div>
+      <div class="flag"><span class="grow">A snippet you paste puts this token in that client's own settings file,
+        which Collide does not control. If that file leaks, rotate the token.</span></div>
+      <h3>Connect a client you run</h3>
+      <p class="muted">Made from this address and token. Collide writes to no client's settings: you paste it.</p>
+      <div class="frow" role="group" aria-label="Snippet for">${tabs.map(([k, w]) => `<button class="chipbtn"
+        data-act="snip" data-v="${k}" aria-pressed="${state.snip === k}">${w}</button>`).join('')}</div>
+      ${state.snip === 'url' ? '<p class="muted">For a client that cannot send headers: the token is the last part '
+        + 'of the address.</p>' : ''}
+      <pre class="snip">${esc(snipText(state.snip, tok))}</pre>
+      <div><button class="btn sm" data-act="toast" data-v="Copied, with the token in it.">Copy</button></div>
+      <h3>Clients seen</h3>
+      <div style="overflow-x:auto"><table class="t"><tbody><tr><td><b>acme-mcp 0.4</b> <span class="chip warn">the
+        name it gave; unverified</span></td><td>my-client</td><td>last seen today 09:30</td><td>41 calls this week</td>
+        </tr></tbody></table></div>
+    </article>`;
+}
+function rotateModal() {
+  modal(`<h2>Rotate the endpoint token?</h2>
+    <p>The old token stops working at once. A client you pasted a snippet into stops working until you paste the new
+      one: acme-mcp 0.4 was seen today.</p>
+    <p class="muted">Asks from Collide are not affected: each ask gets its own token.</p>
+    <div class="acts"><button class="btn" data-act="modal-close">Cancel</button>
+    <button class="btn main" data-act="tok-rotate-yes">Rotate</button></div>`);
+}
+function rotateTok() {
+  state.tok = TOKENS[(TOKENS.indexOf(state.tok) + 1) % TOKENS.length];
+  closeModal();
+  toast('Rotated. The old token is refused from now on; the snippets show the new one.');
+}
+
 /* ---------- mock panel ---------- */
 function mockHtml() {
   const s = (v, label) => `<button class="btn sm" data-act="scn" data-v="${v}">${label}</button>`;
@@ -5281,6 +5893,11 @@ function mockHtml() {
       ${s('needs', 'A task that needs you')}${s('queue', 'Queue: what waits on you')}${s('hubs', 'Bottlenecks')}
       ${s('auto-setup', 'Autopilot: set up')}${s('auto-on', 'Autopilot: running')}${s('upnext', 'Up next')}
       ${s('grouping', 'Group tasks')}${s('qkeep', 'Where answers are kept')}</div>
+    <h3>Round 7: the in-app agent (6b)</h3><div class="grid">${s('ask-run', 'Ask: while it works')}
+      ${s('ask-lens', 'Ask: a lens')}${s('ask-noread', 'Ask: no files read')}${s('ask-mark', 'Ask: marked tasks')}
+      ${s('ask-view', 'Ask: a view')}${s('ask-fail', 'Ask: a failure')}${s('snap', 'A saved snapshot')}
+      ${s('agents', 'Settings: Agents')}${s('agent-red', 'Agents: not confined')}${s('endpoint', 'Agents: endpoint')}
+      </div>
     <h3>Live updates (watch)</h3><div class="grid">${s('sim-finish', 'ts-0178 goes to review')}
       ${s('sim-diverge', "A run's copy moves ts-0168")}</div>
     <h3>View</h3><div class="grid"><button class="btn sm" data-act="notes" aria-pressed="${state.notes}">
@@ -5374,6 +5991,7 @@ function goBoard(id, viewId) {
   state.drawer = null;
   state.goal = null;
   resetFilters();
+  Object.assign(state, { lens: null, chip: null, hl: null });
 }
 
 /* ---------- scenarios ---------- */
@@ -5488,7 +6106,38 @@ function scenario(v) {
       if (state.screen !== 'board' || board().missing) goBoard('collide');
       Object.assign(state, { settings: true, stab: 'general', drawer: null });
       break;
+    case 'ask-run': goBoard('collide'); state.menu = 'ask'; bigAsk(ASKS[0].q); return;
+    case 'ask-lens': goBoard('collide'); bigAsk(ASKS[0].q, true); break;
+    case 'ask-noread': goBoard('collide'); bigAsk(ASKS[1].q, true); break;
+    case 'ask-mark': goBoard('collide'); bigAsk(ASKS[2].q, true); break;
+    case 'ask-view': goBoard('collide'); bigAsk(ASKS[3].q, true); break;
+    case 'ask-fail': goBoard('collide'); bigAsk(ASKS[4].q, true); state.menu = 'ask'; render(); return;
+    case 'snap': {
+      goBoard('collide');
+      bigAsk(ASKS[0].q, true);
+      const { prev, ...c } = state.chip;
+      void prev;
+      state.snaps = [{ id: 'sn1', board: 'collide', name: ASKS[0].title, at: '10:44', lens: clone(state.lens),
+        chip: clone(c) }];
+      openSnap('sn1');
+      state.menu = 'view';
+      render();
+      return;
+    }
+    case 'agents': goBoard('collide'); Object.assign(state, { settings: true, stab: 'agents' }); break;
+    case 'agent-red':
+      goBoard('collide');
+      Object.assign(state, { settings: true, stab: 'agents' });
+      testAgent('local-opencode', true);
+      break;
+    case 'endpoint':
+      goBoard('collide');
+      Object.assign(state, { settings: true, stab: 'agents', menu: null });
+      render();
+      $('#ep').scrollIntoView();
+      return;
     case 'reset': {
+      stopAsk();
       const notes = state.notes;
       state.boards = freshBoards();
       Object.assign(state, { layout: 'board', groupBy: 'auto', open: new Set(), shut: new Set(), notes,
@@ -5496,7 +6145,9 @@ function scenario(v) {
         minSecs: 0, toolType: 'all', cq: '', tphase: null, optCtx: null, optSel: new Set(), optCap: false,
         optTime: false, diffView: 'changes', dock: false, dockSess: 'desk', dview: 'chat', ddraft: '',
         psess: null, ptab: 'plan', pview: 'chat', pdraft: '', ffold: new Set(), dshut: new Set(), dw: 460,
-        qa: clone(QA), qkeep: 'task', qdraft: {}, auto: clone(AUTO), unext: clone(UP_NEXT), overlap: false });
+        qa: clone(QA), qkeep: 'task', qdraft: {}, auto: clone(AUTO), unext: clone(UP_NEXT), overlap: false,
+        ak: null, akUnread: false, snaps: [], askAgent: 'claude-haiku', agents: clone(AGENTS), atest: {},
+        tok: TOKENS[0], tokShow: false, snip: 'claude', lastCall: LAST_CALL });
       goBoard('collide');
       break;
     }
@@ -5529,10 +6180,14 @@ document.addEventListener('click', (e) => {
   if (!el) return;
   const { act, id, v, g } = el.dataset;
   const b = board();
+  if (state.chip && state.chip.undo && ['chip', 'clear', 'group', 'deps-off'].includes(act)) {
+    Object.assign(state.chip, { undo: false, ended: true });
+  }
   switch (act) {
     case 'menu':
       state.menu = state.menu === el.dataset.menu ? null : el.dataset.menu;
       if (/^auto/.test(state.menu || '')) setTimeout(() => $('#aview').focus());
+      if (state.menu === 'ask') { state.akUnread = false; setTimeout(() => $('#akq') && $('#akq').focus()); }
       break;
     case 'menu-close': {
       const m = state.menu;
@@ -5542,7 +6197,10 @@ document.addEventListener('click', (e) => {
       return;
     }
     case 'board': goBoard(id); break;
-    case 'view': state.view = id; state.goal = null; state.menu = null; resetFilters(); break;
+    case 'view':
+      Object.assign(state, { view: id, goal: null, menu: null, lens: null, chip: null, hl: null });
+      resetFilters();
+      break;
     case 'tab': state.surface = id; state.settings = false; break;
     case 'layout': state.layout = v; break;
     case 'group': state.groupBy = v; break;
@@ -5792,6 +6450,30 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'overlap': state.overlap = !state.overlap; break;
+    case 'ak-go': bigAsk(($('#akq') && $('#akq').value) || ''); return;
+    case 'ak-ex': bigAsk(v); return;
+    case 'ak-cancel': cancelAsk(); break;
+    case 'ak-undo': undoAsk(); break;
+    case 'ak-close': Object.assign(state, { lens: null, chip: null, hl: null }); break;
+    case 'ak-keep': state.chip = null; break;
+    case 'ak-agents': Object.assign(state, { settings: true, stab: 'agents', menu: null, drawer: null }); break;
+    case 'lens-next': lensToNext(Number(v)); break;
+    case 'snap': snapModal(); return;
+    case 'snap-yes': saveSnap(); break;
+    case 'snap-open': openSnap(id); break;
+    case 'ag-test': testAgent(id); break;
+    case 'ag-ack': ackModal(id); return;
+    case 'ag-ack-yes':
+      state.agents[id].ack = clock();
+      closeModal();
+      toast(`${id}: acknowledged. The Ask box warns while it is in use.`);
+      break;
+    case 'ag-add': addAgentModal(); return;
+    case 'ag-add-yes': addAgent(); break;
+    case 'tok-show': state.tokShow = !state.tokShow; break;
+    case 'tok-rotate': rotateModal(); return;
+    case 'tok-rotate-yes': rotateTok(); break;
+    case 'snip': state.snip = v; break;
     case 'grp': grpModal(); return;
     case 'grp-yes': {
       const ids = [...document.querySelectorAll('.gpick:checked')].map((x) => x.value);
@@ -5812,6 +6494,7 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'qkeep') { state.qkeep = e.target.value; render(); return; }
+  if (e.target.id === 'askag') { pickAskAgent(e.target.value); return; }
   if (e.target.classList.contains('umode')) {
     state.unext[Number(e.target.dataset.v)].mode = e.target.value;
     render();
@@ -5892,6 +6575,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Enter' && document.activeElement.id === 'askq') { runAsk(document.activeElement.value); return; }
+  if (e.key === 'Enter' && document.activeElement.id === 'akq') { bigAsk(document.activeElement.value); return; }
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && document.activeElement.id === 'cmsg') {
     $('[data-act=send]').click(); return;
   }
