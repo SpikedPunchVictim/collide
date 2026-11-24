@@ -1,0 +1,26 @@
+// The shapes the Field holds, named from the generated protocol types (0.6). A nested wire type is read off its
+// parent here, once, as `components/types.ts` does.
+import type { TaskListResultOutput, TaskOutput, TaskViewsResultOutput } from '../owner/generated.ts'
+
+export type Task = TaskOutput
+export type Category = Task['state']['category']
+export type ListResult = TaskListResultOutput
+export type SourceDecl = ListResult['sources'][number]
+export type Divergence = ListResult['divergence'][number]
+export type DivergentCopy = Divergence['copies'][number]
+export type Collision = ListResult['collisions'][number]
+export type ViewReport = NonNullable<ListResult['view']>
+export type ViewEntry = TaskViewsResultOutput['views'][number]
+
+/** What one load of the Field read: the shown tasks, every task of the board, and the board-wide lists. */
+export interface FieldData {
+  /** The tasks of the selected view, one entry for each place a key is at. */
+  readonly tasks: readonly Task[]
+  /** Every task of the board, which a card's blockers are looked up in. */
+  readonly corpus: readonly Task[]
+  readonly sources: readonly SourceDecl[]
+  readonly collisions: readonly Collision[]
+  readonly divergence: readonly Divergence[]
+  /** What the selected view said of itself. Null for the whole board. */
+  readonly report: ViewReport | null
+}

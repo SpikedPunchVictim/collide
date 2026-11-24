@@ -9,7 +9,8 @@ import type { BoardSummary } from '../loop/types.ts'
 import { BoardMenu } from './BoardMenu.tsx'
 import { LaterPage } from './LaterPage.tsx'
 import { TracksPreview } from './TracksPreview.tsx'
-import { TABS, type TabId, isTab, isTyping, tabForKey } from './tabs.ts'
+import { actionForKey, keyOf, tabOfAction } from './actions.ts'
+import { TABS, type TabId, isTab, isTyping } from './tabs.ts'
 
 export interface FrameProps {
   readonly tab: TabId
@@ -24,6 +25,8 @@ export interface FrameProps {
   readonly onOpenLoop: () => void
   /** The view picker, in its place in the trail after the board menu (`ts-0181-ft`). Nothing shows until given. */
   readonly viewPicker?: ReactNode
+  /** The page of the Field tab. */
+  readonly field: ReactNode
 }
 
 export function Frame(props: FrameProps) {
@@ -65,12 +68,12 @@ export function Frame(props: FrameProps) {
           )}
         </nav>
         <TabsList variant="line" aria-label="Surfaces" className="mx-auto h-auto group-data-horizontal/tabs:h-auto">
-          {TABS.map((entry, index) => (
+          {TABS.map((entry) => (
             <TabsTrigger
               key={entry.id}
               value={entry.id}
-              title={`${entry.name}: ${entry.subtitle} (key ${index + 1})`}
-              aria-keyshortcuts={String(index + 1)}
+              title={`${entry.name}: ${entry.subtitle} (key ${keyOf(`show-${entry.id}`)})`}
+              aria-keyshortcuts={keyOf(`show-${entry.id}`)}
               className={
                 'h-auto flex-none flex-col items-start justify-start gap-0 px-3 py-1.5 leading-tight ' +
                 (entry.id === 'queue' ? 'opacity-60 data-active:opacity-100' : '')
@@ -93,7 +96,7 @@ export function Frame(props: FrameProps) {
           <SettingsPage />
         ) : (
           <TabsContent value={tab} className="flex flex-col gap-3">
-            <Page tab={tab} onOpenLoop={onOpenLoop} />
+            <Page tab={tab} field={props.field} onOpenLoop={onOpenLoop} />
           </TabsContent>
         )}
       </main>
@@ -101,12 +104,12 @@ export function Frame(props: FrameProps) {
   )
 }
 
-/** Keys 1 to 5 show the tabs, except while a text box has the focus. */
+/** The keys of the tabs (`actions.ts`) show them, except while a text box has the focus. */
 function useTabKeys(show: (tab: TabId) => void) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target as HTMLElement | null)) return
-      const next = tabForKey(event.key)
+      const next = tabOfAction(actionForKey(event.key, 'window'))
       if (next !== null) show(next)
     }
     window.addEventListener('keydown', onKey)
@@ -114,16 +117,10 @@ function useTabKeys(show: (tab: TabId) => void) {
   }, [show])
 }
 
-function Page({ tab, onOpenLoop }: { tab: TabId; onOpenLoop: () => void }) {
+function Page({ tab, field, onOpenLoop }: { tab: TabId; field: ReactNode; onOpenLoop: () => void }) {
   switch (tab) {
     case 'field':
-      return (
-        <LaterPage
-          title="Field"
-          what="The whole board: its tasks as columns, a run order or a graph."
-          arrives="It arrives later in Stage 6a."
-        />
-      )
+      return field
     case 'tracks':
       return <TracksPreview onOpenLoop={onOpenLoop} />
     case 'queue':

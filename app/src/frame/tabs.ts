@@ -1,5 +1,6 @@
-// The window's five tabs (0.11; note 2 of the board mock), in the order of the keys 1 to 5. The list is the window's
-// own: `SURFACES` of `../ui/state.ts` is what the in-app agent's `open` tool names, and Stage 6b aligns the two.
+// The window's five tabs (0.11; note 2 of the board mock), in the order of the keys 1 to 5, which `actions.ts` binds.
+// The list is the window's own: `SURFACES` of `../ui/state.ts` is what the in-app agent's `open` tool names, and
+// Stage 6b aligns the two.
 
 export const TABS = [
   { id: 'field', name: 'Field', subtitle: 'the whole board' },
@@ -13,11 +14,6 @@ export type TabId = (typeof TABS)[number]['id']
 
 export function isTab(value: string): value is TabId {
   return TABS.some((tab) => tab.id === value)
-}
-
-/** The tab a key shows: `1` to `5`, one digit. Anything else shows none. */
-export function tabForKey(key: string): TabId | null {
-  return /^[1-9]$/.test(key) ? (TABS[Number(key) - 1]?.id ?? null) : null
 }
 
 /** Whether a key press at `target` is typing into a text box, which the tab keys leave alone. */

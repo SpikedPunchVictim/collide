@@ -1,7 +1,7 @@
 ---
 id: ts-0181-ft
 kind: task
-status: ready
+status: done
 title: "App: the Field board, columns from declared statuses"
 owners: []
 links:
@@ -102,3 +102,60 @@ Write these first.
   keys from it. Move `ts-0179-ke`'s keys 1 to 5 into it. Later items add their keys to the list. The palette (9d) and
   the in-app agent's tools (6b) use these names.
 - Owner decisions (2026-11-24): the owner took the recommendations at the split.
+
+### Built
+
+- `app/src/field/`: `types.ts` (the wire types the Field uses), `load.ts` (`task.views` and `task.list`, every page;
+  a named view is read next to the whole board, so open blockers can be counted), `model.ts` (grouping, headers, chips,
+  stage, the view report's words), `folds.ts` (per board and view, in `localStorage`, tolerant of storage that is
+  missing or broken), `navigation.ts` (arrow keys), `useField.ts`, `FieldPage.tsx` and `ViewPicker.tsx`. `App` holds
+  one `useField`; the picker sits in the trail and the page fills the Field tab.
+- Columns: the declared statuses of the shown tasks' source when there is one, the six categories otherwise, and a
+  view's `layout.groupBy` over both. A status that is not declared is added after the declared ones. Header: the
+  status name with "counts as <category>" under it, or the category alone. Done and Dropped start folded with their
+  counts. A card: title, then short id and stage, with chips only for a status (category columns), "Waits on N", a
+  differing copy, and a collided id. The lit border is on an active card. Click or Enter selects and opens the
+  drawer's place ("The drawer comes next."); arrow keys move between cards.
+- The view report line above the board, in the words of the CLI's own lines.
+- Carry, named actions: `app/src/frame/actions.ts` is the one list. Keys 1 to 5 and the card keys are bound from it;
+  `tabForKey` is gone from `tabs.ts`.
+- Carry, category colours: `--c-backlog` to `--c-dropped` and the mock's `--working`, `--waiting`, `--blocked` and
+  `--done` in `index.css` (both themes), registered for utilities. `TracksPreview.tsx` uses them.
+- Stage 2's `CATEGORIES` and Field data were already gone (`ts-0179-ke`). The model has its own `CATEGORIES` with the
+  mock's words.
+- Tests. `app/test/field-model.test.ts` (grouping over the one-source, eight-status and mixed worlds; header words;
+  chips; stage and short id; the view report; the fold key), `field-navigation.test.ts`, `actions.test.ts`,
+  `field-page.test.tsx`, `category-colours.test.tsx`, and `frame.test.tsx` changed. `app/browser/fake-field.spec.ts`
+  (folds, kept across a reload and its own for each view, click, Enter, arrow keys, eight columns) and
+  `app/browser/field.spec.ts` (bridge, real daemon: the columns, a rename that restarts the source, and the
+  `edge-mvp` view against `collide tasks --view edge-mvp --json`, run by the test with the world's environment).
+  `fake-shell.spec.ts` changed: the Field is no longer a placeholder, and a board switch now causes one Field read.
+  The red runs: the model, navigation and action tests were red against stubs (48 and 16 failures); the
+  two specs were red with the Field page swapped for a placeholder. `field-page` and `category-colours` were written
+  after the code and were not seen red.
+- `worlds.ts`: `field-one-source`, `field-eight` and `field-mixed`; `two-boards` is now a `FieldWorld` with no tasks.
+  `support/world.ts`: `Plan.path` puts folders (where `node` is) on the daemon shell's `PATH`.
+
+### Decisions for the owner
+
+- The plan has no `backlog` status: its statuses are `ready`, `active`, `review`, `done` and `dropped`, so a board of
+  the plan alone has no Backlog column. A mixed board shows all six categories. Recommendation: keep; it is what the
+  source declares.
+- The plan lists each epic as a task, so an epic is a card on the Field. Recommendation: leave epics out of the board
+  by kind in a later item (the view's `where` can do it today). Alternative: show them as a header over their tasks.
+- A card's stage is the target of its `part-of` link, because the plan reports the epic as a link and not as a
+  collection. Recommendation: keep, and show the collection when a source gives one.
+- The Field reads on opening, on a board change and on a view change, and not on events. Recommendation: refresh on
+  the corpus events in a later item; the rename test reloads the page for now.
+- A status column is headed by the declared name, capitalised (`In_review`). Recommendation: a `label` on a declared
+  status, as fields have one, when a pack wants nicer words.
+- Open blockers need the whole board, so a view is read with two `task.list` calls. Alternative: the view report
+  carries each member's open-blocker count, which is a wire change. Recommendation: keep until a board is large.
+- A view is forgotten when the board changes, and the whole board is the default. Recommendation: keep.
+
+### Not done, by design
+
+- The drawer's content (`ts-0184-hv`); the selection only opens its place.
+- `layout.sort` and `layout.default: run-order`: the board lays cards out in the order `task.list` gives them.
+- Live refresh on events, drag to change a status, filters and search.
+- No Rust change, so `cargo test --workspace` was not run.

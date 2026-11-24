@@ -1,5 +1,6 @@
 // A still preview of Tracks, which Stage 9b builds (note 2 of the board mock; `tracksHtml`). The runs are made up, and
-// the page takes no data and calls nothing: its rows and phases are not controls. The colours are the app's own tokens.
+// the page takes no data and calls nothing: its rows and phases are not controls. The colours are the category tokens
+// of `index.css`: done, and the active one for the run that is going.
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
@@ -47,8 +48,8 @@ const RUNS: readonly PreviewRun[] = [
 ]
 
 const PHASE_STYLE: Record<PhaseState, string> = {
-  done: 'bg-primary/15',
-  run: 'bg-primary/25 ring-1 ring-primary ring-inset',
+  done: 'bg-c-done/22',
+  run: 'bg-c-active/25 ring-1 ring-c-active ring-inset',
   wait: 'bg-secondary text-muted-foreground',
 }
 
@@ -85,7 +86,7 @@ export function TracksPreview({ onOpenLoop }: { onOpenLoop: () => void }) {
                 <span className="inline-flex items-center gap-1.5 font-semibold">
                   {run.label}
                   {run.live ? (
-                    <span role="img" aria-label="Running" className="size-2 rounded-full bg-primary" />
+                    <span role="img" aria-label="Running" className="size-2 rounded-full bg-c-active" />
                   ) : null}
                 </span>
                 <span className="truncate text-xs text-primary underline underline-offset-2">

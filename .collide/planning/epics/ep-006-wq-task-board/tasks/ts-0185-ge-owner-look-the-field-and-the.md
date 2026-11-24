@@ -78,6 +78,11 @@ None by a build agent: this check is the owner's. The checklist names the automa
   share `app/`, `core`, `host` and the generated files. The next item waits for this look.
 - Nothing here runs a real `claude` for a prompt. The probe runs `claude` only for its help and status, by the owner.
 - Owner decisions (2026-11-24): the owner took the recommendations at the split.
+- Carry from `ts-0181-ft` (2026-11-24), for the owner to judge on the look: the plan lists each epic as a task, so on
+  the whole board an epic is a card beside its tasks. My recommendation: leave epics out of the Field by kind, since a
+  card's stage already names its epic. Alternative: keep them as cards, or show them as a header over their tasks. A
+  status column is headed by its declared name with only its first letter raised (`In_review`), as the mock's
+  `columnsOf` does.
 
 ### Owner checklist
 

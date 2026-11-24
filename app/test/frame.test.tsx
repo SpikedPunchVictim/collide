@@ -3,7 +3,8 @@ import { describe, expect, test } from 'vitest'
 import { BoardMenuBody } from '../src/frame/BoardMenu.tsx'
 import { Frame, type FrameProps } from '../src/frame/Frame.tsx'
 import { TracksPreview } from '../src/frame/TracksPreview.tsx'
-import { TABS, type TabId, isTyping, tabForKey } from '../src/frame/tabs.ts'
+import { actionForKey, tabOfAction } from '../src/frame/actions.ts'
+import { TABS, type TabId, isTyping } from '../src/frame/tabs.ts'
 import { twoBoards } from './support/worlds.ts'
 
 // The frame (ts-0179-ke) is a function of its props, so it renders for any state with no browser. Clicks, keys and the
@@ -22,6 +23,7 @@ async function frameProps(over: Partial<FrameProps> = {}): Promise<FrameProps> {
     onChooseBoard: noop,
     onOpenFolder: async () => {},
     onOpenLoop: noop,
+    field: <p>the field page</p>,
     ...over,
   }
 }
@@ -69,11 +71,11 @@ describe('keys', () => {
     ['4', 'planning'],
     ['5', 'comms'],
   ] as const)('%s shows %s', (key, tab) => {
-    expect(tabForKey(key)).toBe(tab)
+    expect(tabOfAction(actionForKey(key, 'window'))).toBe(tab)
   })
 
   test.each(['0', '6', '12', 'a', '/', 'Enter', ''])('%j shows no tab', (key) => {
-    expect(tabForKey(key)).toBeNull()
+    expect(tabOfAction(actionForKey(key, 'window'))).toBeNull()
   })
 
   test.each([
@@ -164,8 +166,8 @@ describe('the board menu lists', () => {
 describe('what each tab shows', () => {
   const shown = async (tab: TabId) => show({ tab })
 
-  test('Field and Planning show a placeholder', async () => {
-    expect(await shown('field')).toContain('The whole board')
+  test('Field shows the page it is given, and Planning a placeholder', async () => {
+    expect(await shown('field')).toContain('the field page')
     expect(await shown('planning')).toContain('What to build next')
   })
 

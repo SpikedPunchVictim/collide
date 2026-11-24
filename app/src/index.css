@@ -50,6 +50,16 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-working: var(--working);
+  --color-waiting: var(--waiting);
+  --color-blocked: var(--blocked);
+  --color-done: var(--done);
+  --color-c-backlog: var(--c-backlog);
+  --color-c-ready: var(--c-ready);
+  --color-c-active: var(--c-active);
+  --color-c-review: var(--c-review);
+  --color-c-done: var(--c-done);
+  --color-c-dropped: var(--c-dropped);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
   --radius-sm: calc(var(--radius) * 0.6);
@@ -81,6 +91,19 @@
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --radius: 0.625rem;
+  /* State colours, the board mock's: working, waiting, blocked and done. Colour is for state only, and every state is
+     also written in words (0.11). */
+  --working: #0369a1;
+  --waiting: #b45309;
+  --blocked: #6f675d;
+  --done: #15803d;
+  /* One for each category (0.10), the mock's `--c-*`: a column, a status chip and a card's lit border use them. */
+  --c-backlog: var(--blocked);
+  --c-ready: var(--primary);
+  --c-active: var(--working);
+  --c-review: var(--waiting);
+  --c-done: var(--done);
+  --c-dropped: var(--muted-foreground);
 }
 
 .dark {
@@ -102,6 +125,10 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+  --working: #38bdf8;
+  --waiting: #fbbf24;
+  --blocked: #aea699;
+  --done: #4ade80;
 }
 
 @layer base {

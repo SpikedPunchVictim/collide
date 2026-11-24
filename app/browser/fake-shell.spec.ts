@@ -83,17 +83,18 @@ test('Queue and Comms say what arrives and in which stage', async ({ openFake })
   await expect(page.getByText(/It arrives in Stage 9b/)).toBeVisible()
 })
 
-test('Field and Planning show a placeholder', async ({ openFake }) => {
+test('Field shows the board, and Planning a placeholder', async ({ openFake }) => {
   const page = await openFake('two-boards')
-  await expect(page.getByRole('heading', { name: 'Field' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Field' })).toBeVisible()
   await page.keyboard.press('4')
   await expect(page.getByRole('heading', { name: 'Planning' })).toBeVisible()
 })
 
 test('Tracks shows the still preview and its banner, and calls nothing', async ({ openFake }) => {
   const page = await openFake('two-boards')
-  // The first load is done once the board menu names a board.
+  // The first load is done once the board menu names a board and the Field has read it.
   await expect(boardButton(page, /alpha/)).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Field' })).toBeVisible()
   const before = await calls(page)
   await page.keyboard.press('2')
   await expect(page.getByText('A preview of Stage 9b.')).toBeVisible()
@@ -110,6 +111,8 @@ test('Tracks shows the still preview and its banner, and calls nothing', async (
 test('the board menu lists every board with its default line, and switching stops nothing', async ({ openFake }) => {
   const page = await openFake('two-boards')
   await expect(boardButton(page, /alpha/)).toContainText('main')
+  // The Field has read the board, so what it reads later is what switching causes.
+  await expect(page.getByRole('region', { name: 'Field' })).toBeVisible()
 
   await openBoardMenu(page)
   await expect(boardMenu(page).getByRole('button', { name: /alpha/ })).toContainText('line main')
@@ -121,9 +124,12 @@ test('the board menu lists every board with its default line, and switching stop
   await boardMenu(page).getByRole('button', { name: /beta/ }).click()
   await expect(boardMenu(page)).toHaveCount(0)
   await expect(boardButton(page, /beta/)).toContainText('develop')
-  // Switching is the window's own: nothing was sent, and in particular no stop or cancel.
+  await expect(page.getByRole('region', { name: 'Field' })).toBeVisible()
+  // Switching is the window's own: the Field reads the other board, nothing else is sent, and in particular no stop
+  // or cancel.
   const after = await calls(page)
-  expect(after).toEqual(before)
+  expect(after.slice(0, before.length)).toEqual(before)
+  expect(after.slice(before.length)).toEqual(['task.views', 'task.list'])
   expect(after.filter((method) => /stop|cancel/.test(method))).toEqual([])
 })
 

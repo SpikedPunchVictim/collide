@@ -30,6 +30,10 @@ const TARGET = process.env.CARGO_TARGET_DIR ?? join(REPO_ROOT, 'target')
 
 /** The binaries `global-setup.ts` builds. */
 export const BRIDGE_EXE = join(TARGET, 'debug', 'collide-bridge')
+export const COLLIDE_EXE = join(TARGET, 'debug', 'collide')
+
+/** The root of the repository, for a test that reads a fixture of the host's tests. */
+export const SOURCE_ROOT = REPO_ROOT
 
 const PYTHON = '/usr/bin/python3'
 const GIT_ENV = {
@@ -47,6 +51,8 @@ const ROOT_PREFIX = 'cdb-'
 export interface Plan {
   readonly first: string
   readonly resumed?: string
+  /** Folders put on the `PATH` of the daemon's login shell, after fake Claude's: where `node` is, for a pack. */
+  readonly path?: readonly string[]
 }
 
 /**
@@ -156,7 +162,8 @@ export class World {
     chmodSync(join(bin, 'claude'), 0o755)
     // The login shell the daemon runs to read its base environment: it puts fake Claude first on the PATH.
     const shell = join(root, 'fake-shell')
-    writeFileSync(shell, `#!/bin/sh\nexport PATH=${bin}:/usr/bin:/bin\neval "$4"\n`, { mode: 0o755 })
+    const path = [bin, ...(plan.path ?? []), '/usr/bin', '/bin'].join(':')
+    writeFileSync(shell, `#!/bin/sh\nexport PATH=${path}\neval "$4"\n`, { mode: 0o755 })
     chmodSync(shell, 0o755)
     // The aliases of models.yaml are the fixture's own, below the HOME of the daemon.
     mkdirSync(join(root, '.config', 'collide'), { recursive: true })

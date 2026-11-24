@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { FieldPage } from './field/FieldPage.tsx'
+import { useField } from './field/useField.ts'
+import { ViewPicker } from './field/ViewPicker.tsx'
+import { boardName } from './frame/boards.ts'
 import { Frame } from './frame/Frame.tsx'
 import { TABS, type TabId } from './frame/tabs.ts'
 import { LoopPage } from './loop/LoopPage.tsx'
@@ -18,8 +22,10 @@ export interface AppProps {
 
 export function App({ owner = shellOwner }: AppProps) {
   const { state, loop } = useLoop(owner)
+  const field = useField(owner, state.boardId)
   const [tab, setTab] = useState<TabId>('field')
   const [onLoopPage, setOnLoopPage] = useState(false)
+  const board = state.boards.find((each) => each.id === state.boardId)
   if (onLoopPage) {
     const from = TABS.find((entry) => entry.id === tab)?.name ?? 'the tabs'
     return (
@@ -43,6 +49,12 @@ export function App({ owner = shellOwner }: AppProps) {
       onChooseBoard={loop.chooseBoard}
       onOpenFolder={loop.openFolder}
       onOpenLoop={() => setOnLoopPage(true)}
+      viewPicker={
+        board === undefined ? null : (
+          <ViewPicker boardName={boardName(board)} views={field.views} view={field.view} onChoose={field.select} />
+        )
+      }
+      field={<FieldPage boardId={state.boardId} field={field} />}
     />
   )
 }
