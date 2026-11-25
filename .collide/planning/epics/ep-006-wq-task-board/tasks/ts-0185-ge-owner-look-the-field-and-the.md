@@ -86,4 +86,327 @@ None by a build agent: this check is the owner's. The checklist names the automa
 
 ### Owner checklist
 
-Written by the build agent once `ts-0184-hv` is done.
+Written from the code at `1db3162` (`ts-0184-hv`), 2026-11-24. Every command is the owner's to run. The build agent ran
+none, and started no app, daemon or `claude`.
+
+Relies on: the automated tests of `ts-0179-ke` (frame, fake-owner page), `ts-0180-ad` and `ts-0181-ft` (wire, Field),
+`ts-0182-ad` (`watch`, live updates), `ts-0183-ee` (CSP, capabilities, markdown, link window) and `ts-0184-hv` (drawer).
+This look is what they cannot see: the real window, real files, and the mock beside it.
+
+Placeholders: `<collide checkout>` is this repository. `<look root>` is a folder made for the look with `mktemp -d`.
+`<collide clone>` is a fresh clone of the checkout, made inside `<look root>`. In the commands, `$LOOK` is `<look root>`
+and `$LOOK/clone` is `<collide clone>`.
+
+Where the real `HOME` is used, and why. Everything else runs with a fresh `HOME` and `COLLIDE_DAEMON_ROOT` under
+`<look root>`. With the root set, the daemon never touches `~/Library/Application Support/Collide/`
+(`DaemonPaths::from_env` in `host/src/daemon.rs`).
+
+- Step 1, the build: cargo and rustup find their toolchains and crate cache through `HOME`, and pnpm its store.
+- Step 4, `tauri dev`: runs with the fresh `HOME`, so `CARGO_HOME` and `RUSTUP_HOME` are set to the real folders and the
+  compile still finds the toolchain. If that step fails only because of the fresh `HOME`, run that one command with the
+  real `HOME` and keep the rest of the environment. The daemon then reads the real `HOME`, and its root stays in
+  `<look root>`. Say so in Record.
+- The `claude` probe, steps 27 and 28: the first run uses the real `HOME`, since that is where a login lives.
+- The webview keeps its storage (the folds and the drawer width) under `HOME`, so under the fresh one it starts empty.
+  Not confirmed from the code: that WebKit follows `HOME`. If folds or a width are already set on the first look,
+  the real one was used. Record it.
+
+**Set up**
+
+1. In a first terminal, build from `<collide checkout>`, with the real `HOME`.
+
+```sh
+cd <collide checkout>
+pnpm install
+pnpm build:packs
+pnpm --filter @collide/app build
+cargo build -p collide-host
+```
+
+   `app/src-tauri/tauri.conf.json` has `frontendDist: ../dist` and no `devUrl` or `beforeDevCommand`, so `tauri dev`
+   shows what `app/dist` holds: the third command is needed. Not confirmed from the code: that `tauri dev` serves
+   that folder. A blank window is a result: record it.
+
+2. In the same terminal, make `<look root>`, a fresh `HOME`, and the environment file. The `shell` script hands the
+   daemon this terminal's `PATH`: a fresh `HOME` reads none of your shell's startup files, and `collide/plan` needs
+   `node` 22.18 or newer (`packs/plan/pack.yaml`). The daemon runs `$SHELL -l -i -c <script>` to read its environment
+   (`host/src/base_env.rs`), so the script's fourth argument is that text, as in `app/browser/support/world.ts`.
+
+```sh
+LOOK="$(cd "$(mktemp -d)" && pwd -P)"; echo "$LOOK"
+mkdir "$LOOK/home" "$LOOK/claude-home"
+printf '#!/bin/sh\nexport PATH="%s"\neval "$4"\n' "$PATH" > "$LOOK/shell"
+chmod +x "$LOOK/shell"
+cat > "$LOOK/env.sh" <<EOF
+export LOOK="$LOOK"
+export COLLIDE_BIN="$PWD/target/debug"
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+export HOME="$LOOK/home"
+export COLLIDE_DAEMON_ROOT="$LOOK/d"
+export SHELL="$LOOK/shell"
+EOF
+printf %s "$LOOK/d/run/d.sock" | wc -c
+```
+
+   The last number must be 103 or less (`MAX_SOCKET_PATH_BYTES`, `host/src/daemon.rs`). Over it, the daemon will not
+   start: use a shorter `TMPDIR`. The `pwd -P` matters: the board compares real paths.
+
+3. Make the clone, in the same terminal. It has this repository's plan: the tasks of `ep-006-wq` and the other epics.
+
+```sh
+git clone <collide checkout> "$LOOK/clone"
+git -C "$LOOK/clone" log --oneline -1
+```
+
+4. Open a second terminal. Load the environment and start the app. It builds `collide-app` into `target/debug`, which
+   starts the `collide-daemon` beside itself (`LaunchStarter` in `app/src-tauri/src/shell.rs`). The first build takes
+   minutes. Keep the terminal in view: the app's errors print there.
+
+```sh
+. <look root>/env.sh
+cd <collide checkout>
+pnpm --filter @collide/app exec tauri dev
+```
+
+5. In the window the Field says "No board is open". Open the board menu (top left, "Boards"), type the clone's absolute
+   path in "Folder path" (`echo "$LOOK/clone"` in the first terminal) and press "Open folder". The menu button then
+   names the clone and its line.
+
+6. Open `<collide checkout>/docs/mockups/board.html` in a browser, beside the window. Press "Mock" (bottom left), then
+   "Show design notes". The mock's default scenario is the one to compare with.
+
+7. Open a third terminal and load the environment there. The second one is busy with `tauri dev`. Every `collide`,
+   `git` and `sed` command from here to the clean-up runs in this third terminal: the first one has the real `HOME`
+   and no `COLLIDE_DAEMON_ROOT`, so `collide` there would reach your real daemon. List what is ready, to compare with
+   the app.
+
+```sh
+. <look root>/env.sh
+echo "$COLLIDE_DAEMON_ROOT"
+cd "$LOOK/clone"
+"$COLLIDE_BIN/collide" tasks --ready
+```
+
+**Field** (key 1; the view picker reads "All tasks")
+
+8. The frame, notes 1 and 2. The trail at the top left is the board menu, then the view picker. Settings is at the top
+   right. Five tabs with subtitles and keys 1 to 5. Queue and Comms say when they arrive. Tracks shows a still preview
+   under a banner that says its runs are made up. Switching a view stops nothing.
+
+9. Columns and headers, note 3. Each header is the status name with its category in words beneath ("Ready", "can start";
+   "Review", "waiting on a review"). The plan declares `ready`, `active`, `review`, `done` and `dropped`, so there is no
+   Backlog column (`ts-0181-ft` Decisions). A status a task has that the plan did not declare is added after the
+   declared ones (spikes may add some). Write down any column that looks wrong.
+
+10. Folds, note 4. Done and Dropped start folded and show their counts. A click opens one. Fold and open a column, then
+    pick another view and come back: a fold is kept for each view.
+
+11. Cards, note 5. Title first, then the short id and the stage. A chip only when it says something: "Waits on N", or a
+    differing copy. A card of an `active` task has a lit border (step 20 makes one).
+
+12. Carry from `ts-0181-ft`, for you to judge. The plan lists each epic as a task, so an epic is a card on the whole
+    board, beside its tasks. Find one (its id starts `ep-`). The recommendation is to leave epics out of the Field by
+    kind, since a card's stage already names its epic. The alternatives are cards, or a header over their tasks. Record
+    your choice.
+
+13. Carry, the header words. A column is headed by its declared name with only its first letter raised, so a tracker
+    status `in_review` reads `In_review`. The plan has no such status, so you see "Review" here, not `In_review`.
+    Judge the rule from that and from the mock's `columnsOf`. Record whether the underscore should show.
+
+14. Pick `ready` in the view picker. Its cards are the ones step 7 listed. The line above the board reads like the
+    CLI's own lines. An empty column says "Nothing here". Then pick `spikes`: only spikes show.
+
+15. Make a scratch task in the look's own daemon root (it is kept in the store, in no file), and read its key.
+
+```sh
+cd "$LOOK/clone"
+"$COLLIDE_BIN/collide" task new "Look: a scratch task"
+```
+
+    The Field then has two sources, so it groups by the six categories and each card carries a status chip
+    (`groupMode` in `app/src/field/model.ts`; note 5). Pick "All tasks" again.
+
+**Drawer** (notes 8, 18 and 39)
+
+16. Click the card of `ts-0185-ge` (it waits on `ts-0184-hv`, and `ts-0186-ch` waits on it). The drawer opens beside the
+    board. Compare with the mock's drawer. In order: the header (status chip, category in words, id, Close), the title,
+    "Read only. Edit the file, or ask an agent; the board follows it.", Description, Waits on, Unblocks, Part of
+    (the epic, and a chip for each view that holds it), "In each copy of the project", and "Details for engineers",
+    folded at first. Absent on purpose: Changes (`ts-0189-fg`), the questions part (9a), Discuss with the Desk (9e).
+    "Fields from plan" is absent too: the plan declares no fields, so note 18 cannot be seen on this clone.
+
+17. Folds, note 39. Fold Description and open Details. Click another card: the folds hold. Click a link in Waits on: the
+    drawer shows that task. Press Escape: the drawer closes and the focus goes back to the card.
+
+18. Width. Drag the drawer's left edge (a 12 px strip, half over the drawer). It stops at 360 px and at 70% of the
+    window. Click the edge or Tab to it: ArrowLeft widens and ArrowRight narrows by 40 px (Shift: 120). A double-click
+    goes back to 460 px. Open another task: the width holds.
+
+19. Make the window narrower than 900 px. The drawer lays over the board and the edge is gone. Then widen it again.
+    Click the scratch card: no Waits on or Unblocks, no "In each copy of the project", and "Read only. Change it in
+    scratch."
+
+**Live** (note 14)
+
+20. Edit a status in the main checkout of the clone, by hand. The task is any `status: ready` file. The card should
+    leave Ready for Active within about a second, flash once, and the stamp reads "Live · updated just now". No toast.
+
+```sh
+cd "$LOOK/clone"
+T=.collide/planning/epics/ep-006-wq-task-board/tasks
+sed -i '' 's/^status: ready$/status: active/' $T/ts-0185-ge-*.md
+grep -n '^status:' $T/ts-0185-ge-*.md
+```
+
+21. Make a worktree. The board shows a divergence only for a worktree under the daemon's workspaces folder,
+    `<COLLIDE_DAEMON_ROOT>/data/workspaces/`, whether a run or you made it. A worktree made anywhere else is a copy and
+    no chip shows (`discover` in `host/src/corpus_service.rs`; `ts-0182-ad` Decisions). Wait about 15 s for the daemon
+    to see it (it looks again every 10 s).
+
+```sh
+W="$COLLIDE_DAEMON_ROOT/data/workspaces/wt-a"
+mkdir -p "$COLLIDE_DAEMON_ROOT/data/workspaces"
+git -C "$LOOK/clone" worktree add -b look/a "$W"
+```
+
+22. Edit a status in the worktree, by hand.
+
+```sh
+sed -i '' 's/^status: ready$/status: review/' "$W/$T"/ts-0188-kb-*.md
+grep -n '^status:' "$W/$T"/ts-0188-kb-*.md
+```
+
+    Within about 11 s (the debounce, plus the 10 s recheck) the card of `ts-0188-kb` gets a chip, "Review in wt-a", and
+    flashes once. Compare with the mock's "Review in Run R-121" (note 6). A hand-made worktree has no run, so the chip
+    names its folder. Open the card: its copy row reads "differs from main", with the path under the label.
+
+**Webview**
+
+23. Open the web inspector: right-click the window, then "Inspect Element" (Tauri's debug builds have it; not confirmed
+    from the code). Read the Console from the top; if it opened late, reload and read it again. Look for: no policy
+    violation, the window loaded and styled, the board loaded and updated (steps 5 to 22). From `ts-0183-ee`
+    Decisions, on first launch.
+
+24. The hostile task. Add its file to the clone. The body is `HOSTILE_BODY` in `app/test/support/hostile.ts`. The board
+    shows the new card without a reload.
+
+```sh
+cd "$LOOK/clone"
+T=.collide/planning/epics/ep-006-wq-task-board/tasks
+cat > $T/ts-9001-hz-hostile-look.md <<'EOF'
+---
+id: ts-9001-hz
+kind: task
+status: ready
+title: "Hostile body look"
+owners: []
+---
+
+## Steps
+
+<script>window.__pwned = 'script'</script>
+
+<img src="http://127.0.0.1:9/beacon.png" onerror="window.__pwned = 'onerror'">
+
+<a href="javascript:window.__pwned = 'raw anchor'">raw anchor</a>
+
+[script link](javascript:window.__pwned='link')
+
+[file link](file:///etc/passwd)
+
+[data link](data:text/html,hello)
+
+![tracking pixel](http://127.0.0.1:9/pixel.png)
+
+[the docs](https://example.com/docs?page=1&lang=en)
+
+[write to us](mailto:team@example.com)
+
+| left | right |
+| :--- | ----: |
+| a | b |
+EOF
+```
+
+    Open it. The script and image lines show as visible text. The `javascript:`, `file:` and `data:` links are plain
+    text followed by "(link not opened: <scheme>: links are never opened)". The image reads "[image not loaded:
+    tracking pixel, from http://127.0.0.1:9/pixel.png]". The table is a table. Nothing runs, no dialog or window opens,
+    and the console shows no new error.
+
+25. Click "the docs". The window "Open this link in your browser?" names `example.com` and the whole address, and Cancel
+    is first and has the focus. Cancel, and Escape, open nothing. Click "write to us": the window shows
+    `mailto:team@example.com` and names no host. "Open in browser" on the https link opens your default browser on that
+    address, a real request made by your browser: press it only if you want that.
+
+26. The policy probe. In the inspector's console type this. A policy in force says it refused the image under
+    `img-src`. With no policy the console shows a host-not-found error: `.invalid` never resolves, so nothing leaves the
+    machine.
+
+```js
+new Image().src = 'https://collide-probe.invalid/x.png'
+```
+
+    Then type `location.href`. An address on Tauri's own protocol (`tauri://localhost`) is the page with the policy.
+    A `http://127.0.0.1:…` or `localhost` address is a dev server, which sends none. Not confirmed from the code which
+    `tauri dev` gives. `ts-0183-ee` Decisions say the page may come from the Vite server with no policy. If so, that is
+    the result to record, and the bundled check is `ts-0197-uj`.
+
+**`claude` probe.** No prompt is ever sent. Do not run `claude` bare, with `-p`, or in a session. Use the first
+terminal, which has the real `HOME`.
+
+27. Read the help, and find the command it lists that reports login or auth status. Do not guess one. If it lists none,
+    that is the result.
+
+```sh
+claude --help; echo "exit=$?"
+```
+
+28. Run the status command, logged in, with the real `HOME`. Record the exit code and the output.
+
+```sh
+claude <status command>; echo "exit=$?"
+```
+
+29. Run it again with `HOME` set to an empty folder. Record the exit code and the output. Not confirmed: on macOS a
+    login may live in the keychain, so an empty `HOME` may still answer "logged in". That too is the result.
+
+```sh
+HOME="$LOOK/claude-home" claude <status command>; echo "exit=$?"
+```
+
+**Record.** Fill this in below the checklist, before the clean-up.
+
+30. Copy and fill. Each numbered difference becomes a fix item or a change to the mock.
+
+```text
+Look on <date>. It took <minutes>. Awkward: <what>.
+Differences (mock note, what the mock shows, what the app shows, fix item or mock change):
+1. <...>
+Policy probe: page address <...>; console said <...>.
+claude: status command <name or none>; logged in: exit <n>, <output>; empty HOME: exit <n>, <output>.
+Judged: epics on the Field <leave out | cards | header>; `In_review` header <keep | change>.
+```
+
+**Clean up**
+
+31. Quit the app and press Ctrl-C in the second terminal. Quitting does not stop the daemon, and there is no stop
+    command for it. In the third terminal, stop the daemon of the look by the pid in its own log, then check that
+    nothing of the look is left.
+
+```sh
+. <look root>/env.sh
+pid="$(grep 'starting, pid' "$COLLIDE_DAEMON_ROOT/data/daemon.log" | tail -1 | sed 's/.*pid //')"
+ps -p "$pid" -o pid=,command=
+kill -TERM "$pid"
+ps -ax -o pid=,command= | grep -F "$LOOK"
+```
+
+32. Remove the look, then check that `<collide checkout>` is only built, not changed. Close the second and third
+    terminals: they hold the fresh `HOME`.
+
+```sh
+echo "$LOOK"
+rm -rf "$LOOK"
+git -C <collide checkout> status --short
+```
