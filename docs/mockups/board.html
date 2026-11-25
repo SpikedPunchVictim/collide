@@ -574,6 +574,41 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
   border:1px solid color-mix(in srgb,var(--primary) 35%,var(--border));background:var(--primary-soft);
   font-size:13.5px;margin-bottom:12px}
 .unext{display:flex;flex-direction:column;gap:10px;max-width:980px}
+/* Round 8: the epics strip, a picked epic's cards, and the epic in the panel (notes 58 to 61). */
+.estrip{flex:none;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);
+  margin-bottom:12px;overflow:hidden}
+.estrip > h3{margin:0;background:var(--bar);font-size:13.5px;text-transform:none;letter-spacing:0;
+  color:var(--foreground);gap:6px}
+.estrip > h3 .nm{margin-right:14px}
+.estrip > .dsb{padding:12px 14px 12px}
+.etools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}
+.etools input{border:1px solid var(--input);border-radius:var(--radius-xs);padding:5px 8px;background:var(--card);
+  color:inherit;font:inherit;width:240px;max-width:100%}
+.erow{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px}
+.erow.grid{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;max-height:250px}
+.ec{all:unset;box-sizing:border-box;cursor:pointer;flex:0 0 230px;display:flex;flex-direction:column;gap:7px;
+  padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);box-shadow:var(--shadow)}
+.ec:hover{border-color:var(--input)}
+.ec:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.ec.on{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary),var(--shadow)}
+.ec .et{font-weight:600;line-height:1.3;min-height:2.6em;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
+.ec .em{font-size:12px;color:var(--muted-foreground);display:flex;gap:6px;flex-wrap:wrap}
+.ebar{display:flex;height:6px;border-radius:999px;overflow:hidden;background:var(--secondary)}
+.ebar span{display:block;height:100%}
+.ebar .cat-backlog{background:var(--c-backlog)}.ebar .cat-ready{background:var(--c-ready)}
+.ebar .cat-active{background:var(--c-active)}.ebar .cat-review{background:var(--c-review)}
+.ebar .cat-done{background:var(--c-done)}.ebar .cat-dropped{background:var(--c-dropped)}
+.tc.ehl{background:var(--primary-soft);border-color:color-mix(in srgb,var(--primary) 60%,var(--border))}
+.elit{flex:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;margin-bottom:10px}
+.elitn{font-weight:600;color:var(--primary)}
+.estep{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+.etask{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:8px;padding:5px 8px;
+  border-radius:var(--radius-xs);font-size:13.5px;width:100%}
+.etask:hover{background:var(--muted)}
+.etask:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
+.etask .tt{flex:1;min-width:0}
+.edone summary{cursor:pointer;color:var(--muted-foreground);font-size:13px;margin-top:4px}
 .ue{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:start;padding:12px 14px}
 .ue .pos{font-weight:700;color:var(--muted-foreground);font-variant-numeric:tabular-nums;padding-top:2px}
 .ue .main{display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -2944,6 +2979,45 @@ const OLD_TASKS = [
 ].map(([id, title, status]) => ({ id, title, status, epic: null, blockedBy: [], src: 'plan',
   body: 'A made-up item on the board whose folder moved.' }));
 
+// Round 8: a made-up board with 50 epics, to see how the epics strip scales (note 61). Each epic's statuses follow its
+// age: the early ones are finished, a band in the middle is under way, and the late ones have not started.
+const HARBOR_NAMES = ['Sign-in and accounts', 'Teams and roles', 'Plans and invoices', 'Tax and receipts',
+  'Create a shipment', 'Tracking page', 'Rate shopping', 'Label printing', 'Stock levels', 'Cycle counts',
+  'Returns portal', 'Refunds', 'Email notices', 'Text messages', 'Search shipments', 'Daily summary',
+  'Export to CSV', 'Customs forms', 'Address checks', 'Driver app', 'Proof of delivery', 'Plan a day\'s route',
+  'Live route changes', 'Partner webhooks', 'Public API v2', 'API keys and limits', 'Audit log', 'Data retention',
+  'Single sign-on', 'Onboarding checklist', 'Help links', 'Accessibility pass', 'Dark theme', 'Spanish',
+  'German', 'Faster list pages', 'Faster cold start', 'Error pages', 'Feature flags', 'Settings rework',
+  'Bulk import', 'Bulk edit', 'Tags and saved filters', 'Dashboards', 'Delay alerts', 'Insurance claims',
+  'Pickup times', 'Packaging rules', 'Hazardous goods', 'Year-end clean-up'];
+const HARBOR_STEPS = ['Spike', 'Design', 'Data model', 'Build', 'Wire up', 'Edge cases', 'Tests', 'Error states',
+  'Docs', 'Review fixes', 'Rollout', 'Clean-up'];
+const harborEpic = (i) => `ep-${101 + i}-hb`;
+Object.assign(EPICS, Object.fromEntries(HARBOR_NAMES.map((name, i) => [harborEpic(i), { short: name, name }])));
+const HARBOR_PICK = harborEpic(16);
+function harborTasks() {
+  const rnd = seeded('harbor');
+  const out = [];
+  let n = 1001;
+  HARBOR_NAMES.forEach((name, i) => {
+    const count = 3 + Math.floor(rnd() * 10);
+    const done = i < 12 ? count : i < 20 ? Math.round(count * (0.5 + rnd() * 0.4))
+      : i < 30 ? Math.floor(count * rnd() * 0.4) : 0;
+    const busy = i >= 12 && i < 30 && done < count ? (rnd() < 0.5 ? 'active' : 'review') : null;
+    let prev = null;
+    for (let j = 0; j < count; j++) {
+      const id = `ts-${n++}-hb`;
+      const status = j < done ? (i < 12 && rnd() < 0.08 ? 'dropped' : 'done') : j === done && busy ? busy
+        : j <= done + 1 && i < 34 ? 'ready' : 'backlog';
+      const blockedBy = prev ? [prev] : i % 7 === 3 && out.length ? [out[out.length - 1].id] : [];
+      out.push({ id, title: `${HARBOR_STEPS[j]}: ${name.toLowerCase()}`, status, epic: harborEpic(i), blockedBy,
+        src: 'plan', body: 'A made-up item on a board with 50 epics, to see how the epics strip scales.' });
+      prev = id;
+    }
+  });
+  return out;
+}
+
 // Changed files per task (owner's note, round 2). A run's changes come from its phases' recorded heads (start_head to
 // end_head, or to the working tree while it runs). Work done outside a run: the commits that name the task id.
 const fl = (rows) => rows.map(([path, add, del, diff]) => ({ path, add, del, diff }));
@@ -3124,6 +3198,13 @@ function freshBoards() {
     old: { id: 'old', name: 'old-check', folder: '~/scratch/old-check', line: 'main', shared: true, missing: true,
       sources: ['plan'], tasks: OLD_TASKS, views: [{ id: 'all', name: 'All tasks', where: 'true', test: () => true }],
       copies: [{ id: 'main', label: 'main', kind: 'Line root', where: 'your checkout' }] },
+    harbor: { id: 'harbor', name: 'harbor', folder: '~/projects/harbor', line: 'main', shared: true,
+      sources: ['plan'], tasks: harborTasks(),
+      views: [
+        { id: 'all', name: 'All tasks', where: 'true', test: () => true },
+        { id: 'open', name: 'Open work', where: 'category != "done" && category != "dropped"', test: (t) => isOpen(t) },
+      ],
+      copies: [{ id: 'main', label: 'main', kind: 'Line root', where: 'your checkout' }] },
   };
 }
 
@@ -3279,6 +3360,8 @@ const state = {
   // Round 7: the ask, the lens, marks and chip, snapshots, the agents, the endpoint's token and snippet.
   ak: null, akUnread: false, lens: null, chip: null, hl: null, snaps: [], askAgent: 'claude-haiku',
   agents: clone(AGENTS), atest: {}, tok: TOKENS[0], tokShow: false, snip: 'claude', lastCall: LAST_CALL,
+  // Round 8: the picked epic, the strip folded per view, its find box, and rows in place of one row (notes 58 to 61).
+  epic: null, eshut: new Set(), efind: '', egrid: false,
 };
 const board = () => state.boards[state.board];
 const view = () => board().views.find((v) => v.id === state.view) || board().views[0];
@@ -3542,6 +3625,33 @@ const NOTES = [
     + 'Claude Code, JSON, opencode, or the address with the token in it. Beside Rotate: a snippet puts the token in a '
     + 'file Collide does not control. Recommendation: as drawn, under the agents.', 'Alternative: the endpoint on a '
     + 'page of its own in Settings. Easier to find; it serves only agents.', 'new', 7],
+  ['Epics in a strip over the columns', 'A row of epic cards above the board, folded and opened as the panel\'s parts '
+    + 'are; folded or open is kept per view. A card has the epic\'s name, a bar of its tasks by state, how many are '
+    + 'done, and how many are open or under way. Only an epic with a task in the view shows. Owner, 2026-11-25: in '
+    + 'place of epics as cards among their tasks.', 'Alternative: an epic as a card in its status column, or a row per '
+    + 'epic. Both put the epic among its tasks; a big epic makes a very long card, and rows make the board tall.',
+    'decided', 8],
+  ['Picking an epic lights its cards', 'A click on an epic card picks it: its tasks on the board are lit, and the epic '
+    + 'opens in the panel. A line over the board says how many cards are lit, how many sit in folded columns, and how '
+    + 'many are outside the view; a folded column says how many lit cards it holds. The epic stays picked while you '
+    + 'open its tasks, until a second click on it or Clear. Recommendation: as drawn.', 'Alternative: also dim every '
+    + 'other card. The epic stands out more; the rest of the board is harder to read while one is picked.', 'new', 8],
+  ['The epic in the panel, and Add to Up next', 'The panel shows the picked epic: Run it, then its open tasks in run '
+    + 'order, step by step, with any task of another epic that they wait on, then the finished ones folded. Add to Up '
+    + 'next puts the open tasks in Up next as one group, where you pick how a group runs, and Autopilot can start it '
+    + 'under its caps (Stage 11). Until Stage 11 the button is off and says when it comes. Recommendation: as drawn.',
+    'Alternative: Run this epic, which turns Autopilot on for the epic alone. One click; it skips the choice of how '
+    + 'the group runs.', 'new', 8],
+  ['Fifty epics', 'The strip is one row that scrolls sideways, open work first: an epic with a task under way, then '
+    + 'one with a ready task, then the rest, and finished ones last. Over 8 epics a find box narrows the row by name '
+    + 'or id. The strip keeps one height, so the board stays where it is. Recommendation: as drawn (Round 8, "50 '
+    + 'epics").', 'Alternative: rows that wrap, at most two rows high with their own scroll (Round 8, "50 epics in '
+    + 'rows"). More epics in sight at once; the board starts lower.', 'new', 8],
+  ['The filter bar at fifty epics', 'Found with the 50 epics: the filter bar\'s Stage row has a chip for every epic, '
+    + 'so at 50 it takes five lines. Recommendation: over 8 epics, the row shows only the epics you chose, then '
+    + '"Choose epics", a list with a find box; and the row is named Epic, since another board\'s epics are not '
+    + 'stages. Not drawn yet.', 'Alternative: no epic row in the filter bar; "Show only this epic" on the lit line '
+    + 'filters to the picked one. One place for epics; filtering by two epics at once goes.', 'new', 8],
 ];
 
 /* ---------- top bar ---------- */
@@ -3617,7 +3727,7 @@ function fieldHtml() {
   const tasks = applyFilters(inView);
   if (view().sort) tasks.sort(view().sort);
   const body = state.layout === 'next' ? upNextHtml() : state.layout === 'board' ? (state.lens ? lensHtml(inView)
-    : boardHtml(tasks)) : state.layout === 'graph' ? graphHtml() : runOrderHtml();
+    : epicsHtml(tasks) + elitHtml(tasks) + boardHtml(tasks)) : state.layout === 'graph' ? graphHtml() : runOrderHtml();
   return banners.join('') + autoStripHtml() + filtersHtml(inView, tasks) + viewbarHtml(tasks) + achipHtml()
     + body;
 }
@@ -3654,7 +3764,8 @@ function filtersHtml(inView, shown) {
   const srcs = [...new Set(inView.map((t) => t.src))];
   const groups = [];
   if (epics.length > 1) {
-    groups.push(`<div class="fgroup"><span class="lbl">Stage</span>${epics.map((e) => chip('stage', e,
+    groups.push(`<div class="fgroup"><span class="lbl">Stage${
+      epics.length > 8 ? nm(62) : ''}</span>${epics.map((e) => chip('stage', e,
       esc(EPICS[e].short), inView.filter((t) => t.epic === e).length)).join('')}</div>`);
   }
   groups.push(`<div class="fgroup"><span class="lbl">Where it stands</span>${CAT_ORDER.map((c) => chip('cat', c,
@@ -3810,7 +3921,7 @@ function boardHtml(tasks) {
     if (isShut(col)) {
       return `<div class="col shut" data-act="col" data-v="${esc(col.key)}" role="button" tabindex="0"
         title="Show ${esc(col.label)}"><span class="vert"><span class="dot cat-${col.cat}"></span>${esc(col.label)}
-        <span class="muted">${mine.length}</span></span>${i === cols.length - 2 ? nm(4) : ''}</div>`;
+        <span class="muted">${mine.length}</span>${litOf(mine)}</span>${i === cols.length - 2 ? nm(4) : ''}</div>`;
     }
     return `<section class="col" aria-label="${esc(col.label)}"><div class="colh"><div class="grow">
       <div class="name cat-${col.cat}"><span class="dot"></span><span style="color:var(--foreground)">
@@ -3856,11 +3967,112 @@ function cardHtml(t, mode) {
   const epic = t.epic && EPICS[t.epic] ? ` · ${esc(EPICS[t.epic].short)}` : '';
   const first = notedCard[5] ? '' : ((notedCard[5] = true), nm(5));
   return `<button class="tc ${c === 'active' ? 'lit' : ''} ${c} ${state.drawer === t.id ? 'sel' : ''}
-    ${asks ? 'needs' : ''} ${state.flash.has(t.id) ? 'flash' : ''} ${marked(t) ? 'hl' : ''}" data-act="open"
+    ${asks ? 'needs' : ''} ${state.flash.has(t.id) ? 'flash' : ''} ${marked(t) ? 'hl' : ''} ${
+    state.epic && t.epic === state.epic ? 'ehl' : ''}" data-act="open"
     data-id="${t.id}">
     <span class="tc-t">${esc(t.title)}${first}</span>
     <span class="tc-m"><span>${esc(shortId(t.id))}${epic}</span></span>
     ${chips.length ? `<span class="tc-c">${chips.join('')}</span>` : ''}</button>`;
+}
+
+/* ---------- the epics strip, and the epic in the panel (round 8; notes 58 to 61) ---------- */
+const epicTasks = (ep) => visibleTasks().filter((t) => t.epic === ep);
+const litOf = (ts) => {
+  const n = state.epic ? ts.filter((t) => t.epic === state.epic).length : 0;
+  return n ? `<span class="elitn">${n} lit</span>` : '';
+};
+// Open work first: an epic with a task under way, then one with a ready task, then the rest, then finished ones.
+function epicRank(ep) {
+  const cats = epicTasks(ep).map((t) => catOf(t));
+  if (cats.includes('active') || cats.includes('review')) return 0;
+  return cats.includes('ready') ? 1 : cats.includes('backlog') ? 2 : 3;
+}
+function epicsHtml(tasks) {
+  const all = [...new Set(tasks.map((t) => t.epic).filter((e) => e && EPICS[e]))];
+  if (!all.length) return '';
+  const shut = state.eshut.has(`${state.board}:${state.view}`);
+  const q = state.efind.trim().toLowerCase();
+  const shown = all.filter((e) => !q || `${e} ${EPICS[e].name}`.toLowerCase().includes(q))
+    .sort((a, b) => epicRank(a) - epicRank(b) || a.localeCompare(b));
+  const find = all.length <= 8 ? '' : `<div class="etools"><label class="sr" for="efind">Find an epic</label>
+    <input id="efind" type="search" placeholder="Find an epic by name or id" value="${esc(state.efind)}">
+    <span class="muted">${q ? `${shown.length} of ${all.length}` : 'Open work first'}</span>${nm(61)}</div>`;
+  const picked = state.epic && shut && all.includes(state.epic)
+    ? `<span class="chip info">${esc(EPICS[state.epic].short)} is lit</span>` : '';
+  return `<section class="ds estrip${shut ? ' shut' : ''}" aria-label="Epics"><h3><button class="dsh" data-act="estrip"
+    aria-expanded="${!shut}">${secIcon('Epics')}<span class="dt">Epics <span class="muted" style="font-weight:400">${
+    all.length}</span>${picked}</span>${CHEV}</button>${nm(58)}</h3><div class="dsb">${find}
+    <div class="erow ${state.egrid ? 'grid' : ''}">${shown.map(ecardHtml).join('')
+      || '<span class="muted">No epic matches.</span>'}</div></div></section>`;
+}
+function ecardHtml(ep) {
+  const ts = epicTasks(ep);
+  const n = (c) => ts.filter((t) => catOf(t) === c).length;
+  const open = ts.filter(isOpen).length;
+  const busy = n('active') + n('review');
+  const bar = ['done', 'dropped', 'review', 'active', 'ready', 'backlog'].map((c) => (n(c)
+    ? `<span class="cat-${c}" style="flex:${n(c)}"></span>` : '')).join('');
+  const on = state.epic === ep;
+  return `<button class="ec ${on ? 'on' : ''}" data-act="epic" data-id="${ep}" aria-pressed="${on}">
+    <span class="et">${esc(EPICS[ep].name)}</span><span class="ebar" aria-hidden="true">${bar}</span>
+    <span class="em"><span>${n('done')} of ${ts.length} done</span><span>·</span><span>${open ? `${open} open${busy
+      ? `, ${busy} under way` : ''}` : 'Finished'}</span></span><span class="em mono">${esc(ep)}</span></button>`;
+}
+function elitHtml(tasks) {
+  if (!state.epic || !EPICS[state.epic]) return '';
+  const mode = groupMode(tasks);
+  const cols = columnsOf(mode, tasks);
+  const mine = tasks.filter((t) => t.epic === state.epic);
+  const folded = mine.filter((t) => {
+    const col = cols.find((c) => c.key === (mode === 'category' ? catOf(t) : t.status));
+    return col && isShut(col);
+  }).length;
+  const out = epicTasks(state.epic).length - mine.length;
+  const parts = [`${mine.length - folded} card${mine.length - folded === 1 ? '' : 's'} lit`];
+  if (folded) parts.push(`${folded} in folded columns`);
+  if (out) parts.push(`${out} not in this view`);
+  return `<div class="elit" role="status"><span class="chip info">Epic</span><b>${esc(EPICS[state.epic].name)}</b>
+    <span class="muted">${parts.join(' · ')}</span>${nm(59)}<span class="spacer"></span>
+    ${state.drawer === `epic:${state.epic}` ? '' : '<button class="btn sm" data-act="epic-open">Open the epic</button>'}
+    <button class="btn sm ghost" data-act="epic-clear">Clear</button></div>`;
+}
+function epicDrawerHtml(ep) {
+  const ts = epicTasks(ep);
+  const open = ts.filter(isOpen);
+  const steps = closureSteps(ep);
+  const outside = steps.flat().filter((t) => t.epic !== ep);
+  const queued = state.unext.some((e) => e.epic === ep);
+  const row = (t) => `<button class="etask" data-act="open" data-id="${t.id}"><span class="dot cat-${catOf(t)}"></span>
+    <span class="mono muted">${esc(shortId(t.id))}</span><span class="tt">${esc(t.title)}</span>${t.epic !== ep
+      ? `<span class="chip">${esc(EPICS[t.epic] ? EPICS[t.epic].short : 'no epic')}</span>` : ''}
+    <span class="muted">${esc(t.status)}</span></button>`;
+  const order = steps.map((s, i) => `<div class="estep"><div class="muted" style="font-size:12px">Step ${i + 1}${
+    s.length > 1 ? `, ${s.length} that can go side by side` : ''}</div>${s.map(row).join('')}</div>`).join('');
+  const done = ts.filter((t) => !isOpen(t));
+  const go = queued ? `<span class="chip good">${svg.ok}In Up next</span><button class="btn sm" data-act="layout"
+    data-v="next">See Up next</button>` : `<button class="btn sm main" data-act="epic-queue" data-id="${ep}" ${
+    open.length ? '' : 'disabled'}>Add to Up next</button>`;
+  return `<div class="dh"><div class="row"><span class="chip info">Epic</span>
+    <span class="muted" style="font-size:13px">${open.length ? `${open.length} open of ${ts.length}`
+      : 'Finished'}</span><span class="spacer"></span>
+    <span class="muted mono" style="font-size:12.5px">${esc(ep)}</span>
+    <button class="btn ghost sm" data-act="close" aria-label="Close">${svg.close}</button></div>
+    <h2>${esc(EPICS[ep].name)}${nm(60)}</h2>
+    <div class="row muted" style="font-size:13px">Read only. Its cards are lit on the board while it is picked.</div>
+    </div>
+    <div class="db"><section class="ds"><h3>Run it</h3><p style="margin:0 0 10px">${open.length ? `Adds its ${
+      open.length} open task${open.length === 1 ? '' : 's'}${outside.length ? `, and the ${outside.length} of other
+      epics they wait on,` : ''} to Up next as one group, in run order. Up next picks how the group runs, and
+      Autopilot can start it under its caps.` : 'Nothing is open in it.'}</p>
+      <div class="frow" style="gap:8px">${go}<button class="btn sm" data-act="epic-order" data-id="${ep}">See the run
+      order</button></div><p class="muted" style="margin:10px 0 0;font-size:12.5px">In the app, Add to Up next is off
+      until Stage 11, with groups and Autopilot, and says so.</p></section>
+    <section class="ds"><h3>Tasks in run order</h3>${order || '<p class="muted" style="margin:0">No open tasks.</p>'}
+      ${done.length ? `<details class="edone"><summary>${done.length} done or dropped</summary>${done.map(row).join('')}
+      </details>` : ''}</section>
+    <section class="ds"><h3>Details for engineers</h3><dl class="kv"><dt>File</dt><dd class="mono">
+      .collide/planning/epics/${esc(ep)}/epic.md</dd><dt>Tasks</dt><dd>${ts.length}, the files in its folder's
+      <code>tasks/</code></dd></dl></section></div>`;
 }
 
 /* ---------- run order ---------- */
@@ -5107,6 +5319,9 @@ function foldedFiltersHtml(inView, shown) {
 
 /* the task panel: each part has a bar that folds it (note 39) */
 const SEC_IC = {
+  Epics: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+  Run: '<path d="M7 5v14l12-7z"/>',
+  Tasks: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
   Questions: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4M12 17h.01"/>',
   Description: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h4"/>',
   Waits: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -5898,6 +6113,9 @@ function mockHtml() {
       ${s('ask-view', 'Ask: a view')}${s('ask-fail', 'Ask: a failure')}${s('snap', 'A saved snapshot')}
       ${s('agents', 'Settings: Agents')}${s('agent-red', 'Agents: not confined')}${s('endpoint', 'Agents: endpoint')}
       </div>
+    <h3>Round 8: epics</h3><div class="grid">${s('epics', 'Epics: one picked')}
+      ${s('epics-shut', 'Epics: the strip folded')}${s('epics-50', '50 epics')}${s('epics-50-pick', '50 epics: one '
+      + 'picked')}${s('epics-50-grid', '50 epics in rows')}</div>
     <h3>Live updates (watch)</h3><div class="grid">${s('sim-finish', 'ts-0178 goes to review')}
       ${s('sim-diverge', "A run's copy moves ts-0168")}</div>
     <h3>View</h3><div class="grid"><button class="btn sm" data-act="notes" aria-pressed="${state.notes}">
@@ -5928,10 +6146,12 @@ function render() {
   else if (state.surface === 'comms') html = commsHtml();
   else html = state.surface === 'queue' ? queueHtml() : laterHtml(state.surface);
   $('#content').innerHTML = html;
-  const t = state.drawer && byId(state.drawer);
+  const ep = state.drawer && state.drawer.startsWith('epic:') ? state.drawer.slice(5) : null;
+  const t = !ep && state.drawer && byId(state.drawer);
   const d = $('#drawer');
-  d.hidden = !t || state.screen === 'welcome';
-  if (t) d.innerHTML = foldSections(drawerHtml(t));
+  d.hidden = !(t || (ep && EPICS[ep])) || state.screen === 'welcome';
+  if (ep && EPICS[ep]) d.innerHTML = foldSections(epicDrawerHtml(ep));
+  else if (t) d.innerHTML = foldSections(drawerHtml(t));
   $('#dgrip').hidden = d.hidden;
   d.style.flexBasis = `${state.dw}px`;
   const dk = $('#dock');
@@ -5991,7 +6211,7 @@ function goBoard(id, viewId) {
   state.drawer = null;
   state.goal = null;
   resetFilters();
-  Object.assign(state, { lens: null, chip: null, hl: null });
+  Object.assign(state, { lens: null, chip: null, hl: null, epic: null, efind: '' });
 }
 
 /* ---------- scenarios ---------- */
@@ -5999,6 +6219,16 @@ function scenario(v) {
   const b = state.boards;
   switch (v) {
     case 'collide': state.layout = 'board'; state.groupBy = 'auto'; goBoard('collide'); break;
+    case 'epics': case 'epics-shut':
+      state.layout = 'board'; state.groupBy = 'auto'; goBoard('collide');
+      state.epic = 'ep-006-wq';
+      if (v === 'epics') state.drawer = 'epic:ep-006-wq'; else state.eshut.add(`${state.board}:${state.view}`);
+      break;
+    case 'epics-50': case 'epics-50-grid': case 'epics-50-pick':
+      state.layout = 'board'; state.groupBy = 'auto'; goBoard('harbor');
+      state.egrid = v === 'epics-50-grid';
+      if (v === 'epics-50-pick') Object.assign(state, { epic: HARBOR_PICK, drawer: `epic:${HARBOR_PICK}` });
+      break;
     case 'pantry': state.layout = 'board'; state.groupBy = 'auto'; goBoard('pantry', 'tracker'); break;
     case 'mixed': state.layout = 'board'; state.groupBy = 'auto'; goBoard('pantry', 'everything'); break;
     case 'runorder': goBoard('collide', 's5'); state.layout = 'run'; break;
@@ -6147,7 +6377,8 @@ function scenario(v) {
         psess: null, ptab: 'plan', pview: 'chat', pdraft: '', ffold: new Set(), dshut: new Set(), dw: 460,
         qa: clone(QA), qkeep: 'task', qdraft: {}, auto: clone(AUTO), unext: clone(UP_NEXT), overlap: false,
         ak: null, akUnread: false, snaps: [], askAgent: 'claude-haiku', agents: clone(AGENTS), atest: {},
-        tok: TOKENS[0], tokShow: false, snip: 'claude', lastCall: LAST_CALL });
+        tok: TOKENS[0], tokShow: false, snip: 'claude', lastCall: LAST_CALL,
+        epic: null, eshut: new Set(), efind: '', egrid: false });
       goBoard('collide');
       break;
     }
@@ -6208,6 +6439,32 @@ document.addEventListener('click', (e) => {
     case 'clear': resetFilters(); break;
     case 'open': state.drawer = id; break;
     case 'close': state.drawer = null; break;
+    case 'epic':
+      if (state.epic === id) {
+        if (state.drawer === `epic:${id}`) state.drawer = null;
+        state.epic = null;
+      } else Object.assign(state, { epic: id, drawer: `epic:${id}` });
+      break;
+    case 'epic-open': state.drawer = `epic:${state.epic}`; break;
+    case 'epic-clear':
+      if (state.drawer === `epic:${state.epic}`) state.drawer = null;
+      state.epic = null;
+      break;
+    case 'epic-queue': {
+      const ids = closureSteps(id).flat().map((t) => t.id);
+      state.unext.push({ kind: 'group', name: EPICS[id].short, epic: id, tasks: ids, mode: 'apart', by: 'you' });
+      toast(`${EPICS[id].short} is in Up next: ${ids.length} tasks as one group`);
+      break;
+    }
+    case 'epic-order': state.layout = 'run'; state.goal = id; break;
+    case 'estrip': {
+      const key = `${state.board}:${state.view}`;
+      if (state.eshut.has(key)) state.eshut.delete(key); else state.eshut.add(key);
+      render();
+      const back = $('.estrip .dsh');
+      if (back) back.focus();
+      return;
+    }
     case 'col': {
       const col = { key: v, cat: '' };
       const shut = state.shut.has(v) || (!state.open.has(v) && e.target.closest('.col.shut'));
@@ -6538,8 +6795,10 @@ document.addEventListener('input', (e) => {
   }
   if (id.startsWith('qans-')) { state.qdraft[`${state.drawer}:${id.slice(5)}`] = e.target.value; return; }
   if (id === 'dmsg') { state.ddraft = e.target.value; return; }
-  if (id !== 'ftext' && id !== 'cq') return;
-  if (id === 'ftext') state.filt.text = e.target.value; else state.cq = e.target.value;
+  if (id !== 'ftext' && id !== 'cq' && id !== 'efind') return;
+  if (id === 'ftext') state.filt.text = e.target.value;
+  else if (id === 'efind') state.efind = e.target.value;
+  else state.cq = e.target.value;
   const pos = e.target.selectionStart;
   render();
   const f = $(`#${id}`);
