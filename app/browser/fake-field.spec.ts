@@ -23,6 +23,15 @@ function focused(page: Page) {
   })
 }
 
+test('the board fills a wide window, as the mock does, inside the page padding', async ({ openFake }) => {
+  const page = await openFake('field-one-source')
+  await page.setViewportSize({ width: 2000, height: 900 })
+  const field = page.getByRole('region', { name: 'Field', exact: true })
+  await expect(column(page, 'Ready')).toBeVisible()
+  const box = (await field.boundingBox())!
+  expect([Math.round(box.x), Math.round(box.x + box.width)]).toEqual([16, 2000 - 16])
+})
+
 test('Done and Dropped start folded with their counts, and a click opens one', async ({ openFake }) => {
   const page = await openFake('field-one-source')
   await expect(column(page, 'Ready')).toBeVisible()

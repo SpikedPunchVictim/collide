@@ -427,7 +427,7 @@ start, draw and reach its own daemon.
 - Fixed before your look: `tauri dev` started nothing (the crate has two binaries and named no `default-run`); below
   900 px the drawer was as tall as its text, so the end of a long task was out of reach; Cancel in the link window
   left the focus nowhere (Escape gave it back); step 32's `rm -rf`.
-- Left for your look: the page is at most 1152 px wide (`max-w-6xl` in `app/src/frame/Frame.tsx`), where the mock's
-  board fills the window. On a wide window the drawer takes its room from the board, and at its limit, 70% of the
-  window, it covers the board and runs past the page's edge. The window's first size is 800 × 600 (step 4).
+- Changed at your word after the run: the page was at most 1152 px wide, where the mock's board fills the window, so
+  on a wide window the drawer at its limit covered the board. The page now fills the window.
+- Left for your look: the window's first size is 800 × 600 (step 4).
 - Not run by the agent: 6, 12 and 13 (yours to judge), 19 in the app's window, and 23 and 26 in its inspector.

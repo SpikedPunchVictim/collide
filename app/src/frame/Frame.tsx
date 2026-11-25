@@ -91,7 +91,7 @@ export function Frame(props: FrameProps) {
           </Button>
         </div>
       </header>
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
+      <main className="flex w-full flex-col gap-3 p-4">
         {settings ? (
           <SettingsPage />
         ) : (
