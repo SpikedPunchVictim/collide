@@ -118,8 +118,34 @@ export class FieldWorld extends World {
   held = new Map<string, Held>()
   collisions: TaskListResultOutput['collisions'] = []
   divergence: TaskListResultOutput['divergence'] = []
+  /** What the daemon says while its first listing runs, and of a source that did not start. */
+  refreshing = false
+  notStarted: TaskListResultOutput['not_started'] = []
   /** Set to make `task.list` refuse with these words. */
   refuseList: string | null = null
+
+  /** Changes a listed task, as an edit in a checkout would. Nothing is announced: the daemon's event does that. */
+  edit(key: string, over: Partial<TaskOutput>): void {
+    this.listing = this.listing.map((each) => (each.key === key ? { ...each, ...over } : each))
+  }
+
+  /** The daemon's event that a task of `source` changed, as the corpus service records it. */
+  announce(source: string, key = `${source}:ts-0001-aa`, event: 'task.changed' | 'task.removed' = 'task.changed') {
+    const task = { key, version: 'v2', cause: 'worktree' as const, checkout: '/work/alpha' }
+    const body =
+      event === 'task.changed'
+        ? { event, source, task: { ...task, from: null, to: null, diff: {} } }
+        : { event, source, task: { key, cause: task.cause, checkout: task.checkout } }
+    this.owner.push({
+      method: 'daemon.event',
+      params: { seq: 1, wall_ms: 1, actor: { kind: 'workflow' }, experiment: null, body },
+    } as never)
+  }
+
+  /** How many times `task.list` was called. */
+  lists(): number {
+    return this.callsTo('task.list').length
+  }
 
   constructor() {
     super()
@@ -143,8 +169,8 @@ export class FieldWorld extends World {
         divergence: this.divergence,
         divergent: this.divergence.map((entry) => entry.key),
         invalid: [],
-        not_started: [],
-        refreshing: false,
+        not_started: this.notStarted,
+        refreshing: this.refreshing,
         sources: this.sources,
         sources_started: this.sources.length,
         stale_sources: [],

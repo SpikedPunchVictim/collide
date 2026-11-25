@@ -12,27 +12,38 @@ import { type FieldWorld, eightStatuses, mixedSources, onePlanSource } from './s
 
 const noop = () => {}
 
+/** A Field that has read nothing: the live parts are at rest. */
+const IDLE: FieldState = {
+  views: [],
+  view: null,
+  select: noop,
+  data: null,
+  problem: null,
+  flashed: new Set(),
+  updatedAt: null,
+}
+
 async function page(world: FieldWorld, view: string | null = null, over: Partial<FieldState> = {}) {
   const views = await loadViews(world.owner, 'b-alpha')
   const data = await loadField(world.owner, 'b-alpha', view)
-  const field: FieldState = { views, view, select: noop, data, problem: null, ...over }
+  const field: FieldState = { ...IDLE, views, view, data, ...over }
   return renderToString(<FieldPage boardId="b-alpha" field={field} store={memoryStore()} />)
 }
 
 describe('the Field page', () => {
   test('says no board is open when none is', () => {
-    const field: FieldState = { views: [], view: null, select: noop, data: null, problem: null }
+    const field: FieldState = IDLE
     expect(renderToString(<FieldPage boardId={null} field={field} />)).toContain('No board is open')
   })
 
   test('says why the board could not be read', () => {
-    const field: FieldState = { views: [], view: null, select: noop, data: null, problem: 'no daemon' }
+    const field: FieldState = { ...IDLE, problem: 'no daemon' }
     const html = renderToString(<FieldPage boardId="b-alpha" field={field} />)
     expect(html).toContain('The board could not be read: no daemon')
   })
 
   test('says it is reading while nothing has come', () => {
-    const field: FieldState = { views: [], view: null, select: noop, data: null, problem: null }
+    const field: FieldState = IDLE
     expect(renderToString(<FieldPage boardId="b-alpha" field={field} />)).toContain('Reading the board')
   })
 
@@ -104,6 +115,33 @@ describe('the Field page', () => {
   test('names the view above the board, and counts its tasks', async () => {
     expect(await page(onePlanSource(), 'by-status')).toMatch(/<h1[^>]*>by-status<\/h1>/)
     expect(await page(onePlanSource())).toMatch(/<h1[^>]*>All tasks<\/h1>/)
+  })
+
+  test('says it is live, and when the board last changed', async () => {
+    const html = await page(onePlanSource(), null, { updatedAt: Date.now() - 30_000 })
+    expect(html).toContain('The board follows the files as they change')
+    expect(html).toMatch(/Live[^]*30 s ago/)
+  })
+
+  test('says just now for a change that is a moment old', async () => {
+    expect(await page(onePlanSource(), null, { updatedAt: Date.now() })).toContain('Live · updated just now')
+  })
+
+  test('has no Live stamp before the first read has changed anything', async () => {
+    expect(await page(onePlanSource())).not.toContain('Live')
+  })
+
+  test('marks the cards that flash, and only them', async () => {
+    const html = await page(onePlanSource(), null, { flashed: new Set(['plan:ts-0001-aa|']) })
+    const marked = html.match(/<button[^>]*data-flash="true"[^>]*>/g) ?? []
+    expect(marked).toHaveLength(1)
+    expect(marked[0]).toContain('data-card="plan:ts-0001-aa|"')
+  })
+
+  test('shows no toast or alert for a change', async () => {
+    const html = await page(onePlanSource(), null, { flashed: new Set(['plan:ts-0001-aa|']), updatedAt: Date.now() })
+    expect(html).not.toContain('role="alert"')
+    expect(html).not.toContain('aria-live="assertive"')
   })
 
   test('has no drawer place until a card is selected', async () => {

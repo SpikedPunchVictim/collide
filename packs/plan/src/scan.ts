@@ -25,7 +25,7 @@ const EPIC_FOLDER = /^(ep-[0-9]{3,}-[a-z]{2})(-.*)?$/
 const SPIKE_FOLDER = /^sp-[0-9]{3,}-[a-z]{2}(-.*)?$/
 
 /** The one file of a spike folder that is read (0.10, Planning sources). */
-const SPIKE_RECORD = 'record.md'
+export const SPIKE_RECORD = 'record.md'
 
 /** One item that was read and checked, with where it was found. */
 export interface FoundItem {

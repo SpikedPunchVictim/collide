@@ -1276,17 +1276,71 @@ impl Inner {
     }
 
     /// `collections.changed`: the corpus takes the collections and the members' places, and the cache the copies that
-    /// moved. No event is recorded: no item changed, and the item's own change, if there was one, has its own.
+    /// moved. Each copy that moved records a `TaskChanged` that names its `collections` (ts-0182-ad): the Field reads
+    /// the board again on an event, and a task that only changed epic has no other word to say it did. The item's own
+    /// change, if there was one, has its own event.
     fn collections_changed(&self, name: &str, change: &CollectionsChanged) {
-        let moved = locked(&self.state).corpus.apply_collections(name, change);
+        let (before, moved) = {
+            let mut state = locked(&self.state);
+            let before: BTreeMap<String, Vec<String>> = change
+                .members
+                .iter()
+                .filter_map(|member| {
+                    let copy = state.corpus.copy(&member.key, change.checkout.as_deref())?;
+                    Some((member.key.clone(), copy.collections.clone()))
+                })
+                .collect();
+            (before, state.corpus.apply_collections(name, change))
+        };
         match moved {
             Ok(keys) => {
                 for key in keys {
                     self.keep_copy(name, &key, change.checkout.as_deref());
+                    let old = before.get(&key).map_or(&[][..], Vec::as_slice);
+                    self.record_moved(name, &key, old, change.checkout.as_deref());
                 }
             }
             Err(error) => self.log(&format!("a change of collections was not applied: {error}")),
         }
+    }
+
+    /// Records the `TaskChanged` of a copy whose collections moved from `old`: its state and version are as they were.
+    fn record_moved(&self, name: &str, key: &str, old: &[String], checkout: Option<&str>) {
+        let Some(task) = locked(&self.state).corpus.copy(key, checkout).cloned() else {
+            return;
+        };
+        let set = |items: &[String]| -> Vec<serde_json::Value> {
+            items.iter().map(|item| item.as_str().into()).collect()
+        };
+        let added: Vec<String> = task
+            .collections
+            .iter()
+            .filter(|item| !old.contains(item))
+            .cloned()
+            .collect();
+        let removed: Vec<String> = old
+            .iter()
+            .filter(|item| !task.collections.contains(item))
+            .cloned()
+            .collect();
+        let note = TaskChanged {
+            key: key.to_string(),
+            version: task.version.clone(),
+            from: Some(task.state.clone()),
+            to: Some(task.state.clone()),
+            diff: BTreeMap::from([(
+                "collections".to_string(),
+                collide_core::change::FieldDiff::Set {
+                    added: set(&added),
+                    removed: set(&removed),
+                },
+            )]),
+            cause: ChangeCause::Worktree,
+            actor: None,
+            automated: None,
+            checkout: checkout.map(str::to_string),
+        };
+        self.record(name, ProviderEvent::Changed(note), None);
     }
 
     fn renamed(&self, name: &str, rename: collide_core::change::Rename) {

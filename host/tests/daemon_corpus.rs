@@ -3354,3 +3354,103 @@ fn task_get_on_a_scratch_task_lists_only_the_views_that_hold_it() {
     assert_eq!(first.views, ["ready", "mine"]);
     assert_eq!(second.views, ["ready"]);
 }
+
+// ---- the Field's live updates (ts-0182-ad): what a change of collections or links records ---------------------------
+
+/// A task file with its collections and `part-of` links, which the plan reports as a link to its epic.
+fn task_in(rig: &Rig, checkout: &Path, short: &str, collections: &[&str], part_of: &[&str]) {
+    let links: Vec<Value> = part_of
+        .iter()
+        .map(|to| json!({ "type": "part-of", "to": to }))
+        .collect();
+    let data = json!({
+        "short": short, "title": format!("Task {short}"), "status": "todo", "version": "v1",
+        "collections": collections, "links": links,
+    });
+    rig.file(checkout, &format!("{short}.json"), &format!("{data}\n"));
+}
+
+/// The `TaskChanged` events of `source` after `seq`, as their bodies.
+fn changes_after(rig: &Rig, source: &str, seq: u64) -> Vec<collide_core::provider::TaskChanged> {
+    rig.source_events_after(source, seq)
+        .into_iter()
+        .filter_map(|event| match event.body {
+            EventBody::TaskChanged { task, .. } => Some(task),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_relist_that_changes_only_a_tasks_collections_records_a_task_changed() {
+    let rig = rig();
+    let board = rig.board_with(&[&DOCS], "");
+    let root = rig.root();
+    task_in(&rig, &root, "1", &["epic-a"], &[]);
+    rig.settled(&board);
+    let before = rig.last_seq();
+
+    task_in(&rig, &root, "1", &["epic-b"], &[]);
+    let events = rig.wait_events("docs", before, 1);
+
+    assert_eq!(events.len(), 1, "{events:?}");
+    let changes = changes_after(&rig, "docs", before);
+    assert_eq!(changes[0].key, "docs:1");
+    assert!(changes[0].diff.contains_key("collections"), "{changes:?}");
+}
+
+#[test]
+fn a_relist_that_changes_only_a_tasks_links_records_a_task_changed() {
+    let rig = rig();
+    let board = rig.board_with(&[&DOCS], "");
+    let root = rig.root();
+    task_in(&rig, &root, "1", &[], &["ep-001-aa"]);
+    rig.settled(&board);
+    let before = rig.last_seq();
+
+    // The epic move of the plan: the task is part of another epic, and nothing else about it changed.
+    task_in(&rig, &root, "1", &[], &["ep-002-bb"]);
+    let events = rig.wait_events("docs", before, 1);
+
+    assert_eq!(events.len(), 1, "{events:?}");
+    let changes = changes_after(&rig, "docs", before);
+    assert_eq!(changes[0].key, "docs:1");
+}
+
+#[test]
+fn a_collections_changed_notice_records_a_task_changed_for_each_task_it_moved() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    task_in(&rig, &root, "1", &["epic-a"], &[]);
+    task_in(&rig, &root, "2", &["epic-a"], &[]);
+    task_in(&rig, &root, "3", &["epic-a"], &[]);
+    rig.settled(&board);
+    rig.wait_watched(&board, &FILES);
+    let before = rig.last_seq();
+
+    // Tasks 1 and 2 move to another collection; 3 is named and does not move.
+    rig.notify(
+        &board,
+        &FILES,
+        "collections.changed",
+        json!({
+            "collections": [],
+            "members": [
+                { "key": "files:1", "collections": ["epic-b"] },
+                { "key": "files:2", "collections": ["epic-b", "epic-c"] },
+                { "key": "files:3", "collections": ["epic-a"] },
+            ],
+            "checkout": root.display().to_string(),
+        }),
+    );
+    let events = rig.wait_events("files", before, 2);
+
+    let mut changes = changes_after(&rig, "files", before);
+    changes.sort_by(|a, b| a.key.cmp(&b.key));
+    assert_eq!(events.len(), 2, "task 3 did not move: {events:?}");
+    assert_eq!(changes[0].key, "files:1");
+    assert_eq!(changes[1].key, "files:2");
+    assert!(changes[0].diff.contains_key("collections"), "{changes:?}");
+    assert_eq!(changes[0].checkout.as_deref(), root.to_str());
+}

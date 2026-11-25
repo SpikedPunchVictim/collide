@@ -1,12 +1,13 @@
 // The Field (ts-0181-ft; 0.11; notes 3 to 7 of the board mock): the board's tasks as columns over the selected view,
 // a line for what the view says of itself, and a place for the drawer, which `ts-0184-hv` fills. The columns come from
 // the sources' declared statuses (`model.ts`); a fold is kept per board and view (`folds.ts`).
-import { type KeyboardEvent, useMemo, useState } from 'react'
+import { type KeyboardEvent, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card as Panel } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { actionForKey } from '../frame/actions.ts'
+import { agoWords } from './live.ts'
 import { type FoldStore, browserStore, isShut, memoryStore, readFolds, toggleFold } from './folds.ts'
 import { type Card, type Chip, type Column, type Lane, lanesOf, reportLines } from './model.ts'
 import { type Direction, neighbour } from './navigation.ts'
@@ -70,7 +71,17 @@ export function FieldPage({ boardId, field, store }: FieldPageProps) {
       </p>
     )
   }
-  return <Board boardId={boardId} view={field.view} data={field.data} groupBy={groupByOf(field)} store={store} />
+  return (
+    <Board
+      boardId={boardId}
+      view={field.view}
+      data={field.data}
+      groupBy={groupByOf(field)}
+      flashed={field.flashed}
+      updatedAt={field.updatedAt}
+      store={store}
+    />
+  )
 }
 
 /** The `layout.groupBy` of the selected view, which overrides how the sources would group. */
@@ -84,10 +95,12 @@ interface BoardProps {
   readonly view: string | null
   readonly data: FieldData
   readonly groupBy: string | null
+  readonly flashed: ReadonlySet<string>
+  readonly updatedAt: number | null
   readonly store?: FoldStore | null
 }
 
-function Board({ boardId, view, data, groupBy, store }: BoardProps) {
+function Board({ boardId, view, data, groupBy, flashed, updatedAt, store }: BoardProps) {
   const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
@@ -117,12 +130,43 @@ function Board({ boardId, view, data, groupBy, store }: BoardProps) {
       <div className="flex flex-wrap items-baseline gap-3">
         <h1 className="text-xl font-semibold">{view ?? ALL_TASKS}</h1>
         <span className="text-muted-foreground">{`${count} task${count === 1 ? '' : 's'}`}</span>
+        {updatedAt === null ? null : <LiveStamp updatedAt={updatedAt} />}
       </div>
       <div className="flex items-start gap-3">
-        <Columns lanes={lanes} folds={folds} selected={chosen?.id ?? null} onSelect={select} onFlip={flip} />
+        <Columns
+          lanes={lanes}
+          folds={folds}
+          selected={chosen?.id ?? null}
+          flashed={flashed}
+          onSelect={select}
+          onFlip={flip}
+        />
         {chosen === null ? null : <DrawerPlace card={chosen} onClose={() => select(null)} />}
       </div>
     </section>
+  )
+}
+
+/** How often the stamp's words are looked at again. */
+const STAMP_TICK_MS = 5000
+
+/** The Live stamp (note 14): the board follows the files, and when it last changed. It is a status, not an alert. */
+function LiveStamp({ updatedAt }: { updatedAt: number }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => tick((count) => count + 1), STAMP_TICK_MS)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-sm text-muted-foreground"
+      title="The board follows the files as they change"
+    >
+      <span aria-hidden="true" className="text-done motion-safe:animate-pulse">
+        ●
+      </span>
+      {`Live · updated ${agoWords(updatedAt, Date.now())}`}
+    </span>
   )
 }
 
@@ -130,11 +174,12 @@ interface ColumnsProps {
   readonly lanes: readonly Lane[]
   readonly folds: ReturnType<typeof readFolds>
   readonly selected: string | null
+  readonly flashed: ReadonlySet<string>
   readonly onSelect: (id: string) => void
   readonly onFlip: (column: Column) => void
 }
 
-function Columns({ lanes, folds, selected, onSelect, onFlip }: ColumnsProps) {
+function Columns({ lanes, folds, selected, flashed, onSelect, onFlip }: ColumnsProps) {
   /** Arrow keys between cards, and Enter on one, are the Field's named actions (`../frame/actions.ts`). */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return
@@ -173,6 +218,7 @@ function Columns({ lanes, folds, selected, onSelect, onFlip }: ColumnsProps) {
             key={lane.column.key}
             lane={lane}
             selected={selected}
+            flashed={flashed}
             onSelect={onSelect}
             onFold={() => onFlip(lane.column)}
           />
@@ -205,11 +251,12 @@ function ShutColumn({ lane, onOpen }: { lane: Lane; onOpen: () => void }) {
 interface OpenColumnProps {
   readonly lane: Lane
   readonly selected: string | null
+  readonly flashed: ReadonlySet<string>
   readonly onSelect: (id: string) => void
   readonly onFold: () => void
 }
 
-function OpenColumn({ lane, selected, onSelect, onFold }: OpenColumnProps) {
+function OpenColumn({ lane, selected, flashed, onSelect, onFold }: OpenColumnProps) {
   const { column, cards } = lane
   return (
     <section
@@ -234,18 +281,33 @@ function OpenColumn({ lane, selected, onSelect, onFold }: OpenColumnProps) {
         <p className="px-1 py-1.5 text-sm text-muted-foreground">Nothing here</p>
       ) : (
         cards.map((card) => (
-          <CardButton key={card.id} card={card} selected={card.id === selected} onSelect={onSelect} />
+          <CardButton
+            key={card.id}
+            card={card}
+            selected={card.id === selected}
+            flash={flashed.has(card.id)}
+            onSelect={onSelect}
+          />
         ))
       )}
     </section>
   )
 }
 
-function CardButton({ card, selected, onSelect }: { card: Card; selected: boolean; onSelect: (id: string) => void }) {
+interface CardButtonProps {
+  readonly card: Card
+  readonly selected: boolean
+  /** The card changed in a read just now: it flashes once (`field-flash` in `index.css`), and says nothing. */
+  readonly flash: boolean
+  readonly onSelect: (id: string) => void
+}
+
+function CardButton({ card, selected, flash, onSelect }: CardButtonProps) {
   return (
     <button
       type="button"
       data-card={card.id}
+      data-flash={flash ? 'true' : undefined}
       aria-current={selected}
       onClick={() => onSelect(card.id)}
       className={cn(
@@ -254,6 +316,7 @@ function CardButton({ card, selected, onSelect }: { card: Card; selected: boolea
         // A card being worked on has the lit border (note 5).
         card.category === 'active' && 'border-c-active ring-1 ring-c-active',
         selected && 'outline-2 outline-offset-1 outline-ring',
+        flash && 'field-flash',
       )}
     >
       <span

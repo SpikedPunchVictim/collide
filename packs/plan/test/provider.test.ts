@@ -86,7 +86,7 @@ describe('initialize', () => {
       { name: 'blocked-by', dir: 'out', blocking: true, inverse: 'blocks' },
     ])
     expect(result?.idPattern).toBe('^[a-z]{2}-[0-9]{3,}-[a-z]{2}$')
-    expect(result?.capabilities).toEqual({ watch: false, create: true, collections: false, preview: false })
+    expect(result?.capabilities).toEqual({ watch: true, create: true, collections: false, preview: false })
   })
 })
 

@@ -1,7 +1,7 @@
 ---
 id: ts-0182-ad
 kind: task
-status: ready
+status: done
 title: "Live: collide/plan watch and the Field's quiet updates"
 owners: []
 links:
@@ -99,3 +99,99 @@ Write these first.
   share `app/`, `core`, `host` and the generated files. No builder runs `tauri build`.
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-24): the owner took the recommendations at the split.
+
+### Built
+
+- Finding on the reconcile. `reconcile_by_source` (`core/src/corpus.rs`) compares the whole `Task` and records
+  `TaskChanged` with the cause `startup`, so a relist that changes only a task's links, or only its collections,
+  already records one. The epic move needs no new code there. What recorded nothing was the provider's
+  `collections.changed` notice: `collections_changed` in `host/src/corpus_service.rs` applied it and said nothing.
+  It now records one `TaskChanged` for each task the notice moved (new `record_moved`), with the diff
+  `collections` and the cause `worktree`. No new event kind, no wire change.
+- `packs/plan/src/`: `watch.ts` (the watcher: `createWatcher`, `isPlanChange`, `DEBOUNCE_MS` 300, `RECHECK_MS`
+  10 s; the clock and the file watcher are given by the caller), `changes.ts` (`compare` of two snapshots, and
+  `diffOf`, which names every top-level field that differs), `git.ts` (`gitHead`, `gitDir`, `gitRenames`),
+  `provider.ts` (`watch` handler; `capabilities.watch` is true; `planHandlers` became `planProvider`, which also
+  returns `stop`; `servePlan` stops the watcher when its input ends), `scan.ts` (`SPIKE_RECORD`). It watches each
+  checkout's planning roots, the private root of the main checkout only, and the folder of `HEAD`. It sends
+  `task.changed`, `task.removed`, `task.renamed`, `task.invalid` and `source.stale`. Only a spike's own `record.md`
+  counts inside a spike folder (`ts-0126-nf`); `questions/` is under the epics folder and is covered
+  (`ts-0127-js`).
+- `app/src/field/live.ts` (new): `isBoardEvent`, `changedCards`, `agoWords`, `Burst` (one job for a burst of pokes,
+  and one more after it if poked while it runs), `FieldFeed` (subscribes, reads with `loadField`, reads again on an
+  event, keeps the board while it reads, publishes nothing when a read finds the same board). `useField.ts` runs one
+  feed for each board and view and returns `flashed` and `updatedAt`. `FieldPage.tsx` has the Live stamp
+  ("Live · updated just now") and marks a changed card with `data-flash` and `field-flash`; `index.css` has the
+  keyframes and `--primary-soft`. `FieldData` has `settling` (`types.ts`, `load.ts`). Selection, folds and scroll are
+  not touched: `Board` stays mounted while its data is replaced. No toast.
+- Tests, host, in `host/tests/daemon_corpus.rs`:
+  `a_collections_changed_notice_records_a_task_changed_for_each_task_it_moved`,
+  `a_relist_that_changes_only_a_tasks_collections_records_a_task_changed` and
+  `a_relist_that_changes_only_a_tasks_links_records_a_task_changed`.
+- Tests, pack: `packs/plan/test/watch.test.ts` (39 tests: a change between `list` and `watch`, the debounce, the
+  full read, a status write, a moved epic, a new task, a question, the private root, a worktree, the spike rule, a
+  removed file, an invalid file, a git rename, a checkout that cannot be read, the end of the input, a real
+  in-process watcher, and the provider as a process over stdio), `test/fakes.ts` (fake clock and file watcher),
+  `test/helpers.ts` (`connect` hears notifications), `test/provider.test.ts` (`watch: true`).
+- Tests, app: `app/test/field-live.test.ts` (events of the board and of another board, the cards that flash, the
+  stamp's words, one read for a burst, the feed over a fake owner and a fake clock), `field-page.test.tsx` (stamp,
+  flash mark, no alert), `support/fake-clock.ts`, and `FieldWorld.edit`, `announce`, `lists`. Browser:
+  `app/browser/fake-field-live.spec.ts` (the page's own clock is frozen and stepped: the card moves and flashes once
+  with no toast, a burst is one read, another board's event is ignored, selection and a fold and the scroll stay,
+  the connection coming back reads) and `app/browser/field-live.spec.ts` (bridge, real daemon: a workspace's copy
+  shows as a divergence chip, a change in the main checkout moves the card and it flashes, the page is not reloaded).
+- Seen red at runtime. Host: the `collections_changed` test failed against the old function; the two relist tests
+  pass on the old code, which is the finding above. Pack: the watch tests were written after the code and seen red
+  by a `watch` handler that answers and watches nothing, and by breaking the spike rule and the diff. The
+  tests of a change between `list` and `watch` were written before the code and failed (three through the fakes, one
+  over stdio) until the provider remembered its list. App:
+  `field-live.test.ts` was written after `live.ts` and seen red by four breaks (every task event taken as the
+  board's, a burst not coalesced, every card flashing, a read of an unchanged board published); the stamp and flash
+  tests in `field-page.test.tsx` were red before `FieldPage.tsx` changed, and so were the `settling` tests and the
+  no-flash-while-settling test before their code; `fake-field-live.spec.ts` was red with the feed deaf to events.
+  The bridge spec found two real faults, both fixed: a read made while the daemon was still listing ignored every
+  event, and every card flashed as the first listing arrived.
+- Existing tests changed: `FieldData` has `settling`, so `field-model.test.ts` has it in its data and
+  `field-page.test.tsx` builds its state from one `IDLE`.
+
+### Decisions for the owner
+
+- Which board an event is for. A `daemon.event` has a source name and no board. The Field takes a task event as its
+  own when the board it read has that source, and takes every task event while the daemon is still listing or a
+  source has not started (`settling`). Two boards that both have a `plan` source cannot be told apart: the other
+  board's event costs one read that finds nothing and shows nothing. Alternative: a `board` on the task events, a
+  wire change and a change for `host`. Recommendation: keep, and add the board id when a second consumer needs it.
+- The plan's diff names every changed top-level field, because core fetches the task when a diff names a field other
+  than status or category. Alternative: send the whole task. Recommendation: keep.
+- A rename is only what git says it is: an id that went while another came is a rename only when git renamed the
+  file between the two commits. Otherwise it is a removal and a new task. The private root is not in git, so it has
+  no renames. Alternative: match by content. Recommendation: keep, since a wrong rename keeps a stale link alive.
+- A change between the daemon's `list` and its `watch` is sent at once. The provider keeps, for each checkout, the
+  snapshot (HEAD, tasks as `list` gave them, invalid files) its last `list` of that checkout was computed from, and
+  only when HEAD did not move while it read. `watch` takes it as the baseline, once, and reads the checkout again
+  right after its handles are open, so the change is a `task.changed` without an event or the recheck. With no
+  remembered snapshot the watcher reads one, as before. No wire or host change. The Orchard fixture's watcher still
+  has the gap. Alternative: have the daemon send its list's version with `watch`. Recommendation: keep.
+- The watcher uses recursive `fs.watch` on the planning folders, so it also sees the folders of spikes and their
+  `node_modules`, and then ignores them. Cheap on macOS; heavier on Linux inotify. Alternative: one watcher for each
+  folder outside a spike. Recommendation: keep until a Linux build.
+- A card flashes when its column, title, stage, status or chips changed, and not for a change it does not show. A
+  board that is still being listed does not flash. A card that moves column is a new element, so a keyboard focus on
+  it is lost. Recommendation: keep; restore the focus when the drawer item needs it.
+- The Live stamp says "just now" from the first read, then how long ago a read last changed the board. It looks at
+  the clock every 5 s.
+- A divergence chip needs a workspace: the corpus names a copy divergent only for a worktree in the daemon's
+  workspaces folder (`divergences_of` in `core/src/corpus.rs`). A worktree made elsewhere is a copy, not a
+  divergence, so the bridge spec uses a workspace. Proposed plan text for Stage 6a's success criterion: "A `plan set`
+  in a workspace of the board shows as a divergence chip..." Recommendation: say "workspace".
+- The bridge spec waits 8 s, under the daemon's 10 s recheck, so a pass proves the `watch` path. The bridge world's
+  daemon takes the bundle staged by `pnpm build:packs`, so the spec fails on a bundle staged before `watch` existed.
+  Recommendation: run `pnpm build:packs` before the suite.
+- `collections.changed` records `TaskChanged` with the cause `worktree` and the same state in `from` and `to`; there
+  is no cause for a collections change. Alternative: a new cause. Recommendation: keep.
+
+### Not done, by design
+
+- A board id on the daemon's task events (above): no item yet.
+- The adopted-worktree reading and its minute poll: Stage 8, "Worktrees an agent makes for itself".
+- The drawer's content, filters, search and drag: `ts-0184-hv` and later.

@@ -1,9 +1,11 @@
 // The Field's state for one board (ts-0181-ft): its views, the one selected, and what the last read of it gave. The
 // page and the view picker in the trail share one, so `App` holds it. A board's view is forgotten when the board
-// changes.
-import { useCallback, useEffect, useState } from 'react'
+// changes. The board is read again when the daemon says a task changed, and the cards that changed flash
+// (ts-0182-ad; `live.ts`).
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { OwnerClient } from '../owner/client.ts'
-import { loadField, loadViews } from './load.ts'
+import { FieldFeed, type FieldRead } from './live.ts'
+import { loadViews } from './load.ts'
 import type { FieldData, ViewEntry } from './types.ts'
 
 export interface FieldState {
@@ -16,16 +18,18 @@ export interface FieldState {
   readonly data: FieldData | null
   /** The words of a read that failed. */
   readonly problem: string | null
+  /** The cards that changed in the last reads and are still flashing, by card id. */
+  readonly flashed: ReadonlySet<string>
+  /** When the board last changed, in ms since the epoch. Null before the first read. */
+  readonly updatedAt: number | null
 }
 
-interface Read {
+interface Read extends FieldRead {
   readonly boardId: string
   readonly view: string | null
-  readonly data: FieldData | null
-  readonly problem: string | null
 }
 
-const words = (failure: unknown) => (failure instanceof Error ? failure.message : String(failure))
+const NONE: ReadonlySet<string> = new Set()
 
 export function useField(owner: OwnerClient, boardId: string | null): FieldState {
   const [pick, setPick] = useState<{ boardId: string | null; view: string | null }>({ boardId, view: null })
@@ -47,16 +51,21 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
     }
   }, [owner, boardId])
 
+  // What the selected view groups by decides a card's column, so a read says which cards moved by it.
+  const groupBy = useRef<string | null>(null)
+  groupBy.current = views?.views.find((each) => each.view.name === view)?.view.layout?.groupBy ?? null
+
   useEffect(() => {
     if (boardId === null) return
-    let current = true
-    loadField(owner, boardId, view).then(
-      (data) => current && setRead({ boardId, view, data, problem: null }),
-      (failure) => current && setRead({ boardId, view, data: null, problem: words(failure) }),
-    )
-    return () => {
-      current = false
-    }
+    const feed = new FieldFeed({
+      owner,
+      boardId,
+      view,
+      groupBy: () => groupBy.current,
+      onRead: (found) => setRead({ boardId, view, ...found }),
+    })
+    void feed.start()
+    return () => feed.stop()
   }, [owner, boardId, view])
 
   const shown = read !== null && read.boardId === boardId && read.view === view ? read : null
@@ -66,5 +75,7 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
     select,
     data: shown?.data ?? null,
     problem: shown?.problem ?? null,
+    flashed: shown?.flashed ?? NONE,
+    updatedAt: shown?.updatedAt ?? null,
   }
 }

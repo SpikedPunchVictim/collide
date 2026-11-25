@@ -1,4 +1,4 @@
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { defineProvider } from '@collide/pack-sdk'
 import type {
@@ -8,12 +8,15 @@ import type {
   ListResultInput,
   ProviderHandlers,
 } from '@collide/pack-sdk'
+import { snapshotOf } from './changes.ts'
+import type { Snapshot } from './changes.ts'
 import { isMainCheckout, resolveCheckout } from './checkout.ts'
 import { ROOT_NAMES, RUN_MAX, TITLE_MAX } from './create.ts'
 import { MOVE } from './move.ts'
 import { ADD_FEATURE, FEATURE_PATTERN, MOVE_FEATURE } from './feature-ops.ts'
 import { SECTION_MAX } from './features.ts'
-import { DEFAULT_LAYOUT, resolveLayout } from './layout.ts'
+import { gitHead } from './git.ts'
+import { DEFAULT_LAYOUT, resolveLayout, rootsOf, spikesDirsOf } from './layout.ts'
 import type { Layout } from './layout.ts'
 import {
   BLOCKED_BY,
@@ -37,6 +40,8 @@ import { scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
 import { ACCEPT, DECISION_MAX, DEFER, NOTE_MAX, REJECT, RESOLVE } from './person-ops.ts'
 import { RENAME_SECTION } from './rename-section.ts'
+import { createWatcher } from './watch.ts'
+import type { WatchOptions, Watcher, Where } from './watch.ts'
 import { applyOp } from './write.ts'
 
 const noExtraArgs = { additionalProperties: false }
@@ -239,7 +244,7 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
   kinds: [kind('task'), kind('epic'), proposalKind, spikeKind, questionKind],
   ops: OPS,
   links: [...LINK_TYPES],
-  capabilities: { watch: false, create: true, collections: false, preview: false },
+  capabilities: { watch: true, create: true, collections: false, preview: false },
 }
 
 export interface PlanProviderOptions {
@@ -249,18 +254,29 @@ export interface PlanProviderOptions {
    * value that is not an absolute path, or none, means there is no private root.
    */
   packData: string | null
+  /** The clock, the file watcher and the environment of `watch`. Tests give their own. */
+  watch?: WatchOptions
 }
 
 /** The private root, `<pack data>/planning`, or null when there is no usable pack data folder. */
 const privateRootOf = (packData: string | null): string | null =>
   packData !== null && isAbsolute(packData) ? join(packData, 'planning') : null
 
+const NO_ROOT = 'the provider has no root yet: send initialize, with the main checkout\'s path as root, first'
+
+/** The provider's handlers, and the end of what `watch` started. */
+export interface PlanProvider {
+  handlers: ProviderHandlers
+  /** Closes every file watcher and clock. Nothing is sent after it. */
+  stop(): void
+}
+
 /**
- * Protocol v0's `initialize`, `list`, `get` and `apply` for the markdown provider. The repository root comes from
- * `initialize`'s `root` and from nowhere else, and the shared folders from its `config.layout` (checked there: an
+ * Protocol v0's `initialize`, `list`, `get`, `apply` and `watch` for the markdown provider. The repository root comes
+ * from `initialize`'s `root` and from nowhere else, and the shared folders from its `config.layout` (checked there: an
  * `initialize` with a layout that may not be used fails with the reason); until it has run, `list` and `get` fail.
  */
-export function planHandlers({ log, packData }: PlanProviderOptions): ProviderHandlers {
+export function planProvider({ log, packData, watch: watchOptions }: PlanProviderOptions): PlanProvider {
   let root: string | null = null
   let layout: Layout = DEFAULT_LAYOUT
   const privateRoot = privateRootOf(packData)
@@ -279,7 +295,48 @@ export function planHandlers({ log, packData }: PlanProviderOptions): ProviderHa
     return result
   }
 
-  return {
+  // What each checkout's last `list` was computed from, for the `watch` that follows it (see `Where.listed`).
+  const listed = new Map<string, Snapshot>()
+  const gitEnv = watchOptions?.env ?? process.env
+
+  /** `list` for a named checkout, and the snapshot it came from kept when HEAD did not move while it was read. */
+  const listChecked = async (checkout: string): Promise<ListResultInput> => {
+    const head = await gitHead(checkout, gitEnv)
+    const { items, invalid } = await scan(checkout)
+    const answer = { tasks: items.map((found) => toTask(found, false, items)), invalid }
+    if ((await gitHead(checkout, gitEnv)) === head) listed.set(resolve(checkout), snapshotOf(head, answer))
+    return answer
+  }
+
+  /** What `watch` reads and watches in a checkout: the same folders `scan` reads, as `list` reads them. */
+  const where: Where = {
+    read: async (checkout) => {
+      const { items, invalid } = await scan(checkout)
+      return { tasks: items.map((found) => toTask(found, false, items)), invalid }
+    },
+    listed: (checkout) => {
+      const key = resolve(checkout)
+      const found = listed.get(key)
+      listed.delete(key)
+      return found
+    },
+    places: async (checkout) => {
+      if (root === null) throw new Error(NO_ROOT)
+      const roots = rootsOf(layout)
+      const spikeDirs = spikesDirsOf(layout)
+      // A spike folder outside every root is watched on its own; one inside a root is covered by that root's watch.
+      const outside = spikeDirs.filter((dir) => !roots.some((each) => !relative(each, dir).startsWith('..')))
+      const keepsPrivate = privateRoot !== null && (await isMainCheckout(root, checkout))
+      return {
+        folders: [...roots, ...outside].map((dir) => join(checkout, dir)).concat(keepsPrivate ? [privateRoot] : []),
+        spikes: spikeDirs.map((dir) => join(checkout, dir)).concat(keepsPrivate ? [join(privateRoot, 'spikes')] : []),
+        pathspecs: [...roots, ...spikeDirs],
+      }
+    },
+  }
+  let watcher: Watcher | null = null
+
+  const handlers: ProviderHandlers = {
     initialize: async ({ root: given, config }) => {
       if (typeof given !== 'string' || !isAbsolute(given)) throw new Error(`initialize needs root, the main checkout's absolute path; got ${JSON.stringify(given)}`)
       // Checked before anything is kept, so a refused layout leaves the provider as it was.
@@ -288,6 +345,7 @@ export function planHandlers({ log, packData }: PlanProviderOptions): ProviderHa
       return INITIALIZE_RESULT
     },
     list: async ({ checkout }): Promise<ListResultInput> => {
+      if (typeof checkout === 'string' && isAbsolute(checkout)) return listChecked(checkout)
       const { items, invalid } = await scan(checkout ?? null)
       return { tasks: items.map((found) => toTask(found, false, items)), invalid }
     },
@@ -300,7 +358,17 @@ export function planHandlers({ log, packData }: PlanProviderOptions): ProviderHa
       if (root === null) throw new Error('the provider has no root yet: send initialize, with the main checkout\'s path as root, first')
       return applyOp(root, params, {}, {}, layout, privateRoot)
     },
+    watch: async ({ checkouts }, notify) => {
+      if (!Array.isArray(checkouts) || !checkouts.every((each) => typeof each === 'string' && isAbsolute(each))) {
+        throw new Error(`watch needs checkouts, a list of absolute paths; got ${JSON.stringify(checkouts)}`)
+      }
+      if (root === null) throw new Error(NO_ROOT)
+      watcher ??= createWatcher({ where, log, notify, options: watchOptions })
+      await watcher.set(checkouts)
+      return {}
+    },
   }
+  return { handlers, stop: () => watcher?.stop() }
 }
 
 export interface ServeOptions {
@@ -309,6 +377,8 @@ export interface ServeOptions {
   log?: (message: string) => void
   /** The pack's data folder. `COLLIDE_PACK_DATA` when it is left out; null for none, whatever the environment says. */
   packData?: string | null
+  /** The clock, the file watcher and the environment of `watch`, for a test. */
+  watch?: WatchOptions
 }
 
 /** Serves the provider over `input` and `output` (stdin and stdout by default) until the input ends. */
@@ -317,6 +387,9 @@ export function servePlan({
   output,
   log = (message) => void process.stderr.write(`${message}\n`),
   packData = process.env.COLLIDE_PACK_DATA ?? null,
+  watch,
 }: ServeOptions = {}): Promise<void> {
-  return defineProvider(planHandlers({ log, packData }), { input, output, log })
+  const { handlers, stop } = planProvider({ log, packData, watch })
+  // The watchers and the recheck keep the process alive, so they end with the input.
+  return defineProvider(handlers, { input, output, log }).finally(stop)
 }

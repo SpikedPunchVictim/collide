@@ -104,6 +104,8 @@
   --c-review: var(--waiting);
   --c-done: var(--done);
   --c-dropped: var(--muted-foreground);
+  /* What a card that just changed is lit with, before it settles to `--card` (note 14). */
+  --primary-soft: oklch(0.93 0.04 250);
 }
 
 .dark {
@@ -129,6 +131,7 @@
   --waiting: #fbbf24;
   --blocked: #aea699;
   --done: #4ade80;
+  --primary-soft: oklch(0.32 0.06 250);
 }
 
 @layer base {
@@ -137,5 +140,32 @@
   }
   body {
     @apply bg-background text-foreground font-sans;
+  }
+}
+
+/* A card that changed flashes once and settles (the board mock's `flash`). With reduced motion it only lights. */
+@keyframes field-flash {
+  0% {
+    background: var(--primary-soft);
+    transform: scale(1.02);
+  }
+  100% {
+    background: var(--card);
+    transform: none;
+  }
+}
+
+.field-flash {
+  animation: field-flash 2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes field-flash {
+    0% {
+      background: var(--primary-soft);
+    }
+    100% {
+      background: var(--card);
+    }
   }
 }

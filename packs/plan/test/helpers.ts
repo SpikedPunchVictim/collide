@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterAll } from 'vitest'
 import { servePlan } from '../src/provider.ts'
+import type { WatchOptions } from '../src/watch.ts'
 
 type Message = Record<string, any>
 
@@ -56,11 +57,13 @@ export interface Reply {
  * A fake client for the provider: one request in, its reply out. `packData` is the pack's data folder, which the daemon
  * gives as `COLLIDE_PACK_DATA`: none when it is left out, whatever this process's environment says.
  */
-export function connect({ packData = null }: { packData?: string | null } = {}) {
+export function connect({ packData = null, watch }: { packData?: string | null; watch?: WatchOptions } = {}) {
   const input = new PassThrough()
   const output = new PassThrough()
   output.setEncoding('utf8')
   const lines: string[] = []
+  /** What the provider sent that no request asked for: a message with a method and no id. */
+  const sent: Message[] = []
   const waiting: Array<() => void> = []
   const logs: string[] = []
   let buffer = ''
@@ -68,10 +71,14 @@ export function connect({ packData = null }: { packData?: string | null } = {}) 
     buffer += chunk
     const parts = buffer.split('\n')
     buffer = parts.pop() ?? ''
-    lines.push(...parts)
+    for (const part of parts) {
+      const message: Message = JSON.parse(part)
+      if (message.id === undefined && message.method !== undefined) sent.push(message)
+      else lines.push(part)
+    }
     waiting.splice(0).forEach((wake) => wake())
   })
-  const done = servePlan({ input, output, log: (message) => logs.push(message), packData })
+  const done = servePlan({ input, output, log: (message) => logs.push(message), packData, watch })
   let nextId = 1
 
   const request = async (method: string, params: unknown = {}): Promise<Reply> => {
@@ -86,7 +93,24 @@ export function connect({ packData = null }: { packData?: string | null } = {}) 
     input.end()
     await done
   }
-  return { request, close }
+  /** The notifications of `method` that have come and not been taken, once there are `count` of them. */
+  const notifications = async (method: string, count = 1, within = 20_000): Promise<Message[]> => {
+    const until = Date.now() + within
+    const have = () => sent.filter((message) => message.method === method)
+    while (have().length < count) {
+      if (Date.now() > until) throw new Error(`timed out waiting for ${count} ${method}; have ${JSON.stringify(sent)}`)
+      await new Promise<void>((resolve) => {
+        waiting.push(resolve)
+        setTimeout(resolve, 25)
+      })
+    }
+    const taken = have().slice(0, count)
+    for (const message of taken) sent.splice(sent.indexOf(message), 1)
+    return taken
+  }
+  /** Every notification that has come and not been taken. */
+  const pending = (): Message[] => sent.splice(0)
+  return { request, close, notifications, pending }
 }
 
 /** Runs one request against a provider that `initialize` has given `root`, and returns its reply. */
@@ -123,6 +147,8 @@ const main = join(import.meta.dirname, '..', 'src', 'main.ts')
 export async function spawnProvider(root: string, env: Record<string, string> = {}) {
   const child = spawn(process.execPath, [main], { cwd: tmpdir(), env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] })
   const pending = new Map<number, { resolve: (message: Message) => void; reject: (error: Error) => void }>()
+  /** The notifications the provider sent, in order. */
+  const notified: Message[] = []
   let buffer = ''
   let nextId = 1
   child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
@@ -131,6 +157,7 @@ export async function spawnProvider(root: string, env: Record<string, string> = 
     buffer = parts.pop() ?? ''
     for (const part of parts) {
       const message: Message = JSON.parse(part)
+      if (message.id === undefined) notified.push(message)
       pending.get(message.id)?.resolve(message)
       pending.delete(message.id)
     }
@@ -154,6 +181,7 @@ export async function spawnProvider(root: string, env: Record<string, string> = 
   return {
     request,
     exited,
+    notified,
     close: async () => {
       child.stdin.end()
       return exited

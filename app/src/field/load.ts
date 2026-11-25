@@ -43,5 +43,6 @@ export async function loadField(owner: OwnerClient, boardId: string, view: strin
     collisions: all.collisions,
     divergence: all.divergence,
     report: shown.view ?? null,
+    settling: all.refreshing || all.not_started.length > 0,
   }
 }

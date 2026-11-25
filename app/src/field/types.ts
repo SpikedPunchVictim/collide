@@ -23,4 +23,9 @@ export interface FieldData {
   readonly divergence: readonly Divergence[]
   /** What the selected view said of itself. Null for the whole board. */
   readonly report: ViewReport | null
+  /**
+   * The daemon was still listing, or a source had not started, so `sources` may be short. An event for a source not in
+   * it may be this board's source coming up (`live.ts`).
+   */
+  readonly settling: boolean
 }
