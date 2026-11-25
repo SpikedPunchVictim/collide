@@ -57,3 +57,28 @@ describe('the Field actions', () => {
     expect(actionForKey('ArrowDown', 'window')).toBeNull()
   })
 })
+
+describe('the drawer actions', () => {
+  test('Escape closes the drawer, wherever the focus is in the window', () => {
+    expect(actionForKey('Escape', 'drawer')).toBe('drawer-close')
+  })
+
+  test.each([
+    ['ArrowLeft', 'drawer-wider'],
+    ['ArrowRight', 'drawer-narrower'],
+  ])('the key %s does %s on the drawer edge', (key, name) => {
+    expect(actionForKey(key, 'drawer-edge')).toBe(name)
+  })
+
+  test('the edge hears no other key, and the board and the window hear none of the drawer keys', () => {
+    expect(actionForKey('ArrowUp', 'drawer-edge')).toBeNull()
+    expect(actionForKey('Escape', 'field')).toBeNull()
+    expect(actionForKey('Escape', 'window')).toBeNull()
+    expect(actionForKey('ArrowLeft', 'drawer')).toBeNull()
+  })
+
+  test('none of them shows a tab', () => {
+    expect(tabOfAction('drawer-close')).toBeNull()
+    expect(tabOfAction('drawer-wider')).toBeNull()
+  })
+})

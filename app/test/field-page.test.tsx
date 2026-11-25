@@ -5,12 +5,15 @@ import { loadField, loadViews } from '../src/field/load.ts'
 import { memoryStore } from '../src/field/folds.ts'
 import { ViewPickerBody, viewSource } from '../src/field/ViewPicker.tsx'
 import type { FieldState } from '../src/field/useField.ts'
-import { type FieldWorld, eightStatuses, mixedSources, onePlanSource } from './support/field-world.ts'
+import { FieldWorld, eightStatuses, mixedSources, onePlanSource } from './support/field-world.ts'
 
 // The Field's page and the view picker, drawn to text over the scripted worlds (ts-0181-ft). What a click, a key and a
 // reload do is in `browser/fake-field.spec.ts`.
 
 const noop = () => {}
+
+/** The way to the daemon, which no test of this page uses: the drawer is not drawn to text here. */
+const OWNER = new FieldWorld().owner
 
 /** A Field that has read nothing: the live parts are at rest. */
 const IDLE: FieldState = {
@@ -27,24 +30,24 @@ async function page(world: FieldWorld, view: string | null = null, over: Partial
   const views = await loadViews(world.owner, 'b-alpha')
   const data = await loadField(world.owner, 'b-alpha', view)
   const field: FieldState = { ...IDLE, views, view, data, ...over }
-  return renderToString(<FieldPage boardId="b-alpha" field={field} store={memoryStore()} />)
+  return renderToString(<FieldPage owner={OWNER} boardId="b-alpha" field={field} store={memoryStore()} />)
 }
 
 describe('the Field page', () => {
   test('says no board is open when none is', () => {
     const field: FieldState = IDLE
-    expect(renderToString(<FieldPage boardId={null} field={field} />)).toContain('No board is open')
+    expect(renderToString(<FieldPage owner={OWNER} boardId={null} field={field} />)).toContain('No board is open')
   })
 
   test('says why the board could not be read', () => {
     const field: FieldState = { ...IDLE, problem: 'no daemon' }
-    const html = renderToString(<FieldPage boardId="b-alpha" field={field} />)
+    const html = renderToString(<FieldPage owner={OWNER} boardId="b-alpha" field={field} />)
     expect(html).toContain('The board could not be read: no daemon')
   })
 
   test('says it is reading while nothing has come', () => {
     const field: FieldState = IDLE
-    expect(renderToString(<FieldPage boardId="b-alpha" field={field} />)).toContain('Reading the board')
+    expect(renderToString(<FieldPage owner={OWNER} boardId="b-alpha" field={field} />)).toContain('Reading the board')
   })
 
   test('draws a column for each category of the plan, each with its words and its count', async () => {

@@ -9,6 +9,8 @@ import type {
   QueueListResultOutput,
   RunDiffResultOutput,
   RunGetResultOutput,
+  TaskGetParamsInput,
+  TaskGetResultOutput,
   TaskOutput,
 } from '../../src/owner/generated.ts'
 import { FakeOwner } from '../../src/owner/index.ts'
@@ -183,12 +185,8 @@ export class World {
       this.tasksOf(boardId).set(key, { key, prompt, runs: [] })
       return { result: { outcome: 'ok', files: [], items: [], task: taskOf(key, prompt), version: 'v1' } }
     })
-    owner.handle('task.get', ({ board: boardId, id }) => {
-      const stored = this.tasksOf(boardId).get(id)
-      if (stored === undefined) return { ambiguous: [], copies: [], collisions: [], links: [], runs: [] }
-      const task = taskOf(stored.key, stored.prompt)
-      return { task, ambiguous: [], copies: [], collisions: [], links: [], runs: stored.runs }
-    })
+    // A method of the world, so a world that holds more (the Field's) answers for what it holds and leaves the rest.
+    owner.handle('task.get', (params) => this.getTask(params))
     owner.handle('run.start', ({ board: boardId, tasks }) => {
       if (this.refuseStart !== null) return { outcome: 'refused', problems: [{ message: this.refuseStart }] }
       const key = tasks[0]!
@@ -277,6 +275,14 @@ export class World {
         body: { event: 'run.transition', run: runId, from: null, to: { state: 'running' } },
       },
     })
+  }
+
+  /** What `task.get` answers: the scratch tasks the page made, with their runs. */
+  protected getTask({ board: boardId, id }: TaskGetParamsInput): TaskGetResultOutput {
+    const stored = this.tasksOf(boardId).get(id)
+    if (stored === undefined) return { ambiguous: [], copies: [], collisions: [], links: [], runs: [] }
+    const task = taskOf(stored.key, stored.prompt)
+    return { task, ambiguous: [], copies: [], collisions: [], links: [], runs: stored.runs }
   }
 
   callsTo(method: string): unknown[] {

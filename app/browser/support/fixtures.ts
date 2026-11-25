@@ -9,8 +9,11 @@ import { type Plan, World } from './world.ts'
 interface Fixtures {
   /** Starts a world that plays `plan`. */
   startWorld: (plan: Plan) => Promise<World>
-  /** A page of Chrome on the bridge of `world`, with the token the bridge made for this run. */
-  openPage: (world: World) => Promise<Page>
+  /**
+   * A page of Chrome on the bridge of `world`, with the token the bridge made for this run. `watch` is given the new
+   * page before it loads, to listen for what the load does.
+   */
+  openPage: (world: World, watch?: (page: Page) => void | Promise<void>) => Promise<Page>
   /** The page built over a fake owner, served from loopback (ts-0179-ke). It needs no daemon. */
   fakeSite: FakeSite
   /**
@@ -37,9 +40,10 @@ export const test = base.extend<Fixtures>({
 
   openPage: async ({}, use) => {
     let chrome: Chrome | null = null
-    await use(async (world) => {
+    await use(async (world, watch) => {
       chrome ??= await Chrome.launch()
       const page = await chrome.context.newPage()
+      await watch?.(page)
       await page.goto(`${world.url}/#token=${world.token}`)
       return page
     })

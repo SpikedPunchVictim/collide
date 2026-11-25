@@ -6,39 +6,29 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card as Panel } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { Drawer } from '../drawer/Drawer.tsx'
+import type { BoardNote } from '../drawer/types.ts'
 import { actionForKey } from '../frame/actions.ts'
+import type { OwnerClient } from '../owner/client.ts'
+import { DOT, TEXT } from './colours.ts'
 import { agoWords } from './live.ts'
 import { type FoldStore, browserStore, isShut, memoryStore, readFolds, toggleFold } from './folds.ts'
-import { type Card, type Chip, type Column, type Lane, lanesOf, reportLines } from './model.ts'
+import { type Card, type Chip, type Column, type Lane, cardIdOf, lanesOf, reportLines } from './model.ts'
 import { type Direction, neighbour } from './navigation.ts'
-import type { Category, FieldData } from './types.ts'
+import type { FieldData } from './types.ts'
 import type { FieldState } from './useField.ts'
 import { ALL_TASKS } from './ViewPicker.tsx'
 
 export interface FieldPageProps {
+  /** The way to the daemon, which the drawer reads its task by. */
+  readonly owner: OwnerClient
   /** The board the Field reads, or null when none is open. */
   readonly boardId: string | null
+  /** How the drawer's details name the board. */
+  readonly board?: BoardNote | null
   readonly field: FieldState
   /** Where folds are kept. The webview's own, unless a test gives another. */
   readonly store?: FoldStore | null
-}
-
-const DOT: Record<Category, string> = {
-  backlog: 'bg-c-backlog',
-  ready: 'bg-c-ready',
-  active: 'bg-c-active',
-  review: 'bg-c-review',
-  done: 'bg-c-done',
-  dropped: 'bg-c-dropped',
-}
-
-const TEXT: Record<Category, string> = {
-  backlog: 'text-c-backlog',
-  ready: 'text-c-ready',
-  active: 'text-c-active',
-  review: 'text-c-review',
-  done: 'text-c-done',
-  dropped: 'text-c-dropped',
 }
 
 const ARROWS: Record<string, Direction> = {
@@ -48,7 +38,7 @@ const ARROWS: Record<string, Direction> = {
   'card-left': 'left',
 }
 
-export function FieldPage({ boardId, field, store }: FieldPageProps) {
+export function FieldPage({ owner, boardId, board = null, field, store }: FieldPageProps) {
   if (boardId === null) {
     return (
       <Panel aria-label="Field" className="mx-auto w-full max-w-xl items-center px-6 text-center">
@@ -73,7 +63,10 @@ export function FieldPage({ boardId, field, store }: FieldPageProps) {
   }
   return (
     <Board
+      key={boardId}
+      owner={owner}
       boardId={boardId}
+      board={board}
       view={field.view}
       data={field.data}
       groupBy={groupByOf(field)}
@@ -91,7 +84,9 @@ function groupByOf(field: FieldState): string | null {
 }
 
 interface BoardProps {
+  readonly owner: OwnerClient
   readonly boardId: string
+  readonly board: BoardNote | null
   readonly view: string | null
   readonly data: FieldData
   readonly groupBy: string | null
@@ -100,7 +95,7 @@ interface BoardProps {
   readonly store?: FoldStore | null
 }
 
-function Board({ boardId, view, data, groupBy, flashed, updatedAt, store }: BoardProps) {
+function Board({ owner, boardId, board, view, data, groupBy, flashed, updatedAt, store }: BoardProps) {
   const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
@@ -109,7 +104,25 @@ function Board({ boardId, view, data, groupBy, flashed, updatedAt, store }: Boar
   const { lanes } = lanesOf(data, groupBy)
   const lines = reportLines(data.report)
   const count = data.tasks.length
-  const chosen = lanes.flatMap((lane) => lane.cards).find((card) => card.id === selected) ?? null
+  // The drawer's task is on the board, or else one a link in the drawer named that the view leaves out.
+  const everyTask = data.corpus.length > 0 ? data.corpus : data.tasks
+  const chosen =
+    selected === null
+      ? null
+      : (data.tasks.find((task) => cardIdOf(task) === selected) ??
+        everyTask.find((task) => cardIdOf(task) === selected) ??
+        null)
+  const openTask = (key: string) => {
+    const task = data.tasks.find((each) => each.key === key) ?? everyTask.find((each) => each.key === key)
+    if (task !== undefined) select(cardIdOf(task))
+  }
+  // Closing hands the focus back to the card, as the drawer's own button would otherwise lose it.
+  const closeDrawer = () => {
+    document.querySelectorAll<HTMLElement>('[data-card]').forEach((card) => {
+      if (card.dataset.card === selected) card.focus()
+    })
+    select(null)
+  }
   const flip = (column: Column) => {
     toggleFold(kept, boardId, view, column)
     remember((count) => count + 1)
@@ -136,12 +149,24 @@ function Board({ boardId, view, data, groupBy, flashed, updatedAt, store }: Boar
         <Columns
           lanes={lanes}
           folds={folds}
-          selected={chosen?.id ?? null}
+          selected={selected}
           flashed={flashed}
           onSelect={select}
           onFlip={flip}
         />
-        {chosen === null ? null : <DrawerPlace card={chosen} onClose={() => select(null)} />}
+        {chosen === null ? null : (
+          <Drawer
+            owner={owner}
+            boardId={boardId}
+            shown={chosen}
+            data={data}
+            board={board}
+            stamp={updatedAt}
+            store={store}
+            onOpenTask={openTask}
+            onClose={closeDrawer}
+          />
+        )}
       </div>
     </section>
   )
@@ -354,24 +379,5 @@ function ChipView({ chip }: { chip: Chip }) {
       {chip.id === 'divergence' ? <span aria-hidden="true">↗</span> : null}
       {chip.text}
     </Badge>
-  )
-}
-
-/** The drawer's place: it opens beside the board for the selected card, and says what comes in `ts-0184-hv`. */
-function DrawerPlace({ card, onClose }: { card: Card; onClose: () => void }) {
-  return (
-    <aside
-      aria-label="Task drawer"
-      className="flex w-80 shrink-0 flex-col gap-2 rounded-lg border bg-card p-3.5 shadow-sm"
-    >
-      <div className="flex items-start gap-2">
-        <h2 className="min-w-0 flex-1 text-base font-semibold">{card.title}</h2>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          Close
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">{card.key}</p>
-      <p className="text-muted-foreground">The drawer comes next.</p>
-    </aside>
   )
 }

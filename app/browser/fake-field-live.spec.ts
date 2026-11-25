@@ -12,8 +12,9 @@ function column(page: Page, name: string) {
   return page.getByRole('region', { name, exact: true })
 }
 
+/** A card on the board. The drawer's links carry the same words, so a card is found by what a card is. */
 function card(page: Page, title: string) {
-  return page.getByRole('button', { name: new RegExp(title) })
+  return page.locator('[data-card]', { hasText: title })
 }
 
 /** The board's reads so far. A read of the whole board is one `task.list`. */

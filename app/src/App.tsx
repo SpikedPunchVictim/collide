@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { FieldPage } from './field/FieldPage.tsx'
 import { useField } from './field/useField.ts'
 import { ViewPicker } from './field/ViewPicker.tsx'
-import { boardName } from './frame/boards.ts'
+import { boardName, defaultLine } from './frame/boards.ts'
 import { Frame } from './frame/Frame.tsx'
 import { TABS, type TabId } from './frame/tabs.ts'
 import { LoopPage } from './loop/LoopPage.tsx'
@@ -64,7 +64,14 @@ function Window({ owner }: { readonly owner: OwnerClient }) {
           <ViewPicker boardName={boardName(board)} views={field.views} view={field.view} onChoose={field.select} />
         )
       }
-      field={<FieldPage boardId={state.boardId} field={field} />}
+      field={
+        <FieldPage
+          owner={owner}
+          boardId={state.boardId}
+          board={board === undefined ? null : { name: boardName(board), line: defaultLine(board) }}
+          field={field}
+        />
+      }
     />
   )
 }

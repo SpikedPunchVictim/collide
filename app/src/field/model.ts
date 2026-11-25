@@ -57,14 +57,15 @@ export const CATEGORIES: readonly { readonly id: Category; readonly word: string
   { id: 'dropped', word: 'Dropped', sub: 'not doing it' },
 ]
 
-const categoryOf = (id: Category) => CATEGORIES.find((each) => each.id === id)!
+export const categoryOf = (id: Category) => CATEGORIES.find((each) => each.id === id)!
 
-const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+export const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
-const sourceOf = (key: string) => (key.includes(':') ? key.slice(0, key.indexOf(':')) : '')
+/** The source of a key: `plan:ts-0001-aa` is `plan`. */
+export const sourceOf = (key: string) => (key.includes(':') ? key.slice(0, key.indexOf(':')) : '')
 
 /** The part of a key after its source: `plan:ts-0001-aa` is `ts-0001-aa`. */
-const tailOf = (key: string) => (key.includes(':') ? key.slice(key.indexOf(':') + 1) : key)
+export const tailOf = (key: string) => (key.includes(':') ? key.slice(key.indexOf(':') + 1) : key)
 
 const isOpen = (task: Task) => task.state.category !== 'done' && task.state.category !== 'dropped'
 
@@ -189,6 +190,9 @@ function openBlockers(task: Task, sources: readonly SourceDecl[], index: Map<str
   return waiting.size
 }
 
+/** The id of a task's card: one for each place a key is at, since a collided key is listed at each of its paths. */
+export const cardIdOf = (task: Task) => `${task.key}|${task.path ?? ''}`
+
 /** The columns with their cards: each task in the column of its status, or of its category. */
 export function lanesOf(data: FieldData, groupBy?: string | null): { mode: GroupMode; lanes: Lane[] } {
   const mode = groupMode(data.tasks, groupBy)
@@ -212,7 +216,7 @@ export function lanesOf(data: FieldData, groupBy?: string | null): { mode: Group
     }
     if (collided !== undefined) chips.push({ id: 'collision', text: collisionWords(collided) })
     const card: Card = {
-      id: `${task.key}|${task.path ?? ''}`,
+      id: cardIdOf(task),
       key: task.key,
       title: task.title,
       shortId,

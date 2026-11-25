@@ -3,8 +3,8 @@
 // A later item adds its actions to the list.
 import type { TabId } from './tabs.ts'
 
-/** Where a key is heard: anywhere in the window, or on the Field's board. */
-export type ActionScope = 'window' | 'field'
+/** Where a key is heard: anywhere in the window, on the Field's board, in the task drawer, or on its edge. */
+export type ActionScope = 'window' | 'field' | 'drawer' | 'drawer-edge'
 
 export interface NamedAction {
   /** The name the palette and the agent use. */
@@ -27,6 +27,9 @@ export const ACTIONS = [
   { name: 'card-right', label: 'Go to the next column', key: 'ArrowRight', scope: 'field' },
   { name: 'card-left', label: 'Go to the previous column', key: 'ArrowLeft', scope: 'field' },
   { name: 'card-open', label: 'Select the card', key: 'Enter', scope: 'field' },
+  { name: 'drawer-close', label: 'Close the task drawer', key: 'Escape', scope: 'drawer' },
+  { name: 'drawer-wider', label: 'Make the task drawer wider', key: 'ArrowLeft', scope: 'drawer-edge' },
+  { name: 'drawer-narrower', label: 'Make the task drawer narrower', key: 'ArrowRight', scope: 'drawer-edge' },
 ] as const satisfies readonly NamedAction[]
 
 const SHOW = 'show-'

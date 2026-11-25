@@ -1,13 +1,23 @@
 // Scripted worlds for the Field (ts-0181-ft): a `World` of `loop-world.ts` that also answers `task.list` and
 // `task.views` over plain data, as the daemon does. A world says which sources the board declares, the tasks, the
 // views with the keys each holds and what each reports. The fake-owner page and the vitest tests share them.
-import type { TaskListResultOutput, TaskOutput, TaskViewsResultOutput } from '../../src/owner/generated.ts'
+import type {
+  TaskGetParamsInput,
+  TaskGetResultOutput,
+  TaskListResultOutput,
+  TaskOutput,
+  TaskViewsResultOutput,
+} from '../../src/owner/generated.ts'
+import { HOSTILE_BODY } from './hostile.ts'
 import { World, board } from './loop-world.ts'
 
 export type Category = TaskOutput['state']['category']
 export type SourceDecl = TaskListResultOutput['sources'][number]
 export type ViewEntry = TaskViewsResultOutput['views'][number]
 export type Report = NonNullable<TaskListResultOutput['view']>
+export type Copy = TaskGetResultOutput['copies'][number]
+export type HookLink = TaskGetResultOutput['links'][number]
+export type LinkType = NonNullable<TaskGetResultOutput['link_types']>[number]
 
 export const CATEGORY_ORDER: readonly Category[] = ['backlog', 'ready', 'active', 'review', 'done', 'dropped']
 
@@ -123,6 +133,12 @@ export class FieldWorld extends World {
   notStarted: TaskListResultOutput['not_started'] = []
   /** Set to make `task.list` refuse with these words. */
   refuseList: string | null = null
+  /** Set to make `task.get` refuse with these words. */
+  refuseGet: string | null = null
+  /** The copies `task.get` lists for a key. A key with none here has its listed copies, one for each place it is at. */
+  copies = new Map<string, Copy[]>()
+  /** The link types a source declares, by source name. A source with none here has the plan's two if it blocks. */
+  linkTypes = new Map<string, LinkType[]>()
 
   /** Changes a listed task, as an edit in a checkout would. Nothing is announced: the daemon's event does that. */
   edit(key: string, over: Partial<TaskOutput>): void {
@@ -147,6 +163,93 @@ export class FieldWorld extends World {
     return this.callsTo('task.list').length
   }
 
+  /** How many times `task.get` was called. */
+  gets(): number {
+    return this.callsTo('task.get').length
+  }
+
+  /**
+   * `task.get` as the daemon answers it: the task with its body, the links one hop out and in with the other end's
+   * title, the source's link types, the views that hold it and its copies. A key listed at two places is a collision,
+   * and then there is no task: the answer names the key as ambiguous (`corpus.rs` `get`). A key the world does not
+   * list is for `World` (the scratch tasks of a run).
+   */
+  protected override getTask(params: TaskGetParamsInput): TaskGetResultOutput {
+    if (this.refuseGet !== null) throw new Error(this.refuseGet)
+    const entries = this.listing.filter((each) => each.key === params.id)
+    const [first] = entries
+    if (first === undefined) return super.getTask(params)
+    const copies = this.copies.get(first.key) ?? entries.map((each) => this.copyOf(each))
+    if (entries.length > 1) {
+      const tail = first.key.slice(first.key.indexOf(':') + 1)
+      const collisions = this.collisions.filter((each) => each.shortId === tail)
+      return { ambiguous: [first.key], copies, collisions, runs: [], links: [] }
+    }
+    const source = first.key.slice(0, first.key.indexOf(':'))
+    const held = [...this.held].filter(([, each]) => each.keys.includes(first.key)).map(([name]) => name)
+    return {
+      task: first,
+      ambiguous: [],
+      copies,
+      collisions: [],
+      runs: [],
+      links: this.linksOf(first),
+      link_types: this.linkTypes.get(source) ?? this.defaultLinkTypes(source),
+      views: held,
+    }
+  }
+
+  private copyOf(task: TaskOutput): Copy {
+    return {
+      checkout: task.checkout ?? '/work/alpha',
+      ...(task.path === undefined ? {} : { path: task.path }),
+      state: task.state,
+      version: task.version,
+    }
+  }
+
+  private defaultLinkTypes(source: string): LinkType[] {
+    const blocks = this.sources.find((each) => each.name === source)?.blocking_links ?? false
+    if (!blocks) return []
+    return [
+      { name: 'blocked-by', dir: 'out', blocking: true, inverse: 'blocks' },
+      { name: 'part-of', dir: 'out', blocking: false, inverse: 'contains' },
+    ]
+  }
+
+  /** A link as `task.get` gives it: the other end's state and title, and `missing` for a key the board lacks. */
+  private hookLink(type: string, dir: 'out' | 'in', key: string, other: TaskOutput | undefined): HookLink {
+    if (other === undefined) {
+      return { type, dir, key, kind: '', status: '', category: 'backlog', missing: true, stale: false }
+    }
+    return {
+      type,
+      dir,
+      key: other.key,
+      kind: other.kind ?? 'task',
+      status: other.state.status,
+      category: other.state.category,
+      missing: false,
+      stale: false,
+      title: other.title,
+    }
+  }
+
+  private linksOf(task: TaskOutput): HookLink[] {
+    const source = task.key.slice(0, task.key.indexOf(':'))
+    const keyOf = (to: string) => (to.includes(':') ? to : `${source}:${to}`)
+    const out = task.links.map((link) => {
+      const key = keyOf(link.to)
+      return this.hookLink(link.type, 'out', key, this.listing.find((each) => each.key === key))
+    })
+    const incoming = this.listing.flatMap((holder) =>
+      holder.links
+        .filter((link) => keyOf(link.to) === task.key)
+        .map((link) => this.hookLink(link.type, 'in', holder.key, holder)),
+    )
+    return [...out, ...incoming]
+  }
+
   constructor() {
     super()
     this.boards = [board('b-alpha', '/work/alpha')]
@@ -163,7 +266,8 @@ export class FieldWorld extends World {
         view = held.report
       }
       return {
-        tasks,
+        // The daemon's listing has no body: `task.get` gives the whole task.
+        tasks: tasks.map((each) => ({ ...each, body: undefined })),
         collections: [],
         collisions: this.collisions,
         divergence: this.divergence,
@@ -277,5 +381,121 @@ export function mixedSources(): FieldWorld {
   world.views = [view('only-eight', { type: 'repo' }), view('both', { type: 'repo' })]
   world.held.set('only-eight', { keys: ['eight:2', 'eight:4'], report: report('only-eight', 2) })
   world.held.set('both', { keys: world.listing.map((each) => each.key), report: report('both', 4) })
+  return world
+}
+
+/** A tracker outside the repo (scope `global`): one field with a label, one without, and one that is left empty. */
+export const TRACKER: SourceDecl = {
+  name: 'tracker',
+  pack: 'demo/tracker',
+  scope: 'global',
+  statuses: CATEGORY_ORDER.map((category) => ({ name: category, category })),
+  category_status: Object.fromEntries(CATEGORY_ORDER.map((category) => [category, category])),
+  fields: [
+    { id: 'priority', type: 'enum', filterable: true, label: 'Priority level' },
+    { id: 'story_points', type: 'number', filterable: true },
+    { id: 'component', type: 'string', filterable: false },
+  ],
+  blocking_links: true,
+  id_pattern: '^[0-9]+$',
+  short_id_pattern: '^[0-9]+$',
+}
+
+const PLAN_FILE = (short: string) => `.collide/planning/epics/ep-001-aa/tasks/${short}.md`
+const PART_OF = { type: 'part-of', to: 'ep-001-aa' }
+
+/**
+ * The drawer's world (ts-0184-hv): the plan's tasks with bodies, links, an epic and a collection, a task whose copies
+ * differ, an id held by two tasks, a scratch task, a tracker task with fields, and a task whose body is hostile.
+ */
+export function drawerWorld(): FieldWorld {
+  const world = new FieldWorld()
+  world.sources = [PLAN, SCRATCH, TRACKER]
+  const at = (short: string, over: Partial<TaskOutput>): Partial<TaskOutput> => ({
+    checkout: '/work/alpha',
+    path: PLAN_FILE(short),
+    ...over,
+  })
+  world.listing = [
+    task('plan:ep-001-aa', 'The first epic', 'active', 'active', at('epic', { kind: 'epic' })),
+    task(
+      'plan:ts-0001-aa',
+      'Write the parser',
+      'ready',
+      'ready',
+      at('ts-0001-aa', {
+        body: '## Goal\n\nParse the **files** of the plan.\n\n- one\n- two\n',
+        links: [PART_OF],
+        collections: ['stage-6a'],
+      }),
+    ),
+    task(
+      'plan:ts-0002-bb',
+      'Design the board',
+      'ready',
+      'ready',
+      at('ts-0002-bb', { body: 'Draw the board.', links: [PART_OF, { type: 'blocked-by', to: 'plan:ts-0001-aa' }] }),
+    ),
+    task(
+      'plan:ts-0003-cc',
+      'Build the Field',
+      'active',
+      'active',
+      at('ts-0003-cc', { body: 'Build it.', links: [{ type: 'blocked-by', to: 'plan:ts-0002-bb' }] }),
+    ),
+    task('plan:ts-0004-dd', 'Review the wire', 'ready', 'ready', at('ts-0004-dd', { body: 'Look at the wire.' })),
+    task(
+      'plan:ts-0009-ii',
+      'Same id, one place',
+      'ready',
+      'ready',
+      at('a/ts-0009-ii', { path: 'a/ts-0009-ii.md', body: 'The first one.' }),
+    ),
+    task(
+      'plan:ts-0009-ii',
+      'Same id, another place',
+      'active',
+      'active',
+      at('b/ts-0009-ii', { path: 'b/ts-0009-ii.md', checkout: '/work/wt-b', body: 'The other one.' }),
+    ),
+    task('plan:ts-0066-hh', 'A hostile body', 'ready', 'ready', at('ts-0066-hh', { body: HOSTILE_BODY })),
+    task('scratch:1', 'Try the thing', 'backlog', 'backlog', { body: 'Just a note.' }),
+    task('tracker:12', 'Fix the login', 'ready', 'ready', {
+      body: 'Users cannot log in.',
+      fields: { priority: 'high', component: '' },
+    }),
+  ]
+  const copy = (checkout: string, status: 'ready' | 'review', version: string): Copy => ({
+    checkout,
+    path: PLAN_FILE('ts-0004-dd'),
+    state: { category: status, status },
+    version,
+  })
+  world.copies.set('plan:ts-0004-dd', [
+    copy('/work/alpha', 'ready', 'v1'),
+    copy('/work/alpha-run', 'review', 'v2'),
+    copy('/work/wt-a', 'ready', 'v1'),
+  ])
+  world.divergence = [
+    {
+      key: 'plan:ts-0004-dd',
+      copies: [{ status: 'review', category: 'review', checkout: '/work/alpha-run', run: 'r-121' }],
+    },
+  ]
+  world.collisions = [
+    {
+      shortId: 'ts-0009-ii',
+      locations: [
+        { checkout: '/work/alpha', path: 'a/ts-0009-ii.md' },
+        { checkout: '/work/wt-b', path: 'b/ts-0009-ii.md' },
+      ],
+    },
+  ]
+  world.views = [view('ready', { type: 'builtin' }, { where: 'ready' }), view('mine', { type: 'repo' })]
+  world.held.set('ready', {
+    keys: ['plan:ts-0001-aa', 'plan:ts-0004-dd'],
+    report: report('ready', 2),
+  })
+  world.held.set('mine', { keys: ['plan:ts-0001-aa'], report: report('mine', 1) })
   return world
 }

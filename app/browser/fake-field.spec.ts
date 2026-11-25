@@ -7,8 +7,9 @@ function column(page: Page, name: string) {
   return page.getByRole('region', { name, exact: true })
 }
 
+/** A card on the board. The drawer's links carry the same words, so a card is found by what a card is. */
 function card(page: Page, title: string) {
-  return page.getByRole('button', { name: new RegExp(title) })
+  return page.locator('[data-card]', { hasText: title })
 }
 
 /** The place of the card that has the focus: its column's name, and its title. */
@@ -53,13 +54,13 @@ test('a fold is kept across a reload, and is its own for each view', async ({ op
   await expect(column(page, 'Done')).toHaveCount(0)
 })
 
-test('a card is selected by a click and opens the drawer place', async ({ openFake }) => {
+test('a card is selected by a click and opens the drawer', async ({ openFake }) => {
   const page = await openFake('field-one-source')
   await expect(page.getByRole('complementary', { name: 'Task drawer' })).toHaveCount(0)
   await card(page, 'Design the board').click()
   const drawer = page.getByRole('complementary', { name: 'Task drawer' })
   await expect(drawer).toContainText('Design the board')
-  await expect(drawer).toContainText('The drawer comes next.')
+  await expect(drawer).toContainText('Read only. Edit the file, or ask an agent; the board follows it.')
   await expect(card(page, 'Design the board')).toHaveAttribute('aria-current', 'true')
 })
 
