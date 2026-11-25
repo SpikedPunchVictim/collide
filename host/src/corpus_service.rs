@@ -843,6 +843,11 @@ impl Inner {
         let declared = state.runs.contains_key(name);
         if declared {
             let _ = state.corpus.mark_stale(name, &source_text(error));
+            // The run is marked too: a source with `watch` is listed again at a look only when its run is stale, so
+            // without this mark the look that brings it back would leave its tasks marked out of date.
+            if let Some(run) = state.runs.get_mut(name) {
+                run.stale.get_or_insert_with(StaleAt::default).whole = true;
+            }
         }
         drop(state);
         if first {
