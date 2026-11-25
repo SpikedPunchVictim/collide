@@ -1,7 +1,7 @@
 ---
 id: ts-0185-ge
 kind: task
-status: ready
+status: done
 title: "Owner look: the Field and the drawer beside the mock"
 owners: []
 links:
@@ -456,4 +456,5 @@ run through them. `In_review` header: change, no underscore shows.
   say why, and the kept links are buttons. They stay with the owner: they show a local temp path.
 - The header: fixed after the look. An underscore in a status name shows as a space (`in_review` reads "In review"),
   in the app and in the mock's `columnsOf`. A hyphen stays, as in "On-hold".
-- The Epic card: a change to the mock and the plan, shaped with the owner before it is split into items.
+- The Epic card: shaped with the owner in mock rounds 8 to 10 (notes 58-63, 2026-11-25) as a strip over the Field,
+  and written into the plan by revision 30 as `ts-0216-ve`, with the Epic box in `ts-0190-tz`.

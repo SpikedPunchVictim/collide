@@ -25,6 +25,12 @@ What exists.
 What this adds.
 - `LayoutKind::Graph` in core, the schema and the generated files, so a view file may say `layout: { default:
   graph }`.
+- `collide/plan` reports each epic as a collection (revision 30; Stage 4c, the built-in markdown provider): it
+  declares `collections: true` (`packs/plan/src/provider.ts`), lists each epic folder as a `Collection` (its id and
+  its `epic.md` title), and puts the epic's id in each of its items' `collections`. An epic item is in none. Without
+  it the Collide board has no collections, since membership is the `part-of` link (`Task::epic`), and neither the
+  goal picker nor `ts-0190-tz`'s Epic box (`"<epic>" in collections`) would find a `collide/plan` epic. `watch`
+  reports a changed collection as it reports a changed task.
 - A layout switch on the Field (Board, Run order, Graph), starting at the view's `layout.default`, kept per board
   and view in webview storage.
 - Run order: the goal bar ("Toward <goal>", then "N open tasks in M steps. Only open tasks are walked; finished
@@ -73,7 +79,8 @@ Write these first.
   and straight or one-bend lines, as the mock draws. No graph library. Alternative: a layout library (a new
   dependency, an Owner's choice).
 - Area: `core/src/view.rs`, `core/src/view_eval.rs` (if the collection goal is taken), `schemas/`, the generated
-  files, `app/src/` (the layouts), `app/test/`, `app/browser/`.
+  files, `packs/plan/src/` (epics as collections) and its tests, `app/src/` (the layouts), `app/test/`,
+  `app/browser/`.
 - Dependencies: none.
 - The test rule: no test touches the real home, real launchd, a real daemon, the keychain or the network. Each test
   that runs the `collide` binary clears the environment (`env_clear()`) and sets `HOME` and `COLLIDE_DAEMON_ROOT` to

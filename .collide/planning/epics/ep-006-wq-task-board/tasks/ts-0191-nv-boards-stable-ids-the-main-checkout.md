@@ -5,7 +5,7 @@ status: ready
 title: "Boards: stable ids, the main checkout, a missing board and locate"
 owners: []
 links:
-  - { type: blocked-by, to: ts-0190-tz }
+  - { type: blocked-by, to: ts-0216-ve }
 ---
 
 ## Goal

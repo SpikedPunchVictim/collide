@@ -7,7 +7,15 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 29.** Revision 29 takes four ideas from a study of Woolshed, a closed-source app that runs several
+**Status: revision 30.** Revision 30 writes in the epics the owner designed in rounds 8 to 10 of the board mock
+(notes 58-63, and 38 changed; owner, 2026-11-25): a strip of epic cards over the Field in every layout, a picked epic
+lit on the board and drawn by run order and graph, the epic in the drawer, a funnel on each card, and one Epic box in
+the filter bar, which now folds under its own header (Stage 6a, `ts-0216-ve` after `ts-0190-tz`). Adding an epic to Up
+next is Stage 11's. `collide/plan` now reports each epic as a collection too, so that the Epic box and an epic as a
+closure's goal work on its boards (`ts-0187-hb`). It also fixes wording the 6a build found: a divergence chip needs a
+workspace, the shell answers `shell.*` and `ui_tools.*` itself, the test bridge's policy adds `'self'` to
+`connect-src`, and `tauri dev` runs with no policy (the owner's probe in `ts-0185-ge`).
+Revision 29 takes four ideas from a study of Woolshed, a closed-source app that runs several
 coding agents in one window (`docs/research/woolshed.md`; owner, 2026-11-24). Tracks marks a session that stopped since
 the person last looked (Stage 9b). A menu item and its key start the window with defaults and can set the person's files
 aside (Stage 6a, `ts-0215-gt`). The app's actions are named in one list that keys, the palette and the agent share (6a,
@@ -2589,6 +2597,9 @@ layout: { default: board, groupBy: category }
     - the folder is the epic membership. The provider reports `part-of` from the path, so frontmatter has no
       `part-of` and the two cannot disagree. Moving a file into another epic's folder moves the item, and its links
       do not change. An item with no epic yet lives in `epics/ep-000-<suffix>-general/`;
+    - each epic is also a collection (revision 30): the provider declares `collections`, lists each epic by its id
+      and title, and names it in each of its items' `collections`, so a view, the filter bar's Epic box and a
+      closure's goal reach a `collide/plan` epic as they reach any source's collection (0.10). An epic is in none;
     - spikes sit at the top level, because one spike often informs several epics. Its links name them;
   - **kinds** (owner, 2026-11-13): `epic`, `proposal` (formerly a session), `question`, `task` and `spike`.
     - A proposal holds its decisions in its Decision section. Its statuses (owner, 2026-11-14) merge planning.md's
@@ -2963,7 +2974,7 @@ Details:
   images from remote hosts not loaded, and an external link opens in the browser after a confirmation (0.9). Any other
   place that shows a task's or an agent's text follows the same rule.
 - **Filter bar → view.** Typing a filter in the Field is an ad-hoc view, and saving it writes a view file. CEL is
-  never the only way in: chips in plain words (by stage, where a task stands, where it comes from, its labels) write the
+  never the only way in: chips in plain words (by epic, where a task stands, where it comes from, its labels) write the
   CEL for you, and the expression is shown read-only under Advanced (revision 25; note 9). **Describe what to show**
   turns words into chips with the in-app agent (Stage 6b; note 16).
 - **Drill-down from a phase segment.** An **activity digest** comes first: files touched, commands with exit
@@ -4824,14 +4835,18 @@ keeps the epic `ep-006-wq`, with its items grouped by letter.
 
 **Goal**: The Field, filter bar, drawer, settings and no-setup open, over the corpus, live. Stage 3c built a minimal
 shell and window; this finishes them. The design reference is the board mock, `docs/mockups/board.html`, design notes
-1-46 (owner, six rounds to 2026-11-24). "Note N" below is its note; the look (colour, shading, spacing) is taken from
-the mock, not from this plan.
+1-46 (owner, six rounds to 2026-11-24) and 58-63 (rounds 8 to 10, 2026-11-25; revision 30). "Note N" below is its
+note; the look (colour, shading, spacing) is taken from the mock, not from this plan.
 
 - The Tauri shell: one `rpc` command and one event channel, forwarding to the owner's socket and adding the token
   (0.2). Stage 3c built the minimal form. The webview's CSP and Tauri capabilities are set here (0.9; R5): the
-  capabilities are `rpc` and one event channel, and nothing else. Methods the shell answers itself
-  (`shell.open_external`, `shell.pick_folder`) ride `rpc`, like `ui_tools.*`. The UI's client speaks the owner's
-  JSON-RPC (handshake, reconnect), so it also runs in a browser against a fake owner.
+  capabilities are `rpc` and one event channel, and nothing else. The shell answers `shell.*` (`shell.open_external`,
+  `shell.pick_folder`) and `ui_tools.*` itself, over `rpc`, and forwards neither (revision 30). The UI's client speaks
+  the owner's JSON-RPC (handshake, reconnect), so it also runs in a browser against a fake owner.
+  - **Where the policy holds** (revision 30): Tauri sends it only on its own protocol. `tauri dev` shows the page from
+    the Tauri CLI's dev server, which sends none (the owner's probe, `ts-0185-ge`), so the policy is checked in the
+    browser tests, which run under it, and in the bundled app (`ts-0197-uj`). The test bridge sends it with `'self'`
+    added to `connect-src`, for the page's own calls to the bridge.
 - **Tabs** (0.11; note 2): all five, with their subtitles and keys. Field and Planning work. Queue and Comms say what
   arrives and in which stage (9a, 9b); Tracks shows a still preview of its design, with no data.
 - **Named actions** (revision 29; `docs/research/woolshed.md`): each action the UI binds to a key has a name in one list
@@ -4849,10 +4864,27 @@ the mock, not from this plan.
   - The graph lights a task's lines, and dims the rest, while the pointer is on it. Core's `bottlenecks` view
     (0.10) is listed with the others.
   - Live updates are quiet: a changed card flashes once and the Live stamp updates, with no toast (note 14).
-- **Filter bar** (0.11; notes 9, 10 and 38): chips in plain words that write the CEL, shown read-only under
-  Advanced. Saving a view writes a personal view file, and Share with team writes it to `.collide/views/`. Fold
-  leaves one line, with the filters in force, "showing X of Y" and Clear; it stays folded for that board, and `/`
-  unfolds it into the search.
+  - **Epics** (revision 30; notes 58, 59 and 61): a strip of epic cards between the filter bar and the view's own row
+    (its name, Autopilot, the layouts), in every layout, folded and opened as the drawer's parts are and kept per
+    view. It shows the epics with a task in the view before the filter bar's filters. A card has the epic's name, a
+    bar of its tasks by category, how many are done, and how many are open or under way, counted over the whole board.
+    The strip is one row that scrolls sideways, open work first (an epic with a task under way, then one with a ready
+    task, then the rest, finished ones last), with a find box over 8 epics. Picking an epic leaves the row where it
+    was.
+  - A picked epic's cards are lit. A line over the board says how many are lit, in folded columns and outside the
+    view, and a folded column counts its lit cards. The drawer shows the epic (note 60): Run it (Add to Up next, off
+    until Stage 11 and saying so; See the run order; See the graph), its open tasks in run order with any task of
+    another epic they wait on, the finished ones folded, and Details for engineers. Run order and graph take the
+    picked epic as their goal, its tasks lit, and choosing a goal there picks the epic. A second click or Clear ends
+    the pick.
+  - A funnel on each card shows only that epic's tasks (note 63): it sets the filter bar's Epic box, so another card's
+    funnel adds its epic, and the strip keeps every epic.
+- **Filter bar** (0.11; notes 9, 10, 38 and 62): chips in plain words that write the CEL, shown read-only under
+  Advanced. Saving a view writes a personal view file, and Share with team writes it to `.collide/views/`. The bar
+  sits under a header that folds it, as the drawer's parts do (revision 30); folded, the header shows the filters in
+  force, "showing X of Y" and Clear. It stays folded for that board, and `/` unfolds it into the search. The epics are
+  one Epic box, not a chip each (revision 30): it says Any, the epic chosen, or how many, and opens a list of the
+  view's epics, each with a tick and its count, with a find box over 8 and Clear.
 - **Task drawer, read-only** (0.11; notes 8, 17, 18, 29, 34 and 39): beside the board, its parts in 0.11's order.
   6a builds the description, Waits on and Unblocks, Part of, Changes, Fields from the source, each copy and Details
   for engineers; the questions come in 9a, and Discuss with the Desk in 9e.
@@ -4912,6 +4944,10 @@ the mock, not from this plan.
   with its fix and a copy button, and the board still opens.
 - **Run order and graph** (note 11): for a view with a closure on the fixture board, both show the tasks and steps
   of `collide tasks --view`, and the graph draws one line for each blocking link among them.
+- **Epics** (revision 30; notes 58-63): on a fixture board of 50 epics the strip is one row in every layout, open work
+  first, and its find box narrows it. Picking an epic lights exactly its cards, the lit line's counts match the board,
+  the row keeps its place, and run order and graph draw its closure. Its funnel shows only its tasks, the Epic box
+  shows the same choice, and the strip still lists every epic.
 - **Unblocks** (note 41): on a fixture where three open tasks wait on one task and two more wait on one of those
   three, one of them by two paths, its `unblocks` is 5, and a done task in a chain stops the walk. `bottlenecks`
   lists it first, its card shows Unblocks 5, and a task with 2 shows no chip.
@@ -4920,7 +4956,8 @@ the mock, not from this plan.
 - **Changes** (note 17): a CLI run's phase heads list its files with their diffs, while the run is active and after,
   and a commit made by hand that names the task's id is listed too.
 - The MVP view in the app lists the same tasks as `collide tasks --view edge-mvp`.
-- A `plan set` in a worktree shows as a divergence chip within the watch debounce plus the 10 s recheck.
+- A `plan set` in a workspace of the board shows as a divergence chip within the watch debounce plus the 10 s
+  recheck. A worktree made elsewhere is a copy, not a divergence (revision 30).
 - A key set in both settings files shows the repo's value, labelled as coming from the repo.
 - **Start with defaults** (revision 29): with a user settings file that does not parse, a personal view that does not
   compile and a user pack whose folder is gone, the window opens the board with the built-in packs and views, the banner
@@ -4941,10 +4978,12 @@ settings view; the hostile-body fixture in a browser, against the CSP; one Playw
 Columns from a fixture source's declared statuses, and from categories for a mixed view. Core's `unblocks` and
 `bottlenecks` against hand counts; run order and graph against the closure; the drawer's parts per source; Changes
 from phase heads and from commits; the filter fold and the id peek in a browser; Start with defaults over a broken
-fixture, per connection, and Reset's move.
+fixture, per connection, and Reset's move. The epics strip in a browser over a board of 50 epics: its order, find, a
+pick and a funnel (revision 30).
 Planning: planning-view counts against the CLI; the branch-only chip.
-**Status**: Not Started. Split into `ts-0179-ke` to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`, built
-one at a time in id order (part L), with `ts-0215-gt` (revision 29) between `ts-0196-uw` and `ts-0197-uj`. It runs after
+**Status**: In Progress; `ts-0179-ke` to `ts-0185-ge` are done. Split into `ts-0179-ke` to `ts-0197-uj` (revision 27,
+2026-11-24), in epic `ep-006-wq`, built one at a time in id order (part L), with `ts-0216-ve` (revision 30) between
+`ts-0190-tz` and `ts-0191-nv`, and `ts-0215-gt` (revision 29) between `ts-0196-uw` and `ts-0197-uj`. It runs after
 `ts-0178-fw` and before Stage 5. Nothing in it runs a real `claude`. The owner's midway look is `ts-0185-ge`; the S6
 walkthrough and the bundled-app checks are the owner's, in `ts-0197-uj`. New dependencies (owner, 2026-11-24):
 `react-markdown` 10.1.0 and `remark-gfm` 4.0.1 (`ts-0183-ee`), `tauri-plugin-dialog` 2.x (`ts-0191-nv`).
@@ -5772,6 +5811,8 @@ recorded in a spike folder under `.collide/planning/spikes/`.
     view (below). The in-app agent may propose an order or a group, which shows in the list as proposed until a
     person keeps or splits it, but no agent has a tool that adds or starts an entry. Each entry says who added it:
     the person, Autopilot, or the agent (revision 25; note 42).
+  - An epic's panel on the Field (Stage 6a; note 60) has Add to Up next, off until this stage: the epic's open tasks,
+    in run order, as one group entry, its mode picked as for any group (revision 30).
   - The next entry starts once the one before it has landed (integrated, by the rule above; for a workflow whose
     `landing` is `observed`, merged as Collide sees it on the line's ref, 0.4), so each builds on the last. A switch
     on the list lets independent entries overlap, up to the concurrency cap.
