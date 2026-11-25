@@ -10,6 +10,7 @@ import {
   reportLines,
   shortIdOf,
   stageOf,
+  wordsOf,
 } from '../src/field/model.ts'
 import type { FieldData } from '../src/field/types.ts'
 import {
@@ -74,6 +75,10 @@ describe('loading', () => {
 })
 
 describe('grouping', () => {
+  test('a status name reads as words: an underscore is a space, a hyphen stays, and the first letter is raised', () => {
+    expect(['in_review', 'on-hold', 'qa', 'Done'].map(wordsOf)).toEqual(['In review', 'On-hold', 'Qa', 'Done'])
+  })
+
   test('tasks of one source are grouped by status', async () => {
     const data = await read(onePlanSource())
     expect(groupMode(data.tasks)).toBe('status')
@@ -123,7 +128,7 @@ describe('status columns, from the declared statuses', () => {
       'Triage',
       'Queued',
       'Doing',
-      'In_review',
+      'In review',
       'Qa',
       'Done',
       'Dropped',

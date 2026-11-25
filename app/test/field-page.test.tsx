@@ -90,7 +90,7 @@ describe('the Field page', () => {
 
   test('draws the eight statuses as columns, each saying what it counts as', async () => {
     const html = await page(eightStatuses())
-    for (const name of ['Idea', 'Triage', 'Queued', 'Doing', 'In_review', 'Qa']) {
+    for (const name of ['Idea', 'Triage', 'Queued', 'Doing', 'In review', 'Qa']) {
       expect(html).toContain(`aria-label="${name}"`)
     }
     expect(html).toContain('counts as backlog')

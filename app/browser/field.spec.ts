@@ -197,7 +197,7 @@ test('the columns are the declared statuses of one source, and the six categorie
   // A view over the eight-status source alone has that source's own statuses, in its order, each with its category.
   await chooseView(page, 'octo-only')
   await expect(column(page, 'Idea')).toBeVisible()
-  expect(await columns(page)).toEqual(['Idea', 'Triage', 'Queued', 'Doing', 'In_review', 'Qa'])
+  expect(await columns(page)).toEqual(['Idea', 'Triage', 'Queued', 'Doing', 'In review', 'Qa'])
   await expect(column(page, 'Idea')).toContainText('counts as backlog')
   await expect(column(page, 'Qa')).toContainText('counts as in review')
   await expect(page.getByRole('button', { name: /^Done\s*1$/ })).toBeVisible()
@@ -229,7 +229,7 @@ test('a rename in the declaration restarts the source and changes the columns', 
   await page.reload()
   await chooseView(page, 'octo-only')
   await expect(column(page, 'Sorting')).toBeVisible()
-  expect(await columns(page)).toEqual(['Idea', 'Sorting', 'Queued', 'Doing', 'In_review', 'Qa'])
+  expect(await columns(page)).toEqual(['Idea', 'Sorting', 'Queued', 'Doing', 'In review', 'Qa'])
   await expect(column(page, 'Triage')).toHaveCount(0)
   await expect(column(page, 'Qa').getByRole('button', { name: /Check it twice/ })).toBeVisible()
 })

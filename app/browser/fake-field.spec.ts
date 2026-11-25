@@ -119,7 +119,7 @@ test('the eight-status source gives its own columns in its own order, each sayin
     all.filter((each) => each.hasAttribute('data-column')).map((each) => each.getAttribute('aria-label')),
   )
   // Done and Dropped are folded, so they show as buttons and not as columns.
-  expect(names).toEqual(['Idea', 'Triage', 'Queued', 'Doing', 'In_review', 'Qa'])
+  expect(names).toEqual(['Idea', 'Triage', 'Queued', 'Doing', 'In review', 'Qa'])
   await expect(column(page, 'Idea')).toContainText('counts as backlog')
   await expect(column(page, 'Qa')).toContainText('counts as in review')
   await expect(page.getByRole('button', { name: /^Done\s*1$/ })).toBeVisible()

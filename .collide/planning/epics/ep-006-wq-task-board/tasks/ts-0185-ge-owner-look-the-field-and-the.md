@@ -431,3 +431,22 @@ start, draw and reach its own daemon.
   on a wide window the drawer at its limit covered the board. The page now fills the window.
 - Left for your look: the window's first size is 800 × 600 (step 4).
 - Not run by the agent: 6, 12 and 13 (yours to judge), 19 in the app's window, and 23 and 26 in its inspector.
+
+### The owner's look, 2026-11-25
+
+```text
+Look on 2026-11-25. Awkward: none named.
+Differences: none named.
+Policy probe: not recorded.
+claude: not run on the look; the agent's run above has it.
+Judged: epics on the Field: cards, as an Epic card that shows all of the epic's tasks, so that an agent can be set to
+run through them. `In_review` header: change, no underscore shows.
+```
+
+- Step 19, in the app's window: below 900 px the drawer scrolls to the end of a long task.
+- Step 23: no errors in the webview's console.
+- Step 25: two screenshots of the drawer over the hostile task. Its body shows as text, the refused links and the image
+  say why, and the kept links are buttons. They stay with the owner: they show a local temp path.
+- The header: fixed after the look. An underscore in a status name shows as a space (`in_review` reads "In review"),
+  in the app and in the mock's `columnsOf`. A hyphen stays, as in "On-hold".
+- The Epic card: a change to the mock and the plan, shaped with the owner before it is split into items.

@@ -3795,7 +3795,7 @@ function viewbarHtml(tasks) {
 function columnsOf(mode, tasks) {
   if (mode === 'category') return CAT_ORDER.map((c) => ({ key: c, label: CATS[c].word, cat: c, sub: CATS[c].sub }));
   const src = SOURCES[[...new Set(tasks.map((t) => t.src))][0] || board().sources[0]];
-  return src.statuses.map((s) => ({ key: s.name, label: cap(s.name), cat: s.cat,
+  return src.statuses.map((s) => ({ key: s.name, label: cap(s.name.replaceAll('_', ' ')), cat: s.cat,
     sub: s.name === s.cat ? CATS[s.cat].sub : `counts as ${CATS[s.cat].word.toLowerCase()}` }));
 }
 function isShut(col) {

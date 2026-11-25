@@ -61,6 +61,9 @@ export const categoryOf = (id: Category) => CATEGORIES.find((each) => each.id ==
 
 export const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
+/** A status name as a header shows it: `in_review` is "In review". A hyphen stays, as in "On-hold". */
+export const wordsOf = (name: string) => capital(name.replaceAll('_', ' '))
+
 /** The source of a key: `plan:ts-0001-aa` is `plan`. */
 export const sourceOf = (key: string) => (key.includes(':') ? key.slice(0, key.indexOf(':')) : '')
 
@@ -96,7 +99,7 @@ export function columnsOf(mode: GroupMode, tasks: readonly Task[], sources: read
     const meaning = categoryOf(status.category)
     columns.push({
       key: status.name,
-      label: capital(status.name),
+      label: wordsOf(status.name),
       category: status.category,
       sub: status.name === status.category ? meaning.sub : `counts as ${meaning.word.toLowerCase()}`,
     })
@@ -107,7 +110,7 @@ export function columnsOf(mode: GroupMode, tasks: readonly Task[], sources: read
     if (columns.some((column) => column.key === status)) continue
     columns.push({
       key: status,
-      label: capital(status),
+      label: wordsOf(status),
       category,
       sub: `counts as ${categoryOf(category).word.toLowerCase()}`,
     })
