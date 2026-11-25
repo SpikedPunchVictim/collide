@@ -463,6 +463,7 @@ impl Rig {
             ready: false,
             kind: None,
             checkout: None,
+            filter: None,
             limit: None,
             cursor: None,
         }

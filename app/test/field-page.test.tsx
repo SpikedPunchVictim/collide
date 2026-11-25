@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { FieldPage } from '../src/field/FieldPage.tsx'
 import { loadField, loadViews } from '../src/field/load.ts'
 import { memoryStore } from '../src/field/folds.ts'
+import { NO_FILTERS } from '../src/filters/model.ts'
 import { ViewPickerBody, viewSource } from '../src/field/ViewPicker.tsx'
 import type { FieldState } from '../src/field/useField.ts'
 import { FieldWorld, eightStatuses, mixedSources, onePlanSource } from './support/field-world.ts'
@@ -22,6 +23,12 @@ const IDLE: FieldState = {
   select: noop,
   goal: null,
   chooseGoal: noop,
+  filters: NO_FILTERS,
+  setFilters: noop,
+  shared: false,
+  reloadViews: noop,
+  saveView: () => Promise.resolve(),
+  shareView: () => Promise.resolve(''),
   data: null,
   problem: null,
   flashed: new Set(),

@@ -3087,7 +3087,7 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
             .with_data(serde_json::json!({ "unknown_kind": kind, "declared": declared })));
         }
     }
-    let through = match &params.view {
+    let through: Option<Through> = match &params.view {
         None => None,
         Some(ViewRef::Inline { view }) => {
             let tasks = service.read(|corpus| corpus.rows().len());
@@ -3100,8 +3100,9 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
             Some((view_report(&view.name, &result), result.members.clone()))
         }
         Some(ViewRef::Named { name }) => {
-            let BoardViews { loaded, supplying } =
-                loaded_views(shared, &params.board, &root, &service)?;
+            let BoardViews {
+                loaded, supplying, ..
+            } = loaded_views(shared, &params.board, &root, &service)?;
             let found = find_view(&loaded, name, &supplying).map_err(|lookup| {
                 let kind = match lookup {
                     Lookup::Missing { .. } => code::NOT_FOUND,
@@ -3116,6 +3117,10 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
                 Err(reason) => (ViewReport::failed(name, &reason), Vec::new()),
             })
         }
+    };
+    let through = match &params.filter {
+        None => through,
+        Some(text) => Some(narrowed(shared, &params.board, &service, text, through)?),
     };
     // The tasks come in the order of the view's members, which a rule (`bottlenecks`) may give an order of its own.
     let only: Option<BTreeSet<String>> = through
@@ -3144,6 +3149,63 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
+/// A view's report and members, as `task.list` holds them before it pages.
+type Through = (ViewReport, Vec<String>);
+
+/// The members of `through` (the whole corpus when there is none) that the `filter` of `task.list` matches, in the
+/// order they had. The filter is a view's `where` and is checked, compiled and budgeted as one is, so a bad one is
+/// `INVALID_PARAMS` with the reason, whatever the view is. It is applied to the members, not joined to the view's own
+/// `where`: a rule (`ready`, `bottlenecks`) has none, and `include` and `closure` add members a `where` never sees.
+/// The report is the view's, with the filter's own counts added and `members` and `steps` cut to what is left. With no
+/// view the report is the filter's, named `filter`.
+fn narrowed(
+    shared: &Shared,
+    board: &str,
+    service: &crate::corpus_service::BoardCorpus,
+    text: &str,
+    through: Option<Through>,
+) -> Result<Through, RpcError> {
+    let refused = |failure: collide_core::view_eval::ViewFailure| {
+        RpcError::new(code::INVALID_PARAMS, format!("filter: {failure}"))
+    };
+    let view = collide_core::view::View {
+        name: "filter".to_string(),
+        where_: Some(text.to_string()),
+        include: Vec::new(),
+        exclude: Vec::new(),
+        closure: None,
+        workflow: None,
+        profile: None,
+        layout: None,
+        queue: false,
+    };
+    let tasks = service.read(|corpus| corpus.rows().len());
+    let compiled = shared.views.compile(&view, tasks).map_err(refused)?;
+    let result = evaluated(shared, board, service, &compiled).map_err(refused)?;
+    let Some((mut report, members)) = through else {
+        return Ok((view_report(&view.name, &result), result.members.clone()));
+    };
+    let keep: BTreeSet<&String> = result.members.iter().collect();
+    let members: Vec<String> = members
+        .into_iter()
+        .filter(|key| keep.contains(key))
+        .collect();
+    report.members = u32::try_from(members.len()).unwrap_or(u32::MAX);
+    let counts = &result.counts;
+    for (reason, tasks) in &counts.errors {
+        *report.errors.entry(reason.clone()).or_default() += tasks;
+    }
+    report.over_task_budget += counts.over_task_budget;
+    report.pass_budget_exhausted |= counts.pass_budget_exhausted;
+    report.not_reached += u32::try_from(counts.not_reached).unwrap_or(u32::MAX);
+    let kept: BTreeSet<&String> = members.iter().collect();
+    for step in &mut report.steps {
+        step.retain(|key| kept.contains(key));
+    }
+    report.steps.retain(|step| !step.is_empty());
+    Ok((report, members))
+}
+
 /// `task.views` (ts-0119-tj): the board's views with their counts, for the Field's view menu: the person's, the
 /// repo's and the packs' ([`crate::views`]). One view's error is on that view and hides no other. A line that does not
 /// load is `CONFLICT` with its problems.
@@ -3151,18 +3213,25 @@ fn task_views(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
     let params: TaskViewsParams = read_params("task.views", params)?;
     let root = board_root(shared, &params.board)?;
     let service = corpus_of(shared, &params.board, &root)?;
-    let views = loaded_views(shared, &params.board, &root, &service)?
+    let found = loaded_views(shared, &params.board, &root, &service)?;
+    let views = found
         .loaded
         .iter()
         .map(|loaded| view_entry(shared, &params.board, &service, loaded))
         .collect();
-    Ok(serde_json::to_value(TaskViewsResult { views }).expect("a result is JSON"))
+    let result = TaskViewsResult {
+        views,
+        shared: found.shared,
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
 /// The board's views in the order of precedence, compiled, and the packs that supply a source of its line.
 struct BoardViews {
     loaded: Vec<Loaded>,
     supplying: Vec<String>,
+    /// The line has a Collide folder, so a view can be saved in it.
+    shared: bool,
 }
 
 /// The board's views, `ready` first, then the person's, the repo's and the packs' ([`crate::views`]).
@@ -3194,6 +3263,7 @@ fn loaded_views(
     let tasks = service.read(|corpus| corpus.rows().len());
     Ok(BoardViews {
         loaded: shared.views.assemble(candidates, tasks),
+        shared: line.line.collide_dir.is_some(),
         supplying: plan(&line.line)
             .sources
             .into_iter()

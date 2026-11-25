@@ -22,6 +22,7 @@ export const ACTIONS = [
   { name: 'show-queue', label: 'Show the Queue', key: '3', scope: 'window' },
   { name: 'show-planning', label: 'Show Planning', key: '4', scope: 'window' },
   { name: 'show-comms', label: 'Show Comms', key: '5', scope: 'window' },
+  { name: 'filter-search', label: 'Search the board', key: '/', scope: 'window' },
   { name: 'card-down', label: 'Go to the card below', key: 'ArrowDown', scope: 'field' },
   { name: 'card-up', label: 'Go to the card above', key: 'ArrowUp', scope: 'field' },
   { name: 'card-right', label: 'Go to the next column', key: 'ArrowRight', scope: 'field' },

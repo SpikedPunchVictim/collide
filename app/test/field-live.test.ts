@@ -186,7 +186,7 @@ describe('one read for a burst', () => {
 describe('the feed', () => {
   async function feedOf(
     world: FieldWorld,
-    over: { view?: string | null; groupBy?: string | null; walk?: () => ViewInput | null } = {},
+    over: { view?: string | null; groupBy?: string | null; walk?: () => ViewInput | null; filter?: string } = {},
   ) {
     const clock = new FakeClock()
     const reads: FieldRead[] = []
@@ -197,6 +197,7 @@ describe('the feed', () => {
       view: over.view ?? null,
       groupBy: () => over.groupBy ?? null,
       ...(over.walk === undefined ? {} : { walk: over.walk }),
+      ...(over.filter === undefined ? {} : { filter: over.filter }),
       onRead: (read) => reads.push(read),
       clock,
       now: () => now,
@@ -218,6 +219,22 @@ describe('the feed', () => {
     const { last, feed } = await feedOf(world, { walk: () => WALK })
     expect(last().data?.walked?.steps).toHaveLength(4)
     expect(last().data?.walkProblem).toBeNull()
+    feed.stop()
+  })
+
+  test('reads with the filter at the start and at every read after, and a card that comes in flashes', async () => {
+    const world = walkWorld()
+    const filter = 'category in ["active"]'
+    const { feed, clock, last } = await feedOf(world, { filter })
+    expect(last().data?.tasks.map((each) => each.key)).toEqual(['plan:ts-0003-cc'])
+    world.edit('plan:ts-0001-aa', { state: { category: 'active', status: 'active' } })
+    world.announce('plan')
+    clock.advance(LIVE_DEBOUNCE_MS)
+    await feed.idle()
+    expect(last().data?.tasks.map((each) => each.key)).toEqual(['plan:ts-0001-aa', 'plan:ts-0003-cc'])
+    expect(last().flashed.has(`${KEY}|`)).toBe(true)
+    const calls = world.callsTo('task.list') as { filter?: string }[]
+    expect(calls.filter((params) => params.filter === filter)).toHaveLength(2)
     feed.stop()
   })
 

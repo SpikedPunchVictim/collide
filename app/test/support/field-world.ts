@@ -14,6 +14,7 @@ import type {
 import { OwnerError } from '../../src/owner/index.ts'
 import { HOSTILE_BODY } from './hostile.ts'
 import { tailOf } from '../../src/field/model.ts'
+import { passes } from './cel-lite.ts'
 import { World, board } from './loop-world.ts'
 
 export type Category = TaskOutput['state']['category']
@@ -107,6 +108,11 @@ export function view(name: string, source: ViewEntry['source'], over: Partial<Vi
   return { error_count: 0, source, task_count: 0, view: { name, ...over } }
 }
 
+/** The entry `task.views` lists for a view that was saved. */
+function viewEntry(view: ViewEntry['view'], target: 'repo' | 'personal', count: number): ViewEntry {
+  return { error_count: 0, source: { type: target }, task_count: count, view }
+}
+
 export function report(name: string, members: number, over: Partial<Report> = {}): Report {
   return {
     name,
@@ -161,6 +167,10 @@ export class FieldWorld extends World {
   fileDiffs = new Map<string, TaskDiffResultOutput>()
   /** Set to make `task.changes` refuse with these words. */
   refuseChanges: string | null = null
+  /** The board's line has a Collide folder, so a view can be shared (`task.views`). */
+  shared = false
+  /** Set to make `task.list` refuse a `filter` with these words. */
+  refuseFilter: string | null = null
 
   /** Changes a listed task, as an edit in a checkout would. Nothing is announced: the daemon's event does that. */
   edit(key: string, over: Partial<TaskOutput>): void {
@@ -291,7 +301,15 @@ export class FieldWorld extends World {
   constructor() {
     super()
     this.boards = [board('b-alpha', '/work/alpha')]
-    this.owner.handle('task.views', () => ({ views: this.views }))
+    this.owner.handle('task.views', () => ({ shared: this.shared, views: this.views }))
+    this.owner.handle('task.save_view', ({ view, target, overwrite }) => {
+      const found = this.views.find((each) => each.view.name === view.name && each.source.type === target)
+      if (found !== undefined && overwrite !== true) throw new OwnerError(-32000, `a view named ${view.name} exists`)
+      const keys = this.listing.filter((each) => view.where == null || passes(view.where, each)).map((each) => each.key)
+      this.views = [...this.views.filter((each) => each !== found), viewEntry(view, target, keys.length)]
+      this.held.set(view.name, { keys, report: report(view.name, keys.length) })
+      return { path: `${target}/${view.name}.yaml` }
+    })
     this.owner.handle('task.changes', ({ task }) => {
       if (this.refuseChanges !== null) throw new OwnerError(-32000, this.refuseChanges)
       const how = `no commit on this line names ${tailOf(task)}`
@@ -320,6 +338,15 @@ export class FieldWorld extends World {
         if (held === undefined) throw new Error(`\`closure.goal\` \`${goal}\` matches no task`)
         tasks = tasks.filter((each) => held.keys.includes(each.key))
         view = { ...held.report, name: ref.view.name }
+      }
+      if (params.filter !== undefined && params.filter !== null) {
+        if (this.refuseFilter !== null) throw new OwnerError(-32602, `filter: ${this.refuseFilter}`)
+        const filter = params.filter
+        tasks = tasks.filter((each) => passes(filter, each))
+        const members = new Set(tasks.map((each) => each.key))
+        const kept = (view?.steps ?? []).map((step) => step.filter((key) => members.has(key)))
+        const steps = kept.filter((step) => step.length > 0)
+        view = { ...(view ?? report('filter', 0)), members: members.size, steps }
       }
       return {
         // The daemon's listing has no body: `task.get` gives the whole task.
@@ -627,5 +654,62 @@ export function walkWorld(): FieldWorld {
   const closure = { goal: 'plan:ts-0004-dd', follow: 'depends_on' as const }
   world.views.push(view('to-the-wire', { type: 'repo' }, { closure }))
   world.held.set('to-the-wire', { keys: field, report: report('to-the-wire', 5, { steps: fieldSteps }) })
+  return world
+}
+
+const EPIC_ONE = 'plan:ep-001-aa'
+const EPIC_TWO = 'plan:ep-002-bb'
+
+/**
+ * A board for the filter bar (ts-0190-tz): two sources, two epics, labels on some tasks, a line with a Collide
+ * folder, a built-in view, one that names a task, one that has a `where`, and one of the person's own.
+ */
+export function filtersWorld(): FieldWorld {
+  const world = new FieldWorld()
+  world.sources = [PLAN, eight()]
+  world.shared = true
+  world.collections = [
+    { id: EPIC_ONE, title: 'The Field', groups: [] },
+    { id: EPIC_TWO, title: 'The drawer', groups: [] },
+  ]
+  world.listing = [
+    task('plan:ts-0001-aa', 'Write the parser', 'ready', 'ready', { collections: [EPIC_ONE], labels: ['perf'] }),
+    task('plan:ts-0002-bb', 'Design the board', 'ready', 'ready', { collections: [EPIC_ONE], labels: ['perf', 'ux'] }),
+    task('plan:ts-0003-cc', 'Build the Field', 'active', 'active', { collections: [EPIC_TWO] }),
+    task('plan:ts-0005-ee', 'Plan the drawer', 'review', 'review', { collections: [EPIC_TWO] }),
+    task('plan:ts-0006-ff', 'Ship the shell', 'done', 'done', { collections: [EPIC_ONE] }),
+    task('eight:1', 'Think about it', 'idea', 'backlog'),
+    task('eight:5', 'Parse the old notes', 'queued', 'ready'),
+  ]
+  const keys = (include: (each: TaskOutput) => boolean) => world.listing.filter(include).map((each) => each.key)
+  const open = keys((each) => each.state.category !== 'done')
+  world.views = [
+    view('ready', { type: 'builtin' }),
+    view('open-work', { type: 'repo' }, { where: 'category in ["ready", "active", "review"]' }),
+    view('picked', { type: 'repo' }, { include: ['plan:ts-0001-aa'] }),
+    view('mine', { type: 'personal' }, { where: 'category in ["ready"]', layout: { groupBy: 'category' } }),
+  ]
+  world.held.set('ready', { keys: keys((each) => each.state.category === 'ready'), report: report('ready', 3) })
+  world.held.set('open-work', { keys: open, report: report('open-work', open.length) })
+  world.held.set('picked', { keys: ['plan:ts-0001-aa'], report: report('picked', 1) })
+  world.held.set('mine', { keys: keys((each) => each.state.category === 'ready'), report: report('mine', 3) })
+  return world
+}
+
+/** Fifty epics, so the Epic box has more than it can show without a find box and a scroll. */
+export function manyEpicsWorld(): FieldWorld {
+  const world = new FieldWorld()
+  world.sources = [PLAN]
+  const number = (index: number) => String(index + 1).padStart(3, '0')
+  world.collections = Array.from({ length: 50 }, (_, index) => ({
+    id: `plan:ep-${number(index)}-aa`,
+    title: `Epic ${number(index)} ${index % 2 === 0 ? 'Field work' : 'Daemon work'}`,
+    groups: [],
+  }))
+  world.listing = world.collections.flatMap((collection, index) => [
+    task(`plan:ts-${number(index)}-aa`, `Task of epic ${number(index)}`, 'ready', 'ready', {
+      collections: [collection.id],
+    }),
+  ])
   return world
 }

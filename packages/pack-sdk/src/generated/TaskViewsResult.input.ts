@@ -31,6 +31,11 @@ export type SortDir = 'asc' | 'desc'
  * `task.views` result: the board's views, for the Field's view menu.
  */
 export interface TaskViewsResult {
+  /**
+   * The board's line has a Collide folder, so a personal view can be shared: saved to `.collide/views/` for the
+   * person to commit (`task.save_view`, target `repo`).
+   */
+  shared?: boolean
   views: ViewEntry[]
 }
 /**

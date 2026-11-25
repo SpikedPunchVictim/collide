@@ -154,6 +154,11 @@ export interface FeedOptions {
    * Asked at each read, so a goal that changes is read with the next one.
    */
   readonly walk?: () => ViewInput | null
+  /**
+   * The expression of the filter bar, which narrows the view at every read (`filters/model.ts`). A filter that changes
+   * is a new feed, so it is the one this feed was made with. Null for none.
+   */
+  readonly filter?: string | null
   /** Called with each new state. Never after `stop`. */
   readonly onRead: (read: FieldRead) => void
   readonly clock?: Clock
@@ -225,10 +230,10 @@ export class FieldFeed {
   }
 
   private async read(): Promise<void> {
-    const { owner, boardId, view, groupBy, walk } = this.options
+    const { owner, boardId, view, groupBy, walk, filter } = this.options
     let next: FieldData
     try {
-      next = await loadField(owner, boardId, view, walk?.() ?? null)
+      next = await loadField(owner, boardId, view, walk?.() ?? null, filter ?? null)
     } catch (failure) {
       // A board that was read stays as it was: the next event reads it again. Only a first read has no board to keep.
       if (this.data === null) this.publish({ problem: words(failure) })

@@ -2524,6 +2524,140 @@ fn an_inline_view_evaluates_without_saving_and_a_bad_one_is_refused_with_the_rea
     }
 }
 
+/// Nine tasks: `files:2`, `3` and `4` wait on `files:1`, and `6` to `9` wait on `files:5`, so `ready` lists `1` and `5`
+/// and `bottlenecks` lists `5` before `1`. `1` and `5` carry the label `perf`, and `5` also `x`.
+fn nine_tasks(rig: &Rig, root: &Path) {
+    for short in 1..=9 {
+        let mut data = json!({ "short": short.to_string(), "status": "todo" });
+        match short {
+            1 => data["labels"] = json!(["perf"]),
+            5 => data["labels"] = json!(["perf", "x"]),
+            2..=4 => data["links"] = json!([{ "type": "blocked-by", "to": "1" }]),
+            _ => data["links"] = json!([{ "type": "blocked-by", "to": "5" }]),
+        }
+        rig.task_json(root, &format!("{short}.json"), data);
+    }
+}
+
+#[test]
+fn a_filter_narrows_the_members_of_every_kind_of_view_and_keeps_the_views_order() {
+    let rig = rig();
+    rig.f().write(
+        ".collide/views/picked.yaml",
+        "name: picked\nwhere: \"status == 'doing'\"\ninclude: [files:1, files:2]\nexclude: [files:9]\n",
+    );
+    rig.f().write(
+        ".collide/views/to-two.yaml",
+        "name: to-two\nclosure: { goal: files:2, follow: depends_on }\n",
+    );
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    nine_tasks(&rig, &root);
+    rig.settled(&board);
+    let named = |view: &str, filter: &str| {
+        rig.named(&board, view, json!({ "filter": filter }))
+            .unwrap()
+    };
+    let perf = "\"perf\" in labels";
+
+    // A built-in view has no `where` to join: its rule gives the members, and the filter narrows them.
+    assert_eq!(
+        Rig::keys(&named("bottlenecks", "true")),
+        ["files:5", "files:1"]
+    );
+    assert_eq!(
+        Rig::keys(&named("bottlenecks", perf)),
+        ["files:5", "files:1"]
+    );
+    assert_eq!(
+        Rig::keys(&named("bottlenecks", "\"x\" in labels")),
+        ["files:5"]
+    );
+    assert_eq!(Rig::keys(&named("ready", perf)), ["files:1", "files:5"]);
+    assert_eq!(Rig::keys(&named("ready", "key == 'files:5'")), ["files:5"]);
+    // A view that names tasks adds members its `where` never sees: they pass the filter like the rest.
+    assert_eq!(
+        Rig::keys(&rig.named(&board, "picked", json!({})).unwrap()),
+        ["files:1", "files:2"]
+    );
+    assert_eq!(Rig::keys(&named("picked", perf)), ["files:1"]);
+    // A view's closure too, and the steps the run order draws are the filter's members.
+    let whole = rig.named(&board, "to-two", json!({})).unwrap();
+    assert_eq!(
+        whole.view.expect("a report").steps,
+        [["files:1"], ["files:2"]]
+    );
+    let narrowed = named("to-two", "key == 'files:2'");
+    assert_eq!(Rig::keys(&narrowed), ["files:2"]);
+    let report = narrowed.view.expect("a report");
+    assert_eq!(report.name, "to-two");
+    assert_eq!(report.members, 1);
+    assert_eq!(report.steps, [["files:2"]]);
+}
+
+#[test]
+fn a_filter_alone_lists_the_tasks_it_matches_and_pages_with_a_view() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    nine_tasks(&rig, &root);
+    rig.settled(&board);
+
+    let alone = rig.list(&board, json!({ "filter": "\"perf\" in labels" }));
+    assert_eq!(Rig::keys(&alone), ["files:1", "files:5"]);
+    assert_eq!(alone.view.expect("a report").members, 2);
+    let paged = rig.named(
+        &board,
+        "ready",
+        json!({ "filter": "\"perf\" in labels", "limit": 1 }),
+    );
+    let paged = paged.unwrap();
+    assert_eq!(Rig::keys(&paged), ["files:1"]);
+    assert!(
+        paged.next_cursor.is_some(),
+        "the second member is on the next page"
+    );
+    // Board-wide lists come with the first page, as they do for a view.
+    assert!(!alone.sources.is_empty());
+}
+
+#[test]
+fn a_filter_is_checked_as_a_views_where_is_and_a_bad_one_is_refused_with_the_reason() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    nine_tasks(&rig, &root);
+    rig.settled(&board);
+
+    for (filter, word) in [
+        ("tasks.size() > 0", "tasks"),
+        ("   ", "where"),
+        ("title ==", "filter"),
+        ("status == 'todo'\n  && ((", "filter"),
+    ] {
+        for view in [json!({ "type": "named", "name": "ready" }), json!(null)] {
+            let params = if view.is_null() {
+                json!({ "board": board, "filter": filter })
+            } else {
+                json!({ "board": board, "view": view, "filter": filter })
+            };
+            let refused: RpcError = rpc::<TaskListResult>(&rig, "task.list", &params).unwrap_err();
+            assert_eq!(refused.code, -32602, "{filter}");
+            assert!(
+                refused.message.contains(word),
+                "{filter}: {}",
+                refused.message
+            );
+        }
+    }
+    // Case-insensitive search is a regex the bar writes: it compiles, and it costs no more than a view's own `where`.
+    let found = rig.list(
+        &board,
+        json!({ "filter": "(title.matches(\"(?i)TASK 3\") || key.matches(\"(?i)TASK 3\"))" }),
+    );
+    assert_eq!(Rig::keys(&found), ["files:3"]);
+}
+
 /// The `partProblems` of a spike with a problem at each of `lines`, as a provider reports them.
 fn problems_at(lines: &[u32]) -> Value {
     let found: Vec<Value> = lines
@@ -2750,6 +2884,25 @@ fn save_view_to_the_repo_writes_a_file_that_is_not_committed_and_the_next_load_r
     assert_eq!(entry(&views, "mine").source, ViewSource::Repo {});
     assert_eq!(entry(&views, "mine").view, written);
     assert_eq!(written, serde_json::from_value::<View>(saved()).unwrap());
+}
+
+#[test]
+fn task_views_says_whether_the_line_has_a_collide_folder_to_share_a_view_in() {
+    let rig = rig();
+    let params = |board: &str| TaskViewsParams {
+        board: board.to_string(),
+    };
+    let bare = rig.f().board();
+    let before: TaskViewsResult = rpc(&rig, "task.views", &params(&bare)).unwrap();
+    assert!(
+        !before.shared,
+        "a repo with no `.collide/` has nowhere to share"
+    );
+
+    let board = rig.board_with(&[&FILES], "");
+    assert_eq!(board, bare, "the same repository is the same board");
+    let after: TaskViewsResult = rpc(&rig, "task.views", &params(&board)).unwrap();
+    assert!(after.shared);
 }
 
 #[test]

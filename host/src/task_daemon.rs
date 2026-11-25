@@ -210,6 +210,7 @@ impl Session {
             ready: false,
             kind: None,
             checkout: self.checkout_arg(),
+            filter: None,
             limit: None,
             cursor: None,
         }

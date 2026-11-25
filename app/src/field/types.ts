@@ -17,6 +17,11 @@ export type Collection = ListResult['collections'][number]
 export interface FieldData {
   /** The tasks of the selected view, one entry for each place a key is at. */
   readonly tasks: readonly Task[]
+  /**
+   * The tasks of the selected view before the filter bar's choices, which its groups are counted over. The same as
+   * `tasks` when nothing is chosen.
+   */
+  readonly inView: readonly Task[]
   /** Every task of the board, which a card's blockers are looked up in. */
   readonly corpus: readonly Task[]
   readonly sources: readonly SourceDecl[]
@@ -33,6 +38,8 @@ export interface FieldData {
   readonly walked: ViewReport | null
   /** The words of a walk the daemon refused, such as a goal that is no longer there. Null when there is none. */
   readonly walkProblem: string | null
+  /** The words of a filter the daemon refused, with no task shown. Null when there is none. */
+  readonly filterProblem: string | null
   /**
    * The daemon was still listing, or a source had not started, so `sources` may be short. An event for a source not in
    * it may be this board's source coming up (`live.ts`).

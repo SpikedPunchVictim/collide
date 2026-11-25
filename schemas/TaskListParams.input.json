@@ -203,7 +203,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.list` params: the corpus through a view (`collide tasks [--view] [--ready] [--kind] [--checkout]`). With no\n`view` the whole corpus. `ready` keeps the tasks the ready rule lists. `limit` and `cursor` page the answer.",
+  "description": "`task.list` params: the corpus through a view (`collide tasks [--view] [--ready] [--kind] [--checkout]`). With no\n`view` the whole corpus. `ready` keeps the tasks the ready rule lists. `filter` is a CEL expression, checked,\ncompiled and budgeted as a view's `where` is: it keeps the members of the view asked for (the whole corpus when\nthere is none) that it matches, in the view's order, whatever made them members. `limit` and `cursor` page the\nanswer.",
   "properties": {
     "board": {
       "type": "string"
@@ -215,6 +215,12 @@
       ]
     },
     "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "filter": {
       "type": [
         "string",
         "null"

@@ -30,7 +30,10 @@ pub enum ViewRef {
 }
 
 /// `task.list` params: the corpus through a view (`collide tasks [--view] [--ready] [--kind] [--checkout]`). With no
-/// `view` the whole corpus. `ready` keeps the tasks the ready rule lists. `limit` and `cursor` page the answer.
+/// `view` the whole corpus. `ready` keeps the tasks the ready rule lists. `filter` is a CEL expression, checked,
+/// compiled and budgeted as a view's `where` is: it keeps the members of the view asked for (the whole corpus when
+/// there is none) that it matches, in the view's order, whatever made them members. `limit` and `cursor` page the
+/// answer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskListParams {
@@ -43,6 +46,8 @@ pub struct TaskListParams {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -361,6 +366,10 @@ pub struct TaskViewsParams {
 #[serde(deny_unknown_fields)]
 pub struct TaskViewsResult {
     pub views: Vec<ViewEntry>,
+    /// The board's line has a Collide folder, so a personal view can be shared: saved to `.collide/views/` for the
+    /// person to commit (`task.save_view`, target `repo`).
+    #[serde(default)]
+    pub shared: bool,
 }
 
 /// Where a saved view is written: the repo's `.collide/views/`, or the user's own board settings.

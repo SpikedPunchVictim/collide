@@ -24,12 +24,16 @@ export type SortDir = 'asc' | 'desc'
 
 /**
  * `task.list` params: the corpus through a view (`collide tasks [--view] [--ready] [--kind] [--checkout]`). With no
- * `view` the whole corpus. `ready` keeps the tasks the ready rule lists. `limit` and `cursor` page the answer.
+ * `view` the whole corpus. `ready` keeps the tasks the ready rule lists. `filter` is a CEL expression, checked,
+ * compiled and budgeted as a view's `where` is: it keeps the members of the view asked for (the whole corpus when
+ * there is none) that it matches, in the view's order, whatever made them members. `limit` and `cursor` page the
+ * answer.
  */
 export interface TaskListParams {
   board: string
   checkout?: string | null
   cursor?: string | null
+  filter?: string | null
   kind?: string | null
   limit?: number | null
   ready?: boolean

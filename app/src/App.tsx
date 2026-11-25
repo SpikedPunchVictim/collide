@@ -65,7 +65,15 @@ function Window({ owner }: { readonly owner: OwnerClient }) {
         onOpenLoop={() => setOnLoopPage(true)}
         viewPicker={
           board === undefined ? null : (
-            <ViewPicker boardName={boardName(board)} views={field.views} view={field.view} onChoose={field.select} />
+            <ViewPicker
+              boardName={boardName(board)}
+              views={field.views}
+              view={field.view}
+              onChoose={field.select}
+              shared={field.shared}
+              onShare={field.shareView}
+              onOpen={field.reloadViews}
+            />
           )
         }
         field={

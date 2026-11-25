@@ -31,8 +31,15 @@ describe('the list of named actions', () => {
     expect(actionForKey(key, 'window')).toBe(name)
   })
 
-  test.each(['0', '6', '12', 'a', '/', ''])('the key %j does nothing in the window', (key) => {
+  test.each(['0', '6', '12', 'a', ''])('the key %j does nothing in the window', (key) => {
     expect(actionForKey(key, 'window')).toBeNull()
+  })
+
+  test('the key / goes to the search of the filter bar, from anywhere in the window', () => {
+    expect(actionForKey('/', 'window')).toBe('filter-search')
+    expect(actionForKey('/', 'field')).toBeNull()
+    expect(keyOf('filter-search')).toBe('/')
+    expect(tabOfAction('filter-search')).toBeNull()
   })
 
   test('an action that is not a tab shows no tab', () => {

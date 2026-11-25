@@ -2,7 +2,16 @@
 // `loop-world.ts`: a `FakeOwner` over plain data. The page names one in its address (`#world=two-boards`), and a vitest
 // test calls the same function, so a test in Node and a spec in Chrome see the same daemon.
 import { changesWorld, peekWorld } from './changes-world.ts'
-import { FieldWorld, drawerWorld, eightStatuses, mixedSources, onePlanSource, walkWorld } from './field-world.ts'
+import {
+  FieldWorld,
+  drawerWorld,
+  eightStatuses,
+  filtersWorld,
+  manyEpicsWorld,
+  mixedSources,
+  onePlanSource,
+  walkWorld,
+} from './field-world.ts'
 import { HOSTILE_BODY } from './hostile.ts'
 import { World, board, permissionItem, run } from './loop-world.ts'
 
@@ -42,6 +51,8 @@ export const WORLDS: Readonly<Record<string, () => World>> = {
   'field-mixed': mixedSources,
   'field-drawer': drawerWorld,
   'field-walk': walkWorld,
+  'field-filters': filtersWorld,
+  'field-epics-50': manyEpicsWorld,
   'field-changes': changesWorld,
   'field-peek': peekWorld,
 }

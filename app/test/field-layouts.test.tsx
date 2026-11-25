@@ -4,6 +4,7 @@ import { FieldPage } from '../src/field/FieldPage.tsx'
 import { memoryStore } from '../src/field/folds.ts'
 import { type LayoutKind, writeLayout } from '../src/field/layout.ts'
 import { loadField, loadViews } from '../src/field/load.ts'
+import { NO_FILTERS } from '../src/filters/model.ts'
 import type { FieldState } from '../src/field/useField.ts'
 import { inlineView } from '../src/field/walk.ts'
 import { EPIC_FIELD, EPIC_KNOT, EPIC_LATER, FieldWorld, walkWorld } from './support/field-world.ts'
@@ -35,6 +36,12 @@ async function page({ view = null, layout, goal = null, world = walkWorld(), ove
     select: noop,
     goal,
     chooseGoal: noop,
+    filters: NO_FILTERS,
+    setFilters: noop,
+    shared: false,
+    reloadViews: noop,
+    saveView: () => Promise.resolve(),
+    shareView: () => Promise.resolve(''),
     data,
     problem: null,
     flashed: new Set(),
@@ -219,7 +226,7 @@ describe('the graph', () => {
   test('names a cycle above the graph, and draws no line among its tasks', async () => {
     const html = await page({ view: 'everything', layout: 'graph', goal: EPIC_KNOT })
     expect(html).toContain('wait on each other')
-    expect(html.indexOf('wait on each other')).toBeLessThan(html.indexOf('<svg'))
+    expect(html.indexOf('wait on each other')).toBeLessThan(html.indexOf('<svg width'))
     expect(html.indexOf('Chicken')).toBeGreaterThan(-1)
     expect(lines(html).map((each) => `${each[1]}>${each[2]}`)).toEqual(['plan:ts-0011-kk>plan:ts-0012-ll'])
   })

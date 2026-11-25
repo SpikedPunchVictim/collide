@@ -282,6 +282,8 @@ describe('the chips of a card', () => {
       collections: [],
       walked: null,
       walkProblem: null,
+      filterProblem: null,
+      inView: [],
       settling: false,
     }
     const cards = lanesOf(data).lanes.flatMap((lane) => lane.cards)
@@ -299,6 +301,8 @@ describe('the chips of a card', () => {
       collections: [],
       walked: null,
       walkProblem: null,
+      filterProblem: null,
+      inView: [],
       settling: false,
     }
     const cards = lanesOf(data).lanes.flatMap((lane) => lane.cards)
@@ -316,6 +320,8 @@ describe('the chips of a card', () => {
       collections: [],
       walked: null,
       walkProblem: null,
+      filterProblem: null,
+      inView: [],
       settling: false,
     }
     expect(lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips).toEqual([])
@@ -338,6 +344,8 @@ describe('the chips of a card', () => {
         collections: [],
         walked: null,
         walkProblem: null,
+        filterProblem: null,
+        inView: [],
         settling: false,
       }
       return lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips
@@ -364,6 +372,8 @@ describe('the chips of a card', () => {
         collections: [],
         walked: null,
         walkProblem: null,
+        filterProblem: null,
+        inView: [],
         settling: false,
       }
       return lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips
@@ -438,6 +448,8 @@ describe('the chips of a card', () => {
       collections: [],
       walked: null,
       walkProblem: null,
+      filterProblem: null,
+      inView: [],
       settling: false,
     }
     const { lanes } = lanesOf(data, 'category')

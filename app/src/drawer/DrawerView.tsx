@@ -127,7 +127,8 @@ export function DrawerView(props: DrawerViewProps) {
   )
 }
 
-function Chevron({ folded }: { folded: boolean }) {
+/** The chevron of a folding header, which points down when open and right when folded. */
+export function Chevron({ folded }: { folded: boolean }) {
   return (
     <svg
       aria-hidden="true"

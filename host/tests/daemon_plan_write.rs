@@ -334,6 +334,7 @@ fn list_of_kind(kind: &str, board: &str) -> TaskListParams {
         ready: false,
         kind: Some(kind.to_string()),
         checkout: None,
+        filter: None,
         limit: None,
         cursor: None,
     }

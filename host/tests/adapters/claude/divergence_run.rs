@@ -40,6 +40,7 @@ fn listed(fx: &mut Fixture, board: &str) -> TaskListResult {
             kind: None,
             checkout: None,
             view: None,
+            filter: None,
             limit: None,
             cursor: None,
         },

@@ -7,6 +7,7 @@ import { Card as Panel } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { Drawer } from '../drawer/Drawer.tsx'
 import type { BoardNote } from '../drawer/types.ts'
+import { FilterBar } from '../filters/FilterBar.tsx'
 import { actionForKey } from '../frame/actions.ts'
 import type { OwnerClient } from '../owner/client.ts'
 import { CardButton } from './CardButton.tsx'
@@ -74,6 +75,9 @@ export function FieldPage({ owner, boardId, board = null, field, store }: FieldP
       entry={field.views.find((each) => each.view.name === field.view)}
       goal={field.goal}
       onGoal={field.chooseGoal}
+      filters={field.filters}
+      onFilters={field.setFilters}
+      onSave={field.saveView}
       data={field.data}
       groupBy={groupByOf(field)}
       flashed={field.flashed}
@@ -99,6 +103,9 @@ interface BoardProps {
   /** The goal picked for the run order and graph of a view with none of its own. */
   readonly goal: string | null
   readonly onGoal: (goal: string | null) => void
+  readonly filters: FieldState['filters']
+  readonly onFilters: FieldState['setFilters']
+  readonly onSave: FieldState['saveView']
   readonly data: FieldData
   readonly groupBy: string | null
   readonly flashed: ReadonlySet<string>
@@ -108,6 +115,7 @@ interface BoardProps {
 
 function Board(props: BoardProps) {
   const { owner, boardId, board, view, entry, goal, onGoal, data, groupBy, flashed, updatedAt, store } = props
+  const { filters, onFilters, onSave } = props
   const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
@@ -176,6 +184,15 @@ function Board(props: BoardProps) {
         {updatedAt === null ? null : <LiveStamp updatedAt={updatedAt} />}
         <LayoutSwitch layout={layout} onChoose={choose} />
       </div>
+      <FilterBar
+        boardId={boardId}
+        data={data}
+        entry={entry}
+        filters={filters}
+        onFilters={onFilters}
+        onSave={onSave}
+        store={kept}
+      />
       <div className="flex items-start gap-3">
         {layout === 'board' ? (
           <Columns
