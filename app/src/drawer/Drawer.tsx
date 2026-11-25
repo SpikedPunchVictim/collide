@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   useEffect,
   useMemo,
   useRef,
@@ -82,17 +83,19 @@ function useEscape(onClose: () => void) {
   }, [onClose])
 }
 
-export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpenTask, onClose }: DrawerProps) {
-  const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
-  // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
-  const [, remember] = useState(0)
-  const { got, problem } = useTaskGet(owner, boardId, shown.key, stamp)
-  const { width, room, set } = useWidth(kept)
-  const shut = readShut(kept)
-  // Changes is read while its part is open, for a task the daemon names (a collided key has no changes to ask for).
-  const changes = useChanges(owner, boardId, shown.key, got?.task != null && !shut.includes('changes'))
-  // The diff window is for one task: another task shown closes it.
-  const [diff, setDiff] = useState<{ key: string; target: DiffTarget } | null>(null)
+export interface DrawerShellProps {
+  /** Where the width is kept. */
+  readonly store: FoldStore
+  readonly onClose: () => void
+  readonly children: ReactNode
+}
+
+/**
+ * The box the drawer sits in, whichever it shows (a task, or a picked epic): beside the board, over it below 900 px,
+ * with its edge to drag and Escape to close.
+ */
+export function DrawerShell({ store, onClose, children }: DrawerShellProps) {
+  const { width, room, set } = useWidth(store)
   useEscape(onClose)
   return (
     // Below 900 px it is fixed, and a fixed box follows `align-self` too: left at `start`, it would be as tall as its
@@ -106,6 +109,23 @@ export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpe
       }
     >
       <Edge width={width} room={room} onSet={set} />
+      {children}
+    </div>
+  )
+}
+
+export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpenTask, onClose }: DrawerProps) {
+  const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
+  // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
+  const [, remember] = useState(0)
+  const { got, problem } = useTaskGet(owner, boardId, shown.key, stamp)
+  const shut = readShut(kept)
+  // Changes is read while its part is open, for a task the daemon names (a collided key has no changes to ask for).
+  const changes = useChanges(owner, boardId, shown.key, got?.task != null && !shut.includes('changes'))
+  // The diff window is for one task: another task shown closes it.
+  const [diff, setDiff] = useState<{ key: string; target: DiffTarget } | null>(null)
+  return (
+    <DrawerShell store={kept} onClose={onClose}>
       <DrawerView
         shown={shown}
         got={got}
@@ -132,7 +152,7 @@ export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpe
           onClosed={() => setDiff(null)}
         />
       )}
-    </div>
+    </DrawerShell>
   )
 }
 

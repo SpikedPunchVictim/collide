@@ -10,15 +10,18 @@ export interface CardButtonProps {
   readonly selected: boolean
   /** The card changed in a read just now: it flashes once (`field-flash` in `index.css`), and says nothing. */
   readonly flash: boolean
+  /** The card is of the epic that is picked (ts-0216-ve): it is lit, and says nothing. */
+  readonly lit?: boolean
   readonly onSelect: (id: string) => void
 }
 
-export function CardButton({ card, selected, flash, onSelect }: CardButtonProps) {
+export function CardButton({ card, selected, flash, lit = false, onSelect }: CardButtonProps) {
   return (
     <button
       type="button"
       data-card={card.id}
       data-flash={flash ? 'true' : undefined}
+      data-lit={lit ? 'true' : undefined}
       aria-current={selected}
       onClick={() => onSelect(card.id)}
       className={cn(
@@ -27,6 +30,7 @@ export function CardButton({ card, selected, flash, onSelect }: CardButtonProps)
         // A card being worked on has the lit border (note 5).
         card.category === 'active' && 'border-c-active ring-1 ring-c-active',
         selected && 'outline-2 outline-offset-1 outline-ring',
+        lit && 'border-primary/60 bg-primary/10',
         flash && 'field-flash',
       )}
     >

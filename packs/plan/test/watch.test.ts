@@ -319,7 +319,11 @@ describe('watch: task.changed', () => {
 
 describe('watch: collections.changed', () => {
   const EPIC_TWO = `${BETA}/epic.md`
-  const collection = (id: string, title: string) => ({ id, title, groups: [] })
+  // An epic names its file, relative to the line, so the app can say where it is.
+  const collection = (id: string, title: string) => {
+    const folder = id === 'plan:ep-001-aa' ? ALPHA : BETA
+    return { id, title, groups: [], path: `${folder}/epic.md` }
+  }
 
   test('a task moved to another epic names its new collections, and the collections are what they were', async () => {
     const main = repo()

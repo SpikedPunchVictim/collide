@@ -45,9 +45,10 @@ async function listAll(
 /**
  * What the daemon says of a view with a goal's closure added: its report, whose steps and cycle the run order and graph
  * draw. The tasks are on the board already, so one is asked for. A walk the daemon refuses (the goal is gone, or the
- * view does not compile) is words to show, not a failure of the board.
+ * view does not compile) is words to show, not a failure of the board. The drawer's epic asks the same of the whole
+ * board.
  */
-async function loadWalk(owner: OwnerClient, boardId: string, walk: View, filter: string | null) {
+export async function loadWalk(owner: OwnerClient, boardId: string, walk: View, filter: string | null) {
   try {
     const answer = await owner.rpc('task.list', {
       board: boardId,

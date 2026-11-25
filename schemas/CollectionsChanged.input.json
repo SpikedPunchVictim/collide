@@ -14,6 +14,13 @@
         "id": {
           "type": "string"
         },
+        "path": {
+          "description": "The file the source keeps the collection in, relative to the line as `Task.path` is, when it has one. An epic\nof the plan is `epic.md`; a milestone of a tracker has none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "title": {
           "type": "string"
         }

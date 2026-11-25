@@ -1647,6 +1647,7 @@ fn collection(id: &str, title: &str, keys: &[&str]) -> Collection {
             name: "all".into(),
             tasks: keys.iter().map(|key| (*key).into()).collect(),
         }],
+        path: None,
     }
 }
 

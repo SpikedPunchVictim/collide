@@ -23,9 +23,18 @@ describe('list: collections', () => {
   test('lists each epic folder with an epic.md as a collection of its id and its title, in folder order', async () => {
     const { result } = await call(fixture('basic'), 'list')
     expect(result?.collections).toEqual([
-      { id: 'plan:ep-001-aa', title: 'Alpha epic', groups: [] },
-      { id: 'plan:ep-002-bb', title: expect.any(String), groups: [] },
+      { id: 'plan:ep-001-aa', title: 'Alpha epic', groups: [], path: expect.any(String) },
+      { id: 'plan:ep-002-bb', title: expect.any(String), groups: [], path: expect.any(String) },
     ])
+  })
+
+  test('names the epic.md of each epic as its path, relative to the line as a task\'s path is', async () => {
+    const { result } = await call(fixture('basic'), 'list')
+    expect(result?.collections.map((each: { path: string }) => each.path)).toEqual([
+      `${EPICS}/ep-001-aa-alpha/epic.md`,
+      `${EPICS}/ep-002-bb-beta/epic.md`,
+    ])
+    expect(taskOf(result, 'ep-001-aa').path).toBe(`${EPICS}/ep-001-aa-alpha/epic.md`)
   })
 
   test('puts the epic in the collections of every item of its folder, whatever its kind', async () => {

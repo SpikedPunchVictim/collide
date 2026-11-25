@@ -193,20 +193,21 @@ export async function scanEpics(
 
 const EPIC = 'epic'
 
-/** A collection as the provider lists it: an epic, with no groups. */
+/** A collection as the provider lists it: an epic, with no groups and its `epic.md` as its path. */
 export type EpicCollection = NonNullable<ListResultInput['collections']>[number]
 
 /** The key an epic is a collection under: its id, in this provider's source. */
 const collectionOf = (epicId: string): string => `plan:${epicId}`
 
 /**
- * Each epic that has an `epic.md` as a collection (0.10; ts-0187-hb), in scan order: its key and its title. The folder
- * is still the membership, and `part-of` still says so: an item is also named in the collections of its folder's epic.
+ * Each epic that has an `epic.md` as a collection (0.10; ts-0187-hb), in scan order: its key, its title and its file
+ * (`ts-0216-ve`: the app says where the epic is). The folder is still the membership, and `part-of` still says so: an
+ * item is also named in the collections of its folder's epic.
  */
 export function collectionsOf(items: readonly FoundItem[]): EpicCollection[] {
   return items
     .filter((found) => found.item.kind === EPIC)
-    .map((found) => ({ id: collectionOf(found.item.id), title: found.item.title, groups: [] }))
+    .map((found) => ({ id: collectionOf(found.item.id), title: found.item.title, groups: [], path: found.path }))
 }
 
 /** What `list` answers for a scan: every item with no body, the epics as collections, and the invalid files. */

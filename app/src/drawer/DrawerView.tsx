@@ -89,41 +89,57 @@ export function DrawerView(props: DrawerViewProps) {
             </p>
           ) : null
         ) : (
-          partsOf(input).map((part) => {
-            const folded = shut.includes(part.id)
-            return (
-              <section key={part.id} data-part={part.id} className="border-b px-4 py-2.5 last:border-b-0">
-                <h3 className="text-sm font-semibold">
-                  <button
-                    type="button"
-                    aria-expanded={!folded}
-                    onClick={() => onFlip(part.id)}
-                    className={cn(
-                      'flex w-full cursor-pointer items-center gap-1.5 py-1 text-left',
-                      'focus-visible:outline-2 focus-visible:outline-ring',
-                    )}
-                  >
-                    <Chevron folded={folded} />
-                    <span>{part.title}</span>
-                  </button>
-                </h3>
-                {folded ? null : (
-                  <div className="pt-1 pb-1 break-words">
-                    <PartBody
-                      id={part.id}
-                      input={input}
-                      changes={props.changes}
-                      onOpenTask={props.onOpenTask}
-                      onOpenFile={props.onOpenFile}
-                    />
-                  </div>
-                )}
-              </section>
-            )
-          })
+          partsOf(input).map((part) => (
+            <PartSection
+              key={part.id}
+              id={part.id}
+              title={part.title}
+              folded={shut.includes(part.id)}
+              onFlip={() => onFlip(part.id)}
+            >
+              <PartBody
+                id={part.id}
+                input={input}
+                changes={props.changes}
+                onOpenTask={props.onOpenTask}
+                onOpenFile={props.onOpenFile}
+              />
+            </PartSection>
+          ))
         )}
       </div>
     </aside>
+  )
+}
+
+interface PartSectionProps {
+  readonly id: string
+  readonly title: string
+  readonly folded: boolean
+  readonly onFlip: () => void
+  readonly children: ReactNode
+}
+
+/** A part of a drawer: a header that folds it, and its body. The task's parts and the epic's are drawn alike. */
+export function PartSection({ id, title, folded, onFlip, children }: PartSectionProps) {
+  return (
+    <section data-part={id} className="border-b px-4 py-2.5 last:border-b-0">
+      <h3 className="text-sm font-semibold">
+        <button
+          type="button"
+          aria-expanded={!folded}
+          onClick={onFlip}
+          className={cn(
+            'flex w-full cursor-pointer items-center gap-1.5 py-1 text-left',
+            'focus-visible:outline-2 focus-visible:outline-ring',
+          )}
+        >
+          <Chevron folded={folded} />
+          <span>{title}</span>
+        </button>
+      </h3>
+      {folded ? null : <div className="pt-1 pb-1 break-words">{children}</div>}
+    </section>
   )
 }
 

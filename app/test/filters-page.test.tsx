@@ -180,7 +180,9 @@ describe('the Epic box over many epics', () => {
   test('says Any, and has no more than the box itself drawn until it is opened', async () => {
     const html = await page(manyEpicsWorld())
     expect(html).toContain('aria-label="Epic: Any"')
-    expect(html).not.toContain('Find an epic')
+    // The strip has a find box of its own, named otherwise (`epics-page.test.tsx`); the box's is drawn when it opens.
+    expect(html).not.toContain('id="epic-find"')
+    expect(html).not.toContain('Epics to show')
   })
 
   test('says how many are chosen', async () => {

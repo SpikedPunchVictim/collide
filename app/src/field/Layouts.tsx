@@ -95,6 +95,8 @@ export interface WalkViewProps {
   /** Whether the walk has been read yet. */
   readonly read: boolean
   readonly selected: string | null
+  /** The ids of the cards of the picked epic, which are lit. */
+  readonly lit: ReadonlySet<string>
   readonly onSelect: (id: string) => void
 }
 
@@ -155,7 +157,7 @@ const NODE = cn(
 
 const startWords = (index: number) => (index === 0 ? 'can start now' : `after step ${index}`)
 
-function RunOrder({ data, steps, selected, onSelect }: WalkViewProps) {
+function RunOrder({ data, steps, selected, lit, onSelect }: WalkViewProps) {
   return (
     <ol aria-label="Run order" className="flex flex-col gap-2.5">
       {steps.map((step, index) => (
@@ -168,7 +170,16 @@ function RunOrder({ data, steps, selected, onSelect }: WalkViewProps) {
             {step.map((task) => {
               const card = cardOf(task, data, 'category')
               const on = card.id === selected
-              return <CardButton key={card.id} card={card} selected={on} flash={false} onSelect={onSelect} />
+              return (
+                <CardButton
+                  key={card.id}
+                  card={card}
+                  selected={on}
+                  flash={false}
+                  lit={lit.has(card.id)}
+                  onSelect={onSelect}
+                />
+              )
             })}
           </div>
         </li>
@@ -177,7 +188,7 @@ function RunOrder({ data, steps, selected, onSelect }: WalkViewProps) {
   )
 }
 
-function Graph({ data, steps, cycle, selected, onSelect }: WalkViewProps) {
+function Graph({ data, steps, cycle, selected, lit: picked, onSelect }: WalkViewProps) {
   const graph = graphOf(steps, cycle)
   // The task that has the pointer or the focus: its lines are lit and the tasks not at their ends are dimmed.
   const [lit, setLit] = useState<string | null>(null)
@@ -233,6 +244,7 @@ function Graph({ data, steps, cycle, selected, onSelect }: WalkViewProps) {
                 type="button"
                 data-card={id}
                 data-dim={dim ? 'true' : undefined}
+                data-lit={picked.has(id) ? 'true' : undefined}
                 aria-current={id === selected}
                 title={node.task.title}
                 onClick={() => onSelect(id)}
@@ -244,6 +256,7 @@ function Graph({ data, steps, cycle, selected, onSelect }: WalkViewProps) {
                 className={cn(
                   NODE,
                   'data-[dim=true]:opacity-45',
+                  'data-[lit=true]:border-primary/60 data-[lit=true]:bg-primary/10',
                   node.task.state.category === 'active' && 'border-c-active ring-1 ring-c-active',
                   id === selected && 'outline-2 outline-offset-1 outline-ring',
                 )}

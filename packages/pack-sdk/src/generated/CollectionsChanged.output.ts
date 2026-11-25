@@ -21,6 +21,11 @@ export interface CollectionsChanged {
 export interface Collection {
   groups: CollectionGroup[]
   id: string
+  /**
+   * The file the source keeps the collection in, relative to the line as `Task.path` is, when it has one. An epic
+   * of the plan is `epic.md`; a milestone of a tracker has none.
+   */
+  path?: string | null
   title: string
 }
 /**

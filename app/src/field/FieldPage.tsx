@@ -6,7 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Card as Panel } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { Drawer } from '../drawer/Drawer.tsx'
+import { EpicDrawer } from '../drawer/EpicDrawer.tsx'
 import type { BoardNote } from '../drawer/types.ts'
+import { EpicStrip } from '../epics/EpicStrip.tsx'
+import { LitLine } from '../epics/LitLine.tsx'
+import { boardLit, boardWords, epicsOf, litIds, outsideView, walkWords } from '../epics/model.ts'
 import { FilterBar } from '../filters/FilterBar.tsx'
 import { actionForKey } from '../frame/actions.ts'
 import type { OwnerClient } from '../owner/client.ts'
@@ -34,6 +38,8 @@ export interface FieldPageProps {
   /** Where folds are kept. The webview's own, unless a test gives another. */
   readonly store?: FoldStore | null
 }
+
+const NO_LIT: ReadonlyMap<string, number> = new Map()
 
 const ARROWS: Record<string, Direction> = {
   'card-down': 'down',
@@ -123,18 +129,37 @@ function Board(props: BoardProps) {
   const layout = layoutOf(kept, boardId, view, entry)
   const ownGoal = entry?.view.closure?.goal ?? null
   const goals = goalsOf(data)
-  // A view with no goal of its own is walked toward a collection: the one picked, else the first that has open tasks.
+  // The epic that is picked: a collection the board lists. It is the goal of the run order and graph, and its cards are
+  // lit. It stays picked while a task of it is open in the drawer, and goes with Clear or another pick.
+  const [picked, setPicked] = useState<string | null>(null)
+  const pickedEpic = data.collections.find((each) => each.id === picked) ?? null
+  // The drawer shows the picked epic, or the task that was selected; opening a task leaves the epic picked.
+  const [epicOpen, setEpicOpen] = useState(false)
+  const epicShown = epicOpen && pickedEpic !== null
+  // A view with no goal of its own is walked toward a collection: the epic picked, else the goal picked in the goal
+  // bar, else the first collection that has open tasks.
   const walking = layout !== 'board' && ownGoal === null
   const goalIds = goals.map((each) => each.id).join('\n')
-  const chosenGoal = goals.some((each) => each.id === goal) ? goal : null
+  const isGoal = (id: string | null) => id !== null && goals.some((each) => each.id === id)
+  const walkGoal = isGoal(picked) ? picked : isGoal(goal) ? goal : null
   const fallback = goals[0]?.id ?? null
+  const wanted = walkGoal ?? fallback
   useEffect(() => {
-    if (walking && chosenGoal === null && goal !== fallback) onGoal(fallback)
+    if (walking && goal !== wanted) onGoal(wanted)
     // The goals are compared by what they name, since they are made again at each draw.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walking, chosenGoal, goal, fallback, goalIds])
+  }, [walking, goal, wanted, goalIds])
+  // Choosing a goal in the goal bar picks that epic.
+  const chooseGoal = (next: string) => {
+    setPicked(next)
+    onGoal(next)
+  }
   const report = ownGoal === null ? data.walked : data.report
-  const [selected, select] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
+  const select = (id: string | null) => {
+    setSelected(id)
+    if (id !== null) setEpicOpen(false)
+  }
   const { lanes } = lanesOf(data, groupBy)
   const lines = reportLines(data.report)
   const count = data.tasks.length
@@ -152,10 +177,28 @@ function Board(props: BoardProps) {
   }
   // Closing hands the focus back to the card, as the drawer's own button would otherwise lose it.
   const closeDrawer = () => {
+    if (epicShown) {
+      setEpicOpen(false)
+      return
+    }
     document.querySelectorAll<HTMLElement>('[data-card]').forEach((card) => {
       if (card.dataset.card === selected) card.focus()
     })
     select(null)
+  }
+  // A click on a card picks the epic and opens it in the drawer; a second click ends the pick.
+  const pick = (id: string) => {
+    if (picked === id) {
+      clearPick()
+      return
+    }
+    setPicked(id)
+    setEpicOpen(true)
+    setSelected(null)
+  }
+  const clearPick = () => {
+    setPicked(null)
+    setEpicOpen(false)
   }
   const choose = (next: LayoutKind) => {
     writeLayout(kept, boardId, view, next)
@@ -165,6 +208,19 @@ function Board(props: BoardProps) {
     toggleFold(kept, boardId, view, column)
     remember((count) => count + 1)
   }
+  const cards = useMemo(() => epicsOf(data), [data])
+  const lit = useMemo(() => litIds(data, pickedEpic?.id ?? null), [data, pickedEpic])
+  const walkSteps = stepsOf(report, data)
+  const onBoard = layout === 'board'
+  const onLit = onBoard ? boardLit(lanes, folds, lit) : null
+  const litWords =
+    pickedEpic === null
+      ? ''
+      : onLit !== null
+        ? boardWords(onLit, outsideView(data, pickedEpic.id))
+        : report === null
+          ? ''
+          : walkWords(walkSteps, pickedEpic.id)
   return (
     <section aria-label="Field" className="flex flex-col gap-3">
       {lines.length === 0 ? null : (
@@ -178,12 +234,6 @@ function Board(props: BoardProps) {
           ))}
         </div>
       )}
-      <div className="flex flex-wrap items-baseline gap-3">
-        <h1 className="text-xl font-semibold">{view ?? ALL_TASKS}</h1>
-        <span className="text-muted-foreground">{`${count} task${count === 1 ? '' : 's'}`}</span>
-        {updatedAt === null ? null : <LiveStamp updatedAt={updatedAt} />}
-        <LayoutSwitch layout={layout} onChoose={choose} />
-      </div>
       <FilterBar
         boardId={boardId}
         data={data}
@@ -193,6 +243,38 @@ function Board(props: BoardProps) {
         onSave={onSave}
         store={kept}
       />
+      {cards.length === 0 ? null : (
+        <EpicStrip
+          key={view ?? ''}
+          boardId={boardId}
+          view={view}
+          cards={cards}
+          picked={pickedEpic?.id ?? null}
+          drawerOpen={epicShown}
+          onPick={pick}
+          filters={filters}
+          onFilters={onFilters}
+          store={kept}
+        />
+      )}
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h1 className="text-xl font-semibold">{view ?? ALL_TASKS}</h1>
+        <span className="text-muted-foreground">{`${count} task${count === 1 ? '' : 's'}`}</span>
+        {updatedAt === null ? null : <LiveStamp updatedAt={updatedAt} />}
+        <LayoutSwitch layout={layout} onChoose={choose} />
+      </div>
+      {pickedEpic === null ? null : (
+        <LitLine
+          title={pickedEpic.title}
+          words={litWords}
+          drawerOpen={epicShown}
+          onOpen={() => {
+            setEpicOpen(true)
+            setSelected(null)
+          }}
+          onClear={clearPick}
+        />
+      )}
       <div className="flex items-start gap-3">
         {layout === 'board' ? (
           <Columns
@@ -200,6 +282,8 @@ function Board(props: BoardProps) {
             folds={folds}
             selected={selected}
             flashed={flashed}
+            lit={lit}
+            litShut={onLit?.byFolded ?? NO_LIT}
             onSelect={select}
             onFlip={flip}
           />
@@ -211,15 +295,28 @@ function Board(props: BoardProps) {
             cycle={report?.cycle ?? []}
             own={ownGoal === null ? null : goalTitle(data, ownGoal)}
             goals={goals}
-            goal={chosenGoal}
-            onGoal={onGoal}
+            goal={walkGoal}
+            lit={lit}
+            onGoal={chooseGoal}
             problem={ownGoal === null ? data.walkProblem : null}
             read={report !== null}
             selected={selected}
             onSelect={select}
           />
         )}
-        {chosen === null ? null : (
+        {pickedEpic !== null && epicOpen ? (
+          <EpicDrawer
+            owner={owner}
+            boardId={boardId}
+            collection={pickedEpic}
+            data={data}
+            stamp={updatedAt}
+            store={store}
+            onOpenTask={openTask}
+            onLayout={choose}
+            onClose={closeDrawer}
+          />
+        ) : chosen === null ? null : (
           <Drawer
             owner={owner}
             boardId={boardId}
@@ -265,11 +362,15 @@ interface ColumnsProps {
   readonly folds: ReturnType<typeof readFolds>
   readonly selected: string | null
   readonly flashed: ReadonlySet<string>
+  /** The ids of the cards of the picked epic, which are lit. */
+  readonly lit: ReadonlySet<string>
+  /** How many lit cards each folded column holds, by its key. */
+  readonly litShut: ReadonlyMap<string, number>
   readonly onSelect: (id: string) => void
   readonly onFlip: (column: Column) => void
 }
 
-function Columns({ lanes, folds, selected, flashed, onSelect, onFlip }: ColumnsProps) {
+function Columns({ lanes, folds, selected, flashed, lit, litShut, onSelect, onFlip }: ColumnsProps) {
   /** Arrow keys between cards, and Enter on one, are the Field's named actions (`../frame/actions.ts`). */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return
@@ -302,13 +403,19 @@ function Columns({ lanes, folds, selected, flashed, onSelect, onFlip }: ColumnsP
     >
       {lanes.map((lane) =>
         isShut(lane.column, folds) ? (
-          <ShutColumn key={lane.column.key} lane={lane} onOpen={() => onFlip(lane.column)} />
+          <ShutColumn
+            key={lane.column.key}
+            lane={lane}
+            lit={litShut.get(lane.column.key) ?? 0}
+            onOpen={() => onFlip(lane.column)}
+          />
         ) : (
           <OpenColumn
             key={lane.column.key}
             lane={lane}
             selected={selected}
             flashed={flashed}
+            lit={lit}
             onSelect={onSelect}
             onFold={() => onFlip(lane.column)}
           />
@@ -318,7 +425,7 @@ function Columns({ lanes, folds, selected, flashed, onSelect, onFlip }: ColumnsP
   )
 }
 
-function ShutColumn({ lane, onOpen }: { lane: Lane; onOpen: () => void }) {
+function ShutColumn({ lane, lit, onOpen }: { lane: Lane; lit: number; onOpen: () => void }) {
   const { column, cards } = lane
   return (
     <button
@@ -333,6 +440,7 @@ function ShutColumn({ lane, onOpen }: { lane: Lane; onOpen: () => void }) {
         <span className={cn('size-2 rounded-full', DOT[column.category])} />
         {column.label}
         <span className="font-normal text-muted-foreground">{cards.length}</span>
+        {lit === 0 ? null : <span className="font-semibold text-primary">{`${lit} lit`}</span>}
       </span>
     </button>
   )
@@ -342,11 +450,12 @@ interface OpenColumnProps {
   readonly lane: Lane
   readonly selected: string | null
   readonly flashed: ReadonlySet<string>
+  readonly lit: ReadonlySet<string>
   readonly onSelect: (id: string) => void
   readonly onFold: () => void
 }
 
-function OpenColumn({ lane, selected, flashed, onSelect, onFold }: OpenColumnProps) {
+function OpenColumn({ lane, selected, flashed, lit, onSelect, onFold }: OpenColumnProps) {
   const { column, cards } = lane
   return (
     <section
@@ -376,6 +485,7 @@ function OpenColumn({ lane, selected, flashed, onSelect, onFold }: OpenColumnPro
             card={card}
             selected={card.id === selected}
             flash={flashed.has(card.id)}
+            lit={lit.has(card.id)}
             onSelect={onSelect}
           />
         ))

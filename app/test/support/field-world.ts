@@ -713,3 +713,83 @@ export function manyEpicsWorld(): FieldWorld {
   ])
   return world
 }
+
+/**
+ * The layers of the closure of `goal`, as the daemon's walk gives them (`core/src/view_eval.rs`): the open tasks of the
+ * collection and the open tasks they wait on through `blocked-by` links, each layer the tasks whose blockers are all in
+ * earlier ones, in key order. This is the fake world's own, small walk, so a test can ask for any epic's run order.
+ */
+export function closureOf(listing: readonly TaskOutput[], goal: string): Held {
+  const open = (each: TaskOutput) => each.state.category !== 'done' && each.state.category !== 'dropped'
+  const byKey = new Map(listing.map((each) => [each.key, each]))
+  const blockers = (each: TaskOutput) =>
+    each.links
+      .filter((link) => link.type === 'blocked-by')
+      .flatMap((link) => byKey.get(link.to.includes(':') ? link.to : `${each.key.split(':')[0]}:${link.to}`) ?? [])
+      .filter(open)
+  const set = new Map<string, TaskOutput>()
+  const walk = (each: TaskOutput) => {
+    if (set.has(each.key)) return
+    set.set(each.key, each)
+    blockers(each).forEach(walk)
+  }
+  listing.filter((each) => open(each) && each.collections.includes(goal)).forEach(walk)
+  const level = new Map<string, number>()
+  const levelOf = (each: TaskOutput): number => {
+    const known = level.get(each.key)
+    if (known !== undefined) return known
+    const next = 1 + Math.max(0, ...blockers(each).map(levelOf))
+    level.set(each.key, next)
+    return next
+  }
+  const steps: string[][] = []
+  for (const each of [...set.values()].sort((a, b) => a.key.localeCompare(b.key))) {
+    const at = levelOf(each) - 1
+    steps[at] = [...(steps[at] ?? []), each.key]
+  }
+  return { keys: [...set.keys()], report: report('x', set.size, { steps: steps.filter((step) => step !== undefined) }) }
+}
+
+/**
+ * Fifty epics for the strip (ts-0216-ve), in five kinds that its order tells apart: epic 001, 006, ... have a task
+ * under way, 002, 007, ... a ready task only, 003, 008, ... only a task in the backlog, 004, 009, ... are finished
+ * (one task done, one dropped) and 005, 010, ... have a ready and a done task. Epic 001's ready task waits on a ready
+ * task of epic 002, and one task is part of no epic. `walks` answers the run order of each epic that has an open task.
+ */
+export function epicsStripWorld(): FieldWorld {
+  const world = new FieldWorld()
+  world.sources = [PLAN]
+  const number = (index: number) => String(index + 1).padStart(3, '0')
+  const epicId = (index: number) => `plan:ep-${number(index)}-aa`
+  world.collections = Array.from({ length: 50 }, (_, index) => ({
+    id: epicId(index),
+    title: `Epic ${number(index)} ${index % 2 === 0 ? 'Field work' : 'Daemon work'}`,
+    groups: [],
+    path: `.collide/planning/epics/ep-${number(index)}-aa/epic.md`,
+  }))
+  const kinds: readonly (readonly [string, Category][])[] = [
+    [['ready', 'ready'], ['active', 'active']],
+    [['ready', 'ready']],
+    [['backlog', 'backlog']],
+    [['done', 'done'], ['dropped', 'dropped']],
+    [['ready', 'ready'], ['done', 'done']],
+  ]
+  const tasks = world.collections.flatMap((collection, index) =>
+    kinds[index % 5]!.map(([status, category], at) =>
+      task(`plan:ts-${number(index)}-${'abcde'[at]}a`, `Task ${at + 1} of epic ${number(index)}`, status, category, {
+        collections: [collection.id],
+      }),
+    ),
+  )
+  const waits = { type: 'blocked-by', to: 'plan:ts-002-aa' }
+  world.listing = [
+    ...tasks.map((each) => (each.key === 'plan:ts-001-aa' ? { ...each, links: [waits] } : each)),
+    task('plan:ts-900-zz', 'A task of no epic', 'ready', 'ready'),
+  ]
+  // An epic with nothing open has an empty closure, which the daemon answers and does not refuse.
+  for (const collection of world.collections) world.walks.set(collection.id, closureOf(world.listing, collection.id))
+  const loose = ['plan:ts-900-zz']
+  world.views = [view('loose', { type: 'repo' })]
+  world.held.set('loose', { keys: loose, report: report('loose', loose.length) })
+  return world
+}

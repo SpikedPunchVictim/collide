@@ -6,6 +6,7 @@ import {
   FieldWorld,
   drawerWorld,
   eightStatuses,
+  epicsStripWorld,
   filtersWorld,
   manyEpicsWorld,
   mixedSources,
@@ -53,6 +54,7 @@ export const WORLDS: Readonly<Record<string, () => World>> = {
   'field-walk': walkWorld,
   'field-filters': filtersWorld,
   'field-epics-50': manyEpicsWorld,
+  'field-epics-strip': epicsStripWorld,
   'field-changes': changesWorld,
   'field-peek': peekWorld,
 }

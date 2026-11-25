@@ -225,6 +225,10 @@ pub struct Collection {
     pub title: String,
     #[serde(default)]
     pub groups: Vec<CollectionGroup>,
+    /// The file the source keeps the collection in, relative to the line as `Task.path` is, when it has one. An epic
+    /// of the plan is `epic.md`; a milestone of a tracker has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

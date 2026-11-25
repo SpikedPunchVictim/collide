@@ -176,6 +176,30 @@ fn list_params_and_result_round_trip() {
 }
 
 #[test]
+fn a_collection_may_name_its_file_and_one_that_names_none_is_written_as_before() {
+    let named: ListResult = round_trip(json!({
+        "tasks": [],
+        "collections": [{
+            "id": "plan:ep-002-va",
+            "title": "Skeleton",
+            "groups": [],
+            "path": ".collide/planning/epics/ep-002-va/epic.md"
+        }],
+        "invalid": []
+    }));
+    assert_eq!(
+        named.collections[0].path.as_deref(),
+        Some(".collide/planning/epics/ep-002-va/epic.md")
+    );
+    let bare: ListResult = round_trip(json!({
+        "tasks": [],
+        "collections": [{ "id": "plan:queue", "title": "Waiting", "groups": [] }],
+        "invalid": []
+    }));
+    assert_eq!(bare.collections[0].path, None);
+}
+
+#[test]
 fn list_result_carries_invalid_items_in_the_task_invalid_shape() {
     let result: ListResult = round_trip(json!({
         "tasks": [],

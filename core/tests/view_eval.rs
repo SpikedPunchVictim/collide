@@ -648,6 +648,7 @@ fn epic_board(tasks: Vec<Task>) -> Corpus {
         id: id.into(),
         title: format!("title of {id}"),
         groups: Vec::new(),
+        path: None,
     };
     let mut corpus = Corpus::default();
     corpus.declare_source("plan", &init(Scope::Global));
