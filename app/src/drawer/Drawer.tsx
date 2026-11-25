@@ -87,11 +87,14 @@ export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpe
   const { width, room, set } = useWidth(kept)
   useEscape(onClose)
   return (
+    // Below 900 px it is fixed, and a fixed box follows `align-self` too: left at `start`, it would be as tall as its
+    // text, not as the window, and the end of a long task would be out of reach.
     <div
       style={{ '--drawer-w': `${width}px` } as CSSProperties}
       className={
         'sticky top-3 z-40 w-(--drawer-w) shrink-0 self-start ' +
-        'max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:top-0 max-[900px]:right-0 max-[900px]:w-[min(460px,100vw)]'
+        'max-[900px]:fixed max-[900px]:inset-y-0 max-[900px]:top-0 max-[900px]:right-0 max-[900px]:self-stretch ' +
+        'max-[900px]:w-[min(460px,100vw)]'
       }
     >
       <Edge width={width} room={room} onSet={set} />

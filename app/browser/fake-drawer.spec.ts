@@ -241,6 +241,8 @@ test('below 900 px the drawer lies over the board', async ({ openFake }) => {
   const box = (await drawer.boundingBox())!
   expect(Math.round(box.x + box.width)).toBe(800)
   expect(Math.round(box.width)).toBeLessThanOrEqual(460)
+  // It fills the window's height, whatever the task's length, so its own parts scroll and the last is in reach.
+  expect([Math.round(box.y), Math.round(box.height)]).toEqual([0, 700])
   await expect(edgeOf(page)).toBeHidden()
   await page.setViewportSize({ width: 1280, height: 720 })
   await expect(wrap).not.toHaveCSS('position', 'fixed')

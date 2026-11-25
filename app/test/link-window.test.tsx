@@ -6,6 +6,7 @@ import { LinkWindow } from '../src/markdown/ExternalLinks.tsx'
 // Escape do is in `browser/fake-hostile.spec.ts`.
 
 const noop = () => {}
+const notOpened = () => Promise.resolve(false)
 
 function draw(url: string, over: { problem?: string | null; opening?: boolean } = {}) {
   return renderToString(
@@ -13,8 +14,8 @@ function draw(url: string, over: { problem?: string | null; opening?: boolean } 
       url={url}
       problem={over.problem ?? null}
       opening={over.opening ?? false}
-      onOpen={noop}
-      onCancel={noop}
+      onOpen={notOpened}
+      onClosed={noop}
     />,
   )
 }

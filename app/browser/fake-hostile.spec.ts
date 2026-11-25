@@ -144,6 +144,20 @@ test('a kept link asks first: Cancel opens nothing, and Open asks the shell for 
   expect(await opened()).toEqual([url])
 })
 
+test('each way out of the link window gives the focus back to the link', async ({ openFake }) => {
+  const { page } = await openHostile(openFake)
+  const asking = page.getByRole('dialog', { name: 'Open this link in your browser?' })
+  const link = page.getByRole('button', { name: 'the docs' }).first()
+  for (const way of ['Cancel', 'Escape', 'Open in browser']) {
+    await link.click()
+    await expect(asking).toBeVisible()
+    if (way === 'Escape') await page.keyboard.press('Escape')
+    else await asking.getByRole('button', { name: way }).click()
+    await expect(asking).toHaveCount(0)
+    await expect(link, `after ${way}`).toBeFocused()
+  }
+})
+
 test('a mail link asks first too, and names no host', async ({ openFake }) => {
   const { page } = await openHostile(openFake)
   await page.getByRole('button', { name: 'write to us' }).first().click()

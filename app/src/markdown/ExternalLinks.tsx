@@ -2,7 +2,8 @@
 // provided once, at the top of the app. A link in a task's text (`Markdown`) asks it with `useAskToOpen`, and nothing
 // opens until the person presses Open. Open calls the shell's own method, `shell.open_external`, which checks the
 // scheme again and runs `/usr/bin/open`; Cancel opens nothing and makes no call. The window is the browser's own
-// `<dialog>`, which holds the focus and closes on Escape with no library and no inline style.
+// `<dialog>`, which holds the focus and closes on Escape with no library and no inline style. Cancel, Escape and an
+// opened link all close it the same way, so the browser gives the focus back to the link each time.
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { type OwnerClient, toOwnerError } from '../owner/index.ts'
@@ -34,12 +35,14 @@ export interface LinkWindowProps {
   /** Why the link could not be opened, when it could not. */
   readonly problem: string | null
   readonly opening: boolean
-  readonly onOpen: () => void
-  readonly onCancel: () => void
+  /** Asks to open the link: true when it opened, and the window then closes. */
+  readonly onOpen: () => Promise<boolean>
+  /** The window has closed: by Cancel, by Escape, or once the link opened. */
+  readonly onClosed: () => void
 }
 
 /** The window: the whole address, where it leads, and the two buttons. It is a function of its props. */
-export function LinkWindow({ url, problem, opening, onOpen, onCancel }: LinkWindowProps) {
+export function LinkWindow({ url, problem, opening, onOpen, onClosed }: LinkWindowProps) {
   const dialog = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   const host = hostOf(url)
@@ -47,12 +50,15 @@ export function LinkWindow({ url, problem, opening, onOpen, onCancel }: LinkWind
     const element = dialog.current
     if (element !== null && !element.open) element.showModal()
   }, [])
+  // The dialog's own `close` is what Escape does, and it puts the focus back where it was before the window opened.
+  // Taking the window away without it would leave the focus nowhere.
+  const shut = () => dialog.current?.close()
   return (
-    // `close` is what Escape does too. Cancel is first, so it has the focus and Enter does not open.
+    // Cancel is first, so it has the focus and Enter does not open.
     <dialog
       ref={dialog}
       aria-labelledby={titleId}
-      onClose={onCancel}
+      onClose={onClosed}
       className={WINDOW}
     >
       <div className="flex flex-col gap-3">
@@ -76,10 +82,17 @@ export function LinkWindow({ url, problem, opening, onOpen, onCancel }: LinkWind
           </p>
         )}
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={shut}>
             Cancel
           </Button>
-          <Button disabled={opening} onClick={onOpen}>
+          <Button
+            disabled={opening}
+            onClick={() => {
+              void onOpen().then((opened) => {
+                if (opened) shut()
+              })
+            }}
+          >
             Open in browser
           </Button>
         </div>
@@ -102,18 +115,19 @@ export function ExternalLinks({ owner, children }: ExternalLinksProps) {
     setProblem(null)
     setUrl(next)
   }, [])
-  const close = useCallback(() => {
+  const closed = useCallback(() => {
     setUrl(null)
     setProblem(null)
   }, [])
   const open = async () => {
-    if (url === null) return
+    if (url === null) return false
     setOpening(true)
     try {
       await owner.rpc('shell.open_external', { url })
-      close()
+      return true
     } catch (failure) {
       setProblem(`Collide could not open the link: ${toOwnerError(failure).message}`)
+      return false
     } finally {
       setOpening(false)
     }
@@ -122,7 +136,7 @@ export function ExternalLinks({ owner, children }: ExternalLinksProps) {
     <AskToOpen value={ask}>
       {children}
       {url === null ? null : (
-        <LinkWindow url={url} problem={problem} opening={opening} onOpen={() => void open()} onCancel={close} />
+        <LinkWindow url={url} problem={problem} opening={opening} onOpen={open} onClosed={closed} />
       )}
     </AskToOpen>
   )
