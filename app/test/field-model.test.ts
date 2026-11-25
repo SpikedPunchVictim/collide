@@ -279,6 +279,9 @@ describe('the chips of a card', () => {
       collisions: [],
       divergence: [],
       report: null,
+      collections: [],
+      walked: null,
+      walkProblem: null,
       settling: false,
     }
     const cards = lanesOf(data).lanes.flatMap((lane) => lane.cards)
@@ -293,6 +296,9 @@ describe('the chips of a card', () => {
       collisions: [],
       divergence: [],
       report: null,
+      collections: [],
+      walked: null,
+      walkProblem: null,
       settling: false,
     }
     const cards = lanesOf(data).lanes.flatMap((lane) => lane.cards)
@@ -307,6 +313,9 @@ describe('the chips of a card', () => {
       collisions: [],
       divergence: [],
       report: null,
+      collections: [],
+      walked: null,
+      walkProblem: null,
       settling: false,
     }
     expect(lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips).toEqual([])
@@ -326,6 +335,9 @@ describe('the chips of a card', () => {
         collisions: [],
         divergence: [],
         report: null,
+        collections: [],
+        walked: null,
+        walkProblem: null,
         settling: false,
       }
       return lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips
@@ -349,6 +361,9 @@ describe('the chips of a card', () => {
         collisions: [],
         divergence: [],
         report: null,
+        collections: [],
+        walked: null,
+        walkProblem: null,
         settling: false,
       }
       return lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips
@@ -420,6 +435,9 @@ describe('the chips of a card', () => {
       collisions: [],
       divergence: [{ key: 'plan:a', copies: [{ status: 'done', category: 'done', checkout: '/w/x' }] }],
       report: null,
+      collections: [],
+      walked: null,
+      walkProblem: null,
       settling: false,
     }
     const { lanes } = lanesOf(data, 'category')

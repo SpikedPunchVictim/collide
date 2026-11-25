@@ -86,7 +86,7 @@ describe('initialize', () => {
       { name: 'blocked-by', dir: 'out', blocking: true, inverse: 'blocks' },
     ])
     expect(result?.idPattern).toBe('^[a-z]{2}-[0-9]{3,}-[a-z]{2}$')
-    expect(result?.capabilities).toEqual({ watch: true, create: true, collections: false, preview: false })
+    expect(result?.capabilities).toEqual({ watch: true, create: true, collections: true, preview: false })
   })
 })
 
@@ -143,7 +143,7 @@ describe('list over a tree of items', () => {
 
   test('is empty when the repository has no planning folder', async () => {
     const { result, invalid } = await call(makeRepo({}), 'list')
-    expect(result).toEqual({ tasks: [], invalid: [] })
+    expect(result).toEqual({ tasks: [], collections: [], invalid: [] })
     expect(invalid).toEqual([])
   })
 })
@@ -304,7 +304,7 @@ describe('the root', () => {
 describe('invalid items are in the list reply', () => {
   test('list returns them beside the tasks, each as { path, checkout, reason }, and get adds nothing', async () => {
     const { result } = await call(fixture('hazards'), 'list')
-    expect(Object.keys(result ?? {}).sort()).toEqual(['invalid', 'tasks'])
+    expect(Object.keys(result ?? {}).sort()).toEqual(['collections', 'invalid', 'tasks'])
     expect(result?.invalid).toHaveLength(11)
     expect(result?.invalid[0]).toEqual({ path: expect.any(String), checkout: null, reason: expect.any(String) })
     const got = await call(fixture('hazards'), 'get', { id: 'ts-0101-aa' })

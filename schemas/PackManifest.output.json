@@ -229,7 +229,7 @@
     },
     "Closure": {
       "additionalProperties": false,
-      "description": "`closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal.",
+      "description": "`closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal. The goal\nis a task key, or the key of a collection a source lists (an epic), whose open tasks are then all goals.",
       "properties": {
         "follow": {
           "$ref": "#/$defs/Follow"
@@ -545,10 +545,11 @@
       "type": "object"
     },
     "LayoutKind": {
-      "description": "How the Field lays a view out.",
+      "description": "How the Field lays a view out: as columns, as numbered steps, or as a graph of the steps.",
       "enum": [
         "board",
-        "run-order"
+        "run-order",
+        "graph"
       ],
       "type": "string"
     },

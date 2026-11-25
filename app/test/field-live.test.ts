@@ -11,7 +11,8 @@ import {
   isBoardEvent,
 } from '../src/field/live.ts'
 import { FakeClock } from './support/fake-clock.ts'
-import { type FieldWorld, onePlanSource, task } from './support/field-world.ts'
+import { EPIC_FIELD, type FieldWorld, onePlanSource, task, walkWorld } from './support/field-world.ts'
+import type { ViewInput } from '../src/owner/generated.ts'
 
 // The Field's live updates (ts-0182-ad): which events are the board's, which cards flash, one read for a burst, and
 // what a read keeps. A fake clock stands in for time, so no test waits.
@@ -183,7 +184,10 @@ describe('one read for a burst', () => {
 })
 
 describe('the feed', () => {
-  async function feedOf(world: FieldWorld, over: { view?: string | null; groupBy?: string | null } = {}) {
+  async function feedOf(
+    world: FieldWorld,
+    over: { view?: string | null; groupBy?: string | null; walk?: () => ViewInput | null } = {},
+  ) {
     const clock = new FakeClock()
     const reads: FieldRead[] = []
     let now = 1_000
@@ -192,6 +196,7 @@ describe('the feed', () => {
       boardId: 'b-alpha',
       view: over.view ?? null,
       groupBy: () => over.groupBy ?? null,
+      ...(over.walk === undefined ? {} : { walk: over.walk }),
       onRead: (read) => reads.push(read),
       clock,
       now: () => now,
@@ -205,6 +210,47 @@ describe('the feed', () => {
       at: (ms: number) => void (now = ms),
     }
   }
+
+  const WALK: ViewInput = { name: 'x', closure: { goal: EPIC_FIELD, follow: 'depends_on' } }
+
+  test('reads the walk of a goal with the board, so the steps come with the cards', async () => {
+    const world = walkWorld()
+    const { last, feed } = await feedOf(world, { walk: () => WALK })
+    expect(last().data?.walked?.steps).toHaveLength(4)
+    expect(last().data?.walkProblem).toBeNull()
+    feed.stop()
+  })
+
+  test('asks for no walk while there is no goal', async () => {
+    const world = walkWorld()
+    const { last, feed } = await feedOf(world, { walk: () => null })
+    expect(last().data?.walked).toBeNull()
+    expect((world.callsTo('task.list') as { view?: unknown }[]).every((params) => params.view === undefined)).toBe(true)
+    feed.stop()
+  })
+
+  test('reads the walk again when a task changes, and publishes the steps it finds', async () => {
+    const world = walkWorld()
+    const { feed, clock, last } = await feedOf(world, { walk: () => WALK })
+    const held = world.walks.get(EPIC_FIELD)!
+    const steps = held.report.steps.slice(0, 2)
+    world.walks.set(EPIC_FIELD, { ...held, report: { ...held.report, steps } })
+    world.announce('plan')
+    clock.advance(LIVE_DEBOUNCE_MS)
+    await feed.idle()
+    expect(last().data?.walked?.steps).toEqual(steps)
+    feed.stop()
+  })
+
+  test('a goal the daemon refuses is words in the read, and the board is read as it was', async () => {
+    const world = walkWorld()
+    const gone: ViewInput = { name: 'x', closure: { goal: 'plan:gone', follow: 'depends_on' } }
+    const { last, feed } = await feedOf(world, { walk: () => gone })
+    expect(last().problem).toBeNull()
+    expect(last().data?.walkProblem).toContain('matches no task')
+    expect(last().data?.tasks.length).toBeGreaterThan(0)
+    feed.stop()
+  })
 
   test('reads the board once at the start, and nothing flashes', async () => {
     const world = onePlanSource()

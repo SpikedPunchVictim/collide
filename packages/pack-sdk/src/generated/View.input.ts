@@ -5,9 +5,9 @@
  */
 export type Follow = 'depends_on'
 /**
- * How the Field lays a view out.
+ * How the Field lays a view out: as columns, as numbered steps, or as a graph of the steps.
  */
-export type LayoutKind = 'board' | 'run-order'
+export type LayoutKind = 'board' | 'run-order' | 'graph'
 export type SortDir = 'asc' | 'desc'
 
 export interface View {
@@ -40,7 +40,8 @@ export interface View {
   workflow?: string | null
 }
 /**
- * `closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal.
+ * `closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal. The goal
+ * is a task key, or the key of a collection a source lists (an epic), whose open tasks are then all goals.
  */
 export interface Closure {
   follow: Follow

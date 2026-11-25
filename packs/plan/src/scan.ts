@@ -1,6 +1,6 @@
 import { lstat, readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
-import type { TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
+import type { ListResultInput, TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
 import { readAssumptions } from './assumptions.ts'
 import type { Assumption } from './assumptions.ts'
 import { readDecisions } from './decisions.ts'
@@ -191,6 +191,29 @@ export async function scanEpics(
   return { items: kept, invalid, unknownKind, brokenLink }
 }
 
+const EPIC = 'epic'
+
+/** A collection as the provider lists it: an epic, with no groups. */
+export type EpicCollection = NonNullable<ListResultInput['collections']>[number]
+
+/** The key an epic is a collection under: its id, in this provider's source. */
+const collectionOf = (epicId: string): string => `plan:${epicId}`
+
+/**
+ * Each epic that has an `epic.md` as a collection (0.10; ts-0187-hb), in scan order: its key and its title. The folder
+ * is still the membership, and `part-of` still says so: an item is also named in the collections of its folder's epic.
+ */
+export function collectionsOf(items: readonly FoundItem[]): EpicCollection[] {
+  return items
+    .filter((found) => found.item.kind === EPIC)
+    .map((found) => ({ id: collectionOf(found.item.id), title: found.item.title, groups: [] }))
+}
+
+/** What `list` answers for a scan: every item with no body, the epics as collections, and the invalid files. */
+export function listedOf({ items, invalid }: Pick<Scan, 'items' | 'invalid'>) {
+  return { tasks: items.map((found) => toTask(found, false, items)), collections: collectionsOf(items), invalid }
+}
+
 /** What the scan knows of an item, for an evidence id: the first item of that id in `items`. */
 const lookupIn =
   (items: readonly FoundItem[]): ItemLookup =>
@@ -262,6 +285,12 @@ export function toTask(found: FoundItem, withBody: boolean, items: readonly Foun
   const quality = qualityPartsOf(found, featureIds, items)
   const coverage = coverageOf(found, featureIds, items)
   const partOf = found.epic === null ? [] : [{ type: 'part-of', to: found.epic }]
+  // An item is in the collection of its folder's epic when that epic has a file. An epic and a spike are in none.
+  const epicId = found.epic
+  const collections =
+    epicId !== null && items.some((other) => other.item.kind === EPIC && other.item.id === epicId)
+      ? [collectionOf(epicId)]
+      : []
   // A private item says so in `fields.root`, over any `root` field the file has.
   const own = Object.keys(item.fields).length === 0 ? null : item.fields
   const fields = found.root === 'private' ? { ...item.fields, root: 'private' } : own
@@ -277,6 +306,7 @@ export function toTask(found: FoundItem, withBody: boolean, items: readonly Foun
     kind: item.kind,
     links: [...partOf, ...item.links],
     owners: item.owners,
+    ...(collections.length === 0 ? {} : { collections }),
     ...(fields === null ? {} : { fields }),
     ...(features.length === 0 ? {} : { features }),
     ...(problems.length === 0 ? {} : { featureProblems: problems }),

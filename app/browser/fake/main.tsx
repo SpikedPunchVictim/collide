@@ -1,8 +1,8 @@
 // The entry of the page the browser tests load over a fake owner (ts-0179-ke): the same `App`, with a `FakeOwner` that
 // plays the scripted world named in the fragment of the address (`#world=two-boards`; `test/support/worlds.ts`). There
 // is no Tauri, no bridge and no daemon. `window.collideFake` is the test's one view into the fake: the methods called,
-// in order, as the client sent them, the links the shell was asked to open (ts-0183-ee), and (ts-0182-ad) the way to
-// change a Field world and announce it.
+// in order, as the client sent them, the views `task.list` was asked for (ts-0187-hb), the links the shell was asked
+// to open (ts-0183-ee), and (ts-0182-ad) the way to change a Field world and announce it.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '../../src/App.tsx'
@@ -14,6 +14,8 @@ declare global {
   interface Window {
     collideFake: {
       calls(): string[]
+      /** The `view` each `task.list` was asked for, in order: undefined for the whole board (ts-0187-hb). */
+      views(): unknown[]
       /** Changes a listed task of a Field world, as an edit in a checkout would (nothing is announced). */
       edit(key: string, over: Record<string, unknown>): void
       /** The daemon's event that a task of `source` changed (a Field world). */
@@ -44,6 +46,10 @@ world.owner.handle('shell.open_external', ({ url }) => {
 })
 window.collideFake = {
   calls: () => world.owner.calls.map((call) => call.method),
+  views: () =>
+    world.owner.calls
+      .filter((call) => call.method === 'task.list')
+      .map((call) => (call.params as { view?: unknown } | undefined)?.view),
   edit: (key, over) => fieldWorld().edit(key, over),
   announce: (source, key) => fieldWorld().announce(source, key),
   connection: (state) => world.owner.push({ method: 'shell.connection', params: { state } }),

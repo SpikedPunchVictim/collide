@@ -640,6 +640,107 @@ fn the_closure_is_computed_before_exclude_and_the_steps_leave_the_excluded_out()
     assert_eq!(result.steps, [step(&["C"]), step(&["A"])]);
 }
 
+// --- a collection as the goal ---
+
+/// A board whose source `plan` lists the collection `plan:E-07` (an epic) and `plan:E-08`.
+fn epic_board(tasks: Vec<Task>) -> Corpus {
+    let epic = |id: &str| Collection {
+        id: id.into(),
+        title: format!("title of {id}"),
+        groups: Vec::new(),
+    };
+    let mut corpus = Corpus::default();
+    corpus.declare_source("plan", &init(Scope::Global));
+    let list = ListResult {
+        tasks,
+        collections: vec![epic("plan:E-07"), epic("plan:E-08")],
+        invalid: Vec::new(),
+        next_cursor: None,
+    };
+    corpus.load("plan", None, list).expect("plan is declared");
+    corpus
+}
+
+/// E-07 holds A (open, waits on B and on X), C (done) and D (open). B is in E-08, X in none.
+fn epic_tasks() -> Vec<Task> {
+    vec![
+        collected(
+            depends(depends(task("A", "ready"), "B"), "X"),
+            &["plan:E-07"],
+        ),
+        collected(task("B", "doing"), &["plan:E-08"]),
+        collected(depends(task("C", "done"), "Y"), &["plan:E-07"]),
+        collected(task("D", "ready"), &["plan:E-07"]),
+        task("X", "ready"),
+        task("Y", "ready"),
+        task("Z", "ready"),
+    ]
+}
+
+#[test]
+fn a_collection_as_the_goal_makes_each_of_its_open_tasks_a_goal() {
+    let result = run(&closure("plan:E-07"), &epic_board(epic_tasks()));
+    // A and D are the epic's open tasks, B and X are what A waits on. C is done and Y is behind it.
+    assert_eq!(result.members, keys(&["A", "B", "D", "X"]));
+    assert_eq!(result.steps, [step(&["B", "D", "X"]), step(&["A"])]);
+    assert!(result.cycle.is_empty());
+    assert_eq!(result.counts.goal_unmatched, None);
+}
+
+#[test]
+fn a_collection_with_no_open_task_is_an_empty_closure_and_no_error() {
+    let corpus = epic_board(vec![
+        collected(task("C", "done"), &["plan:E-07"]),
+        collected(task("W", "dropped"), &["plan:E-07"]),
+    ]);
+    let result = run(&closure("plan:E-07"), &corpus);
+    assert!(result.members.is_empty());
+    assert!(result.steps.is_empty());
+    assert_eq!(result.counts.goal_unmatched, None);
+}
+
+#[test]
+fn a_collection_nobody_lists_is_an_unmatched_goal_as_a_missing_task_is() {
+    let view = view(&closure("plan:E-99"));
+    let failure = try_run(&view, &epic_board(epic_tasks()), &Budgets::default()).unwrap_err();
+    assert_eq!(
+        failure,
+        ViewFailure::GoalUnmatched {
+            goal: "plan:E-99".into()
+        }
+    );
+}
+
+#[test]
+fn a_key_that_is_a_collection_and_a_task_is_read_as_the_collection() {
+    // `collide/plan` lists an epic as a task and as a collection under one key.
+    let mut tasks = epic_tasks();
+    tasks.push(task("E-07", "doing"));
+    let result = run(&closure("plan:E-07"), &epic_board(tasks));
+    assert_eq!(result.members, keys(&["A", "B", "D", "X"]));
+}
+
+#[test]
+fn a_collection_goal_beside_a_where_joins_the_members_and_is_not_counted_unmatched() {
+    let result = run(
+        "name: v\nwhere: \"key == 'plan:Z'\"\nclosure: { goal: plan:E-07, follow: depends_on }",
+        &epic_board(epic_tasks()),
+    );
+    assert_eq!(result.members, keys(&["A", "B", "D", "X", "Z"]));
+    assert_eq!(result.steps, [step(&["B", "D", "X"]), step(&["A"])]);
+    assert_eq!(result.counts.goal_unmatched, None);
+}
+
+#[test]
+fn a_cycle_among_a_collections_tasks_is_named() {
+    let corpus = epic_board(vec![
+        collected(depends(task("A", "ready"), "D"), &["plan:E-07"]),
+        collected(depends(task("D", "ready"), "A"), &["plan:E-07"]),
+    ]);
+    let result = run(&closure("plan:E-07"), &corpus);
+    assert_eq!(result.cycle, keys(&["A", "D"]));
+}
+
 // --- errors on a view, and the counts ---
 
 #[test]

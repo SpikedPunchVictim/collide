@@ -20,6 +20,8 @@ const IDLE: FieldState = {
   views: [],
   view: null,
   select: noop,
+  goal: null,
+  chooseGoal: noop,
   data: null,
   problem: null,
   flashed: new Set(),

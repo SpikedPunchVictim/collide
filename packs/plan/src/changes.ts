@@ -1,4 +1,10 @@
-import type { ProviderNotifications, TaskChangedOutput, TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
+import type {
+  ListResultInput,
+  ProviderNotifications,
+  TaskChangedOutput,
+  TaskInput,
+  TaskInvalidOutput,
+} from '@collide/pack-sdk'
 import type { GitRename } from './git.ts'
 
 /** What one scan of a checkout found: its tasks by id, its invalid files by path, and where git had HEAD. */
@@ -9,18 +15,23 @@ export interface Snapshot {
   tasks: Map<string, TaskInput>
   /** The reason for each file that is not an item, by its path from the checkout. */
   invalid: Map<string, string>
+  /** The collections as `list` gives them: the epics. */
+  collections: Collection[]
 }
 
-export const emptySnapshot = (): Snapshot => ({ head: null, tasks: new Map(), invalid: new Map() })
+type Collection = NonNullable<ListResultInput['collections']>[number]
+
+export const emptySnapshot = (): Snapshot => ({ head: null, tasks: new Map(), invalid: new Map(), collections: [] })
 
 /** The snapshot of what a `list` answered (or a read found), taken with HEAD as it was around that read. */
 export const snapshotOf = (
   head: string | null,
-  found: { tasks: TaskInput[]; invalid: TaskInvalidOutput[] },
+  found: { tasks: TaskInput[]; collections?: Collection[]; invalid: TaskInvalidOutput[] },
 ): Snapshot => ({
   head,
   tasks: new Map(found.tasks.map((task) => [task.id, task])),
   invalid: new Map(found.invalid.map((item) => [item.path, item.reason])),
+  collections: found.collections ?? [],
 })
 
 /** One notification of `watch`, with its method. */
@@ -133,4 +144,21 @@ export function compare(
     if (before.invalid.get(path) !== reason) out.push({ method: 'task.invalid', params: { path, checkout, reason } })
   }
   return out
+}
+
+/**
+ * What the checkout's collections, and the places of its items in them, changed to between two snapshots, as one
+ * notification; none when they did not change. An item is named when it is in both snapshots and its collections
+ * differ. An item that is new or renamed is left to its own notification, which makes core read it.
+ */
+export function collectionsChanged(checkout: string, before: Snapshot, after: Snapshot): Notification[] {
+  const members: Array<{ key: string; collections: string[] }> = []
+  for (const [id, task] of after.tasks) {
+    const was = before.tasks.get(id)
+    if (was !== undefined && !same(was.collections ?? [], task.collections ?? [])) {
+      members.push({ key: task.key, collections: task.collections ?? [] })
+    }
+  }
+  if (members.length === 0 && same(before.collections, after.collections)) return []
+  return [{ method: 'collections.changed', params: { collections: after.collections, members, checkout } }]
 }

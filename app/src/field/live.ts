@@ -7,6 +7,7 @@
 // This is plain code over an `OwnerClient` and a clock the caller gives, so each rule is tested with no browser and no
 // real time. `useField.ts` wires it to React.
 import { CONNECTION_EVENT, type ChannelEvent, type OwnerClient } from '../owner/client.ts'
+import type { ViewInput } from '../owner/generated.ts'
 import { loadField } from './load.ts'
 import { lanesOf } from './model.ts'
 import type { FieldData } from './types.ts'
@@ -148,6 +149,11 @@ export interface FeedOptions {
   readonly view: string | null
   /** The `layout.groupBy` of the view, which decides what a card's column is. Asked at each read. */
   readonly groupBy: () => string | null
+  /**
+   * The view to ask the daemon to walk, with a goal's closure added (`walk.ts`, `inlineView`), or null for no walk.
+   * Asked at each read, so a goal that changes is read with the next one.
+   */
+  readonly walk?: () => ViewInput | null
   /** Called with each new state. Never after `stop`. */
   readonly onRead: (read: FieldRead) => void
   readonly clock?: Clock
@@ -219,10 +225,10 @@ export class FieldFeed {
   }
 
   private async read(): Promise<void> {
-    const { owner, boardId, view, groupBy } = this.options
+    const { owner, boardId, view, groupBy, walk } = this.options
     let next: FieldData
     try {
-      next = await loadField(owner, boardId, view)
+      next = await loadField(owner, boardId, view, walk?.() ?? null)
     } catch (failure) {
       // A board that was read stays as it was: the next event reads it again. Only a first read has no board to keep.
       if (this.data === null) this.publish({ problem: words(failure) })

@@ -139,6 +139,13 @@ export class FieldWorld extends World {
   copies = new Map<string, Copy[]>()
   /** The link types a source declares, by source name. A source with none here has the plan's two if it blocks. */
   linkTypes = new Map<string, LinkType[]>()
+  /** What the sources list as collections, on the first page of `task.list`. */
+  collections: TaskListResultOutput['collections'] = []
+  /**
+   * What the daemon answers when `task.list` is asked for an inline view with a closure, by the closure's goal. A goal
+   * with none here matches no task, and the daemon refuses the view as it does then.
+   */
+  walks = new Map<string, Held>()
 
   /** Changes a listed task, as an edit in a checkout would. Nothing is announced: the daemon's event does that. */
   edit(key: string, over: Partial<TaskOutput>): void {
@@ -265,10 +272,17 @@ export class FieldWorld extends World {
         tasks = tasks.filter((each) => held.keys.includes(each.key))
         view = held.report
       }
+      if (ref !== undefined && ref !== null && ref.type === 'inline') {
+        const goal = ref.view.closure?.goal ?? ''
+        const held = this.walks.get(goal)
+        if (held === undefined) throw new Error(`\`closure.goal\` \`${goal}\` matches no task`)
+        tasks = tasks.filter((each) => held.keys.includes(each.key))
+        view = { ...held.report, name: ref.view.name }
+      }
       return {
         // The daemon's listing has no body: `task.get` gives the whole task.
         tasks: tasks.map((each) => ({ ...each, body: undefined })),
-        collections: [],
+        collections: this.collections,
         collisions: this.collisions,
         divergence: this.divergence,
         divergent: this.divergence.map((entry) => entry.key),
@@ -497,5 +511,79 @@ export function drawerWorld(): FieldWorld {
     report: report('ready', 2),
   })
   world.held.set('mine', { keys: ['plan:ts-0001-aa'], report: report('mine', 1) })
+  return world
+}
+
+export const EPIC_FIELD = 'plan:ep-006-wq'
+export const EPIC_LATER = 'plan:ep-007-xx'
+export const EPIC_DONE = 'plan:ep-008-yy'
+export const EPIC_KNOT = 'plan:ep-009-zz'
+
+/**
+ * The run order and graph's world (ts-0187-hb): the plan with four epics as collections. One has a diamond of tasks, a
+ * task whose blocker is finished, a task that waits on something that is not a task, and a task with a part-of link.
+ * One has nothing open, and one has two tasks that wait on each other. Views: one with no closure, one with the goal
+ * of a task, and two that open in a layout of their own. `walks` answers the inline view of each goal that has tasks.
+ */
+export function walkWorld(): FieldWorld {
+  const world = new FieldWorld()
+  world.sources = [PLAN]
+  const blocked = (...to: string[]) => to.map((each) => ({ type: 'blocked-by', to: each }))
+  const inField = { collections: [EPIC_FIELD] }
+  world.collections = [
+    { id: EPIC_FIELD, title: 'The Field', groups: [] },
+    { id: EPIC_LATER, title: 'Later work', groups: [] },
+    { id: EPIC_DONE, title: 'A finished epic', groups: [] },
+    { id: EPIC_KNOT, title: 'Tied in a knot', groups: [] },
+  ]
+  world.listing = [
+    task('plan:ts-0001-aa', 'Write the parser', 'ready', 'ready', { ...inField, links: blocked('plan:ts-0006-ff') }),
+    task('plan:ts-0002-bb', 'Design the board', 'ready', 'ready', { ...inField, links: blocked('plan:ts-0001-aa') }),
+    task('plan:ts-0003-cc', 'Build the Field', 'active', 'active', {
+      ...inField,
+      links: blocked('plan:ts-0001-aa', 'plan:ts-0002-bb', 'plan:ts-0099-zz'),
+    }),
+    task('plan:ts-0004-dd', 'Review the wire', 'ready', 'ready', {
+      ...inField,
+      links: [...blocked('plan:ts-0003-cc', 'plan:ts-0013-mm'), { type: 'part-of', to: 'ep-006-wq' }],
+    }),
+    task('plan:ts-0005-ee', 'Plan the drawer', 'ready', 'ready', { collections: [EPIC_LATER] }),
+    task('plan:ts-0006-ff', 'Ship the shell', 'done', 'done', inField),
+    task('plan:ts-0007-gg', 'Tidy up', 'done', 'done', { collections: [EPIC_DONE] }),
+    task('plan:ts-0010-jj', 'Chicken', 'ready', 'ready', {
+      collections: [EPIC_KNOT],
+      links: blocked('plan:ts-0011-kk'),
+    }),
+    task('plan:ts-0011-kk', 'Egg', 'ready', 'ready', {
+      collections: [EPIC_KNOT],
+      links: blocked('plan:ts-0010-jj'),
+    }),
+    task('plan:ts-0012-ll', 'Omelette', 'ready', 'ready', {
+      collections: [EPIC_KNOT],
+      links: blocked('plan:ts-0011-kk'),
+    }),
+    task('plan:ts-0013-mm', 'Draw the tabs', 'ready', 'ready', inField),
+  ]
+  const keys = (...shorts: string[]) => shorts.map((short) => `plan:ts-${short}`)
+  const field = keys('0001-aa', '0002-bb', '0003-cc', '0004-dd', '0013-mm')
+  const fieldSteps = [keys('0001-aa', '0013-mm'), keys('0002-bb'), keys('0003-cc'), keys('0004-dd')]
+  world.walks.set(EPIC_FIELD, { keys: field, report: report('x', 5, { steps: fieldSteps }) })
+  world.walks.set(EPIC_LATER, { keys: keys('0005-ee'), report: report('x', 1, { steps: [keys('0005-ee')] }) })
+  const knot = keys('0010-jj', '0011-kk', '0012-ll')
+  world.walks.set(EPIC_KNOT, {
+    keys: knot,
+    report: report('x', 3, { steps: [knot], cycle: keys('0010-jj', '0011-kk') }),
+  })
+  const open = world.listing.filter((each) => each.state.category !== 'done').map((each) => each.key)
+  const board = (name: string, over: Partial<ViewEntry['view']> = {}) => {
+    world.views.push(view(name, { type: 'repo' }, over))
+    world.held.set(name, { keys: open, report: report(name, open.length) })
+  }
+  board('everything')
+  board('graph-first', { layout: { default: 'graph' } })
+  board('run-first', { layout: { default: 'run-order' } })
+  const closure = { goal: 'plan:ts-0004-dd', follow: 'depends_on' as const }
+  world.views.push(view('to-the-wire', { type: 'repo' }, { closure }))
+  world.held.set('to-the-wire', { keys: field, report: report('to-the-wire', 5, { steps: fieldSteps }) })
   return world
 }

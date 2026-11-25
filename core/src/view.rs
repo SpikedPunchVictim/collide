@@ -27,7 +27,8 @@ pub enum Follow {
     DependsOn,
 }
 
-/// `closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal.
+/// `closure: { goal: plan:T-01-042, follow: depends_on }`: the open tasks the goal depends on, and the goal. The goal
+/// is a task key, or the key of a collection a source lists (an epic), whose open tasks are then all goals.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Closure {
@@ -35,12 +36,13 @@ pub struct Closure {
     pub follow: Follow,
 }
 
-/// How the Field lays a view out.
+/// How the Field lays a view out: as columns, as numbered steps, or as a graph of the steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum LayoutKind {
     Board,
     RunOrder,
+    Graph,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

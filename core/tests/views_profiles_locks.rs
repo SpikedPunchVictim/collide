@@ -237,6 +237,21 @@ fn a_layout_is_a_board_or_a_run_order() {
 }
 
 #[test]
+fn a_layout_may_default_to_a_graph() {
+    let view: View = load("name: MVP\nlayout: { default: graph }\n");
+    let written = serde_json::to_value(view.layout.unwrap().default).unwrap();
+    assert_eq!(written, serde_json::json!("graph"));
+}
+
+#[test]
+fn an_unknown_layout_is_still_refused_and_the_error_names_the_ones_there_are() {
+    let error = parse_error::<View>("name: MVP\nlayout: { default: table }\n");
+    for known in ["board", "run-order", "graph"] {
+        assert!(error.contains(known), "{error}");
+    }
+}
+
+#[test]
 fn a_namespaced_name_is_pack_slash_name() {
     for good in ["collide/review", "ferry/loop"] {
         assert!(is_namespaced_name(good), "{good}");

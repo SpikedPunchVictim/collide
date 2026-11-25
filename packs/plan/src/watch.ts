@@ -1,8 +1,8 @@
 import { watch as fsWatch } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import type { Notify, TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
-import { compare, emptySnapshot, idsChanged, snapshotOf } from './changes.ts'
+import type { ListResultInput, Notify, TaskInput, TaskInvalidOutput } from '@collide/pack-sdk'
+import { collectionsChanged, compare, emptySnapshot, idsChanged, snapshotOf } from './changes.ts'
 import type { Notification, Snapshot } from './changes.ts'
 import { gitDir, gitHead, gitRenames } from './git.ts'
 import { SPIKE_RECORD } from './scan.ts'
@@ -64,7 +64,11 @@ const isFolder = async (path: string): Promise<boolean> => (await stat(path).cat
 /** What the provider tells the watcher about a checkout: how to read it, and what to watch in it. */
 export interface Where {
   /** The items and invalid files of a checkout, as `list` reads them. It throws when the checkout cannot be read. */
-  read(checkout: string): Promise<{ tasks: TaskInput[]; invalid: TaskInvalidOutput[] }>
+  read(checkout: string): Promise<{
+    tasks: TaskInput[]
+    collections: NonNullable<ListResultInput['collections']>
+    invalid: TaskInvalidOutput[]
+  }>
   /**
    * Where to look for a change: the folders to watch (each with everything below it), the folders that hold spike
    * folders, and the paths git is asked about when it is asked for renames. All are absolute but `pathspecs`.
@@ -251,7 +255,7 @@ export function createWatcher(deps: {
     entry.snapshot = next
     // Watchers first: whoever hears of the change may write at once, and that write must be seen.
     await openHandles(checkout, entry)
-    send(compare(checkout, before, next, renames))
+    send([...compare(checkout, before, next, renames), ...collectionsChanged(checkout, before, next)])
   }
 
   const flush = async (): Promise<void> => {

@@ -34,6 +34,7 @@ const question = (id: string, status = 'open'): string =>
   item('question', id, status, `Question ${id}`, '## Question\n\nWhy?')
 const spike = (id: string, status = 'planned'): string =>
   item('spike', id, status, `Spike ${id}`, '## Question\n\nWhy?')
+const EPIC_FILE_OF = (id: string): string => EPIC_FILE.replace('ep-001-aa', id)
 const PROPOSAL = item('proposal', 'pr-0001-aa', 'draft', 'Made-up proposal', '') +
   '## Context\n\nMade-up.\n\n## Features\n\n### Packs\n- **F1 Trust prompt**: asks before the first run.\n'
 
@@ -228,9 +229,11 @@ describe('watch: task.changed', () => {
     expect(changed?.params.key).toBe('plan:ts-0001-aa')
     expect(changed?.params.diff).toEqual({
       links: { from: [{ type: 'part-of', to: 'ep-001-aa' }], to: [{ type: 'part-of', to: 'ep-002-bb' }] },
+      collections: { from: ['plan:ep-001-aa'], to: ['plan:ep-002-bb'] },
       path: { from: ONE, to: `${BETA}/tasks/ts-0001-aa-one.md` },
     })
-    expect(await inbox(watch)).toEqual([])
+    // The move changes the item's collections too, which is a notification of its own.
+    expect((await inbox(watch)).map((one) => one.method)).toEqual(['collections.changed'])
   })
 
   test('a title that changed is named, with the status that did not change left out', async () => {
@@ -311,6 +314,68 @@ describe('watch: task.changed', () => {
     const [changed] = await watch.client.notifications('task.changed')
     expect(changed?.params).toMatchObject({ key: 'plan:ts-0001-aa', checkout: linked })
     expect(await inbox(watch)).toEqual([])
+  })
+})
+
+describe('watch: collections.changed', () => {
+  const EPIC_TWO = `${BETA}/epic.md`
+  const collection = (id: string, title: string) => ({ id, title, groups: [] })
+
+  test('a task moved to another epic names its new collections, and the collections are what they were', async () => {
+    const main = repo()
+    const watch = await watching(main)
+    mkdirSync(join(main, BETA, 'tasks'), { recursive: true })
+    renameSync(join(main, ONE), join(main, BETA, 'tasks/ts-0001-aa-one.md'))
+    watch.touch(main, 'epics/ep-002-bb-beta/tasks/ts-0001-aa-one.md')
+    watch.settle()
+    const [changed] = await watch.client.notifications('collections.changed')
+    expect(changed?.params).toEqual({
+      collections: [collection('plan:ep-001-aa', 'Made-up epic'), collection('plan:ep-002-bb', 'Made-up epic')],
+      members: [{ key: 'plan:ts-0001-aa', collections: ['plan:ep-002-bb'] }],
+      checkout: main,
+    })
+  })
+
+  test('an epic whose title changed is a changed collection with no member named', async () => {
+    const main = repo()
+    const watch = await watching(main)
+    write(main, EPIC_TWO, read(main, EPIC_TWO).replace('"Made-up epic"', '"Beta, renamed"'))
+    watch.touch(main, 'epics/ep-002-bb-beta/epic.md')
+    watch.settle()
+    const [changed] = await watch.client.notifications('collections.changed')
+    expect(changed?.params.collections).toEqual([
+      collection('plan:ep-001-aa', 'Made-up epic'),
+      collection('plan:ep-002-bb', 'Beta, renamed'),
+    ])
+    expect(changed?.params.members).toEqual([])
+  })
+
+  test('a new epic is a new collection, and its new task is left to its own notification', async () => {
+    const main = repo()
+    const watch = await watching(main)
+    write(main, `${PLANNING}/epics/ep-003-cc-gamma/epic.md`, EPIC_FILE_OF('ep-003-cc'))
+    write(main, `${PLANNING}/epics/ep-003-cc-gamma/tasks/ts-0007-gg-new.md`, task('ts-0007-gg'))
+    watch.touch(main)
+    watch.settle()
+    const [changed] = await watch.client.notifications('collections.changed')
+    expect(changed?.params.collections.map((each: { id: string }) => each.id)).toEqual([
+      'plan:ep-001-aa',
+      'plan:ep-002-bb',
+      'plan:ep-003-cc',
+    ])
+    expect(changed?.params.members).toEqual([])
+    const tasks = await watch.client.notifications('task.changed', 2)
+    expect(tasks.map((one) => one.params.key).sort()).toEqual(['plan:ep-003-cc', 'plan:ts-0007-gg'])
+  })
+
+  test('a status change moves no collection, so none is sent', async () => {
+    const main = repo()
+    const watch = await watching(main)
+    setStatus(main, ONE, 'active')
+    watch.touch(main)
+    watch.settle()
+    await watch.client.notifications('task.changed')
+    expect((await inbox(watch)).filter((one) => one.method === 'collections.changed')).toEqual([])
   })
 })
 

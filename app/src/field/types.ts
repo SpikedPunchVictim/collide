@@ -11,6 +11,7 @@ export type DivergentCopy = Divergence['copies'][number]
 export type Collision = ListResult['collisions'][number]
 export type ViewReport = NonNullable<ListResult['view']>
 export type ViewEntry = TaskViewsResultOutput['views'][number]
+export type Collection = ListResult['collections'][number]
 
 /** What one load of the Field read: the shown tasks, every task of the board, and the board-wide lists. */
 export interface FieldData {
@@ -23,6 +24,15 @@ export interface FieldData {
   readonly divergence: readonly Divergence[]
   /** What the selected view said of itself. Null for the whole board. */
   readonly report: ViewReport | null
+  /** What the sources list as collections (an epic is one), from the first page of the listing. */
+  readonly collections: readonly Collection[]
+  /**
+   * What the daemon said of the view with a goal's closure added (the run order of a collection), or null when no
+   * goal was asked for or the walk failed.
+   */
+  readonly walked: ViewReport | null
+  /** The words of a walk the daemon refused, such as a goal that is no longer there. Null when there is none. */
+  readonly walkProblem: string | null
   /**
    * The daemon was still listing, or a source had not started, so `sources` may be short. An event for a source not in
    * it may be this board's source coming up (`live.ts`).

@@ -210,41 +210,48 @@ function unblocksOf(task: Task, sources: readonly SourceDecl[]): number {
 /** The id of a task's card: one for each place a key is at, since a collided key is listed at each of its paths. */
 export const cardIdOf = (task: Task) => `${task.key}|${task.path ?? ''}`
 
+/** The card of a task: its title, short id and stage, and the chips that say what a reader should know of it. */
+export function cardOf(task: Task, data: FieldData, mode: GroupMode, index = indexOf(everyTaskOf(data))): Card {
+  const chips: Chip[] = []
+  const { status, category } = task.state
+  if (mode === 'category') chips.push({ id: 'status', text: status, category })
+  const waits = openBlockers(task, data.sources, index)
+  if (waits > 0) chips.push({ id: 'waits', text: `Waits on ${waits}` })
+  const unblocks = unblocksOf(task, data.sources)
+  if (unblocks > 0) chips.push({ id: 'unblocks', text: `Unblocks ${unblocks}` })
+  const collided = data.collisions.find(
+    (each) =>
+      tailOf(task.key) === each.shortId &&
+      (task.path == null || each.locations.some((place) => place.path === task.path)),
+  )
+  const differs = data.divergence.find((each) => each.key === task.key && each.copies.length > 0)
+  // A collided id is never shown as a difference (note 7).
+  if (differs !== undefined && collided === undefined) {
+    chips.push({ id: 'divergence', text: divergenceWords(differs) })
+  }
+  if (collided !== undefined) chips.push({ id: 'collision', text: collisionWords(collided) })
+  return {
+    id: cardIdOf(task),
+    key: task.key,
+    title: task.title,
+    shortId: shortIdOf(task, data.sources),
+    stage: stageOf(task),
+    category,
+    chips,
+  }
+}
+
+/** Every task of the board, which a card's blockers are looked up in: the shown ones when it was not read. */
+const everyTaskOf = (data: FieldData) => (data.corpus.length > 0 ? data.corpus : data.tasks)
+
 /** The columns with their cards: each task in the column of its status, or of its category. */
 export function lanesOf(data: FieldData, groupBy?: string | null): { mode: GroupMode; lanes: Lane[] } {
   const mode = groupMode(data.tasks, groupBy)
-  const index = indexOf(data.corpus.length > 0 ? data.corpus : data.tasks)
-  const cards = data.tasks.map((task): [string, Card] => {
-    const chips: Chip[] = []
-    const { status, category } = task.state
-    if (mode === 'category') chips.push({ id: 'status', text: status, category })
-    const waits = openBlockers(task, data.sources, index)
-    if (waits > 0) chips.push({ id: 'waits', text: `Waits on ${waits}` })
-    const unblocks = unblocksOf(task, data.sources)
-    if (unblocks > 0) chips.push({ id: 'unblocks', text: `Unblocks ${unblocks}` })
-    const shortId = shortIdOf(task, data.sources)
-    const collided = data.collisions.find(
-      (each) =>
-        tailOf(task.key) === each.shortId &&
-        (task.path == null || each.locations.some((place) => place.path === task.path)),
-    )
-    const differs = data.divergence.find((each) => each.key === task.key && each.copies.length > 0)
-    // A collided id is never shown as a difference (note 7).
-    if (differs !== undefined && collided === undefined) {
-      chips.push({ id: 'divergence', text: divergenceWords(differs) })
-    }
-    if (collided !== undefined) chips.push({ id: 'collision', text: collisionWords(collided) })
-    const card: Card = {
-      id: cardIdOf(task),
-      key: task.key,
-      title: task.title,
-      shortId,
-      stage: stageOf(task),
-      category,
-      chips,
-    }
-    return [mode === 'category' ? category : status, card]
-  })
+  const index = indexOf(everyTaskOf(data))
+  const cards = data.tasks.map((task): [string, Card] => [
+    mode === 'category' ? task.state.category : task.state.status,
+    cardOf(task, data, mode, index),
+  ])
   const lanes = columnsOf(mode, data.tasks, data.sources).map((column) => ({
     column,
     cards: cards.filter(([key]) => key === column.key).map(([, card]) => card),

@@ -1,7 +1,7 @@
 ---
 id: ts-0187-hb
 kind: task
-status: ready
+status: done
 title: "App: the run order and graph layouts"
 owners: []
 links:
@@ -92,3 +92,87 @@ Write these first.
   share `app/`, `core`, `host` and the generated files. No builder runs `tauri build`.
 - Nothing here runs a real `claude`.
 - Owner decisions (2026-11-24): the owner took the recommendations at the split.
+
+### Built
+
+- Core, the layout: `LayoutKind` (`core/src/view.rs`) has `Graph` beside `Board` and `RunOrder`, written `graph`. The
+  schemas and `packages/pack-sdk/src/generated/` came from `pnpm gen`.
+- Core, the goal: a closure's `goal` may be a collection key. `Corpus::has_collection` (`core/src/corpus.rs`) asks the
+  collections the sources list. `goals_of` and `walk` (`core/src/view_eval.rs`) make every open task of the collection a
+  goal; a collection with no open task is an empty closure and no error. A goal that is neither a collection nor a task
+  is unmatched as before (`goal_unmatched`, or `INVALID_PARAMS` from `task.list` for a view with no `where` or
+  `include`). A key that is both is read as the collection.
+- Pack: `collide/plan` (`packs/plan/src/scan.ts`, `provider.ts`, `changes.ts`, `watch.ts`) reports each epic as a
+  collection, `{ id: "plan:<epic id>", title, groups: [] }`, declares the `collections` capability, and puts the id in
+  `collections` of each task of that epic's folder. The `part-of` link stays as it was. `collectionsChanged` sends one
+  `collections.changed` when the list or a task's membership changes.
+- App, the reads: `loadField` (`app/src/field/load.ts`) takes an optional inline view. It asks `task.list` with
+  `ViewRef::Inline` and `limit: 1`, since the report is what is wanted, and keeps the report as `FieldData.walked`. A
+  walk the daemon refuses is words in `FieldData.walkProblem`. `FieldData.collections` is the first page's list.
+  `FieldFeed` (`live.ts`) takes `walk` and asks it at each read, so the steps follow the board. `useField` holds the
+  goal per board and view (`goal`, `chooseGoal`) and builds the inline view with `inlineView` (`walk.ts`): the shown
+  view with `closure: { goal, follow: depends_on }` added.
+- App, the layout: `app/src/field/layout.ts` (`layoutOf`, `writeLayout`, `layoutKey`) keeps the layout per board and
+  view in the `FoldStore` of `folds.ts`. A view starts in its `layout.default`, else the board; a kept choice wins.
+- App, the pure parts: `app/src/field/walk.ts` has `goalsOf`, `goalTitle`, `stepsOf`, `walkWords`, `graphOf` (the
+  geometry of the mock: 236 by 68 cells, 200 by 52 tasks), `lightOf` and `inlineView`. `model.ts` `cardOf` was cut
+  out of `lanesOf` so the run order draws the same card. `CardButton.tsx` was moved out of `FieldPage.tsx` to be shared.
+- App, the page: `app/src/field/Layouts.tsx` has `LayoutSwitch` (Board, Run order, Graph), the goal bar, `RunOrder` and
+  `Graph`. The lines are svg `path` elements with `data-from`, `data-to` and `data-hot`, coloured by classes. A task's
+  place is a React `style` prop. No `<style>` element or style string is made. Hover or focus on a task lights its lines
+  and dims the tasks not at their ends. A cycle is named above the graph and no line is drawn among its tasks. A link to
+  a task that is not shown draws no line. A card in either layout selects its task for the drawer.
+- Tests, and which I saw fail at runtime before the code (the new modules were first stubs that return the old,
+  empty behaviour; the browser specs were run with the layout switch left out of the page):
+  - `core/tests/views_profiles_locks.rs` (2): `a_layout_may_default_to_a_graph` and the unknown-layout refusal. Red:
+    "unknown variant `graph`".
+  - `core/tests/view_eval.rs` (6, "a collection as the goal"). Red: five failed with "`closure.goal` ... matches no
+    task" or a wrong member list; the cycle test passed only with the goal in place.
+  - `packs/plan/test/collections.test.ts` (9), four tests in `watch.test.ts` (`collections.changed`), and the changed
+    expectations in `provider.test.ts` and `watch.test.ts`. Red: capability false, no `collections` key, no event.
+  - `app/test/field-walk.test.ts` (27), `field-layout-store.test.ts` (7), `field-layouts.test.tsx` (26) and four feed
+    tests in `field-live.test.ts`: 43 of the first three failed against the stubs, and the three feed tests that read a
+    walk failed against the feed without `walk`.
+  - `app/browser/fake-graph.spec.ts` (8): the first seven failed (90 s timeouts) without the layout switch; I stopped
+    that run there. `app/browser/run-order.spec.ts` (3, real daemon, compared with `collide tasks --view ... --json`
+    run with the world's environment): not run red. The first two need the switch; the third (the inline closure over
+    the wire) tests what the daemon already did for a task goal, so it was never red.
+- The fake worlds: `walkWorld` (`app/test/support/field-world.ts`, `#world=field-walk`) has four epics as collections,
+  scripted walks by goal, a cycle, a finished blocker and a link to a key no task has. `window.collideFake.views()`
+  lists the view each `task.list` asked for.
+
+### Decisions for the owner
+
+- A key that is both a collection and a task: read as the collection. `collide/plan` lists an epic as both under one key
+  (`plan:<id>`), and the picker offers the epic, so the epic's open tasks are the goals. Alternative: read it as the
+  task. Recommend the collection.
+- The collection id is `plan:<epic id>`, as the Orchard adapter of Stage 4b writes it, so a collection id and the
+  epic's task key are one string. Alternative: the bare epic id. Recommend as built.
+- A task is in the epic's collection only when the epic has an `epic.md` in the scan; a folder with no epic file lists
+  no collection and keeps its `part-of` link. `groups` is `[]`. Recommend as built.
+- A collection with no open task is an empty closure, not an error, and the picker leaves it out. Alternative: refuse
+  it. Recommend as built, since an epic that is all done is a normal board.
+- The inline view is the shown view plus the closure, so its own `where` and `include` still apply and join the
+  closure's members. Only the steps and the cycle are drawn from it, and the cards are the board's own tasks. The whole
+  board is walked as a view named "All tasks" with only the closure. Alternative: walk the closure alone for any view.
+  Recommend as built: the picker then narrows with the view, as the mock's does.
+- The picker starts on the first collection that has open tasks, and sets it as soon as a run order or graph is shown;
+  a goal that is no longer in the list is replaced the same way. Alternative: start empty and ask the person to pick.
+  Recommend as built, as the mock does.
+- Lines are straight when the two tasks are in one row and have one bend when they are not, entering the task level for
+  12 px. The mock's curve is not drawn. Both stay in the brief's "straight or one-bend". Recommend as built.
+- The two layouts reuse the board's drawer, selection and the live reads. The arrow keys move between cards on the
+  board only; the graph's tasks are buttons and take the Tab key. Alternative: arrow keys in the graph. Recommend later.
+- Proposed plan text for Stage 6a: "`collide/plan` reports each epic as a collection `plan:<id>`; a closure's goal may
+  be a collection, and the Field walks a picked collection through an inline view." The plan was not edited.
+
+### Not done, by design
+
+- The epics strip, the filter bar and a pick (a picked epic as the goal of the run order and graph): `ts-0190-tz` and
+  `ts-0216-ve`. They build on `FieldData.collections`, `goalsOf` and the inline view here.
+- The goal picker over the plan's real epics is not run against a real daemon in the browser. The bridge runs the staged
+  built-in pack (`app/src-tauri/resources/builtin-packs`), which this item does not rebuild, so the bridge world lists
+  no epics. The pack's lists are tested in `packs/plan/test/`, the collection goal in `core/tests/view_eval.rs`, and the
+  picker in the fake-owner specs. A test of the daemon with a provider that lists collections is not written, since the
+  shared corpus provider fixture lists none.
+- Arrow keys in the graph and the run order; the "Up next" layout of the mock (a later item).

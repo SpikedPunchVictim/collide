@@ -12,9 +12,11 @@
 //!   `dropped`). The goal is always in, but a goal that is done is the whole closure: nothing is walked from it and it
 //!   is no step, as the prototype board's generator has it. The walk goes through a task that `exclude` names:
 //!   exclude removes members, it does not cut the walk.
-//! - **A goal that matches no task** is [`ViewFailure::GoalUnmatched`] for a view whose members come from the closure
-//!   alone (no `where`, no `include`), as the generator stops with an error. Beside a `where` or an `include` it is
-//!   [`ViewCounts::goal_unmatched`]: the closure is empty and the other members stay.
+//! - **A goal that is a collection's key** (an epic a source lists) makes each open task of the collection a goal. A
+//!   collection is read before a task of the same key. One with no open task is an empty closure, not an error.
+//! - **A goal that matches no task** (nor a collection) is [`ViewFailure::GoalUnmatched`] for a view whose members
+//!   come from the closure alone (no `where`, no `include`), as the generator stops with an error. Beside a `where` or
+//!   an `include` it is [`ViewCounts::goal_unmatched`]: the closure is empty and the other members stay.
 //! - **The steps** are the closure's layers. The first holds the tasks with no dependency in the set, and each later
 //!   one the tasks whose dependencies are all in earlier steps, in key order. When the layering stalls, a cycle is
 //!   below it: the last step holds every task it could not place, and [`ViewResult::cycle`] names the ones on a cycle.
@@ -248,8 +250,8 @@ pub fn evaluate_view(
 
     let mut closure = Reach::default();
     if let Some(spec) = &view.closure {
-        match corpus.resolve_key(&spec.goal) {
-            Some(goal) => closure = walk(corpus, &rows, spec, &goal),
+        match goals_of(corpus, &rows, &spec.goal) {
+            Some(goals) => closure = walk(corpus, &rows, spec, &goals),
             None if view.where_.is_none() && view.include.is_empty() => {
                 return Err(ViewFailure::GoalUnmatched {
                     goal: spec.goal.clone(),
@@ -360,22 +362,42 @@ pub(crate) fn is_open(task: &Task) -> bool {
     !matches!(task.state.category, Category::Done | Category::Dropped)
 }
 
-/// The closure of `goal`: the goal, and every open task it reaches through open tasks. A goal that is not open is the
-/// whole closure: the generator walks nothing from a done goal.
-fn walk(corpus: &Corpus, rows: &[Row<'_>], spec: &Closure, goal: &str) -> Reach {
+/// The goals `goal` names: the keys of the open tasks of the collection it is the key of, else the task it is the key
+/// of. `None` when it is neither. A collection is read first: `collide/plan` lists an epic as a task and as a
+/// collection under one key, and the closure of the epic is what its tasks need.
+fn goals_of(corpus: &Corpus, rows: &[Row<'_>], goal: &str) -> Option<Vec<String>> {
+    if corpus.has_collection(goal) {
+        let mut open: Vec<String> = rows
+            .iter()
+            .filter(|row| is_open(row.task) && row.task.collections.iter().any(|id| id == goal))
+            .map(|row| row.task.key.clone())
+            .collect();
+        open.dedup();
+        return Some(open);
+    }
+    corpus.resolve_key(goal).map(|key| vec![key])
+}
+
+/// The closure of `goals`: the goals, and every open task they reach through open tasks. A goal that is not open is
+/// in the closure and walked from by no one: the generator walks nothing from a done goal.
+fn walk(corpus: &Corpus, rows: &[Row<'_>], spec: &Closure, goals: &[String]) -> Reach {
     let mut by_key: HashMap<&str, &Task> = HashMap::new();
     for row in rows {
         by_key.entry(row.task.key.as_str()).or_insert(row.task);
     }
-    if !by_key.get(goal).is_some_and(|task| is_open(task)) {
+    let mut set: BTreeSet<String> = goals.iter().cloned().collect();
+    let mut pending: Vec<String> = goals
+        .iter()
+        .filter(|goal| by_key.get(goal.as_str()).is_some_and(|task| is_open(task)))
+        .cloned()
+        .collect();
+    if pending.is_empty() {
         return Reach {
-            set: BTreeSet::from([goal.to_string()]),
+            set,
             needs: BTreeMap::new(),
         };
     }
     let mut reached: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut pending = vec![goal.to_string()];
-    let mut set: BTreeSet<String> = BTreeSet::from([goal.to_string()]);
     while let Some(key) = pending.pop() {
         let Some(task) = by_key.get(key.as_str()) else {
             continue;

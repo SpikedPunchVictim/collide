@@ -7,6 +7,7 @@ import type { OwnerClient } from '../owner/client.ts'
 import { FieldFeed, type FieldRead } from './live.ts'
 import { loadViews } from './load.ts'
 import type { FieldData, ViewEntry } from './types.ts'
+import { inlineView } from './walk.ts'
 
 export interface FieldState {
   /** The views of the board, built-in first. Empty until they are read. */
@@ -14,6 +15,9 @@ export interface FieldState {
   /** The selected view's name, or null for the whole board. */
   readonly view: string | null
   readonly select: (view: string | null) => void
+  /** The collection or task the run order and graph walk toward, or null when none is picked. */
+  readonly goal: string | null
+  readonly chooseGoal: (goal: string | null) => void
   /** What the last read gave, for the board and view shown, or null while the first read is on its way. */
   readonly data: FieldData | null
   /** The words of a read that failed. */
@@ -37,6 +41,14 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
   const [read, setRead] = useState<Read | null>(null)
   const view = pick.boardId === boardId ? pick.view : null
   const select = useCallback((next: string | null) => setPick({ boardId, view: next }), [boardId])
+  // The goal of the run order and graph, for a view with none of its own. It is the view's, so it goes with the view.
+  const [chosen, setChosen] = useState<{ boardId: string | null; view: string | null; goal: string | null }>({
+    boardId,
+    view,
+    goal: null,
+  })
+  const goal = chosen.boardId === boardId && chosen.view === view ? chosen.goal : null
+  const chooseGoal = useCallback((next: string | null) => setChosen({ boardId, view, goal: next }), [boardId, view])
 
   useEffect(() => {
     if (boardId === null) return
@@ -54,6 +66,9 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
   // What the selected view groups by decides a card's column, so a read says which cards moved by it.
   const groupBy = useRef<string | null>(null)
   groupBy.current = views?.views.find((each) => each.view.name === view)?.view.layout?.groupBy ?? null
+  // The view a goal's walk is asked of is read at each read, so the views loading does not start the feed again.
+  const entry = useRef<ViewEntry | undefined>(undefined)
+  entry.current = views?.views.find((each) => each.view.name === view)
 
   useEffect(() => {
     if (boardId === null) return
@@ -62,17 +77,20 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
       boardId,
       view,
       groupBy: () => groupBy.current,
+      walk: () => (goal === null ? null : inlineView(entry.current, goal)),
       onRead: (found) => setRead({ boardId, view, ...found }),
     })
     void feed.start()
     return () => feed.stop()
-  }, [owner, boardId, view])
+  }, [owner, boardId, view, goal])
 
   const shown = read !== null && read.boardId === boardId && read.view === view ? read : null
   return {
     views: views !== null && views.boardId === boardId ? views.views : [],
     view,
     select,
+    goal,
+    chooseGoal,
     data: shown?.data ?? null,
     problem: shown?.problem ?? null,
     flashed: shown?.flashed ?? NONE,

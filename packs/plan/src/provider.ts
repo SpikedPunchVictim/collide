@@ -36,7 +36,7 @@ import {
   SUPERSEDES,
 } from './item.ts'
 import type { Category } from './item.ts'
-import { scanEpics, toTask } from './scan.ts'
+import { listedOf, scanEpics, toTask } from './scan.ts'
 import type { Scan } from './scan.ts'
 import { ACCEPT, DECISION_MAX, DEFER, NOTE_MAX, REJECT, RESOLVE } from './person-ops.ts'
 import { RENAME_SECTION } from './rename-section.ts'
@@ -244,7 +244,7 @@ export const INITIALIZE_RESULT: InitializeResultInput = {
   kinds: [kind('task'), kind('epic'), proposalKind, spikeKind, questionKind],
   ops: OPS,
   links: [...LINK_TYPES],
-  capabilities: { watch: true, create: true, collections: false, preview: false },
+  capabilities: { watch: true, create: true, collections: true, preview: false },
 }
 
 export interface PlanProviderOptions {
@@ -302,8 +302,7 @@ export function planProvider({ log, packData, watch: watchOptions }: PlanProvide
   /** `list` for a named checkout, and the snapshot it came from kept when HEAD did not move while it was read. */
   const listChecked = async (checkout: string): Promise<ListResultInput> => {
     const head = await gitHead(checkout, gitEnv)
-    const { items, invalid } = await scan(checkout)
-    const answer = { tasks: items.map((found) => toTask(found, false, items)), invalid }
+    const answer = listedOf(await scan(checkout))
     if ((await gitHead(checkout, gitEnv)) === head) listed.set(resolve(checkout), snapshotOf(head, answer))
     return answer
   }
@@ -311,8 +310,7 @@ export function planProvider({ log, packData, watch: watchOptions }: PlanProvide
   /** What `watch` reads and watches in a checkout: the same folders `scan` reads, as `list` reads them. */
   const where: Where = {
     read: async (checkout) => {
-      const { items, invalid } = await scan(checkout)
-      return { tasks: items.map((found) => toTask(found, false, items)), invalid }
+      return listedOf(await scan(checkout))
     },
     listed: (checkout) => {
       const key = resolve(checkout)
@@ -346,8 +344,7 @@ export function planProvider({ log, packData, watch: watchOptions }: PlanProvide
     },
     list: async ({ checkout }): Promise<ListResultInput> => {
       if (typeof checkout === 'string' && isAbsolute(checkout)) return listChecked(checkout)
-      const { items, invalid } = await scan(checkout ?? null)
-      return { tasks: items.map((found) => toTask(found, false, items)), invalid }
+      return listedOf(await scan(checkout ?? null))
     },
     get: async ({ id, checkout }): Promise<GetResultInput> => {
       const { items } = await scan(checkout ?? null)

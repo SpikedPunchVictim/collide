@@ -2,7 +2,6 @@
 // a line for what the view says of itself, and a place for the drawer, which `ts-0184-hv` fills. The columns come from
 // the sources' declared statuses (`model.ts`); a fold is kept per board and view (`folds.ts`).
 import { type KeyboardEvent, useEffect, useMemo, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card as Panel } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
@@ -10,14 +9,18 @@ import { Drawer } from '../drawer/Drawer.tsx'
 import type { BoardNote } from '../drawer/types.ts'
 import { actionForKey } from '../frame/actions.ts'
 import type { OwnerClient } from '../owner/client.ts'
-import { DOT, TEXT } from './colours.ts'
+import { CardButton } from './CardButton.tsx'
+import { DOT } from './colours.ts'
 import { agoWords } from './live.ts'
 import { type FoldStore, browserStore, isShut, memoryStore, readFolds, toggleFold } from './folds.ts'
-import { type Card, type Chip, type Column, type Lane, cardIdOf, lanesOf, reportLines } from './model.ts'
+import { type LayoutKind, layoutOf, writeLayout } from './layout.ts'
+import { LayoutSwitch, WalkView } from './Layouts.tsx'
+import { type Column, type Lane, cardIdOf, lanesOf, reportLines } from './model.ts'
 import { type Direction, neighbour } from './navigation.ts'
-import type { FieldData } from './types.ts'
+import type { FieldData, ViewEntry } from './types.ts'
 import type { FieldState } from './useField.ts'
 import { ALL_TASKS } from './ViewPicker.tsx'
+import { goalTitle, goalsOf, stepsOf } from './walk.ts'
 
 export interface FieldPageProps {
   /** The way to the daemon, which the drawer reads its task by. */
@@ -68,6 +71,9 @@ export function FieldPage({ owner, boardId, board = null, field, store }: FieldP
       boardId={boardId}
       board={board}
       view={field.view}
+      entry={field.views.find((each) => each.view.name === field.view)}
+      goal={field.goal}
+      onGoal={field.chooseGoal}
       data={field.data}
       groupBy={groupByOf(field)}
       flashed={field.flashed}
@@ -88,6 +94,11 @@ interface BoardProps {
   readonly boardId: string
   readonly board: BoardNote | null
   readonly view: string | null
+  /** The selected view as the board lists it, which says its layout and its goal. Undefined for the whole board. */
+  readonly entry: ViewEntry | undefined
+  /** The goal picked for the run order and graph of a view with none of its own. */
+  readonly goal: string | null
+  readonly onGoal: (goal: string | null) => void
   readonly data: FieldData
   readonly groupBy: string | null
   readonly flashed: ReadonlySet<string>
@@ -95,11 +106,26 @@ interface BoardProps {
   readonly store?: FoldStore | null
 }
 
-function Board({ owner, boardId, board, view, data, groupBy, flashed, updatedAt, store }: BoardProps) {
+function Board(props: BoardProps) {
+  const { owner, boardId, board, view, entry, goal, onGoal, data, groupBy, flashed, updatedAt, store } = props
   const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
   const folds = readFolds(kept, boardId, view)
+  const layout = layoutOf(kept, boardId, view, entry)
+  const ownGoal = entry?.view.closure?.goal ?? null
+  const goals = goalsOf(data)
+  // A view with no goal of its own is walked toward a collection: the one picked, else the first that has open tasks.
+  const walking = layout !== 'board' && ownGoal === null
+  const goalIds = goals.map((each) => each.id).join('\n')
+  const chosenGoal = goals.some((each) => each.id === goal) ? goal : null
+  const fallback = goals[0]?.id ?? null
+  useEffect(() => {
+    if (walking && chosenGoal === null && goal !== fallback) onGoal(fallback)
+    // The goals are compared by what they name, since they are made again at each draw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walking, chosenGoal, goal, fallback, goalIds])
+  const report = ownGoal === null ? data.walked : data.report
   const [selected, select] = useState<string | null>(null)
   const { lanes } = lanesOf(data, groupBy)
   const lines = reportLines(data.report)
@@ -123,6 +149,10 @@ function Board({ owner, boardId, board, view, data, groupBy, flashed, updatedAt,
     })
     select(null)
   }
+  const choose = (next: LayoutKind) => {
+    writeLayout(kept, boardId, view, next)
+    remember((count) => count + 1)
+  }
   const flip = (column: Column) => {
     toggleFold(kept, boardId, view, column)
     remember((count) => count + 1)
@@ -144,16 +174,34 @@ function Board({ owner, boardId, board, view, data, groupBy, flashed, updatedAt,
         <h1 className="text-xl font-semibold">{view ?? ALL_TASKS}</h1>
         <span className="text-muted-foreground">{`${count} task${count === 1 ? '' : 's'}`}</span>
         {updatedAt === null ? null : <LiveStamp updatedAt={updatedAt} />}
+        <LayoutSwitch layout={layout} onChoose={choose} />
       </div>
       <div className="flex items-start gap-3">
-        <Columns
-          lanes={lanes}
-          folds={folds}
-          selected={selected}
-          flashed={flashed}
-          onSelect={select}
-          onFlip={flip}
-        />
+        {layout === 'board' ? (
+          <Columns
+            lanes={lanes}
+            folds={folds}
+            selected={selected}
+            flashed={flashed}
+            onSelect={select}
+            onFlip={flip}
+          />
+        ) : (
+          <WalkView
+            layout={layout}
+            data={data}
+            steps={stepsOf(report, data)}
+            cycle={report?.cycle ?? []}
+            own={ownGoal === null ? null : goalTitle(data, ownGoal)}
+            goals={goals}
+            goal={chosenGoal}
+            onGoal={onGoal}
+            problem={ownGoal === null ? data.walkProblem : null}
+            read={report !== null}
+            selected={selected}
+            onSelect={select}
+          />
+        )}
         {chosen === null ? null : (
           <Drawer
             owner={owner}
@@ -316,68 +364,5 @@ function OpenColumn({ lane, selected, flashed, onSelect, onFold }: OpenColumnPro
         ))
       )}
     </section>
-  )
-}
-
-interface CardButtonProps {
-  readonly card: Card
-  readonly selected: boolean
-  /** The card changed in a read just now: it flashes once (`field-flash` in `index.css`), and says nothing. */
-  readonly flash: boolean
-  readonly onSelect: (id: string) => void
-}
-
-function CardButton({ card, selected, flash, onSelect }: CardButtonProps) {
-  return (
-    <button
-      type="button"
-      data-card={card.id}
-      data-flash={flash ? 'true' : undefined}
-      aria-current={selected}
-      onClick={() => onSelect(card.id)}
-      className={cn(
-        'flex w-full cursor-pointer flex-col gap-1.5 rounded-[10px] border bg-card px-3 py-2.5 text-left shadow-sm',
-        'hover:border-input focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-        // A card being worked on has the lit border (note 5).
-        card.category === 'active' && 'border-c-active ring-1 ring-c-active',
-        selected && 'outline-2 outline-offset-1 outline-ring',
-        flash && 'field-flash',
-      )}
-    >
-      <span
-        className={cn('leading-snug font-medium', card.category === 'dropped' && 'text-muted-foreground line-through')}
-      >
-        {card.title}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        {card.shortId}
-        {card.stage === null ? null : ` · ${card.stage}`}
-      </span>
-      {card.chips.length === 0 ? null : (
-        <span className="flex flex-wrap gap-1.5">
-          {card.chips.map((chip) => (
-            <ChipView key={chip.id} chip={chip} />
-          ))}
-        </span>
-      )}
-    </button>
-  )
-}
-
-function ChipView({ chip }: { chip: Chip }) {
-  const style =
-    chip.id === 'status'
-      ? TEXT[chip.category!]
-      : chip.id === 'divergence'
-        ? 'border-waiting/40 text-waiting'
-        : chip.id === 'collision'
-          ? 'border-destructive/40 text-destructive'
-          : 'text-muted-foreground'
-  return (
-    <Badge variant="outline" className={cn('font-normal', style)}>
-      {chip.id === 'status' ? <span className={cn('size-2 rounded-full', DOT[chip.category!])} /> : null}
-      {chip.id === 'divergence' ? <span aria-hidden="true">↗</span> : null}
-      {chip.text}
-    </Badge>
   )
 }

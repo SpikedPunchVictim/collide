@@ -1007,6 +1007,15 @@ impl Corpus {
         }
     }
 
+    /// Whether a source lists a collection with this id, as its shown checkout listed it.
+    pub fn has_collection(&self, id: &str) -> bool {
+        self.sources
+            .values()
+            .filter_map(|state| self.preferred(state.collections.iter()))
+            .flatten()
+            .any(|collection| collection.id == id)
+    }
+
     /// `task.list` for the whole corpus: the shown tasks with no body, the collections of each source as its shown
     /// checkout listed them, and every invalid item.
     pub fn list_result(&self) -> TaskListResult {
