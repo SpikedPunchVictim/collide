@@ -23,6 +23,8 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
                             start a child that writes its own environment to the file, and wait for it
     {"sleep": SECONDS}      do nothing for that long (a child that holds on until it is signalled)
     {"touch": "path"}       create the file (a mark that the steps before it ran)
+    {"wait_file": "path"}   wait until the file exists, which the test makes when the phase may go on (ts-0188-kb). It
+                            ends with 96 after two minutes, so a test that never makes it does not leave a child
     {"write_file": {"path": "a/b.txt", "text": "..."}}
                             write the text to the file, below this process's working folder (ts-0078-ye)
     {"git_commit": "message"}
@@ -129,6 +131,18 @@ def write_file(path, text):
         out.write(text)
 
 
+WAIT_FILE_SECONDS = 120
+
+
+def wait_file(path):
+    """Holds the phase until the test makes the file; a recording whose file never comes ends instead of hanging."""
+    deadline = time.monotonic() + WAIT_FILE_SECONDS
+    while not os.path.exists(path):
+        if time.monotonic() > deadline:
+            stop(EXIT_STEP_UNKNOWN, "wait_file: %s did not appear in %d s" % (path, WAIT_FILE_SECONDS))
+        time.sleep(0.05)
+
+
 IDENTITY = ["-c", "user.name=Fake Claude", "-c", "user.email=fake@example.invalid", "-c", "commit.gpgsign=false"]
 
 
@@ -183,6 +197,8 @@ def main():
             time.sleep(step["sleep"])
         elif "touch" in step:
             open(step["touch"], "w").close()
+        elif "wait_file" in step:
+            wait_file(step["wait_file"])
         elif "write_file" in step:
             write_file(step["write_file"]["path"], step["write_file"]["text"])
         elif "git_commit" in step:

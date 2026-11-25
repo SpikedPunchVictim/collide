@@ -43,7 +43,7 @@
 //! |---|---|---|
 //! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions`, `daemon.subscribe` |
 //! | board | [`board`] | `board.list`, `board.open`, `board.init`, `board.trust` |
-//! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.create`, `task.reid`, `task.preview`, `task.views`, `task.save_view`, `task.sections` |
+//! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.create`, `task.reid`, `task.preview`, `task.views`, `task.save_view`, `task.sections`, `task.changes`, `task.diff` |
 //! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.record`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
 //! | queue | [`queue`] | `queue.list`, `queue.context`, `queue.answer` |
 //! | workspace | [`workspace`] | `workspace.list`, `workspace.remove`, `workspace.resume` |
@@ -582,6 +582,12 @@ methods! {
     TaskSections, "task.sections", Task,
         "collide sections",
         TaskSectionsParams, Sections;
+    TaskChanges, "task.changes", Task,
+        "0.11, Task drawer, Changes: a task's runs and the commits that name it, with their files",
+        TaskChangesParams, TaskChangesResult;
+    TaskDiff, "task.diff", Task,
+        "0.11, Task drawer, Changes: one file's patch, or the whole file after the changes",
+        TaskDiffParams, TaskDiffResult;
     RunStart, "run.start", Run,
         "collide run, and Launch",
         RunStartParams, RunStartResult;

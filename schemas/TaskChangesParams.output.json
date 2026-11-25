@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.changes` params: the task's key, as `task.get` gives it.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board",
+    "task"
+  ],
+  "title": "TaskChangesParams",
+  "type": "object"
+}

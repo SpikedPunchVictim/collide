@@ -398,6 +398,8 @@ impl FileRuns {
         if let Err(message) = &committed {
             self.log(&format!("run {run}: {message}"));
         }
+        // Before the Review item, so a client that finds the item finds the span.
+        self.record_head(&run, &live.workspace, super::Head::End);
         let (to, title) = match (to, committed) {
             (RunState::Ended { .. }, Ok(())) => (
                 RunState::Ended {

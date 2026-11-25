@@ -289,6 +289,13 @@ impl RunContext {
     }
 }
 
+/// Which of a phase's two heads [`FileRuns::record_head`] keeps.
+#[derive(Clone, Copy)]
+enum Head {
+    Start,
+    End,
+}
+
 /// A run the daemon drives: its worktree and what it keeps of it. One lock for both, held while the run starts, resumes
 /// or ends, so the phase's end hook waits for a start that has not finished.
 struct Live {
@@ -761,6 +768,7 @@ impl FileRuns {
                 .live
                 .started(run, Path::new(&location.path), false);
         }
+        self.record_head(run, workspace, Head::Start);
         // A workspace that is `idle` (a worktree a re-prompt takes over) goes in use from there.
         self.record_workspace(
             phases,
@@ -771,6 +779,32 @@ impl FileRuns {
         );
         let first_turn = ctx.task_text.clone();
         self.start_attempt(phases, run, workspace, ctx, base, &first_turn, false)
+    }
+
+    /// Keeps the commit the worktree is at as the phase's start head or its end head ([`Store::set_phase_start_head`]).
+    /// A head that cannot be read or kept is logged and the run goes on: its changes then read "no changes recorded".
+    fn record_head(&self, run: &str, workspace: &BuiltinWorkspace, which: Head) {
+        let kept = || -> Result<(), String> {
+            let location = workspace.location().ok_or("the worktree has no location")?;
+            let head = Git::with_env(self.config.git_env.clone())
+                .text(
+                    Path::new(&location.path),
+                    &["rev-parse", "--verify", "HEAD^{commit}"],
+                )
+                .map_err(|error| error.to_string())?;
+            match which {
+                Head::Start => self
+                    .config
+                    .store
+                    .set_phase_start_head(run, PHASE_NAME, &head),
+                Head::End => self.config.store.set_phase_end_head(run, PHASE_NAME, &head),
+            }
+            .map(drop)
+            .map_err(|error| error.to_string())
+        };
+        if let Err(message) = kept() {
+            self.log(&format!("run {run}: a phase head was not kept: {message}"));
+        }
     }
 
     /// The commit the worktree is at, which is the one it was made from while no phase has run in it.
@@ -1079,6 +1113,7 @@ impl FileRuns {
         if live.workspace.state() == WorkspaceState::InUse {
             self.end_workspace_phase(phases, live);
         }
+        self.record_head(&live.ctx.run, &live.workspace, Head::End);
         self.record_run_state(phases, live, RunState::Failed {});
         self.config.store.delete_run_context(&live.ctx.run).ok();
     }
@@ -1134,6 +1169,10 @@ impl FileRuns {
             _ => RunState::Failed {},
         };
         // A prompt run goes on to its review before it shows as final, so a client that sees it final finds the item.
+        // A prompt run keeps its end head once its leftovers are committed, in `finish_quick`, so the span holds them.
+        if live.ctx.quick.is_none() {
+            self.record_head(run, &live.workspace, Head::End);
+        }
         let to = self.finish_quick(phases, &mut live, to);
         self.record_run_state(phases, &mut live, to);
         self.sync(&mut live);

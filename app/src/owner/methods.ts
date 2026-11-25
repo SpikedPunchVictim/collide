@@ -36,6 +36,8 @@ export const OWNER_METHODS = {
   'task.views': call<G.TaskViewsParamsInput, G.TaskViewsResultOutput>(),
   'task.save_view': call<G.TaskSaveViewParamsInput, G.TaskSaveViewResultOutput>(),
   'task.sections': call<G.TaskSectionsParamsInput, G.SectionsOutput>(),
+  'task.changes': call<G.TaskChangesParamsInput, G.TaskChangesResultOutput>(),
+  'task.diff': call<G.TaskDiffParamsInput, G.TaskDiffResultOutput>(),
   'run.start': call<G.RunStartParamsInput, G.RunStartResultOutput>(),
   // `RunPreviewParams` is a type alias of `RunStartParams` in `core`, so it has no schema of its own.
   'run.preview': call<G.RunStartParamsInput, G.RunPreviewResultOutput>(),

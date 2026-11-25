@@ -74,6 +74,7 @@ pub mod store;
 pub mod supervisor;
 pub mod sysproc;
 pub mod task_args;
+pub mod task_changes;
 pub mod task_cli;
 pub mod task_daemon;
 pub mod task_view;

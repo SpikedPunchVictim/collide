@@ -67,12 +67,21 @@ impl From<WorkspaceError> for DiffError {
 }
 
 /// One entry of git's raw diff.
-struct Entry {
-    path: String,
-    old_path: Option<String>,
-    status: DiffStatus,
+pub(crate) struct Entry {
+    pub(crate) path: String,
+    pub(crate) old_path: Option<String>,
+    pub(crate) status: DiffStatus,
     /// The blob to measure: the new one, or the old one for a file the run deleted.
-    blob: String,
+    pub(crate) blob: String,
+    /// The size, for a file that is not in git yet (no blob to measure). `None` for one that is.
+    pub(crate) size: Option<u64>,
+}
+
+/// The files of a diff as a client reads them: listed, collapsed into folders, and capped.
+pub(crate) struct Listing {
+    pub(crate) files: Vec<DiffFile>,
+    pub(crate) collapsed: Vec<CollapsedFolder>,
+    pub(crate) more: u32,
 }
 
 /// The diff of `base` (a commit) against the head of `branch`, in the repository `repo`. With `path`, the result also
@@ -99,10 +108,36 @@ pub(crate) fn diff(
     let numstat = git.run(repo, &diff_args("--numstat", &range))?;
     let entries = parse_raw(&raw)?;
     let counts = parse_numstat(&numstat);
+    let Listing {
+        files,
+        collapsed,
+        more,
+    } = listing(git, repo, &entries, &counts)?;
 
+    let patch = path
+        .map(|path| patch_of(git, repo, &range, path, &entries))
+        .transpose()?;
+    Ok(RunDiffResult {
+        base: base.to_string(),
+        head,
+        files,
+        collapsed,
+        more,
+        patch,
+    })
+}
+
+/// The entries as files and collapsed folders, capped. `counts` has the added and deleted lines of the entries git
+/// counted; a file it has no count for lists none.
+pub(crate) fn listing(
+    git: &Git,
+    repo: &Path,
+    entries: &[Entry],
+    counts: &HashMap<String, Counts>,
+) -> Result<Listing, DiffError> {
     let mut files = Vec::new();
     let mut folders: BTreeMap<String, Vec<&Entry>> = BTreeMap::new();
-    for entry in &entries {
+    for entry in entries {
         match collapsed_folder(&entry.path) {
             Some(folder) => folders.entry(folder).or_default().push(entry),
             None => {
@@ -126,23 +161,20 @@ pub(crate) fn diff(
             files: inside.len() as u32,
             bytes: inside
                 .iter()
-                .map(|entry| sizes.get(&entry.blob).copied().unwrap_or(0))
+                .map(|entry| {
+                    entry
+                        .size
+                        .or_else(|| sizes.get(&entry.blob).copied())
+                        .unwrap_or(0)
+                })
                 .sum(),
         })
         .collect();
-
     let more = cap(&mut files, &mut collapsed);
-
-    let patch = path
-        .map(|path| patch_of(git, repo, &range, path, &entries))
-        .transpose()?;
-    Ok(RunDiffResult {
-        base: base.to_string(),
-        head,
+    Ok(Listing {
         files,
         collapsed,
         more,
-        patch,
     })
 }
 
@@ -162,7 +194,7 @@ fn cap(files: &mut Vec<DiffFile>, collapsed: &mut Vec<CollapsedFolder>) -> u32 {
 
 /// The arguments of `git diff` in one `format` between two commits: renames found, no program the repository names run,
 /// and `-z` so a path is never quoted.
-fn diff_args<'a>(format: &'a str, range: &[&'a str; 2]) -> Vec<&'a str> {
+pub(crate) fn diff_args<'a>(format: &'a str, range: &[&'a str]) -> Vec<&'a str> {
     let mut args = vec!["diff", format, "-z", "-M", "--no-ext-diff", "--no-textconv"];
     if format == "--raw" {
         args.push("--no-abbrev");
@@ -173,7 +205,7 @@ fn diff_args<'a>(format: &'a str, range: &[&'a str; 2]) -> Vec<&'a str> {
 
 /// The folder a collapsed path is collapsed into, when it is: the outermost folder of the path that is one of
 /// [`COLLAPSED`]. A lock file is never collapsed.
-fn collapsed_folder(path: &str) -> Option<String> {
+pub(crate) fn collapsed_folder(path: &str) -> Option<String> {
     let parts: Vec<&str> = path.split('/').collect();
     let (name, folders) = parts.split_last()?;
     if name.ends_with(".lock") || LOCK_FILES.contains(name) {
@@ -183,12 +215,12 @@ fn collapsed_folder(path: &str) -> Option<String> {
     Some(folders[..=at].join("/"))
 }
 
-fn text(bytes: &[u8]) -> String {
+pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// `git diff --raw -z --no-abbrev`: `:<modes> <old blob> <new blob> <status>` and then one path, or two for a rename.
-fn parse_raw(raw: &[u8]) -> Result<Vec<Entry>, DiffError> {
+pub(crate) fn parse_raw(raw: &[u8]) -> Result<Vec<Entry>, DiffError> {
     let mut parts = raw.split(|byte| *byte == 0).filter(|part| !part.is_empty());
     let mut entries = Vec::new();
     while let Some(meta) = parts.next() {
@@ -224,16 +256,17 @@ fn parse_raw(raw: &[u8]) -> Result<Vec<Entry>, DiffError> {
             old_path,
             status,
             blob: blob.to_string(),
+            size: None,
         });
     }
     Ok(entries)
 }
 
-type Counts = (Option<u32>, Option<u32>);
+pub(crate) type Counts = (Option<u32>, Option<u32>);
 
 /// `git diff --numstat -z`: `<added>\t<deleted>\t<path>`, with `-` for both of a binary file. A rename has an empty
 /// path there and the two paths as the next two parts.
-fn parse_numstat(numstat: &[u8]) -> HashMap<String, Counts> {
+pub(crate) fn parse_numstat(numstat: &[u8]) -> HashMap<String, Counts> {
     let mut counts = HashMap::new();
     let mut parts = numstat
         .split(|byte| *byte == 0)
@@ -267,6 +300,7 @@ fn blob_sizes(
     let blobs: Vec<&str> = folders
         .values()
         .flatten()
+        .filter(|entry| entry.size.is_none())
         .map(|entry| entry.blob.as_str())
         .collect();
     if blobs.is_empty() {
@@ -316,17 +350,21 @@ fn patch_of(
     if full.is_empty() {
         return Err(DiffError::NoChange(path.to_string()));
     }
-    let bytes = full.len() as u64;
+    Ok(cut_patch(path, &full))
+}
+
+/// `full` as a patch of `path`, cut at [`MAX_PATCH_BYTES`] on a character boundary.
+pub(crate) fn cut_patch(path: &str, full: &str) -> FilePatch {
     let mut cut = full.len().min(MAX_PATCH_BYTES);
     while !full.is_char_boundary(cut) {
         cut -= 1;
     }
-    Ok(FilePatch {
+    FilePatch {
         path: path.to_string(),
         text: full[..cut].to_string(),
-        bytes,
+        bytes: full.len() as u64,
         truncated: cut < full.len(),
-    })
+    }
 }
 
 #[cfg(test)]

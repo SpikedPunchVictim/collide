@@ -48,6 +48,7 @@ mod run_process;
 mod session;
 mod settings_schema;
 mod snapshot;
+mod task_changes;
 mod tool_results;
 mod usage;
 mod user_config;

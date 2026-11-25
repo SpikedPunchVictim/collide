@@ -142,6 +142,7 @@ export interface RunSummary {
  * One phase of a run, for a track's segment: its instances' states, its real times and its gate verdicts.
  */
 export interface PhaseSummary {
+  end_head?: string | null
   ended_ms?: number | null
   gate_results?: {
     [k: string]: HookStatus
@@ -150,6 +151,11 @@ export interface PhaseSummary {
   kind: PhaseKindWire
   name: string
   round: number
+  /**
+   * The commit the phase started at, and the one it ended at (`task.changes` reads a task's changes from them).
+   * A phase of a run from before they were kept, and one that is active, has no `end_head`.
+   */
+  start_head?: string | null
   started_ms?: number | null
   take_over?: TakeOverState | null
 }

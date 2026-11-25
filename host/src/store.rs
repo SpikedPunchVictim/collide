@@ -70,7 +70,7 @@ pub struct Migration {
 /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
 /// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
 /// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
-pub const MIGRATIONS: [Migration; 11] = [
+pub const MIGRATIONS: [Migration; 12] = [
     Migration {
         version: 1,
         name: "events",
@@ -149,6 +149,17 @@ pub const MIGRATIONS: [Migration; 11] = [
         version: 11,
         name: "run_task_file",
         sql: "ALTER TABLE runs ADD COLUMN task_file TEXT",
+    },
+    Migration {
+        version: 12,
+        name: "phase_heads",
+        sql: "CREATE TABLE phase_heads (
+              run        TEXT NOT NULL,
+              phase      TEXT NOT NULL,
+              start_head TEXT NOT NULL,
+              end_head   TEXT,
+              PRIMARY KEY (run, phase)
+          )",
     },
 ];
 
@@ -1309,6 +1320,32 @@ mod tests {
             })
             .unwrap();
         assert_eq!(row, None, "a run from before has no task file");
+    }
+
+    #[test]
+    fn a_store_at_version_eleven_gains_phase_heads_and_keeps_its_runs() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 11);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        conn.execute(
+            "INSERT INTO runs (run, state, live, opened_seq, started_ms)
+             VALUES ('r', '{\"state\":\"stopped\"}', 0, 1, 5)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(user_version(&raw(&store)), known_version());
+        assert_eq!(
+            MIGRATIONS.get(11).map(|migration| migration.name),
+            Some("phase_heads")
+        );
+        assert!(store.run("r").unwrap().is_some(), "the old run is read");
+        assert_eq!(
+            store.phase_heads("r").unwrap(),
+            Vec::new(),
+            "it has no heads"
+        );
     }
 
     #[test]

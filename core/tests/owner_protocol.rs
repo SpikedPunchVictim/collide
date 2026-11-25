@@ -315,6 +315,33 @@ fn samples() -> Vec<(Method, Value, Value)> {
             json!({ "sections": [], "nearDuplicates": [] }),
         ),
         (
+            Method::TaskChanges,
+            json!({ "board": "bd-1", "task": "plan:ts-0001" }),
+            json!({
+                "runs": [{
+                    "run": "R-118", "state": { "state": "running" }, "place": "worktree",
+                    "words": { "place": "Run R-118's worktree", "how": "since the build phase began" },
+                    "files": [{ "path": "a.rs", "status": "modified", "additions": 3, "deletions": 1 }],
+                    "collapsed": [], "more": 0
+                }],
+                "commits": [{
+                    "id": "abc", "subject": "Fix ts-0001", "date_ms": 5, "files": [], "collapsed": [], "more": 0
+                }],
+                "commits_words": { "place": "Your checkout, line main", "how": "1 commit names ts-0001" }
+            }),
+        ),
+        (
+            Method::TaskDiff,
+            json!({ "board": "bd-1", "task": "plan:ts-0001", "run": "R-118", "path": "a.rs", "whole": true }),
+            json!({
+                "path": "a.rs",
+                "whole": {
+                    "lines": [{ "n": 1, "text": "fn a() {}", "changed": true }],
+                    "bytes": 9, "truncated": false, "binary": false
+                }
+            }),
+        ),
+        (
             Method::RunStart,
             json!({ "board": "bd-1", "tasks": ["plan:ts-0001"], "launch": {}, "mode": "headless" }),
             json!({ "outcome": "started", "run": "R-118" }),

@@ -134,6 +134,7 @@ use crate::phases::{
     Phases, PhasesConfig, StopRunError, process_is_running, read_exit_json, read_identity,
 };
 use crate::queue::Queue;
+use crate::run_diff::DiffError;
 use crate::run_store::{RunFilter, RunRow};
 use crate::run_summary::summarize;
 use crate::sampler::{Sampler, TICK};
@@ -146,10 +147,12 @@ use crate::sources::{
 use crate::stop::{Cleanup, Processes, SystemProcesses};
 use crate::store::{Store, StoreError};
 use crate::supervisor::SupervisorPolicy;
+use crate::task_changes;
 use crate::views::{
     BeforeParse, Loaded, Lookup, SaveError, ViewCache, builtin_candidates, find_view,
     pack_candidates, personal_candidates, personal_dir, repo_candidates, repo_dir, save_view,
 };
+use crate::workspace::Git;
 use crate::write_guard::{
     self, Applied, Fate, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig,
 };
@@ -159,25 +162,27 @@ use collide_core::events::Event;
 use collide_core::item::Category;
 use collide_core::owner::{
     BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardSummary,
-    BoardTrustParams, BoardTrustReviewParams, ConfigGetParams, ConfigPackAddParams,
-    ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult,
-    ConfigPackUpdateParams, ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult,
-    DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture,
-    MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer,
-    QueueAnswerParams, QueueAnswerResult, QueueItem, QueueListParams, QueueListResult, Request,
-    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
-    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
-    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
-    TaskApplyParams, TaskApplyResult, TaskCreateParams, TaskGetParams, TaskGetResult,
-    TaskListParams, TaskPreviewParams, TaskReidParams, TaskReidResult, TaskSaveViewParams,
-    TaskSaveViewResult, TaskSectionsParams, TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef,
-    ViewReport, ViewTarget, WriteQueued, code, encode_line, parse_request, route,
+    BoardTrustParams, BoardTrustReviewParams, ChangeWords, ChangesPlace, CommitChanges,
+    ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams, ConfigPackLinkParams,
+    ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams, ConfigSetParams,
+    ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
+    DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
+    OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueItem,
+    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunDiffParams,
+    RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
+    RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult,
+    RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskChangesParams,
+    TaskChangesResult, TaskCreateParams, TaskDiffParams, TaskDiffResult, TaskGetParams,
+    TaskGetResult, TaskListParams, TaskPreviewParams, TaskReidParams, TaskReidResult,
+    TaskSaveViewParams, TaskSaveViewResult, TaskSectionsParams, TaskViewsParams, TaskViewsResult,
+    ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued, code, encode_line, parse_request,
+    route,
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::section::{ProposalFeatures, section_uses};
 use collide_core::shim::ExitRecord;
 use collide_core::view_eval::view_report;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -2149,6 +2154,8 @@ fn call(
         Method::TaskCreate => task_create(shared, session, params),
         Method::TaskReid => task_reid(shared, session, params),
         Method::TaskSections => task_sections(shared, params),
+        Method::TaskChanges => task_changes(shared, params),
+        Method::TaskDiff => task_diff(shared, params),
         Method::TaskPreview => task_preview(shared, session, params),
         Method::TaskViews => task_views(shared, params),
         Method::TaskSaveView => task_save_view(shared, session, params),
@@ -2328,8 +2335,14 @@ fn summary_of(
         .file_runs
         .workspace_path(&row.run)
         .map(|path| path.to_string_lossy().into_owned());
-    let (mut summary, rounds) =
-        summarize(row, &shared.phases.run_phases(&row.run), &spans, workspace);
+    let heads = shared.store.phase_heads(&row.run).map_err(store_failed)?;
+    let (mut summary, rounds) = summarize(
+        row,
+        &shared.phases.run_phases(&row.run),
+        &spans,
+        &heads,
+        workspace,
+    );
     summary.warnings = shared.store.run_warnings(&row.run).map_err(store_failed)?;
     Ok((summary, rounds))
 }
@@ -3809,6 +3822,208 @@ fn task_sections(
         section_uses(&proposals)
     });
     Ok(serde_json::to_value(sections).expect("a result is JSON"))
+}
+
+/// `task.changes` (ts-0188-kb): for each run of the task, the files from where its first phase began to where its last
+/// one ended (to the working tree while a phase is active), then the commits on the board's line that name the task,
+/// outside every run's span. A task of the scratch source has no commits to find: its ids are short numbers.
+fn task_changes(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: TaskChangesParams = read_params("task.changes", params)?;
+    let root = board_root(shared, &params.board)?;
+    let root = Path::new(&root);
+    let rows = task_runs(shared, &params.board, root, &params.task)?;
+    let git = Git::with_env(shared.git_env.clone());
+    let mut runs = Vec::new();
+    let mut in_runs = HashSet::new();
+    for row in &rows {
+        let heads = shared.store.phase_heads(&row.run).map_err(store_failed)?;
+        let workspace = shared.file_runs.workspace_path(&row.run);
+        let input = task_changes::RunInput {
+            run: &row.run,
+            state: &row.state,
+            heads: &heads,
+            workspace: workspace.as_deref(),
+            place: ChangesPlace::Worktree,
+        };
+        if let Some(found) = task_changes::run_span(&input, root) {
+            in_runs.extend(commits_of_span(shared, &git, &found, &row.run));
+        }
+        runs.push(task_changes::changes_of_run(&git, root, &input));
+    }
+    let (commits, commits_words) =
+        task_commits(shared, &git, root, &params.task, &in_runs, runs.len())?;
+    let result = TaskChangesResult {
+        runs,
+        commits,
+        commits_words,
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// The commits a run's span holds. A span git cannot read is logged and holds none: the list of commits is then a
+/// little longer, which is the better mistake.
+fn commits_of_span(
+    shared: &Shared,
+    git: &Git,
+    found: &task_changes::RunSpan,
+    run: &str,
+) -> HashSet<String> {
+    let (base, head) = match &found.span {
+        task_changes::Span::Between { base, head } => (base, head.as_str()),
+        task_changes::Span::WorkingTree { base } => (base, "HEAD"),
+        task_changes::Span::Commit { .. } => return HashSet::new(),
+    };
+    task_changes::commits_in(git, &found.cwd, base, head).unwrap_or_else(|error| {
+        shared
+            .log
+            .line(&format!("run {run}: its commits were not listed: {error}"));
+        HashSet::new()
+    })
+}
+
+/// The commits that name `task` on the board's line, outside `in_runs`, and the words that say where they are.
+fn task_commits(
+    shared: &Shared,
+    git: &Git,
+    root: &Path,
+    task: &str,
+    in_runs: &HashSet<String>,
+    runs: usize,
+) -> Result<(Vec<CommitChanges>, ChangeWords), RpcError> {
+    let (source, id) = task.split_once(':').unwrap_or((scratch::SOURCE, task));
+    let line = boards::checkout_of(root, &shared.git_env)
+        .map(|checkout| checkout.line_branch().to_string())
+        .ok();
+    let (Some(line), true) = (line, source != scratch::SOURCE) else {
+        let line = "none";
+        return Ok((Vec::new(), task_changes::commit_words(line, id, &[], runs)));
+    };
+    let found = task_changes::naming(git, root, &line, id).map_err(diff_failed)?;
+    let found: Vec<_> = found
+        .into_iter()
+        .filter(|commit| !in_runs.contains(&commit.id))
+        .collect();
+    let mut commits = Vec::new();
+    for commit in &found {
+        let span = task_changes::Span::Commit {
+            id: commit.id.clone(),
+        };
+        let files = task_changes::list(git, root, &span).map_err(diff_failed)?;
+        commits.push(CommitChanges {
+            id: commit.id.clone(),
+            subject: commit.subject.clone(),
+            date_ms: commit.date_ms,
+            files: files.files,
+            collapsed: files.collapsed,
+            more: files.more,
+        });
+    }
+    let words = task_changes::commit_words(&line, id, &found, runs);
+    Ok((commits, words))
+}
+
+fn diff_failed(error: DiffError) -> RpcError {
+    match error {
+        DiffError::NoChange(_) | DiffError::BranchGone(_) => {
+            RpcError::new(code::NOT_FOUND, error.to_string())
+        }
+        DiffError::Git(message) => RpcError::new(code::INTERNAL_ERROR, message),
+    }
+}
+
+/// The runs of `task` under its key and the keys it had before, newest first.
+fn task_runs(
+    shared: &Shared,
+    board: &str,
+    root: &Path,
+    task: &str,
+) -> Result<Vec<RunRow>, RpcError> {
+    let mut keys = vec![task.to_string()];
+    if task.contains(':')
+        && let Ok(corpus) = corpus_of(shared, board, &root.to_string_lossy())
+    {
+        keys.extend(corpus.read(|corpus| corpus.former_keys(task)));
+    }
+    runs_of(shared, board, &keys)
+}
+
+/// `task.diff` (ts-0188-kb): one file of a run's changes, or of a commit's, as git's patch or as the whole file after
+/// the changes with each line numbered and marked. The patch is cut at the cap `run.diff`'s is.
+fn task_diff(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: TaskDiffParams = read_params("task.diff", params)?;
+    let root = board_root(shared, &params.board)?;
+    let root = Path::new(&root);
+    let (span, cwd) = match (&params.run, &params.commit) {
+        (Some(run), None) => {
+            let rows = task_runs(shared, &params.board, root, &params.task)?;
+            let row = rows.iter().find(|row| &row.run == run).ok_or_else(|| {
+                RpcError::new(
+                    code::NOT_FOUND,
+                    format!("{} has no run {run:?}", params.task),
+                )
+            })?;
+            let heads = shared.store.phase_heads(run).map_err(store_failed)?;
+            let workspace = shared.file_runs.workspace_path(run);
+            let input = task_changes::RunInput {
+                run,
+                state: &row.state,
+                heads: &heads,
+                workspace: workspace.as_deref(),
+                place: ChangesPlace::Worktree,
+            };
+            let found = task_changes::run_span(&input, root)
+                .ok_or_else(|| RpcError::new(code::NOT_FOUND, task_changes::NO_CHANGES_RECORDED))?;
+            (found.span, found.cwd)
+        }
+        (None, Some(commit)) => {
+            if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(RpcError::new(
+                    code::INVALID_PARAMS,
+                    format!("{commit:?} is not a commit id"),
+                ));
+            }
+            (
+                task_changes::Span::Commit { id: commit.clone() },
+                root.to_path_buf(),
+            )
+        }
+        _ => {
+            return Err(RpcError::new(
+                code::INVALID_PARAMS,
+                "task.diff takes a run or a commit, one of the two",
+            ));
+        }
+    };
+    let git = Git::with_env(shared.git_env.clone());
+    let result = if params.whole {
+        let (whole, note) =
+            task_changes::whole(&git, &cwd, &span, &params.path).map_err(diff_failed)?;
+        TaskDiffResult {
+            path: params.path,
+            patch: None,
+            whole: Some(whole),
+            note,
+        }
+    } else {
+        let patch = task_changes::patch(&git, &cwd, &span, &params.path).map_err(diff_failed)?;
+        let note = patch.truncated.then(|| {
+            format!(
+                "the patch is {} bytes and is cut at {}",
+                patch.bytes,
+                crate::run_diff::MAX_PATCH_BYTES
+            )
+        });
+        TaskDiffResult {
+            path: params.path,
+            patch: Some(patch),
+            whole: None,
+            note,
+        }
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
 /// Whether the write is one only a person makes (0.10, Planning sources), and what the connection may do about it.

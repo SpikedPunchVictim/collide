@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.diff` params: one file of a run's changes (`run`) or of a commit's (`commit`); exactly one is given. With\n`whole` the result is the whole file after the changes, not the patch.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "run": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "type": "string"
+    },
+    "whole": {
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "board",
+    "task",
+    "path"
+  ],
+  "title": "TaskDiffParams",
+  "type": "object"
+}

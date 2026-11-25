@@ -34,6 +34,16 @@ pub struct RunLaunch {
     pub workflow: String,
 }
 
+/// The commits a phase started and ended at (migration 12), which a task's changes are read from. A phase of a run
+/// from before the migration has no row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseHeads {
+    pub phase: String,
+    pub start_head: String,
+    /// `None` while the phase is active, and for a phase whose end the daemon did not see.
+    pub end_head: Option<String>,
+}
+
 /// One run as the store holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRow {
@@ -184,6 +194,62 @@ impl Store {
         Ok(changed > 0)
     }
 
+    /// Keeps the commit a phase started at. The first write stays: a phase that resumes (a usage limit, a disk pause)
+    /// started once. `false` when the phase already has its start head.
+    pub fn set_phase_start_head(
+        &self,
+        run: &str,
+        phase: &str,
+        head: &str,
+    ) -> Result<bool, StoreError> {
+        let changed = self
+            .connect()?
+            .execute(
+                "INSERT OR IGNORE INTO phase_heads (run, phase, start_head) VALUES (?1, ?2, ?3)",
+                params![run, phase, head],
+            )
+            .map_err(|e| sql_error("writing a phase's start head", e))?;
+        Ok(changed > 0)
+    }
+
+    /// Keeps the commit a phase ended at. `false` when the phase has no start head, so there is nothing to end.
+    pub fn set_phase_end_head(
+        &self,
+        run: &str,
+        phase: &str,
+        head: &str,
+    ) -> Result<bool, StoreError> {
+        let changed = self
+            .connect()?
+            .execute(
+                "UPDATE phase_heads SET end_head = ?3 WHERE run = ?1 AND phase = ?2",
+                params![run, phase, head],
+            )
+            .map_err(|e| sql_error("writing a phase's end head", e))?;
+        Ok(changed > 0)
+    }
+
+    /// The heads of each phase of a run, in the order the phases started. Empty for a run from before they were kept.
+    pub fn phase_heads(&self, run: &str) -> Result<Vec<PhaseHeads>, StoreError> {
+        let conn = self.connect()?;
+        let mut statement = conn
+            .prepare(
+                "SELECT phase, start_head, end_head FROM phase_heads WHERE run = ?1 ORDER BY rowid",
+            )
+            .map_err(|e| sql_error("reading a run's phase heads", e))?;
+        let rows = statement
+            .query_map([run], |row| {
+                Ok(PhaseHeads {
+                    phase: row.get(0)?,
+                    start_head: row.get(1)?,
+                    end_head: row.get(2)?,
+                })
+            })
+            .map_err(|e| sql_error("reading a run's phase heads", e))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| sql_error("reading a run's phase heads", e))
+    }
+
     /// One run, or `None` for a run the store has no row of.
     pub fn run(&self, run: &str) -> Result<Option<RunRow>, StoreError> {
         let conn = self.connect()?;
@@ -296,6 +362,53 @@ mod tests {
             }
             let _ = fs::remove_dir(&self.0);
         }
+    }
+
+    #[test]
+    fn a_phase_keeps_its_first_start_head_and_gains_an_end_head() {
+        let dir = TempDir::new();
+        let store = Store::open(&dir.0).unwrap();
+
+        assert!(store.set_phase_start_head("r", "build", "aaa").unwrap());
+        assert!(!store.set_phase_start_head("r", "build", "bbb").unwrap());
+        assert!(store.set_phase_end_head("r", "build", "ccc").unwrap());
+
+        assert_eq!(
+            store.phase_heads("r").unwrap(),
+            [PhaseHeads {
+                phase: "build".into(),
+                start_head: "aaa".into(),
+                end_head: Some("ccc".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn an_end_head_for_a_phase_that_has_no_start_head_is_not_kept() {
+        let dir = TempDir::new();
+        let store = Store::open(&dir.0).unwrap();
+
+        assert!(!store.set_phase_end_head("r", "build", "ccc").unwrap());
+
+        assert_eq!(store.phase_heads("r").unwrap(), []);
+    }
+
+    #[test]
+    fn phase_heads_come_in_the_order_the_phases_started_and_by_run() {
+        let dir = TempDir::new();
+        let store = Store::open(&dir.0).unwrap();
+        store.set_phase_start_head("r", "second", "b").unwrap();
+        store.set_phase_start_head("r", "first", "a").unwrap();
+        store.set_phase_start_head("other", "x", "z").unwrap();
+
+        let phases: Vec<String> = store
+            .phase_heads("r")
+            .unwrap()
+            .into_iter()
+            .map(|heads| heads.phase)
+            .collect();
+
+        assert_eq!(phases, ["second", "first"]);
     }
 
     fn ended() -> RunState {

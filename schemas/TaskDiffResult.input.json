@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "FilePatch": {
+      "additionalProperties": false,
+      "description": "One file's patch as text. It is untrusted (0.9). `truncated` says the text was cut, and `bytes` is the patch's\nfull size.",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "bytes",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "NumberedLine": {
+      "additionalProperties": false,
+      "description": "One line of a file after the changes: its number, from 1, its text, and whether the changes added or changed it.",
+      "properties": {
+        "changed": {
+          "type": "boolean"
+        },
+        "n": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "n",
+        "text",
+        "changed"
+      ],
+      "type": "object"
+    },
+    "WholeFile": {
+      "additionalProperties": false,
+      "description": "A whole file after the changes. `binary` says it is not text and has no `lines`. `truncated` says `lines` stops at\nthe patch cap, and `bytes` is the file's full size.",
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/NumberedLine"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "lines",
+        "bytes",
+        "truncated",
+        "binary"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.diff` result: `patch` for a patch, `whole` for the whole file. `note` says what was cut or left out.",
+  "properties": {
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "patch": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilePatch"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "whole": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WholeFile"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "title": "TaskDiffResult",
+  "type": "object"
+}

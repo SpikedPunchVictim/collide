@@ -1,0 +1,339 @@
+{
+  "$defs": {
+    "ChangeWords": {
+      "additionalProperties": false,
+      "description": "Where a list of changes comes from, and how far it reaches, in words a window shows as they are (`place` and `how`).",
+      "properties": {
+        "how": {
+          "type": "string"
+        },
+        "place": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "place",
+        "how"
+      ],
+      "type": "object"
+    },
+    "ChangesPlace": {
+      "description": "Where a run's changes were made.",
+      "oneOf": [
+        {
+          "const": "worktree",
+          "description": "A worktree the run has to itself.",
+          "type": "string"
+        },
+        {
+          "const": "checkout",
+          "description": "The person's own checkout, where the person's edits are in the working tree too.",
+          "type": "string"
+        }
+      ]
+    },
+    "CollapsedFolder": {
+      "additionalProperties": false,
+      "description": "A folder the diff collapses (dependency stores and build output that `.gitignore` does not hide, 0.11): its file\ncount and size are shown instead of its files. Lock files are never collapsed.",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "files",
+        "bytes"
+      ],
+      "type": "object"
+    },
+    "CommitChanges": {
+      "additionalProperties": false,
+      "description": "One commit that names the task, outside every run's span. `date_ms` is the commit's time.",
+      "properties": {
+        "collapsed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CollapsedFolder"
+          },
+          "type": "array"
+        },
+        "date_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DiffFile"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "more": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "date_ms"
+      ],
+      "type": "object"
+    },
+    "DiffFile": {
+      "additionalProperties": false,
+      "description": "One changed file. The counts are absent for a binary file.",
+      "properties": {
+        "additions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "deletions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "old_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/DiffStatus"
+        }
+      },
+      "required": [
+        "path",
+        "status"
+      ],
+      "type": "object"
+    },
+    "DiffStatus": {
+      "enum": [
+        "added",
+        "modified",
+        "deleted",
+        "renamed"
+      ],
+      "type": "string"
+    },
+    "PauseCause": {
+      "description": "Why a run or a phase is paused (0.2, 0.3, 0.8). `ask_human` waits in the Queue, `usage_limit` waits for the\naccount's reset time, and `disk` is the free-space floor: nothing is started until space comes back (0.2).",
+      "enum": [
+        "ask_human",
+        "usage_limit",
+        "disk"
+      ],
+      "type": "string"
+    },
+    "RunChanges": {
+      "additionalProperties": false,
+      "description": "One run's changes for `task.changes`: the files from its first phase's start head to its last phase's end head, or\nto the working tree while a phase is active. A run with no heads has no files and says so in `note`. `files` and\n`collapsed` are capped as `run.diff`'s are, and `more` counts what they left out.",
+      "properties": {
+        "collapsed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CollapsedFolder"
+          },
+          "type": "array"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DiffFile"
+          },
+          "type": "array"
+        },
+        "more": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "note": {
+          "description": "Why `files` is empty, for a run that has no changes to show: `no changes recorded`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "place": {
+          "$ref": "#/$defs/ChangesPlace"
+        },
+        "run": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/RunState"
+        },
+        "words": {
+          "$ref": "#/$defs/ChangeWords"
+        },
+        "workspace": {
+          "description": "The folder the run works in, while it is there.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "run",
+        "state",
+        "place",
+        "words"
+      ],
+      "type": "object"
+    },
+    "RunState": {
+      "description": "Where a run is (0.8, Run). It ends `ended(<outcome>)`, `failed` or `stopped`; `outcome` is the `end` token the run\nreached (0.7, Outcomes and terminal states). `integrating` is a run whose `integrate` answered `pending`, so the\npull request is not merged yet (0.4).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/PauseCause"
+            },
+            "state": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "cause"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "integrating",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "state": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.changes` result: the task's runs, newest first, then the commits on the board's line that name its id, newest\nfirst and at most 200. A commit inside a run's span is under the run. `commits_words` says where the commits are\nand how they were found. A task of the `scratch` source has no commits: its short ids name nothing.",
+  "properties": {
+    "commits": {
+      "items": {
+        "$ref": "#/$defs/CommitChanges"
+      },
+      "type": "array"
+    },
+    "commits_words": {
+      "$ref": "#/$defs/ChangeWords"
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/$defs/RunChanges"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "runs",
+    "commits",
+    "commits_words"
+  ],
+  "title": "TaskChangesResult",
+  "type": "object"
+}

@@ -254,6 +254,12 @@ pub struct PhaseSummary {
     pub gate_results: BTreeMap<String, HookStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take_over: Option<TakeOverState>,
+    /// The commit the phase started at, and the one it ended at (`task.changes` reads a task's changes from them).
+    /// A phase of a run from before they were kept, and one that is active, has no `end_head`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_head: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_head: Option<String>,
 }
 
 /// What a run warning is about.

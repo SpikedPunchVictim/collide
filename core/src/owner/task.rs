@@ -9,10 +9,12 @@
 use crate::change::{ItemState, LatestRun};
 use crate::hook::HookLink;
 use crate::item::{Category, LinkTypeDecl, OpDecl, StatusDecl};
+use crate::owner::run::{CollapsedFolder, DiffFile, FilePatch};
 use crate::provider::{
     ApplyParams, ApplyResult, Collection, FieldDecl, Scope, Task, TaskCollision, TaskInvalid,
 };
 use crate::ready::UnknownTarget;
+use crate::state::RunState;
 use crate::view::View;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -446,4 +448,129 @@ pub struct TaskReidResult {
 #[serde(deny_unknown_fields)]
 pub struct TaskSectionsParams {
     pub board: String,
+}
+
+/// `task.changes` params: the task's key, as `task.get` gives it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskChangesParams {
+    pub board: String,
+    pub task: String,
+}
+
+/// Where a run's changes were made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangesPlace {
+    /// A worktree the run has to itself.
+    Worktree,
+    /// The person's own checkout, where the person's edits are in the working tree too.
+    Checkout,
+}
+
+/// Where a list of changes comes from, and how far it reaches, in words a window shows as they are (`place` and `how`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeWords {
+    pub place: String,
+    pub how: String,
+}
+
+/// One run's changes for `task.changes`: the files from its first phase's start head to its last phase's end head, or
+/// to the working tree while a phase is active. A run with no heads has no files and says so in `note`. `files` and
+/// `collapsed` are capped as `run.diff`'s are, and `more` counts what they left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunChanges {
+    pub run: String,
+    pub state: RunState,
+    /// The folder the run works in, while it is there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    pub place: ChangesPlace,
+    pub words: ChangeWords,
+    #[serde(default)]
+    pub files: Vec<DiffFile>,
+    #[serde(default)]
+    pub collapsed: Vec<CollapsedFolder>,
+    #[serde(default)]
+    pub more: u32,
+    /// Why `files` is empty, for a run that has no changes to show: `no changes recorded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// One commit that names the task, outside every run's span. `date_ms` is the commit's time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommitChanges {
+    pub id: String,
+    pub subject: String,
+    pub date_ms: u64,
+    #[serde(default)]
+    pub files: Vec<DiffFile>,
+    #[serde(default)]
+    pub collapsed: Vec<CollapsedFolder>,
+    #[serde(default)]
+    pub more: u32,
+}
+
+/// `task.changes` result: the task's runs, newest first, then the commits on the board's line that name its id, newest
+/// first and at most 200. A commit inside a run's span is under the run. `commits_words` says where the commits are
+/// and how they were found. A task of the `scratch` source has no commits: its short ids name nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskChangesResult {
+    pub runs: Vec<RunChanges>,
+    pub commits: Vec<CommitChanges>,
+    pub commits_words: ChangeWords,
+}
+
+/// `task.diff` params: one file of a run's changes (`run`) or of a commit's (`commit`); exactly one is given. With
+/// `whole` the result is the whole file after the changes, not the patch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskDiffParams {
+    pub board: String,
+    pub task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    pub path: String,
+    #[serde(default)]
+    pub whole: bool,
+}
+
+/// One line of a file after the changes: its number, from 1, its text, and whether the changes added or changed it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NumberedLine {
+    pub n: u32,
+    pub text: String,
+    pub changed: bool,
+}
+
+/// A whole file after the changes. `binary` says it is not text and has no `lines`. `truncated` says `lines` stops at
+/// the patch cap, and `bytes` is the file's full size.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WholeFile {
+    pub lines: Vec<NumberedLine>,
+    pub bytes: u64,
+    pub truncated: bool,
+    pub binary: bool,
+}
+
+/// `task.diff` result: `patch` for a patch, `whole` for the whole file. `note` says what was cut or left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskDiffResult {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<FilePatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whole: Option<WholeFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }

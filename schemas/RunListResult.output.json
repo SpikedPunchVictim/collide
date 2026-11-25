@@ -185,6 +185,12 @@
       "additionalProperties": false,
       "description": "One phase of a run, for a track's segment: its instances' states, its real times and its gate verdicts.",
       "properties": {
+        "end_head": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "ended_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -216,6 +222,13 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "start_head": {
+          "description": "The commit the phase started at, and the one it ended at (`task.changes` reads a task's changes from them).\nA phase of a run from before they were kept, and one that is active, has no `end_head`.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "started_ms": {
           "format": "uint64",

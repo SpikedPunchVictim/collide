@@ -12,16 +12,18 @@
 //! - **The text of a task's status is not read.** The status is carried as it was given.
 
 use crate::metrics_store::{Span, SpanKind};
-use crate::run_store::RunRow;
+use crate::run_store::{PhaseHeads, RunRow};
 use collide_core::owner::{InstanceSummary, PhaseKindWire, PhaseSummary, RunSummary};
 use collide_core::state::PhaseState;
 use std::collections::BTreeMap;
 
-/// The summary of the run, and how often each of its phases was entered.
+/// The summary of the run, and how often each of its phases was entered. `heads` are the commits its phases started
+/// and ended at; a phase with none (a run from before they were kept) shows none.
 pub fn summarize(
     row: &RunRow,
     phases: &[(String, PhaseState)],
     spans: &[Span],
+    heads: &[PhaseHeads],
     workspace: Option<String>,
 ) -> (RunSummary, BTreeMap<String, u32>) {
     let mut rounds = BTreeMap::new();
@@ -34,6 +36,7 @@ pub fn summarize(
                 .collect();
             let round = u32::try_from(own.len()).unwrap_or(u32::MAX).max(1);
             rounds.insert(name.clone(), round);
+            let own_heads = heads.iter().find(|heads| &heads.phase == name);
             PhaseSummary {
                 name: name.clone(),
                 kind: PhaseKindWire::Agent,
@@ -48,6 +51,8 @@ pub fn summarize(
                 ended_ms: own.last().and_then(|span| span.ended_wall_ms).map(wall_ms),
                 gate_results: BTreeMap::new(),
                 take_over: None,
+                start_head: own_heads.map(|heads| heads.start_head.clone()),
+                end_head: own_heads.and_then(|heads| heads.end_head.clone()),
             }
         })
         .collect();
@@ -114,10 +119,34 @@ mod tests {
     }
 
     #[test]
+    fn a_phase_carries_the_heads_it_started_and_ended_at_and_one_without_heads_carries_none() {
+        let phases = [
+            ("work".to_string(), PhaseState::Ended {}),
+            ("old".to_string(), PhaseState::Ended {}),
+        ];
+        let heads = [PhaseHeads {
+            phase: "work".to_string(),
+            start_head: "aaa".to_string(),
+            end_head: Some("bbb".to_string()),
+        }];
+
+        let (summary, _) = summarize(&row(), &phases, &[], &heads, None);
+
+        let of = |name: &str| summary.phases.iter().find(|p| p.name == name).unwrap();
+        assert_eq!(of("work").start_head.as_deref(), Some("aaa"));
+        assert_eq!(of("work").end_head.as_deref(), Some("bbb"));
+        assert_eq!(
+            (of("old").start_head.clone(), of("old").end_head.clone()),
+            (None, None)
+        );
+    }
+
+    #[test]
     fn the_row_gives_the_run_and_a_phase_gives_one_agent_instance_with_its_spans_times() {
         let phases = [("work".to_string(), PhaseState::Ended {})];
         let spans = [phase_span("work", 1100, Some(1900))];
-        let (summary, rounds) = summarize(&row(), &phases, &spans, Some("/w/run-1".to_string()));
+        let (summary, rounds) =
+            summarize(&row(), &phases, &spans, &[], Some("/w/run-1".to_string()));
         assert_eq!(summary.id, "run-1");
         assert_eq!(summary.workspace.as_deref(), Some("/w/run-1"));
         assert_eq!((summary.line.as_str(), summary.tasks.len()), ("main", 1));
@@ -136,7 +165,7 @@ mod tests {
             phase_span("work", 1100, Some(1200)),
             phase_span("work", 1300, None),
         ];
-        let (summary, rounds) = summarize(&row(), &phases, &spans, None);
+        let (summary, rounds) = summarize(&row(), &phases, &spans, &[], None);
         let phase = &summary.phases[0];
         assert_eq!(
             (phase.round, phase.started_ms, phase.ended_ms),
@@ -148,7 +177,7 @@ mod tests {
     #[test]
     fn a_phase_with_no_span_has_no_times_and_is_round_one() {
         let phases = [("work".to_string(), PhaseState::Pending {})];
-        let (summary, _) = summarize(&row(), &phases, &[], None);
+        let (summary, _) = summarize(&row(), &phases, &[], &[], None);
         let phase = &summary.phases[0];
         assert_eq!(
             (phase.round, phase.started_ms, phase.ended_ms),
@@ -166,14 +195,14 @@ mod tests {
             phase_span("b", 1100, Some(1200)),
             phase_span("a", 1300, Some(1400)),
         ];
-        let (summary, _) = summarize(&row(), &phases, &spans, None);
+        let (summary, _) = summarize(&row(), &phases, &spans, &[], None);
         let names: Vec<&str> = summary.phases.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["b", "a"]);
     }
 
     #[test]
     fn a_run_with_no_phases_has_none() {
-        let (summary, rounds) = summarize(&row(), &[], &[], None);
+        let (summary, rounds) = summarize(&row(), &[], &[], &[], None);
         assert!(summary.phases.is_empty() && rounds.is_empty());
     }
 }
