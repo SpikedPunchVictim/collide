@@ -3663,12 +3663,14 @@ const NOTES = [
     + 'Claude Code, JSON, opencode, or the address with the token in it. Beside Rotate: a snippet puts the token in a '
     + 'file Collide does not control. Recommendation: as drawn, under the agents.', 'Alternative: the endpoint on a '
     + 'page of its own in Settings. Easier to find; it serves only agents.', 'new', 7],
-  ['Epics in a strip over the columns', 'A row of epic cards above the board, folded and opened as the panel\'s parts '
-    + 'are; folded or open is kept per view. A card has the epic\'s name, a bar of its tasks by state, how many are '
-    + 'done, and how many are open or under way. Only an epic with a task in the view shows. Owner, 2026-11-25: in '
-    + 'place of epics as cards among their tasks.', 'Alternative: an epic as a card in its status column, or a row per '
-    + 'epic. Both put the epic among its tasks; a big epic makes a very long card, and rows make the board tall.',
-    'decided', 8],
+  ['Epics in a strip over the columns', 'A row of epic cards between the filters and the view\'s own row (its '
+    + 'name, Autopilot, the layouts), folded and opened as the panel\'s parts are; folded or open is kept per view. '
+    + 'It shows in every layout, so the view\'s row stays put as you move between them. A card has the epic\'s '
+    + 'name, a bar of its tasks by state, how many are done, and how many are open or under way. Only an epic with a '
+    + 'task in the view shows. Owner, 2026-11-25: in place of epics as cards among their tasks; the view\'s row '
+    + 'below the strip, where it stands out less.', 'Alternative: an epic as a card in its status column, or a row '
+    + 'per epic. Both put the epic among its tasks; a big epic makes a very long card, and rows make the board tall.',
+    'decided', 10],
   ['Picking an epic lights its cards', 'A click on an epic card picks it: its tasks on the board are lit, and the epic '
     + 'opens in the panel. A line over the board says how many cards are lit, how many sit in folded columns, and how '
     + 'many are outside the view; a folded column says how many lit cards it holds. The epic stays picked while you '
@@ -3684,9 +3686,9 @@ const NOTES = [
   ['Fifty epics', 'The strip is one row that scrolls sideways, open work first: an epic with a task under way, then '
     + 'one with a ready task, then the rest, and finished ones last. Over 8 epics a find box narrows the row by name '
     + 'or id. The strip keeps one height, so the board stays where it is. Picking an epic leaves the row where it was; '
-    + 'it moves only to keep the picked card in sight when the panel opens. Recommendation: as drawn (Round 8, "50 '
-    + 'epics").', 'Alternative: rows that wrap, at most two rows high with their own scroll (Round 8, "50 epics in '
-    + 'rows"). More epics in sight at once; the board starts lower.', 'new', 9],
+    + 'it moves only to keep the picked card in sight when the panel opens. Owner, 2026-11-25: one row; tiles would '
+    + 'cost the board its height.', 'Alternative: rows that wrap, at most two rows high with their own scroll (Round '
+    + '8, "50 epics in rows"). More epics in sight at once; the board starts lower.', 'decided', 10],
   ['The Epic box in the filters', 'The Stage row had a chip for every epic, five lines at 50. It is one box now, '
     + 'named Epic, since another board\'s epics are not stages. It says Any, the one epic chosen, or how many; it '
     + 'opens a list of the view\'s epics, each with a tick and its count of tasks, with a find box over 8 and Clear. '
@@ -3695,9 +3697,9 @@ const NOTES = [
   ['Show only one epic\'s tasks', 'Each epic card has a funnel at its corner, always shown. A click shows only that '
     + 'epic\'s tasks, and the funnel stays pressed. It is the Epic filter, so the Epic box shows the same choice, '
     + 'another card\'s funnel adds its epic, and a second click or Clear filters ends it. The strip keeps every epic, '
-    + 'so you can move to another. Recommendation: as drawn (Round 9, "Only one epic").', 'Alternative: "Show only '
+    + 'so you can move to another. Owner, 2026-11-25: as drawn.', 'Alternative: "Show only '
     + 'this epic" on the line over the board, for the picked epic alone. No control on each card; it needs a pick '
-    + 'first.', 'new', 9],
+    + 'first.', 'kept', 9],
 ];
 
 /* ---------- top bar ---------- */
@@ -3772,11 +3774,14 @@ function fieldHtml() {
   if (!visibleTasks().length) return banners.join('') + emptyHtml();
   const tasks = applyFilters(inView);
   if (view().sort) tasks.sort(view().sort);
-  const strip = state.lens || state.layout === 'next' ? '' : epicsHtml(inView) + elitHtml(tasks);
+  // Round 10: the strip sits between the filters and the view's own row, in every layout, so that row stays put when
+  // you move between layouts (note 58). Up next lights nothing, so it has no lit line.
+  const strip = state.lens ? '' : epicsHtml(inView);
+  const lit = state.lens || state.layout === 'next' ? '' : elitHtml(tasks);
   const body = state.layout === 'next' ? upNextHtml() : state.layout === 'board' ? (state.lens ? lensHtml(inView)
-    : strip + boardHtml(tasks)) : strip + (state.layout === 'graph' ? graphHtml() : runOrderHtml());
-  return banners.join('') + autoStripHtml() + filtersHtml(inView, tasks) + viewbarHtml(tasks) + achipHtml()
-    + body;
+    : boardHtml(tasks)) : state.layout === 'graph' ? graphHtml() : runOrderHtml();
+  return banners.join('') + autoStripHtml() + filtersHtml(inView, tasks) + strip + viewbarHtml(tasks) + achipHtml()
+    + lit + body;
 }
 
 function groupMode(tasks) {
