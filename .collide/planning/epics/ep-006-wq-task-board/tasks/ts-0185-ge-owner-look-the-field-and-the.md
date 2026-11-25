@@ -437,7 +437,8 @@ start, draw and reach its own daemon.
 ```text
 Look on 2026-11-25. Awkward: none named.
 Differences: none named.
-Policy probe: not recorded.
+Policy probe: page address http://127.0.0.1:1430/; console said "Failed to load resource: A server with the
+specified hostname could not be found", and no img-src refusal.
 claude: not run on the look; the agent's run above has it.
 Judged: epics on the Field: cards, as an Epic card that shows all of the epic's tasks, so that an agent can be set to
 run through them. `In_review` header: change, no underscore shows.
@@ -445,6 +446,12 @@ run through them. `In_review` header: change, no underscore shows.
 
 - Step 19, in the app's window: below 900 px the drawer scrolls to the end of a long task.
 - Step 23: no errors in the webview's console.
+- Step 26: no policy is in force under `tauri dev`. With no `devUrl`, it serves `app/dist` from the Tauri CLI's own
+  dev server on `127.0.0.1:1430`, not on `tauri://localhost` as the step expected. That server sends no policy, so the
+  image was asked for, and failed only because `.invalid` never resolves. `ts-0183-ee` Decisions say the same of a dev
+  server: Tauri sends `csp` and `devCsp` only on its own protocol. The hostile text still showed as text (step 25),
+  kept inert by the renderer. The bundled app's policy is checked in `ts-0197-uj`; the plan's wording on dev changes
+  with the next revision.
 - Step 25: two screenshots of the drawer over the hostile task. Its body shows as text, the refused links and the image
   say why, and the kept links are buttons. They stay with the owner: they show a local temp path.
 - The header: fixed after the look. An underscore in a status name shows as a space (`in_review` reads "In review"),
