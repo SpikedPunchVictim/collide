@@ -119,6 +119,7 @@ pub fn fake_task(id: &str, title: &str, status: &str, category: Category) -> Tas
         coverage: None,
         claims: Vec::new(),
         preregistration: None,
+        unblocks: None,
     }
 }
 

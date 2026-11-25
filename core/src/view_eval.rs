@@ -28,7 +28,7 @@ use crate::owner::task::ViewReport;
 use crate::provider::Task;
 use crate::ready::UnknownTarget;
 use crate::view::{Closure, Follow, View, ViewError, check_view};
-use crate::view_builtin::{evaluate_ready, ready_view};
+use crate::view_builtin::BuiltinView;
 use crate::view_expr::{
     Budgets, CompiledExpr, Estimate, ExprError, TaskVars, check_cost, compile_with_hook,
     dependencies, evaluate_pass,
@@ -75,23 +75,33 @@ impl From<ExprError> for ViewFailure {
 pub struct CompiledView {
     view: View,
     where_: Option<(CompiledExpr, Estimate)>,
-    /// A view core holds ([`crate::view_builtin`]): it has no `where`, and its members come from a rule.
-    builtin: bool,
+    /// The view core holds ([`crate::view_builtin`]) that this is: it has no `where`, and its members come from a rule.
+    builtin: Option<BuiltinView>,
 }
 
 impl CompiledView {
-    /// The built-in `ready` view ([`crate::view_builtin`]). It needs no check and no compile.
-    pub fn ready() -> CompiledView {
+    /// A view core holds ([`crate::view_builtin`]). It needs no check and no compile.
+    pub fn builtin(which: BuiltinView) -> CompiledView {
         CompiledView {
-            view: ready_view(),
+            view: which.view(),
             where_: None,
-            builtin: true,
+            builtin: Some(which),
         }
+    }
+
+    /// The built-in `ready` view.
+    pub fn ready() -> CompiledView {
+        CompiledView::builtin(BuiltinView::Ready)
+    }
+
+    /// The built-in `bottlenecks` view.
+    pub fn bottlenecks() -> CompiledView {
+        CompiledView::builtin(BuiltinView::Bottlenecks)
     }
 
     /// Whether core holds this view's rule.
     pub fn is_builtin(&self) -> bool {
-        self.builtin
+        self.builtin.is_some()
     }
 
     pub fn view(&self) -> &View {
@@ -134,7 +144,7 @@ pub fn compile_view_with(
     Ok(CompiledView {
         view: view.clone(),
         where_,
-        builtin: false,
+        builtin: None,
     })
 }
 
@@ -216,8 +226,8 @@ pub fn evaluate_view(
     corpus: &Corpus,
     budgets: &Budgets,
 ) -> Result<ViewResult, ViewFailure> {
-    if compiled.builtin {
-        return Ok(evaluate_ready(corpus));
+    if let Some(builtin) = compiled.builtin {
+        return Ok(builtin.evaluate(corpus));
     }
     let view = &compiled.view;
     let rows = corpus.rows();
@@ -288,6 +298,7 @@ fn matching(
     budgets: &Budgets,
     counts: &mut ViewCounts,
 ) -> Result<Vec<String>, ViewFailure> {
+    let unblocks = corpus.unblocks();
     let mut bound = Vec::with_capacity(rows.len());
     let mut keys = Vec::with_capacity(rows.len());
     for row in rows {
@@ -299,7 +310,8 @@ fn matching(
         let kind = corpus.kind_of(source, row.task);
         // The corpus's ingest caps every task, so a bind that fails here is a bug, counted and not hidden.
         match TaskVars::bind(row.task, &kind, None) {
-            Ok(vars) => {
+            Ok(mut vars) => {
+                vars.unblocks = unblocks.get(&vars.key).copied().unwrap_or(0);
                 bound.push(vars);
                 keys.push(row.task.key.clone());
             }
@@ -343,7 +355,8 @@ struct Reach {
     needs: BTreeMap<String, BTreeSet<String>>,
 }
 
-fn is_open(task: &Task) -> bool {
+/// Whether a task is open: its category is not `done` or `dropped`, the rule a closure and `unblocks` walk by.
+pub(crate) fn is_open(task: &Task) -> bool {
     !matches!(task.state.category, Category::Done | Category::Dropped)
 }
 

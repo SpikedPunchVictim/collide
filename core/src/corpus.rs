@@ -43,11 +43,13 @@ use crate::provider::{
 };
 use crate::ready::UnknownTarget;
 use crate::short_id;
-use crate::view_expr::check_task_caps;
+use crate::view_eval::is_open;
+use crate::view_expr::{check_task_caps, dependencies};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 /// How far a chain of renames is followed when an old key is resolved.
 const MAX_REDIRECTS: usize = 16;
@@ -141,6 +143,9 @@ pub struct ListFilter<'a> {
     pub kind: Option<&'a str>,
     pub checkout: Option<&'a str>,
     pub only: Option<&'a BTreeSet<String>>,
+    /// The order of the listing, when it is not key order: the tasks come in the order of these keys (a view's
+    /// members), and a task they do not name comes after them, in key order.
+    pub order: Option<&'a [String]>,
 }
 
 /// One page of a list: at most `limit` tasks (all of them when `None`), after the task `cursor` names.
@@ -319,6 +324,9 @@ pub struct Corpus {
     /// What the corpus held last changed to, from one counter for the process. A copy has its original's stamp, so
     /// what was worked out from a stamp is still true of the copy. See [`Corpus::stamp`].
     stamp: u64,
+    /// The number of open tasks that wait on each key ([`Corpus::unblocks`]), worked out when first asked for and
+    /// dropped when the corpus changes. A copy has it, as it has the stamp.
+    unblocks: OnceLock<Arc<BTreeMap<String, u32>>>,
 }
 
 /// The last stamp given: a stamp is never given twice, so two corpora with one stamp hold the same.
@@ -343,17 +351,54 @@ fn empty_list() -> TaskListResult {
     }
 }
 
-/// A row's place in a list: its key, then its path, so that one key at two paths has two places.
-fn cursor_of(row: &Row<'_>) -> String {
-    format!(
+/// A row's place in a list: its key, then its path, so that one key at two places has two places. A list in an order of
+/// its own ([`ListFilter::order`]) puts the position of the key first, in a fixed width so that places compare as text.
+fn cursor_of(row: &Row<'_>, positions: Option<&Positions<'_>>) -> String {
+    let place = format!(
         "{}\n{}",
         row.task.key,
         row.task.path.as_deref().unwrap_or("")
-    )
+    );
+    match positions {
+        Some(positions) => format!("{:010}\n{place}", positions.of(&row.task.key)),
+        None => place,
+    }
 }
 
-fn after_cursor(row: &Row<'_>, cursor: &str) -> bool {
-    cursor_of(row).as_str() > cursor
+/// Where each key of [`ListFilter::order`] is: a key it does not name is after the last one.
+struct Positions<'a> {
+    at: HashMap<&'a str, usize>,
+    after: usize,
+}
+
+impl<'a> Positions<'a> {
+    fn new(order: &'a [String]) -> Positions<'a> {
+        let mut at = HashMap::new();
+        for (position, key) in order.iter().enumerate() {
+            at.entry(key.as_str()).or_insert(position);
+        }
+        Positions {
+            at,
+            after: order.len(),
+        }
+    }
+
+    fn of(&self, key: &str) -> usize {
+        self.at.get(key).copied().unwrap_or(self.after)
+    }
+}
+
+/// A task as `task.list` gives it: no body, and the number of open tasks that wait on it.
+fn listed_task(task: &Task, unblocks: &BTreeMap<String, u32>) -> Task {
+    Task {
+        body: None,
+        unblocks: unblocks.get(&task.key).copied(),
+        ..task.clone()
+    }
+}
+
+fn after_cursor(row: &Row<'_>, positions: Option<&Positions<'_>>, cursor: &str) -> bool {
+    cursor_of(row, positions).as_str() > cursor
 }
 
 fn short_of(key: &str) -> &str {
@@ -396,6 +441,7 @@ impl Corpus {
 
     fn touch(&mut self) {
         self.stamp = LAST_STAMP.fetch_add(1, Ordering::Relaxed) + 1;
+        self.unblocks = OnceLock::new();
     }
 
     /// The board's checkouts and what each is. They decide the shown copy and the divergences, and nothing is
@@ -964,13 +1010,11 @@ impl Corpus {
     /// `task.list` for the whole corpus: the shown tasks with no body, the collections of each source as its shown
     /// checkout listed them, and every invalid item.
     pub fn list_result(&self) -> TaskListResult {
+        let unblocks = self.unblocks();
         let tasks = self
             .rows()
             .into_iter()
-            .map(|row| Task {
-                body: None,
-                ..row.task.clone()
-            })
+            .map(|row| listed_task(row.task, &unblocks))
             .collect();
         let collections = self
             .sources
@@ -1019,15 +1063,20 @@ impl Corpus {
                     && ready.as_ref().is_none_or(|ids| ids.contains(&row.task.key))
             })
             .collect();
+        let positions = filter.order.map(Positions::new);
+        if let Some(positions) = &positions {
+            // Stable, so a key's rows and the keys the order does not name stay in key order.
+            rows.sort_by_key(|row| positions.of(&row.task.key));
+        }
         if let Some(cursor) = page.cursor {
-            rows.retain(|row| after_cursor(row, cursor));
+            rows.retain(|row| after_cursor(row, positions.as_ref(), cursor));
         }
         let more = page.limit.is_some_and(|limit| rows.len() > limit);
         if let Some(limit) = page.limit {
             rows.truncate(limit);
         }
         let next_cursor = more
-            .then(|| rows.last().map(|row| cursor_of(row)))
+            .then(|| rows.last().map(|row| cursor_of(row, positions.as_ref())))
             .flatten();
         let first = page.cursor.is_none();
         let mut result = if first {
@@ -1035,12 +1084,10 @@ impl Corpus {
         } else {
             TaskListResult { ..empty_list() }
         };
+        let unblocks = self.unblocks();
         result.tasks = rows
             .into_iter()
-            .map(|row| Task {
-                body: None,
-                ..row.task.clone()
-            })
+            .map(|row| listed_task(row.task, &unblocks))
             .collect();
         result.next_cursor = next_cursor;
         if first {
@@ -1099,6 +1146,56 @@ impl Corpus {
             found.unknown_blockers.extend(result.unknown_targets);
         }
         found
+    }
+
+    /// How many open tasks wait on each task, by key: the open tasks that reach it through [`dependencies`], each
+    /// counted once, and never the task itself. A task that is done or dropped is not counted, and nothing is reached
+    /// through it. Worked out the first time it is asked for after the corpus changed, and kept for that version.
+    pub fn unblocks(&self) -> Arc<BTreeMap<String, u32>> {
+        Arc::clone(
+            self.unblocks
+                .get_or_init(|| Arc::new(self.count_unblocks())),
+        )
+    }
+
+    fn count_unblocks(&self) -> BTreeMap<String, u32> {
+        let rows = self.rows();
+        let mut by_key: BTreeMap<&str, &Task> = BTreeMap::new();
+        for row in &rows {
+            by_key.entry(row.task.key.as_str()).or_insert(row.task);
+        }
+        // Each task, to the open tasks that wait on it. A task that is not open waits on nothing.
+        let mut waiters: HashMap<String, Vec<&str>> = HashMap::new();
+        for (key, task) in by_key.iter().filter(|(_, task)| is_open(task)) {
+            let source = source_of_key(key).unwrap_or_default();
+            for to in dependencies(task) {
+                if let Some(held) = self
+                    .resolve_target(source, &to)
+                    .filter(|held| by_key.contains_key(held.as_str()))
+                {
+                    waiters.entry(held).or_default().push(key);
+                }
+            }
+        }
+        by_key
+            .keys()
+            .map(|start| {
+                let mut reached: BTreeSet<&str> = BTreeSet::from([*start]);
+                let mut pending = vec![*start];
+                while let Some(key) = pending.pop() {
+                    for waiter in waiters.get(key).into_iter().flatten() {
+                        if reached.insert(waiter) {
+                            pending.push(waiter);
+                        }
+                    }
+                }
+                let others = reached.len() - 1;
+                (
+                    (*start).to_string(),
+                    u32::try_from(others).unwrap_or(u32::MAX),
+                )
+            })
+            .collect()
     }
 
     /// The keys the ready rule lists.

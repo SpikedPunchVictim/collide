@@ -137,6 +137,7 @@ fn task_of(
         coverage: None,
         claims: Vec::new(),
         preregistration: None,
+        unblocks: None,
     })
 }
 

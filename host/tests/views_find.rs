@@ -148,7 +148,7 @@ fn the_built_in_ready_view_is_first_loads_with_no_error_and_cannot_be_replaced_b
     let mut candidates = builtin_candidates();
     candidates.push(candidate("ready", ViewSource::Personal {}));
     let views = loaded(candidates);
-    assert_eq!(views.len(), 2);
+    assert_eq!(views.len(), 3);
     assert_eq!(views[0].source, ViewSource::Builtin {});
     assert_eq!(views[0].error, None);
     assert!(
@@ -156,7 +156,7 @@ fn the_built_in_ready_view_is_first_loads_with_no_error_and_cannot_be_replaced_b
             .compiled()
             .is_some_and(|compiled| compiled.is_builtin())
     );
-    let shadowed = views[1]
+    let shadowed = views[2]
         .error
         .as_deref()
         .expect("the personal copy is refused");
@@ -164,6 +164,49 @@ fn the_built_in_ready_view_is_first_loads_with_no_error_and_cannot_be_replaced_b
     assert_eq!(found(&views, "ready", &[]), "ready");
     assert_eq!(
         find_view(&views, "ready", &[]).unwrap().source,
+        ViewSource::Builtin {}
+    );
+}
+
+#[test]
+fn the_built_in_views_are_ready_then_bottlenecks_and_both_load_with_no_error() {
+    let views = loaded(builtin_candidates());
+    let names: Vec<&str> = views.iter().map(|each| each.view.name.as_str()).collect();
+    assert_eq!(names, ["ready", "bottlenecks"]);
+    for each in &views {
+        assert_eq!(each.source, ViewSource::Builtin {}, "{}", each.view.name);
+        assert_eq!(each.error, None, "{}", each.view.name);
+        assert!(
+            each.compiled()
+                .is_some_and(|compiled| compiled.is_builtin())
+        );
+        assert_eq!(
+            each.compiled()
+                .map(|compiled| compiled.view().name.as_str()),
+            Some(each.view.name.as_str())
+        );
+    }
+}
+
+#[test]
+fn a_file_or_pack_view_named_bottlenecks_is_listed_with_an_error_naming_the_built_in() {
+    let mut candidates = builtin_candidates();
+    candidates.push(candidate("bottlenecks", ViewSource::Personal {}));
+    candidates.push(candidate("bottlenecks", ViewSource::Repo {}));
+    let views = loaded(candidates);
+    assert_eq!(views.len(), 4);
+    assert_eq!(views[1].source, ViewSource::Builtin {});
+    assert_eq!(views[1].error, None);
+    for shadowed in &views[2..] {
+        let error = shadowed.error.as_deref().expect("the copy is refused");
+        assert!(
+            error.contains("`bottlenecks`") && error.contains("built-in"),
+            "{error}"
+        );
+        assert!(shadowed.compiled().is_none());
+    }
+    assert_eq!(
+        find_view(&views, "bottlenecks", &[]).unwrap().source,
         ViewSource::Builtin {}
     );
 }

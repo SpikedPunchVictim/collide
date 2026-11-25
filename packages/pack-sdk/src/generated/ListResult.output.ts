@@ -109,6 +109,12 @@ export interface Task {
     [k: string]: string
   }
   title: string
+  /**
+   * How many open tasks wait on this one, directly or through other open tasks, each counted once (0.10, Views;
+   * note 41). Core derives it and sets it on the tasks `task.list` and `task.get` give. A source does not report it,
+   * and one it reports is replaced.
+   */
+  unblocks?: number | null
   version: string
 }
 /**

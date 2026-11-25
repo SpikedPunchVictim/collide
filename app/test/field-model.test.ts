@@ -12,9 +12,9 @@ import {
   stageOf,
   wordsOf,
 } from '../src/field/model.ts'
-import type { FieldData } from '../src/field/types.ts'
+import type { FieldData, Task } from '../src/field/types.ts'
 import {
-  type FieldWorld,
+  FieldWorld,
   PLAN,
   SCRATCH,
   eight,
@@ -23,6 +23,7 @@ import {
   onePlanSource,
   report,
   task,
+  view,
 } from './support/field-world.ts'
 
 // The Field's columns and cards over the scripted worlds (ts-0181-ft). The worlds are `FakeOwner`s, so `loadField`
@@ -309,6 +310,72 @@ describe('the chips of a card', () => {
       settling: false,
     }
     expect(lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips).toEqual([])
+  })
+
+  test('Unblocks N shows from 3 up, after Waits on, and not below', () => {
+    const board = (count: number | undefined, over: Partial<Task> = {}) => {
+      const target = task('plan:a', 'A', 'ready', 'ready', {
+        links: [{ type: 'blocked-by', to: 'plan:b' }],
+        ...(count === undefined ? {} : { unblocks: count }),
+        ...over,
+      })
+      const data: FieldData = {
+        tasks: [target],
+        corpus: [target, task('plan:b', 'B', 'ready', 'ready')],
+        sources: [PLAN],
+        collisions: [],
+        divergence: [],
+        report: null,
+        settling: false,
+      }
+      return lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips
+    }
+    expect(board(2)).toEqual([{ id: 'waits', text: 'Waits on 1' }])
+    expect(board(undefined)).toEqual([{ id: 'waits', text: 'Waits on 1' }])
+    expect(board(3)).toEqual([
+      { id: 'waits', text: 'Waits on 1' },
+      { id: 'unblocks', text: 'Unblocks 3' },
+    ])
+    expect(board(12).at(-1)).toEqual({ id: 'unblocks', text: 'Unblocks 12' })
+  })
+
+  test('a done task, and a source with no blocking links, show no Unblocks', () => {
+    const shown = (key: string, category: 'done' | 'ready', source: typeof PLAN) => {
+      const target = task(key, 'A', category, category, { unblocks: 5 })
+      const data: FieldData = {
+        tasks: [target],
+        corpus: [target],
+        sources: [source],
+        collisions: [],
+        divergence: [],
+        report: null,
+        settling: false,
+      }
+      return lanesOf(data).lanes.flatMap((lane) => lane.cards)[0]!.chips
+    }
+    expect(shown('plan:a', 'done', PLAN)).toEqual([])
+    expect(shown('scratch:a', 'ready', SCRATCH)).toEqual([])
+    expect(shown('plan:a', 'ready', PLAN)).toEqual([{ id: 'unblocks', text: 'Unblocks 5' }])
+  })
+
+  test('bottlenecks lists the task first and its card shows Unblocks 5, and a task with 2 shows no chip', async () => {
+    const world = new FieldWorld()
+    world.sources = [PLAN]
+    world.listing = [
+      task('plan:ts-0001-aa', 'The hub', 'ready', 'ready', { unblocks: 5 }),
+      task('plan:ts-0002-bb', 'The near miss', 'ready', 'ready', { unblocks: 2 }),
+    ]
+    world.views = [view('ready', { type: 'builtin' }), view('bottlenecks', { type: 'builtin' })]
+    world.held.set('bottlenecks', { keys: ['plan:ts-0001-aa'], report: report('bottlenecks', 1) })
+    const views = await loadViews(world.owner, BOARD)
+    expect(views.map((each) => each.view.name)).toEqual(['ready', 'bottlenecks'])
+
+    const through = lanesOf(await read(world, 'bottlenecks')).lanes.flatMap((lane) => lane.cards)
+    expect(through.map((card) => [card.title, card.chips])).toEqual([
+      ['The hub', [{ id: 'unblocks', text: 'Unblocks 5' }]],
+    ])
+    const whole = lanesOf(await read(world)).lanes.flatMap((lane) => lane.cards)
+    expect(whole.find((card) => card.title === 'The near miss')!.chips).toEqual([])
   })
 
   test('a copy that differs is named by its state and the run it is in', async () => {

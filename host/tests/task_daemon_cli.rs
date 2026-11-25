@@ -852,6 +852,195 @@ fn the_built_in_ready_view_lists_what_the_ready_flag_lists() {
     assert_eq!(by_view, by_flag);
 }
 
+// ---- tasks --view bottlenecks (ts-0186-ch) -----------------------------------------------------------------------
+
+/// A plan task file under the first epic that waits on each of `waits_on`.
+fn waiting_task(id: &str, status: &str, waits_on: &[&str]) -> (String, String) {
+    let links: String = waits_on
+        .iter()
+        .map(|to| format!("  - {{ type: blocked-by, to: {to} }}\n"))
+        .collect();
+    let links = if links.is_empty() {
+        "links: []\n".to_string()
+    } else {
+        format!("links:\n{links}")
+    };
+    (
+        format!("{EPIC}/{id}-made-up.md"),
+        format!(
+            "---\nid: {id}\nkind: task\nstatus: {status}\ntitle: \"Made-up {id}\"\nowners: []\n{links}---\n\n\
+             ## Goal\n\nMade up.\n"
+        ),
+    )
+}
+
+/// Hubs that open tasks wait on: `ts-0109-hz` is waited on by six, `ts-0101-ha` by five (one by two paths),
+/// `ts-0102-hb` and `ts-0104-hd` by three each, `ts-0103-hc` by two, and `ts-0105-he` is done and has three open
+/// tasks waiting.
+fn bottleneck_rig() -> Rig {
+    let mut tasks: Vec<(String, String)> = Vec::new();
+    let hubs = [
+        ("ts-0109-hz", "ready", 6),
+        ("ts-0101-ha", "active", 4),
+        ("ts-0102-hb", "ready", 3),
+        ("ts-0104-hd", "review", 3),
+        ("ts-0103-hc", "ready", 2),
+        ("ts-0105-he", "done", 3),
+    ];
+    let mut next = 200;
+    let mut under_ha = Vec::new();
+    for (hub, status, waiters) in hubs {
+        tasks.push(waiting_task(hub, status, &[]));
+        for _ in 0..waiters {
+            let id = format!("ts-{next}-wa");
+            next += 1;
+            tasks.push(waiting_task(&id, "ready", &[hub]));
+            if hub == "ts-0101-ha" {
+                under_ha.push(id);
+            }
+        }
+    }
+    // Waits on two of those that wait on `ts-0101-ha`: one more for it, though by two paths.
+    let both: Vec<&str> = under_ha.iter().take(2).map(String::as_str).collect();
+    tasks.push(waiting_task("ts-0300-wb", "ready", &both));
+    let files: Vec<(&str, String)> = tasks
+        .iter()
+        .map(|(path, text)| (path.as_str(), text.clone()))
+        .collect();
+    Rig::with_files(&files)
+}
+
+const BOTTLENECKS_ORDER: [&str; 4] = [
+    "plan:ts-0109-hz",
+    "plan:ts-0101-ha",
+    "plan:ts-0102-hb",
+    "plan:ts-0104-hd",
+];
+
+fn task_entries(document: &Value) -> Vec<(String, Value)> {
+    document["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .map(|task| {
+            (
+                task["key"].as_str().unwrap().to_string(),
+                task["unblocks"].clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn tasks_view_bottlenecks_json_lists_the_open_tasks_with_three_or_more_the_most_first_with_their_counts()
+ {
+    let rig = bottleneck_rig();
+
+    let (code, out, err) = rig.cli(&["tasks", "--view", "bottlenecks", "--json"]);
+
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+    let document = json(&out);
+    assert_eq!(document["view"]["name"], "bottlenecks");
+    assert_eq!(document["view"]["members"], 4);
+    assert_eq!(
+        task_entries(&document),
+        [
+            (BOTTLENECKS_ORDER[0].to_string(), json!(6)),
+            (BOTTLENECKS_ORDER[1].to_string(), json!(5)),
+            (BOTTLENECKS_ORDER[2].to_string(), json!(3)),
+            (BOTTLENECKS_ORDER[3].to_string(), json!(3)),
+        ]
+    );
+}
+
+#[test]
+fn tasks_view_bottlenecks_lists_in_the_order_the_app_reads_it_in_and_the_whole_board_carries_the_counts()
+ {
+    let rig = bottleneck_rig();
+    let (_, text, _) = rig.cli(&["tasks", "--view", "bottlenecks"]);
+    let mut params = rig.list_params();
+    params.view = Some(ViewRef::Named {
+        name: "bottlenecks".to_string(),
+    });
+    let app = rig.settled_keys(params.clone());
+    // Pages of two, as a client that pages gets them: the same tasks in the same order.
+    params.limit = Some(2);
+    let mut paged = Vec::new();
+    wait_until("the first listing ends", DEADLINE, || {
+        !rig.listed(params.clone()).refreshing
+    });
+    loop {
+        let page = rig.listed(params.clone());
+        paged.extend(page.tasks.iter().map(|task| task.key.clone()));
+        match page.next_cursor {
+            Some(cursor) => params.cursor = Some(cursor),
+            None => break,
+        }
+    }
+
+    assert_eq!(first_words(&text), BOTTLENECKS_ORDER);
+    assert_eq!(app, BOTTLENECKS_ORDER);
+    assert_eq!(paged, BOTTLENECKS_ORDER);
+    let (_, whole, _) = rig.cli(&["tasks", "--json"]);
+    let counts: BTreeMap<String, Value> = task_entries(&json(&whole)).into_iter().collect();
+    assert_eq!(
+        counts["plan:ts-0105-he"], 3,
+        "a done task is counted as the open tasks waiting on it"
+    );
+    assert_eq!(counts["plan:ts-0103-hc"], 2);
+    assert_eq!(counts["plan:ts-0300-wb"], 0);
+}
+
+#[test]
+fn task_json_gives_the_count_of_open_tasks_waiting_on_it_as_task_list_does() {
+    let rig = bottleneck_rig();
+
+    let hub = json(&rig.cli(&["task", "ts-0102-hb", "--json"]).1);
+    let top = json(&rig.cli(&["task", "ts-0109-hz", "--json"]).1);
+    let leaf = json(&rig.cli(&["task", "ts-0300-wb", "--json"]).1);
+
+    assert_eq!(hub["task"]["unblocks"], 3);
+    assert_eq!(top["task"]["unblocks"], 6);
+    assert_eq!(leaf["task"]["unblocks"], 0);
+}
+
+#[test]
+fn a_view_file_named_bottlenecks_is_listed_with_an_error_naming_the_built_in() {
+    let rig = Rig::with_files(&[(
+        ".collide/views/bottlenecks.yaml",
+        "name: bottlenecks\nwhere: \"status == 'ready'\"\n".into(),
+    )]);
+
+    let (code, out, err) = rig.cli(&["tasks", "--view", "bottlenecks"]);
+    let views: collide_core::owner::TaskViewsResult = rig.call(
+        "task.views",
+        &collide_core::owner::TaskViewsParams {
+            board: rig.board.clone(),
+        },
+    );
+
+    assert_eq!((code, err.as_str()), (exit::OK, ""), "{out}");
+    let named: Vec<_> = views
+        .views
+        .iter()
+        .filter(|entry| entry.view.name == "bottlenecks")
+        .collect();
+    assert_eq!(named.len(), 2, "the built-in and the file");
+    assert_eq!(named[0].source, collide_core::owner::ViewSource::Builtin {});
+    assert_eq!(named[0].error, None);
+    let refused = named[1]
+        .error
+        .as_deref()
+        .expect("the file's view is refused");
+    assert!(refused.contains("built-in"), "{refused}");
+    let order: Vec<&str> = views
+        .views
+        .iter()
+        .map(|entry| entry.view.name.as_str())
+        .collect();
+    assert_eq!(&order[..2], ["ready", "bottlenecks"]);
+}
+
 #[test]
 fn json_of_a_spike_carries_its_claims_and_the_problems_of_its_claim_blocks() {
     let rig = spike_rig();

@@ -190,6 +190,11 @@ pub struct Task {
     /// A spike's Pre-registration part (0.10). Left out when its record has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preregistration: Option<Preregistration>,
+    /// How many open tasks wait on this one, directly or through other open tasks, each counted once (0.10, Views;
+    /// note 41). Core derives it and sets it on the tasks `task.list` and `task.get` give. A source does not report it,
+    /// and one it reports is replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unblocks: Option<u32>,
 }
 
 impl Task {

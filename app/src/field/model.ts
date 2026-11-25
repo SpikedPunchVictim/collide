@@ -25,7 +25,7 @@ export interface Column {
 }
 
 export interface Chip {
-  readonly id: 'status' | 'waits' | 'divergence' | 'collision'
+  readonly id: 'status' | 'waits' | 'unblocks' | 'divergence' | 'collision'
   readonly text: string
   /** The category a status chip is coloured by. */
   readonly category?: Category
@@ -193,6 +193,20 @@ function openBlockers(task: Task, sources: readonly SourceDecl[], index: Map<str
   return waiting.size
 }
 
+/** How many open tasks must wait on a task for its card to say so (note 41). */
+export const UNBLOCKS_MIN = 3
+
+/**
+ * How many open tasks wait on this one, directly or through others: core's count (`unblocks` on the listed task), shown
+ * from `UNBLOCKS_MIN` up, for a task that is open, in a source that has blocking links.
+ */
+function unblocksOf(task: Task, sources: readonly SourceDecl[]): number {
+  const source = sources.find((each) => each.name === sourceOf(task.key))
+  if (!isOpen(task) || !(source?.blocking_links ?? true)) return 0
+  const count = task.unblocks ?? 0
+  return count >= UNBLOCKS_MIN ? count : 0
+}
+
 /** The id of a task's card: one for each place a key is at, since a collided key is listed at each of its paths. */
 export const cardIdOf = (task: Task) => `${task.key}|${task.path ?? ''}`
 
@@ -206,6 +220,8 @@ export function lanesOf(data: FieldData, groupBy?: string | null): { mode: Group
     if (mode === 'category') chips.push({ id: 'status', text: status, category })
     const waits = openBlockers(task, data.sources, index)
     if (waits > 0) chips.push({ id: 'waits', text: `Waits on ${waits}` })
+    const unblocks = unblocksOf(task, data.sources)
+    if (unblocks > 0) chips.push({ id: 'unblocks', text: `Unblocks ${unblocks}` })
     const shortId = shortIdOf(task, data.sources)
     const collided = data.collisions.find(
       (each) =>

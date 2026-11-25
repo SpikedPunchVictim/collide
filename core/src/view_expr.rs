@@ -45,8 +45,8 @@ pub const ESTIMATE_LIST_SIZE: u128 = 64;
 /// refused on a board of the usual size (a board has about 1,600 tasks).
 pub const MIN_ESTIMATE_TASKS: u128 = 1_600;
 
-/// The names a view may use for a task (0.10, Fields), and `kind` and `fields`.
-pub const TASK_NAMES: [&str; 12] = [
+/// The names a view may use for a task (0.10, Fields), and `kind`, `unblocks` and `fields`.
+pub const TASK_NAMES: [&str; 13] = [
     "key",
     "source",
     "title",
@@ -57,6 +57,7 @@ pub const TASK_NAMES: [&str; 12] = [
     "collections",
     "deps",
     "link_types",
+    "unblocks",
     "author",
     "fields",
 ];
@@ -568,6 +569,9 @@ pub struct TaskVars {
     pub collections: Vec<String>,
     pub deps: Vec<String>,
     pub link_types: Vec<String>,
+    /// How many open tasks wait on this one ([`crate::corpus::Corpus::unblocks`]). A task binds with 0: the caller that
+    /// has the corpus sets it, since a task alone cannot know.
+    pub unblocks: u32,
     pub author: String,
     pub fields: BTreeMap<String, Json>,
 }
@@ -597,6 +601,7 @@ impl TaskVars {
             collections: task.collections.clone(),
             deps: dependencies(task),
             link_types: link_types(task),
+            unblocks: 0,
             author: author.unwrap_or_default().to_string(),
             fields: task.fields.clone(),
         })
@@ -618,6 +623,7 @@ impl TaskVars {
         bind("collections", cel::to_value(&self.collections));
         bind("deps", cel::to_value(&self.deps));
         bind("link_types", cel::to_value(&self.link_types));
+        bind("unblocks", cel::to_value(i64::from(self.unblocks)));
         bind("author", cel::to_value(&self.author));
         bind("fields", cel::to_value(&self.fields));
         context

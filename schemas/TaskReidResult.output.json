@@ -769,6 +769,15 @@
         "title": {
           "type": "string"
         },
+        "unblocks": {
+          "description": "How many open tasks wait on this one, directly or through other open tasks, each counted once (0.10, Views;\nnote 41). Core derives it and sets it on the tasks `task.list` and `task.get` give. A source does not report it,\nand one it reports is replaced.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "version": {
           "type": "string"
         }

@@ -3084,10 +3084,7 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
                 .map_err(|failure| RpcError::new(code::INVALID_PARAMS, failure.to_string()))?;
             let result = evaluated(shared, &params.board, &service, &compiled)
                 .map_err(|failure| RpcError::new(code::INVALID_PARAMS, failure.to_string()))?;
-            Some((
-                view_report(&view.name, &result),
-                result.members.iter().cloned().collect(),
-            ))
+            Some((view_report(&view.name, &result), result.members.clone()))
         }
         Some(ViewRef::Named { name }) => {
             let BoardViews { loaded, supplying } =
@@ -3102,20 +3099,22 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
             // The report names the view found, so a bare name and the full one are answered alike.
             let name = &found.view.name;
             Some(match viewed(shared, &params.board, &service, found) {
-                Ok(result) => (
-                    view_report(name, &result),
-                    result.members.iter().cloned().collect(),
-                ),
-                Err(reason) => (ViewReport::failed(name, &reason), BTreeSet::new()),
+                Ok(result) => (view_report(name, &result), result.members.clone()),
+                Err(reason) => (ViewReport::failed(name, &reason), Vec::new()),
             })
         }
     };
+    // The tasks come in the order of the view's members, which a rule (`bottlenecks`) may give an order of its own.
+    let only: Option<BTreeSet<String>> = through
+        .as_ref()
+        .map(|(_, members)| members.iter().cloned().collect());
     let mut result = service.list(
         &ListFilter {
             ready: params.ready,
             kind: params.kind.as_deref(),
             checkout: params.checkout.as_deref(),
-            only: through.as_ref().map(|(_, members)| members),
+            only: only.as_ref(),
+            order: through.as_ref().map(|(_, members)| members.as_slice()),
         },
         &Page {
             limit: params.limit.map(|limit| limit as usize),
@@ -3199,7 +3198,11 @@ fn evaluated(
 {
     let stamp = service.read(|corpus| corpus.stamp());
     shared.views.evaluate(board, compiled, stamp, || {
-        service.read(|corpus| corpus.clone())
+        // The copy has the counts of `unblocks` when the corpus has them, so each view of a version shares one pass.
+        service.read(|corpus| {
+            corpus.unblocks();
+            corpus.clone()
+        })
     })
 }
 
@@ -3406,6 +3409,11 @@ fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::V
             Err(SourceError::NoSource(_)) => None,
             Err(error) => return Err(source_failed(error)),
         };
+    }
+    if let Some(task) = &mut result.task {
+        // Core's count, as `task.list` gives it: whatever the source sent is replaced.
+        let counts = corpus_of(shared, &params.board, &root)?.read(|corpus| corpus.unblocks());
+        task.unblocks = counts.get(&task.key).copied();
     }
     if let Some(task) = &result.task {
         let mut keys = vec![task.key.clone()];

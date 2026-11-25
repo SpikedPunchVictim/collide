@@ -2,7 +2,8 @@
 //! members are worked out again. [`crate::daemon`] turns these into `task.views`, `task.list` with a view and
 //! `task.save_view`.
 //!
-//! **Four places, in this order.** The views core holds (`ready`, [`builtin_candidates`]), which no file can replace.
+//! **Four places, in this order.** The views core holds (`ready` and `bottlenecks`, [`builtin_candidates`]), which no
+//! file can replace.
 //! The person's own files, `~/.config/collide/boards/<board-id>/views/*.yaml`: they
 //! are global to the board, read from the file system at each call, and not hashed. The repo's, `.collide/views/*.yaml`
 //! as the board's line has them: read from the blobs of the commit the line names, never from the working tree, and
@@ -31,7 +32,7 @@ use collide_core::corpus::Corpus;
 use collide_core::owner::{TrustState, ViewSource};
 use collide_core::resolve::is_safe_token;
 use collide_core::view::View;
-use collide_core::view_builtin::ready_view;
+use collide_core::view_builtin::BuiltinView;
 use collide_core::view_eval::{
     CompiledView, ViewFailure, ViewResult, compile_view_with, evaluate_view,
 };
@@ -215,10 +216,13 @@ pub fn repo_candidates(line: &SourceLine) -> Vec<Candidate> {
         .collect()
 }
 
-/// The views core holds: `ready`, first in the order of precedence, so a file cannot make `ready` mean something other
-/// than what `--ready` lists.
+/// The views core holds: `ready` and then `bottlenecks`, first in the order of precedence, so a file cannot make
+/// `ready` mean something other than what `--ready` lists.
 pub fn builtin_candidates() -> Vec<Candidate> {
-    vec![Candidate::found(ready_view(), ViewSource::Builtin {})]
+    BuiltinView::ALL
+        .into_iter()
+        .map(|view| Candidate::found(view.view(), ViewSource::Builtin {}))
+        .collect()
 }
 
 /// The views of the line's packs, named `pack/name`, in pack order. A pack whose code the line's trust covers gives
@@ -323,8 +327,10 @@ impl ViewCache {
                 .or_insert_with(|| source.clone());
             let mut compiled = None;
             if error.is_none() {
-                if source == (ViewSource::Builtin {}) {
-                    compiled = Some(CompiledView::ready());
+                if let Some(builtin) =
+                    BuiltinView::named(&view.name).filter(|_| source == (ViewSource::Builtin {}))
+                {
+                    compiled = Some(CompiledView::builtin(builtin));
                 } else {
                     match self.compile(&view, tasks) {
                         Ok(done) => compiled = Some(done),
