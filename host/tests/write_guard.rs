@@ -1084,7 +1084,22 @@ fn a_queued_write_whose_version_is_old_becomes_a_conflict_item_and_overwrites_no
         "review",
         "the edit was not overwritten"
     );
-    assert!(rig.changed().is_empty());
+    // The watcher may have recorded the person's own edit to `review` by now; the write to `active` must not be there.
+    let written = rig
+        .daemon()
+        .events_since(0)
+        .unwrap()
+        .into_iter()
+        .filter(|event| match &event.body {
+            EventBody::TaskChanged { task, .. } => {
+                task.cause != ChangeCause::Startup
+                    && task.key == format!("plan:{SECOND}")
+                    && task.to.as_ref().is_some_and(|to| to.status == "active")
+            }
+            _ => false,
+        })
+        .count();
+    assert_eq!(written, 0, "the stale write was recorded as made");
 }
 
 #[test]

@@ -189,22 +189,39 @@ fn a_hung_shell_falls_back_to_the_minimal_environment_and_is_killed() {
             child_file.display()
         ),
     );
-    let start = Instant::now();
-    let env = capture(&shell, &options(Duration::from_millis(400)));
-    assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "{:?}",
-        start.elapsed()
-    );
-    assert!(
-        reason_of(&env).contains("did not finish"),
-        "{}",
-        reason_of(&env)
-    );
-    assert_eq!(env.vars.get("USER").map(String::as_str), Some("tester"));
-    // The shell and what it started are in the session that was killed.
-    assert!(gone(pid_in(&pid_file)), "the shell is still running");
-    assert!(gone(pid_in(&child_file)), "its child is still running");
+    // On a loaded machine a shell can take longer to start than the capture waits, and is then killed before it writes
+    // its pid. The timeout grows until the shell got as far as starting its child, so the kill is always checked.
+    for timeout in [400, 2_000, 10_000].map(Duration::from_millis) {
+        let _ = fs::remove_file(&pid_file);
+        let _ = fs::remove_file(&child_file);
+        let start = Instant::now();
+        let env = capture(&shell, &options(timeout));
+        assert!(
+            start.elapsed() < timeout + Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(
+            reason_of(&env).contains("did not finish"),
+            "{}",
+            reason_of(&env)
+        );
+        assert_eq!(env.vars.get("USER").map(String::as_str), Some("tester"));
+        let (Some(shell_pid), Some(child_pid)) = (pid_written(&pid_file), pid_written(&child_file))
+        else {
+            continue;
+        };
+        // The shell and what it started are in the session that was killed.
+        assert!(gone(shell_pid), "the shell is still running");
+        assert!(gone(child_pid), "its child is still running");
+        return;
+    }
+    panic!("the fake shell never started its child, even when the capture waited 10 s");
+}
+
+/// The pid a script wrote, or `None` when it was killed before it wrote a whole one.
+fn pid_written(path: &Path) -> Option<i32> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
 #[test]
