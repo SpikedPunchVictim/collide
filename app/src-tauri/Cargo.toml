@@ -3,16 +3,18 @@ name = "collide-app"
 version = "0.0.0"
 edition.workspace = true
 publish = false
+# `tauri dev` runs `cargo run` with no `--bin`; the test-only bridge below is a second binary, so name the app.
+default-run = "collide-app"
 
 [dependencies]
 collide-core = { path = "../../core" }
 collide-host = { path = "../../host" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = "2"
+tauri = { version = "2", features = [] }
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [features]
 # The test-only bridge (ts-0082-fp): a program that hosts the shell's `Shell` behind loopback HTTP, so a browser test
