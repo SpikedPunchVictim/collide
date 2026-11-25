@@ -13,9 +13,11 @@
 //! 1. `initialize` is the shell's: it carries the per-client token, so the window cannot send it. The link makes the
 //!    handshake when it connects, with the token it read itself.
 //! 2. A `ui_tools.*` method goes to [`UiToolsEndpoint::rpc`] and is never forwarded, whatever it answers.
-//! 3. A `shell.*` method is the shell's own and is never forwarded, whatever it answers. There is one,
-//!    [`OPEN_EXTERNAL`], which opens a link in the person's browser after the shell has checked its scheme
-//!    ([`open_external`]). The opener is given to [`Shell::new`], so a test never opens a real link.
+//! 3. A `shell.*` method is the shell's own and is never forwarded, whatever it answers. There are two.
+//!    [`OPEN_EXTERNAL`] opens a link in the person's browser after the shell has checked its scheme
+//!    ([`open_external`]). The opener is given to [`Shell::new`], so a test never opens a real link. [`PICK_FOLDER`]
+//!    asks the person for a folder ([`pick_folder`]). The picker is given to [`Shell::with_picker`], so a test never
+//!    opens a real window.
 //! 4. `ask.start` and `ask.test` are read in the window's shape ([`collide_core::ask::AskStartParams`]), which has no
 //!    token field, so a window that sends one is refused. The shell then makes the daemon's shape, with the endpoint and
 //!    the ask's token, which is Stage 6b's (`shell: ask token`). `ask.cancel` has one shape and goes on as it is.
@@ -563,6 +565,83 @@ impl Opener for RecordingOpener {
     }
 }
 
+/// The method that asks the person for a folder, for `board.locate` and the board menu's typed path (ts-0191-nv). It
+/// answers `{ "path": "<absolute path>" }`, or `{ "path": null }` when they cancel. `app/src/owner/` has the same name
+/// (`SHELL_METHODS`); a test keeps the two equal.
+pub const PICK_FOLDER: &str = "shell.pick_folder";
+
+/// Asks the person for a folder. The app's wiring gives the system's picker (`DialogPicker` in `lib.rs`); a test gives
+/// [`RecordingPicker`], so nothing a test does opens a window. The picker is the shell's and the webview has no way to
+/// it but [`PICK_FOLDER`]: the dialog plugin has no permission in the window's capability.
+pub trait FolderPicker {
+    /// Asks for one folder and waits. `Ok(None)` when the person cancels. The path is absolute.
+    fn pick(&mut self) -> Result<Option<PathBuf>, String>;
+}
+
+/// The picker of a shell that was given none, as the test bridge's: it says so and asks nothing.
+pub struct NoPicker;
+
+impl FolderPicker for NoPicker {
+    fn pick(&mut self) -> Result<Option<PathBuf>, String> {
+        Err("this shell has no folder picker".to_string())
+    }
+}
+
+/// What a [`RecordingPicker`] does when it is asked.
+#[derive(Clone)]
+enum Choice {
+    Folder(PathBuf),
+    Cancel,
+    Fail(String),
+}
+
+/// A picker that counts how often it was asked and opens nothing. Clones share the count.
+#[derive(Clone)]
+pub struct RecordingPicker {
+    choice: Choice,
+    asked: Arc<Mutex<usize>>,
+}
+
+impl RecordingPicker {
+    fn with(choice: Choice) -> Self {
+        RecordingPicker {
+            choice,
+            asked: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    /// A person who chooses `folder`.
+    pub fn choosing(folder: &str) -> Self {
+        Self::with(Choice::Folder(PathBuf::from(folder)))
+    }
+
+    /// A person who cancels.
+    pub fn cancelling() -> Self {
+        Self::with(Choice::Cancel)
+    }
+
+    /// A picker that cannot ask, for `reason`.
+    pub fn failing(reason: &str) -> Self {
+        Self::with(Choice::Fail(reason.to_string()))
+    }
+
+    /// How many times it was asked.
+    pub fn asked(&self) -> usize {
+        *self.asked.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl FolderPicker for RecordingPicker {
+    fn pick(&mut self) -> Result<Option<PathBuf>, String> {
+        *self.asked.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        match &self.choice {
+            Choice::Folder(folder) => Ok(Some(folder.clone())),
+            Choice::Cancel => Ok(None),
+            Choice::Fail(reason) => Err(reason.clone()),
+        }
+    }
+}
+
 /// The most a link may be, in bytes.
 const MAX_LINK: usize = 2048;
 
@@ -624,11 +703,50 @@ pub fn open_external(opener: &mut dyn Opener, params: Option<Value>) -> Result<V
     Ok(serde_json::json!({}))
 }
 
+/// `shell.pick_folder`'s params: none. A window that sends a field is refused, so nothing it adds reaches the picker.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PickFolderParams {}
+
+/// `shell.pick_folder`: asks the person for a folder with `picker`. It never reaches the daemon.
+pub fn pick_folder(
+    picker: &mut dyn FolderPicker,
+    params: Option<Value>,
+) -> Result<Value, RpcError> {
+    let params = match params {
+        None | Some(Value::Null) => Value::Object(serde_json::Map::new()),
+        Some(other) => other,
+    };
+    serde_json::from_value::<PickFolderParams>(params).map_err(|error| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("invalid params for `{PICK_FOLDER}`: {error}"),
+        )
+    })?;
+    let picked = picker.pick().map_err(|why| {
+        RpcError::new(
+            code::INTERNAL_ERROR,
+            format!("could not ask for a folder: {why}"),
+        )
+    })?;
+    let Some(folder) = picked else {
+        return Ok(serde_json::json!({ "path": null }));
+    };
+    let path = folder.to_str().ok_or_else(|| {
+        RpcError::new(
+            code::INTERNAL_ERROR,
+            "the folder's path is not text, so the window cannot be given it",
+        )
+    })?;
+    Ok(serde_json::json!({ "path": path }))
+}
+
 /// The shell. See the module doc.
 pub struct Shell {
     endpoint: UiToolsEndpoint,
     link: Box<dyn DaemonLink>,
     opener: Box<dyn Opener>,
+    picker: Box<dyn FolderPicker>,
     next_id: i64,
     completed: Vec<Completed>,
 }
@@ -643,9 +761,16 @@ impl Shell {
             endpoint,
             link,
             opener,
+            picker: Box::new(NoPicker),
             next_id: 0,
             completed: Vec::new(),
         }
+    }
+
+    /// The shell with `picker` to ask the person for a folder. Without one, `shell.pick_folder` says there is none.
+    pub fn with_picker(mut self, picker: Box<dyn FolderPicker>) -> Self {
+        self.picker = picker;
+        self
     }
 
     /// The UI-tools endpoint, for the listener of Stage 6b to feed with HTTP requests.
@@ -667,6 +792,7 @@ impl Shell {
         }
         match method {
             OPEN_EXTERNAL => return open_external(self.opener.as_mut(), params),
+            PICK_FOLDER => return pick_folder(self.picker.as_mut(), params),
             other if other.starts_with(SHELL_PREFIX) => {
                 return Err(RpcError::method_not_found(other));
             }

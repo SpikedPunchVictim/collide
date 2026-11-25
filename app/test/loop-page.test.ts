@@ -10,6 +10,7 @@ import {
   confirmationItem,
   diff,
   fileRun,
+  missingBoard,
   permissionItem,
   reviewItem,
   run,
@@ -39,6 +40,67 @@ function oneBoard(): World {
   world.boards = [board('b-1', '/work/repo')]
   return world
 }
+
+describe('a board whose folder moved', () => {
+  function withMissing(): World {
+    const world = new World()
+    world.boards = [board('b-1', '/work/one'), missingBoard('b-2', '/work/old')]
+    return world
+  }
+
+  test('is listed missing, and the page does not choose it for the person', async () => {
+    const loop = await pageOf(withMissing())
+    expect(loop.getState().boards.map((b) => b.missing === true)).toEqual([false, true])
+    expect(loop.getState().boardId).toBe('b-1')
+  })
+
+  test('locating it keeps its id, points it at the new folder and makes it the board in use', async () => {
+    const loop = await pageOf(withMissing())
+    const outcome = await loop.locateBoard('b-2', '/work/new')
+    expect(outcome).toEqual({ problem: null, note: null })
+    const { boards, boardId } = loop.getState()
+    expect(boards.map((b) => [b.id, b.root, b.missing === true])).toEqual([
+      ['b-1', '/work/one', false],
+      ['b-2', '/work/new', false],
+    ])
+    expect(boardId).toBe('b-2')
+  })
+
+  test('locating it passes on the note the daemon adds', async () => {
+    const world = withMissing()
+    world.locateNotes.set('/work/new', 'The check could not run.')
+    const loop = await pageOf(world)
+    expect(await loop.locateBoard('b-2', '/work/new')).toEqual({ problem: null, note: 'The check could not run.' })
+  })
+
+  test('a folder the daemon refuses gives its words, and the board stays missing', async () => {
+    const world = withMissing()
+    world.locateRefusals.set('/work/other', '`/work/other` is a different repository.')
+    const loop = await pageOf(world)
+    const outcome = await loop.locateBoard('b-2', '/work/other')
+    expect(outcome).toEqual({ problem: '`/work/other` is a different repository.', note: null })
+    expect(loop.getState().boards[1]).toMatchObject({ id: 'b-2', root: '/work/old', missing: true })
+  })
+
+  test('an empty folder is refused without asking the daemon', async () => {
+    const world = withMissing()
+    const loop = await pageOf(world)
+    const before = world.owner.calls.length
+    const outcome = await loop.locateBoard('b-2', '   ')
+    expect(outcome.problem).not.toBeNull()
+    expect(world.owner.calls.length).toBe(before)
+  })
+
+  test('refreshing the boards reads them again, so a folder that moved since shows as missing', async () => {
+    const world = new World()
+    world.boards = [board('b-1', '/work/one')]
+    const loop = await pageOf(world)
+    world.boards = [missingBoard('b-1', '/work/one')]
+    await loop.refreshBoards()
+    await loop.idle()
+    expect(loop.getState().boards[0]?.missing).toBe(true)
+  })
+})
 
 describe('the repository', () => {
   test('the boards come from board.list and the first is chosen', async () => {

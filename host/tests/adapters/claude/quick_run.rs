@@ -95,6 +95,15 @@ pub(super) fn open(fx: &mut Fixture, folder: &Path) -> String {
     opened.board.expect("the folder opens as a board").id
 }
 
+/// A board rooted at `folder` itself, as a build before ts-0191-nv stored one for a linked worktree. `board.open` now
+/// roots a worktree's board at the main checkout, so a test of a board rooted at a worktree stores its board this way.
+pub(super) fn stored_board(fx: &Fixture, folder: &Path) -> String {
+    collide_host::store::Store::open(&fx.paths().store_dir)
+        .unwrap()
+        .open_board(folder.to_str().unwrap(), &|_| false)
+        .unwrap()
+}
+
 pub(super) fn apply(
     fx: &mut Fixture,
     board: &str,
@@ -891,7 +900,7 @@ fn a_board_whose_root_is_a_linked_worktree_runs_from_the_branch_it_is_on() {
     let feature_head = git_out(&linked, &["rev-parse", "HEAD"]);
     let linked = fs::canonicalize(linked).unwrap();
 
-    let board = open(&mut fx, &linked);
+    let board = stored_board(&fx, &linked);
     let key = create(&mut fx, &board, PROMPT);
     let run = started(&mut fx, &board, &key);
     wait_item(&mut fx, &run, QueueKind::Review);

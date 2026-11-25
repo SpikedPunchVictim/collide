@@ -9,3 +9,8 @@ export function boardName(board: BoardSummary): string {
 export function defaultLine(board: BoardSummary): string | null {
   return board.lines[0]?.ref_name ?? null
 }
+
+/** The board's folder is gone (moved or deleted). Nothing of the board is deleted, and it can be located again. */
+export function isMissing(board: BoardSummary): boolean {
+  return board.missing === true
+}

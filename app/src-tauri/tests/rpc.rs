@@ -6,7 +6,8 @@
 mod common;
 
 use collide_app::shell::{
-    ChannelEvent, ChannelWindow, DaemonLink, EventChannel, RecordingOpener, Shell, ShellHandle,
+    ChannelEvent, ChannelWindow, DaemonLink, EventChannel, RecordingOpener, RecordingPicker, Shell,
+    ShellHandle,
 };
 use collide_core::owner::{Request, RequestId, Response, RpcError, code};
 use collide_core::ui_tools::ToolManifest;
@@ -133,6 +134,12 @@ fn shell_with_opener(opener: RecordingOpener) -> (Shell, FakeLink, FakeChannel) 
     (shell, link, channel)
 }
 
+/// A shell whose folder picker is `picker`, which opens no window.
+fn shell_with_picker(picker: RecordingPicker) -> (Shell, FakeLink) {
+    let (shell, link, _) = shell();
+    (shell.with_picker(Box::new(picker)), link)
+}
+
 fn failure(result: Result<Value, RpcError>) -> RpcError {
     result.expect_err("the call should fail")
 }
@@ -204,8 +211,66 @@ fn shell_open_external_refuses_a_scheme_it_does_not_open_and_does_not_forward_it
 #[test]
 fn an_unknown_shell_method_is_refused_here_and_is_not_forwarded() {
     let (mut shell, link, _) = shell();
-    let error = failure(shell.rpc("shell.pick_folder", None));
+    let error = failure(shell.rpc("shell.nothing", None));
     assert_eq!(error.code, code::METHOD_NOT_FOUND);
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
+#[test]
+fn shell_pick_folder_answers_the_folder_the_person_chose_and_does_not_forward_it() {
+    let picker = RecordingPicker::choosing("/work/chosen");
+    let (mut shell, link) = shell_with_picker(picker.clone());
+    let result = shell.rpc("shell.pick_folder", None);
+    assert_eq!(result, Ok(json!({ "path": "/work/chosen" })));
+    assert_eq!(picker.asked(), 1);
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
+#[test]
+fn shell_pick_folder_answers_no_path_when_the_person_cancels() {
+    let picker = RecordingPicker::cancelling();
+    let (mut shell, link) = shell_with_picker(picker.clone());
+    assert_eq!(
+        shell.rpc("shell.pick_folder", Some(json!({}))),
+        Ok(json!({ "path": null }))
+    );
+    assert_eq!(picker.asked(), 1);
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
+#[test]
+fn shell_pick_folder_refuses_params_it_does_not_have_and_does_not_ask_the_person() {
+    let picker = RecordingPicker::choosing("/work/chosen");
+    let (mut shell, link) = shell_with_picker(picker.clone());
+    let error = failure(shell.rpc("shell.pick_folder", Some(json!({ "start": "/etc" }))));
+    assert_eq!(error.code, code::INVALID_PARAMS);
+    assert_eq!(picker.asked(), 0);
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
+#[test]
+fn shell_pick_folder_says_why_when_the_picker_fails() {
+    let (mut shell, link) = shell_with_picker(RecordingPicker::failing("no window to ask in"));
+    let error = failure(shell.rpc("shell.pick_folder", None));
+    assert_eq!(error.code, code::INTERNAL_ERROR);
+    assert!(
+        error.message.contains("no window to ask in"),
+        "{}",
+        error.message
+    );
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
+#[test]
+fn a_shell_with_no_picker_says_so_and_does_not_forward_the_call() {
+    let (mut shell, link, _) = shell();
+    let error = failure(shell.rpc("shell.pick_folder", None));
+    assert_eq!(error.code, code::INTERNAL_ERROR);
+    assert!(
+        error.message.contains("no folder picker"),
+        "{}",
+        error.message
+    );
     assert!(link.calls().is_empty(), "{:?}", link.calls());
 }
 

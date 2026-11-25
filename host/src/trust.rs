@@ -649,6 +649,16 @@ impl Trust {
         Ok(())
     }
 
+    /// Moves what was trusted for the board at `from` to the board at `to`, for a board that was located. What `to`
+    /// had is replaced. Nothing is written when there is nothing at `from`.
+    pub fn move_board(&self, from: &str, to: &str) -> Result<(), TrustError> {
+        let mut file = self.store.load()?;
+        if file.move_board(from, to) {
+            self.store.save(&file)?;
+        }
+        Ok(())
+    }
+
     /// Whether the `dev:` folder is trusted. A change inside the folder does not matter: the trust is of the folder.
     /// A folder inside one of `workspaces` is refused.
     pub fn dev_trusted(&self, folder: &Path, workspaces: &[PathBuf]) -> Result<bool, TrustError> {

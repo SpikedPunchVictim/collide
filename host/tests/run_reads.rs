@@ -96,8 +96,8 @@ fn launch(daemon: &Daemon, run: &str, board: &str, tasks: &[(&str, &str)]) {
 /// run with no board, and `r5` a file run paused for disk. Returns the two boards' names.
 fn five_runs(daemon: &Daemon) -> (String, String) {
     let store = daemon.store();
-    let one = store.open_board("/work/one").unwrap();
-    let two = store.open_board("/work/two").unwrap();
+    let one = store.open_board("/work/one", &|_| false).unwrap();
+    let two = store.open_board("/work/two", &|_| false).unwrap();
     transition(daemon, "r1", None, RunState::Running {});
     launch(daemon, "r1", &one, &[("scratch:1", "status-a")]);
     transition(daemon, "r1", Some(RunState::Running {}), ended());

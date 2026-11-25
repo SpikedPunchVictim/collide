@@ -24,6 +24,7 @@ export const OWNER_METHODS = {
   'daemon.subscribe': call<G.DaemonSubscribeParamsInput, G.DaemonSubscribeResultOutput>(),
   'board.list': call<G.BoardListParamsInput, G.BoardListResultOutput>(),
   'board.open': call<G.BoardOpenParamsInput, G.BoardOpenResultOutput>(),
+  'board.locate': call<G.BoardLocateParamsInput, G.BoardLocateResultOutput>(),
   'board.init': call<G.BoardInitParamsInput, G.BoardInitResultOutput>(),
   'board.trust': call<G.BoardTrustParamsInput, G.BoardTrustResultOutput>(),
   'board.trust_review': call<G.BoardTrustReviewParamsInput, G.BoardTrustReviewResultOutput>(),
@@ -89,4 +90,9 @@ export const UI_TOOLS_METHODS = {
 export const SHELL_METHODS = {
   /** Opens a link in the person's browser. The shell opens only `http:`, `https:` and `mailto:`. */
   'shell.open_external': call<{ url: string }, G.AckOutput>(),
+  /**
+   * Asks the person for a folder with the system's picker (`ts-0191-nv`). `path` is null when they cancel. The bridge
+   * and the fake owner have no picker, and the window shows the picker only in the shell.
+   */
+  'shell.pick_folder': call<Record<never, never>, { path: string | null }>(),
 }

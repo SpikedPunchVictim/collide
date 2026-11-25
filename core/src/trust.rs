@@ -196,6 +196,18 @@ impl TrustFile {
         self.boards.remove(root).is_some()
     }
 
+    /// Moves every line trusted for the board at `from` to the board at `to`, replacing what `to` had. Returns whether
+    /// there was anything at `from`.
+    pub fn move_board(&mut self, from: &str, to: &str) -> bool {
+        match self.boards.remove(from) {
+            Some(lines) => {
+                self.boards.insert(to.to_string(), lines);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn set_pack(&mut self, source: &str, tree: &str) {
         self.packs.insert(
             source.to_string(),

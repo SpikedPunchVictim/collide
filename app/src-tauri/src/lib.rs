@@ -8,14 +8,16 @@ use collide_host::daemon::{DaemonPaths, ROOT_ENV};
 use collide_host::ui_tools::{SecretStoreTokens, UiToolsEndpoint};
 use serde_json::Value;
 use shell::{
-    ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, LaunchStarter, Shell, ShellHandle,
-    SocketLink, UsrBinOpen, pump_daemon_events,
+    ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, FolderPicker, LaunchStarter, Shell,
+    ShellHandle, SocketLink, UsrBinOpen, pump_daemon_events,
 };
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 pub const NAME: &str = "collide-app";
 
@@ -69,7 +71,28 @@ async fn rpc(
         })?
 }
 
-fn build_shell(channel: Arc<dyn EventChannel>, access: Arc<DaemonAccess>) -> Shell {
+/// The system's folder picker (ts-0191-nv). It is called only from the shell's thread, never the main one, because a
+/// blocking dialog on the main thread would never return. The window cannot reach the plugin: its capability allows the
+/// one `rpc` command and the event channel, so the only way to the picker is `shell.pick_folder`.
+struct DialogPicker(tauri::AppHandle);
+
+impl FolderPicker for DialogPicker {
+    fn pick(&mut self) -> Result<Option<PathBuf>, String> {
+        match self.0.dialog().file().blocking_pick_folder() {
+            None => Ok(None),
+            Some(chosen) => chosen
+                .into_path()
+                .map(Some)
+                .map_err(|error| format!("the chosen folder has no path: {error}")),
+        }
+    }
+}
+
+fn build_shell(
+    channel: Arc<dyn EventChannel>,
+    access: Arc<DaemonAccess>,
+    picker: Box<dyn FolderPicker>,
+) -> Shell {
     // The manifest is empty until the generator of Stage 6 writes the real one from the tools' TypeScript.
     let endpoint = UiToolsEndpoint::new(
         UNBOUND_PORT,
@@ -85,6 +108,7 @@ fn build_shell(channel: Arc<dyn EventChannel>, access: Arc<DaemonAccess>) -> She
         Box::new(SocketLink::new(access)),
         Box::new(UsrBinOpen),
     )
+    .with_picker(picker)
 }
 
 /// The files of the daemon and the way to start it, from this process's environment (0.2, Starting the daemon).
@@ -111,13 +135,15 @@ const EVENT_RETRY: Duration = Duration::from_secs(1);
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let channel: Arc<dyn EventChannel> = Arc::new(WebviewChannel(app.handle().clone()));
             let access = daemon_access()?;
             let shell_access = Arc::clone(&access);
             let shell_channel = Arc::clone(&channel);
+            let picker = DialogPicker(app.handle().clone());
             app.manage(Arc::new(ShellHandle::spawn(move || {
-                build_shell(shell_channel, shell_access)
+                build_shell(shell_channel, shell_access, Box::new(picker))
             })));
             // The pump lives as long as the app does, so its stop flag is never set.
             thread::Builder::new()

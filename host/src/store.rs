@@ -70,7 +70,7 @@ pub struct Migration {
 /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
 /// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
 /// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
-pub const MIGRATIONS: [Migration; 12] = [
+pub const MIGRATIONS: [Migration; 13] = [
     Migration {
         version: 1,
         name: "events",
@@ -161,7 +161,22 @@ pub const MIGRATIONS: [Migration; 12] = [
               PRIMARY KEY (run, phase)
           )",
     },
+    Migration {
+        version: 13,
+        name: "board_names_and_root_commits",
+        sql: BOARD_IDENTITY_SQL,
+    },
 ];
+
+/// A board's own name, and the root commits of its repository (ts-0191-nv). A board made before this has no name of
+/// its own: it is `board-<id>`. A board made after has `board-` and random letters, and the name is what everything
+/// else keys the board by. `root_commits` is NULL until a commit is seen, then one commit id per line; it is the proof
+/// that a folder is the board's repository again after a move.
+const BOARD_IDENTITY_SQL: &str = "
+    ALTER TABLE boards ADD COLUMN name TEXT;
+    ALTER TABLE boards ADD COLUMN root_commits TEXT;
+    CREATE UNIQUE INDEX boards_by_name ON boards (name);
+";
 
 /// The corpus cache (ts-0116-wh; 0.10), see [`crate::corpus_store`]. Each row is what one source last listed, or was
 /// told, for one checkout of one board: `checkout` is empty for a source that is not ref-scoped. `json` is the task
@@ -1552,6 +1567,105 @@ mod tests {
         assert!(table_exists(&raw(&store), "boards"));
         assert!(table_exists(&raw(&store), "scratch_tasks"));
         assert_eq!(user_version(&raw(&store)), known_version());
+    }
+
+    /// A store as an older build left it (version 12), with boards that have no name of their own, each with a task.
+    fn store_of_numbered_boards(dir: &Path, roots: &[&str]) {
+        store_at_version(dir, 12);
+        let conn = Connection::open(dir.join(DB_FILE)).unwrap();
+        for (index, root) in roots.iter().enumerate() {
+            conn.execute("INSERT INTO boards (root) VALUES (?1)", [root])
+                .unwrap();
+            conn.execute(
+                "INSERT INTO scratch_tasks (board, num, title, prompt, status, version)
+                 VALUES (?1, 1, 'Old', 'Old', 'ready', 1)",
+                [index as i64 + 1],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_board_from_before_names_were_stored_keeps_its_numbered_name_and_its_tasks() {
+        let dir = TempDir::new();
+        store_of_numbered_boards(dir.path(), &["/old/one", "/old/two"]);
+
+        let store = Store::open(dir.path()).unwrap();
+
+        let names: Vec<String> = store.boards().unwrap().into_iter().map(|b| b.id).collect();
+        assert_eq!(names, ["board-1", "board-2"]);
+        assert_eq!(store.open_board("/old/two", &|_| false).unwrap(), "board-2");
+        assert_eq!(
+            store.scratch_task("board-2", 1).unwrap().unwrap().title,
+            "Old"
+        );
+        assert_eq!(
+            store.board_root("board-1").unwrap().as_deref(),
+            Some("/old/one")
+        );
+        assert_eq!(store.root_commits("board-1").unwrap(), None);
+    }
+
+    #[test]
+    fn a_new_board_beside_numbered_ones_is_never_a_number_and_numbered_boards_keep_working() {
+        let dir = TempDir::new();
+        store_of_numbered_boards(dir.path(), &["/old/one"]);
+        let store = Store::open(dir.path()).unwrap();
+
+        let new = store.open_board("/new", &|_| false).unwrap();
+        store.add_scratch_task(&new, "New", "New", "ready").unwrap();
+        store
+            .add_scratch_task("board-1", "More", "More", "ready")
+            .unwrap();
+
+        assert!(
+            new.strip_prefix("board-")
+                .unwrap()
+                .chars()
+                .all(|c| c.is_ascii_lowercase())
+        );
+        assert_eq!(store.scratch_tasks("board-1").unwrap().len(), 2);
+        assert_eq!(store.scratch_tasks(&new).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_boards_root_commits_are_recorded_once_and_never_replaced() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let board = store.open_board("/a", &|_| false).unwrap();
+        let one = vec!["1111".to_string()];
+        let two = vec!["2222".to_string(), "3333".to_string()];
+
+        assert!(!store.record_root_commits(&board, &[]).unwrap());
+        assert_eq!(store.root_commits(&board).unwrap(), None);
+        assert!(store.record_root_commits(&board, &one).unwrap());
+        assert!(!store.record_root_commits(&board, &two).unwrap());
+        assert_eq!(store.root_commits(&board).unwrap(), Some(one));
+        assert_eq!(
+            store.boards().unwrap()[0]
+                .root_commits
+                .as_ref()
+                .map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_moved_board_keeps_its_name_and_its_tasks_and_the_old_root_opens_a_new_board() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let board = store.open_board("/before", &|_| false).unwrap();
+        store
+            .add_scratch_task(&board, "Keep", "Keep", "ready")
+            .unwrap();
+
+        assert!(store.move_board(&board, "/after").unwrap());
+        assert!(!store.move_board("board-nope", "/elsewhere").unwrap());
+
+        assert_eq!(store.open_board("/after", &|_| false).unwrap(), board);
+        assert_eq!(store.board_root(&board).unwrap().as_deref(), Some("/after"));
+        assert_eq!(store.scratch_tasks(&board).unwrap().len(), 1);
+        assert_ne!(store.open_board("/before", &|_| false).unwrap(), board);
     }
 
     #[test]

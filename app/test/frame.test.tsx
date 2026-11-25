@@ -5,6 +5,7 @@ import { Frame, type FrameProps } from '../src/frame/Frame.tsx'
 import { TracksPreview } from '../src/frame/TracksPreview.tsx'
 import { actionForKey, tabOfAction } from '../src/frame/actions.ts'
 import { TABS, type TabId, isTyping } from '../src/frame/tabs.ts'
+import { missingBoard } from './support/loop-world.ts'
 import { twoBoards } from './support/worlds.ts'
 
 // The frame (ts-0179-ke) is a function of its props, so it renders for any state with no browser. Clicks, keys and the
@@ -160,6 +161,24 @@ describe('the board menu lists', () => {
   test('why a folder was not opened', async () => {
     const html = await body({ problems: ['This folder is not a git repository.'] })
     expect(html).toContain('This folder is not a git repository.')
+  })
+
+  test('a board whose folder is gone, saying "folder not found" in its row and no other row', async () => {
+    const { boards } = await twoBoards().owner.rpc('board.list')
+    const html = await body({ boards: [boards[0]!, missingBoard('b-gone', '/work/gone')] })
+    expect(html.match(/folder not found/g)).toHaveLength(1)
+    expect(html).toMatch(/folder not found · <\/span>(?:(?!<\/button>)[^])*\/work\/gone/)
+  })
+
+  test('no folder picker where the page has none', async () => {
+    expect(await body()).not.toContain('Choose a folder…')
+    expect(await body({ pickFolder: null })).not.toContain('Choose a folder…')
+  })
+
+  test('a folder picker in the shell, beside the typed path', async () => {
+    const html = await body({ pickFolder: async () => null })
+    expect(html).toContain('Choose a folder…')
+    expect(html).toContain('aria-label="Folder path"')
   })
 })
 

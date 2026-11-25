@@ -2,23 +2,39 @@
 //! ([`crate::store::MIGRATIONS`]); this file is the writes and reads on them. What a scratch task is, and which
 //! statuses it may have, is [`crate::scratch`]'s; this is the SQL.
 //!
-//! - A board is named `board-<n>`: the store gives each checkout root the next number the first time it is opened, and
-//!   gives the same name every time after.
+//! - A board keeps one name for its life, and the store gives each checkout root its name the first time it is
+//!   opened. A board made before ts-0191-nv is `board-<n>`, the number of its row, and keeps that name. A new board is
+//!   `board-` and six random letters, so a lost store never gives a name that a folder of an earlier store (its views,
+//!   its pack data) already has: the daemon says which names are taken on disk, and the store checks its own.
+//! - A board records the root commits of its repository the first time one is seen (`root_commits`): `board.locate`
+//!   accepts a folder only when it shares one.
 //! - A scratch task is numbered inside its board, from 1. The number and the insert are one transaction, so two writers
 //!   never take the same number.
 
 use crate::store::{Store, StoreError, sql_error};
-use rusqlite::{OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 use std::io;
 
-/// The text a board's name starts with. The number after it is the row's.
+/// The text a board's name starts with. After it comes the row's number (a board made before ts-0191-nv) or the
+/// board's random letters.
 const BOARD_PREFIX: &str = "board-";
 
-/// One board as the store holds it: its name and the top level of its checkout.
+/// How many random letters a new board's name ends with. They are letters only, so a new name is never a number and
+/// never the name of an older board's row.
+const SUFFIX_LEN: usize = 6;
+
+/// How many names a new board tries before the store gives up. Each is taken with a chance of about 1 in 300 million.
+const NAME_TRIES: usize = 64;
+
+/// One board as the store holds it: its name, the top level of its checkout, and the root commits of its repository
+/// when they were recorded (`None` when they were not).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredBoard {
     pub id: String,
     pub root: String,
+    pub root_commits: Option<Vec<String>>,
 }
 
 /// One scratch task as the store holds it. `status` is the text of its category.
@@ -35,9 +51,47 @@ fn board_name(number: i64) -> String {
     format!("{BOARD_PREFIX}{number}")
 }
 
-/// The number in a board's name, or `None` for text that is not the name of any board.
+/// The number in a board's name, or `None` for text that is not the name of an older board.
 fn board_number(name: &str) -> Option<i64> {
     name.strip_prefix(BOARD_PREFIX)?.parse().ok()
+}
+
+/// A board's name from its row: its own, or `board-<n>` for a board made before names were stored.
+fn name_of(number: i64, own: Option<String>) -> String {
+    own.unwrap_or_else(|| board_name(number))
+}
+
+/// The row of the board named `name`: the row whose own name it is, or row `n` for `board-<n>` when that row has no
+/// name of its own. `None` when the store has no such board.
+fn row_of(conn: &Connection, name: &str) -> rusqlite::Result<Option<i64>> {
+    conn.query_row(
+        "SELECT id FROM boards WHERE name = ?1 OR (name IS NULL AND id = ?2)",
+        params![name, board_number(name)],
+        |row| row.get(0),
+    )
+    .optional()
+}
+
+/// Six random letters, from a hasher the operating system seeds: `RandomState` is the one source of randomness in
+/// `std`, and a name only has to differ from the others, not be secret.
+fn random_suffix() -> String {
+    let mut bits = RandomState::new().build_hasher().finish();
+    (0..SUFFIX_LEN)
+        .map(|_| {
+            let letter = char::from(b'a' + (bits % 26) as u8);
+            bits /= 26;
+            letter
+        })
+        .collect()
+}
+
+/// The root commits as a text, one per line, and back.
+fn commits_text(commits: &[String]) -> String {
+    commits.join("\n")
+}
+
+fn commits_of(text: Option<String>) -> Option<Vec<String>> {
+    text.map(|text| text.lines().map(str::to_string).collect())
 }
 
 fn task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScratchRow> {
@@ -53,30 +107,62 @@ fn task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScratchRow> {
 const TASK_COLUMNS: &str = "num, title, prompt, status, version";
 
 impl Store {
-    /// The board of the checkout at `root`: the one the store has, or a new one with the next number. Opening the same
-    /// root again returns the same name.
-    pub fn open_board(&self, root: &str) -> Result<String, StoreError> {
+    /// The board of the checkout at `root`: the one the store has, or a new one with a random name. Opening the same
+    /// root again returns the same name. `taken` says whether a name is already used outside the store (a folder of an
+    /// earlier store), and a new board never takes one.
+    pub fn open_board(
+        &self,
+        root: &str,
+        taken: &dyn Fn(&str) -> bool,
+    ) -> Result<String, StoreError> {
+        self.open_board_with(root, taken, &mut random_suffix)
+    }
+
+    /// [`Store::open_board`] with the letters a new name gets, so a test can name them.
+    pub fn open_board_with(
+        &self,
+        root: &str,
+        taken: &dyn Fn(&str) -> bool,
+        suffix: &mut dyn FnMut() -> String,
+    ) -> Result<String, StoreError> {
         let context = "opening a board";
         let mut conn = self.connect()?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| sql_error(context, e))?;
-        let known: Option<i64> = tx
-            .query_row("SELECT id FROM boards WHERE root = ?1", [root], |row| {
-                row.get(0)
-            })
+        let known: Option<(i64, Option<String>)> = tx
+            .query_row(
+                "SELECT id, name FROM boards WHERE root = ?1",
+                [root],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
             .optional()
             .map_err(|e| sql_error(context, e))?;
-        let number = match known {
-            Some(number) => number,
-            None => {
-                tx.execute("INSERT INTO boards (root) VALUES (?1)", [root])
-                    .map_err(|e| sql_error(context, e))?;
-                tx.last_insert_rowid()
+        if let Some((number, own)) = known {
+            return Ok(name_of(number, own));
+        }
+        for _ in 0..NAME_TRIES {
+            let name = format!("{BOARD_PREFIX}{}", suffix());
+            let in_store = row_of(&tx, &name)
+                .map_err(|e| sql_error(context, e))?
+                .is_some();
+            if in_store || taken(&name) {
+                continue;
             }
-        };
-        tx.commit().map_err(|e| sql_error(context, e))?;
-        Ok(board_name(number))
+            tx.execute(
+                "INSERT INTO boards (root, name) VALUES (?1, ?2)",
+                params![root, name],
+            )
+            .map_err(|e| sql_error(context, e))?;
+            tx.commit().map_err(|e| sql_error(context, e))?;
+            return Ok(name);
+        }
+        Err(StoreError::Io {
+            context: context.to_string(),
+            source: io::Error::other(format!(
+                "no free board name after {NAME_TRIES} tries; every one was taken"
+            )),
+        })
     }
 
     /// Every board, in the order they were first opened.
@@ -84,13 +170,14 @@ impl Store {
         let context = "reading the boards";
         let conn = self.connect()?;
         let mut statement = conn
-            .prepare("SELECT id, root FROM boards ORDER BY id")
+            .prepare("SELECT id, name, root, root_commits FROM boards ORDER BY id")
             .map_err(|e| sql_error(context, e))?;
         let rows = statement
             .query_map([], |row| {
                 Ok(StoredBoard {
-                    id: board_name(row.get(0)?),
-                    root: row.get(1)?,
+                    id: name_of(row.get(0)?, row.get(1)?),
+                    root: row.get(2)?,
+                    root_commits: commits_of(row.get(3)?),
                 })
             })
             .map_err(|e| sql_error(context, e))?;
@@ -100,15 +187,71 @@ impl Store {
 
     /// The root of the board named `board`, or `None` when the store has no such board.
     pub fn board_root(&self, board: &str) -> Result<Option<String>, StoreError> {
-        let Some(number) = board_number(board) else {
+        let conn = self.connect()?;
+        let context = "reading a board";
+        let Some(row) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
             return Ok(None);
         };
-        self.connect()?
-            .query_row("SELECT root FROM boards WHERE id = ?1", [number], |row| {
-                row.get(0)
-            })
-            .optional()
-            .map_err(|e| sql_error("reading a board", e))
+        conn.query_row("SELECT root FROM boards WHERE id = ?1", [row], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(|e| sql_error(context, e))
+    }
+
+    /// The root commits recorded for `board`, or `None` when none are (or the board is not in the store).
+    pub fn root_commits(&self, board: &str) -> Result<Option<Vec<String>>, StoreError> {
+        let context = "reading a board's root commits";
+        let conn = self.connect()?;
+        let Some(row) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(None);
+        };
+        let text: Option<String> = conn
+            .query_row(
+                "SELECT root_commits FROM boards WHERE id = ?1",
+                [row],
+                |row| row.get(0),
+            )
+            .map_err(|e| sql_error(context, e))?;
+        Ok(commits_of(text))
+    }
+
+    /// Records the root commits of the repository of `board`, when none are recorded yet. A record is never replaced,
+    /// and an empty list is never recorded: a repository with no commit has no record to keep. Returns whether it
+    /// wrote.
+    pub fn record_root_commits(&self, board: &str, commits: &[String]) -> Result<bool, StoreError> {
+        let context = "recording a board's root commits";
+        if commits.is_empty() {
+            return Ok(false);
+        }
+        let conn = self.connect()?;
+        let Some(row) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(false);
+        };
+        let changed = conn
+            .execute(
+                "UPDATE boards SET root_commits = ?2 WHERE id = ?1 AND root_commits IS NULL",
+                params![row, commits_text(commits)],
+            )
+            .map_err(|e| sql_error(context, e))?;
+        Ok(changed > 0)
+    }
+
+    /// Moves `board` to the checkout at `root`. Its name, its scratch tasks and everything keyed by its name stay.
+    /// `false` when the store has no such board. A root another board has is an error of the store (the column is
+    /// unique), so the caller looks first.
+    pub fn move_board(&self, board: &str, root: &str) -> Result<bool, StoreError> {
+        let context = "moving a board";
+        let conn = self.connect()?;
+        let Some(row) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(false);
+        };
+        conn.execute(
+            "UPDATE boards SET root = ?2 WHERE id = ?1",
+            params![row, root],
+        )
+        .map_err(|e| sql_error(context, e))?;
+        Ok(true)
     }
 
     /// Adds a scratch task to `board` with the next number there, at version 1.
@@ -120,11 +263,13 @@ impl Store {
         status: &str,
     ) -> Result<ScratchRow, StoreError> {
         let context = "writing a scratch task";
-        let number = board_number(board).ok_or_else(|| StoreError::Io {
-            context: context.to_string(),
-            source: io::Error::new(io::ErrorKind::InvalidInput, format!("no board {board:?}")),
-        })?;
         let mut conn = self.connect()?;
+        let number = row_of(&conn, board)
+            .map_err(|e| sql_error(context, e))?
+            .ok_or_else(|| StoreError::Io {
+                context: context.to_string(),
+                source: io::Error::new(io::ErrorKind::InvalidInput, format!("no board {board:?}")),
+            })?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| sql_error(context, e))?;
@@ -153,26 +298,30 @@ impl Store {
 
     /// One scratch task of `board`, or `None` when the board has no task with that number.
     pub fn scratch_task(&self, board: &str, num: u64) -> Result<Option<ScratchRow>, StoreError> {
-        let (Some(board), Ok(num)) = (board_number(board), i64::try_from(num)) else {
+        let context = "reading a scratch task";
+        let Ok(num) = i64::try_from(num) else {
             return Ok(None);
         };
-        self.connect()?
-            .query_row(
-                &format!("SELECT {TASK_COLUMNS} FROM scratch_tasks WHERE board = ?1 AND num = ?2"),
-                params![board, num],
-                task_row,
-            )
-            .optional()
-            .map_err(|e| sql_error("reading a scratch task", e))
+        let conn = self.connect()?;
+        let Some(board) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(None);
+        };
+        conn.query_row(
+            &format!("SELECT {TASK_COLUMNS} FROM scratch_tasks WHERE board = ?1 AND num = ?2"),
+            params![board, num],
+            task_row,
+        )
+        .optional()
+        .map_err(|e| sql_error(context, e))
     }
 
     /// Every scratch task of `board`, by number. A board the store does not have has none.
     pub fn scratch_tasks(&self, board: &str) -> Result<Vec<ScratchRow>, StoreError> {
         let context = "reading the scratch tasks";
-        let Some(board) = board_number(board) else {
+        let conn = self.connect()?;
+        let Some(board) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
             return Ok(Vec::new());
         };
-        let conn = self.connect()?;
         let mut statement = conn
             .prepare(&format!(
                 "SELECT {TASK_COLUMNS} FROM scratch_tasks WHERE board = ?1 ORDER BY num"
@@ -194,10 +343,13 @@ impl Store {
         status: &str,
     ) -> Result<Option<ScratchRow>, StoreError> {
         let context = "writing a scratch task's status";
-        let (Some(board), Ok(num)) = (board_number(board), i64::try_from(num)) else {
+        let Ok(num) = i64::try_from(num) else {
             return Ok(None);
         };
         let mut conn = self.connect()?;
+        let Some(board) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(None);
+        };
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| sql_error(context, e))?;

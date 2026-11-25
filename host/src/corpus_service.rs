@@ -133,6 +133,18 @@ impl Corpora {
         Some(service)
     }
 
+    /// Ends the service of `board` and starts another from `root`, for a board that was located (ts-0191-nv): a
+    /// service reads its board's folder, so one that began at the old root is of no use at the new one. The caller has
+    /// stopped the board's providers, so no call the old service waits on can hold it up. `None` once the daemon is
+    /// stopping.
+    pub fn restart(&self, board: &str, root: &Path) -> Option<Arc<BoardCorpus>> {
+        let old = locked(&self.boards).remove(board);
+        if let Some(old) = old {
+            old.close();
+        }
+        self.ensure(board, root)
+    }
+
     /// The service of `board` if one has started.
     pub fn get(&self, board: &str) -> Option<Arc<BoardCorpus>> {
         locked(&self.boards).get(board).cloned()
@@ -216,6 +228,8 @@ struct Inner {
     state: Mutex<State>,
     gate: Mutex<()>,
     nudged: AtomicBool,
+    /// This service was ended on its own ([`Corpora::restart`]), apart from the daemon stopping.
+    closed: AtomicBool,
     handles: Mutex<Vec<JoinHandle<()>>>,
     /// What the cache held when the service started, for the first listing's comparison.
     cache: Mutex<Option<CorpusCache>>,
@@ -238,6 +252,7 @@ impl BoardCorpus {
             }),
             gate: Mutex::new(()),
             nudged: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
             handles: Mutex::new(Vec::new()),
             cache: Mutex::new(None),
         });
@@ -346,6 +361,12 @@ impl BoardCorpus {
             .note_write(source, task, items, files, written_in);
     }
 
+    /// Ends this service alone, whatever the daemon is doing, and joins its threads.
+    fn close(&self) {
+        self.inner.closed.store(true, Ordering::SeqCst);
+        self.join();
+    }
+
     fn join(&self) {
         let handles = std::mem::take(&mut *locked(&self.inner.handles));
         for handle in handles {
@@ -356,7 +377,7 @@ impl BoardCorpus {
 
 impl Inner {
     fn stopping(&self) -> bool {
-        (self.config.stopping)()
+        self.closed.load(Ordering::SeqCst) || (self.config.stopping)()
     }
 
     fn log(&self, text: &str) {

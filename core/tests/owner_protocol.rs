@@ -216,6 +216,11 @@ fn samples() -> Vec<(Method, Value, Value)> {
             }),
         ),
         (
+            Method::BoardLocate,
+            json!({ "board": "bd-1", "path": "/work/moved" }),
+            json!({ "board": board(), "note": "the old repository was never recorded" }),
+        ),
+        (
             Method::BoardInit,
             json!({ "board": "bd-1", "dry_run": true }),
             json!({ "files": [".collide/board.yaml"], "written": false }),

@@ -47,6 +47,10 @@ pub struct BoardSummary {
     /// line that does not load). Absent when the last look read them. Only `board.list` fills it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources_unread: Option<String>,
+    /// The board's folder is gone (moved or deleted). Nothing of the board is deleted: `board.locate` points it at
+    /// the folder again (0.2, Boards and lines). Absent when the folder is there. Only `board.list` fills it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub missing: bool,
 }
 
 /// `board.list` params: none.
@@ -101,6 +105,26 @@ pub struct BoardOpenResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<BoardSummary>,
     pub checks: Vec<FirstRunCheck>,
+}
+
+/// `board.locate` params: the board whose folder moved, and the folder it is now in. `path` is any folder in the
+/// repo's checkout, as `board.open`'s `root` is, and it is an absolute path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardLocateParams {
+    pub board: String,
+    pub path: String,
+}
+
+/// `board.locate` result: the board, now rooted at the folder, with its id, scratch tasks, trust entry, views and
+/// pack data as they were. `note` is set when the check that the folder is the same repository could not run, because
+/// Collide had no record of the old one: the move was made without it, and the note says so.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardLocateResult {
+    pub board: BoardSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// `board.init` params: Share with team, `collide init` (0.11). `dry_run` lists the files without writing them,

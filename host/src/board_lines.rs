@@ -154,25 +154,55 @@ impl Lines {
             })
     }
 
-    /// The board `id` with its line: the ref its checkout is on, the commit that names and the trust of what the
-    /// commit holds. A folder that is not a checkout, and a checkout with no commit, have no line.
+    /// The board `id` with a line for each of `checkouts`, the default line (the board's own checkout) first: the ref
+    /// a checkout is on, the commit that names and the trust of what the commit holds. A linked worktree the board was
+    /// opened from is a line of it (ts-0191-nv); its trust is the board's, kept at the board's root. A folder that is
+    /// not a checkout, and a checkout with no commit, have no line.
     pub fn summary(
         &self,
         id: &str,
         root: &str,
-        checkout: Option<&Checkout>,
+        checkouts: &[Checkout],
         tools: &OsStr,
     ) -> BoardSummary {
-        let lines = checkout
-            .and_then(|checkout| self.line_of(id, root, checkout, tools))
-            .into_iter()
+        let lines = checkouts
+            .iter()
+            .filter_map(|checkout| self.line_of(id, root, checkout, tools))
             .collect();
         BoardSummary {
             id: id.to_string(),
             root: root.to_string(),
             lines,
             sources_unread: None,
+            missing: false,
         }
+    }
+
+    /// Whether the user's files already hold a folder for a board named `name` (its views and packs). A new board never
+    /// takes such a name, so a store that was lost cannot give a board the files of an earlier one.
+    pub fn board_folder_exists(&self, name: &str) -> bool {
+        let Some(home) = &self.home else {
+            return false;
+        };
+        match UserScope::new(home.clone(), name.to_string(), Vec::new()).board_dir() {
+            Ok(dir) => dir.exists(),
+            // A name that cannot be a folder is never used as one.
+            Err(_) => false,
+        }
+    }
+
+    /// Carries what was trusted for the board at `from` to the board at `to`, for a board that was located (0.2,
+    /// Boards and lines). Nothing is written when there is nothing to carry.
+    pub fn move_trust(&self, from: &str, to: &str) -> Result<(), LineError> {
+        let home = self.home.as_ref().ok_or_else(|| {
+            LineError::Failed(
+                "the daemon has no home folder, so there is nowhere to keep what you trust"
+                    .to_string(),
+            )
+        })?;
+        Trust::new(TrustStore::new(user_config_dir(home)))
+            .move_board(from, to)
+            .map_err(|error| LineError::Failed(error.to_string()))
     }
 
     fn line_of(
@@ -193,9 +223,11 @@ impl Lines {
         let unknown = TrustState::Untrusted {
             hash: String::new(),
         };
+        // The git directory is the board's, whichever checkout the line is: a linked worktree's own is a folder
+        // inside it.
         let board = BoardRef {
             id,
-            root: &checkout.root,
+            root: Path::new(root),
         };
         let opened = match self.open(board, tools) {
             Ok(opened) => opened,

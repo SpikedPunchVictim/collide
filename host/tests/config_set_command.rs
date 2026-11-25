@@ -263,8 +263,14 @@ fn a_plain_value_in_a_checkout_goes_to_the_boards_own_file_and_is_printed_with_i
     assert_eq!(code, exit::OK, "{err}");
     assert_eq!(out, "ferry.greeting = \"hi\"  (user)\n");
     assert_eq!(rig.user_file("config.yaml"), "");
+    // The board's name is random (ts-0191-nv), so its folder is the one folder under `boards/`.
+    let folders: Vec<_> = fs::read_dir(rig.fixture.home().join(".config/collide/boards"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(folders.len(), 1, "{folders:?}");
     assert!(
-        rig.user_file("boards/board-1/config.yaml")
+        rig.user_file(&format!("boards/{}/config.yaml", folders[0]))
             .contains("greeting: \"hi\"")
     );
 }

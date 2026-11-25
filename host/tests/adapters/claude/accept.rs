@@ -10,8 +10,8 @@
 use super::common::{TempRoot, wait_until};
 use super::file_run::Fixture;
 use super::quick_run::{
-    PROMPT, answer, create, git_out, open, quick, rpc_error, run_get, started, status_moves, task,
-    wait_ended, wait_item, workspace_moves, write_file,
+    PROMPT, answer, create, git_out, quick, rpc_error, run_get, started, status_moves,
+    stored_board, task, wait_ended, wait_item, workspace_moves, write_file,
 };
 use collide_core::change::{Actor, ActorKind};
 use collide_core::events::{Event, EventBody, StepKind, StepResult};
@@ -575,7 +575,7 @@ fn a_board_whose_root_is_a_linked_worktree_merges_into_the_branch_it_is_on() {
     let linked = fs::canonicalize(linked).unwrap();
     let main = git_out(&fx.repo, &["rev-parse", "main"]);
 
-    let board = open(&mut fx, &linked);
+    let board = stored_board(&fx, &linked);
     let key = create(&mut fx, &board, PROMPT);
     let run = started(&mut fx, &board, &key);
     let item = wait_item(&mut fx, &run, QueueKind::Review);

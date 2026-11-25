@@ -3076,6 +3076,27 @@ fn a_run_agent_may_not_save_a_view_and_nothing_is_written() {
 }
 
 #[test]
+fn a_run_agent_may_not_locate_a_board_and_the_board_stays_where_it_is() {
+    use collide_core::owner::code::NOT_PERMITTED;
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let root = rig.root();
+    let elsewhere = rig.f().home().join("elsewhere");
+
+    let replies = as_a_run_agent(
+        &rig,
+        "run-1",
+        &[("board.locate", json!({ "board": board, "path": elsewhere }))],
+    );
+
+    assert_eq!(replies, [json!(NOT_PERMITTED)], "{replies:?}");
+    // Where the board is has not changed: the daemon still lists its folder.
+    let boards: BoardListResult = rpc(&rig, "board.list", &BoardListParams {}).unwrap();
+    assert_eq!(boards.boards[0].root, root.to_str().unwrap());
+}
+
+#[test]
 fn save_view_refuses_an_invalid_view_an_unsafe_name_and_an_overwrite_with_no_flag() {
     let rig = rig();
     let board = rig.board_with(&[&FILES], "");

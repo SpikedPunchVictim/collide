@@ -5,10 +5,92 @@
 //! Only the `git_repo` check is made here. The checks for `claude` come with the no-setup open (Stage 6a), and
 //! `git init` for a folder that is not a checkout is that stage's too.
 
-use crate::checkout::root_busy;
+use crate::checkout::{CheckoutError, main_checkout_with, root_busy};
 use collide_core::owner::{CheckId, FirstRunCheck};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The checkout a board of `checkout` is rooted at (ts-0191-nv): the main checkout of its repository, so a linked
+/// worktree opens as a line of the board of the repository it belongs to, and the main checkout opens the same board.
+/// A checkout whose main checkout git cannot name (a bare repository, or a git directory kept elsewhere) is its own
+/// root. `Err` says that the main checkout cannot be read.
+pub fn board_checkout(checkout: &Checkout, env: &[(String, String)]) -> Result<Checkout, String> {
+    let main = match main_checkout_with(&checkout.root, env) {
+        Ok(main) => main,
+        Err(CheckoutError::NoMainCheckout { .. }) => return Ok(checkout.clone()),
+        Err(other) => return Err(other.to_string()),
+    };
+    let main = std::fs::canonicalize(&main).map_err(|error| {
+        format!(
+            "the main checkout `{}` of `{}` cannot be read ({error}); check that the folder is still there",
+            main.display(),
+            checkout.root.display()
+        )
+    })?;
+    if main == checkout.root {
+        return Ok(checkout.clone());
+    }
+    checkout_of(&main, env)
+}
+
+/// The root commits of the repository checked out at `root`: the commits `HEAD` reaches that have no parent, in the
+/// order git lists them. A repository with more than one (merged histories) has several. Empty when `HEAD` names no
+/// commit yet. `Err` says why git could not be asked.
+pub fn root_commits(root: &Path, env: &[(String, String)]) -> Result<Vec<String>, String> {
+    if git(
+        root,
+        env,
+        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+    )?
+    .is_none()
+    {
+        return Ok(Vec::new());
+    }
+    match git(root, env, &["rev-list", "--max-parents=0", "HEAD"])? {
+        Some(text) => Ok(text.lines().map(str::to_string).collect()),
+        None => Err(format!(
+            "`git rev-list` failed in `{}`; is it still a git checkout?",
+            root.display()
+        )),
+    }
+}
+
+/// Whether the repository at `folder` is the one a board recorded (`board.locate`): the two share a root commit.
+/// `Ok(true)` says the check ran and passed, and `Ok(false)` that it could not run because nothing was recorded.
+/// `Err` is the reason the folder is refused.
+pub fn same_repository(
+    recorded: Option<&[String]>,
+    found: &[String],
+    folder: &Path,
+) -> Result<bool, String> {
+    let Some(recorded) = recorded else {
+        return Ok(false);
+    };
+    if found.is_empty() {
+        return Err(format!(
+            "`{}` has no commit yet, so Collide cannot tell that it is the board's repository. \
+             Choose the folder that holds the repository's history.",
+            folder.display()
+        ));
+    }
+    if found.iter().any(|commit| recorded.contains(commit)) {
+        return Ok(true);
+    }
+    let short = |commits: &[String]| {
+        commits
+            .iter()
+            .map(|commit| commit.chars().take(12).collect::<String>())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    Err(format!(
+        "`{}` is a different repository: its first commit is {}, and the board's is {}. \
+         Choose the folder the board's repository moved to.",
+        folder.display(),
+        short(found),
+        short(recorded)
+    ))
+}
 
 /// A git checkout: the top level of its working tree and the branch it is on.
 #[derive(Debug, Clone, PartialEq, Eq)]

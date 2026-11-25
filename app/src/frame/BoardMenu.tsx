@@ -1,12 +1,15 @@
 // The board menu of the top bar (note 1; 0.11, Line selector): every board of `board.list` with its default line, and
 // a typed folder to open, as `loop/Repository.tsx` has it. Choosing a board only changes which board the window reads;
-// it stops nothing. The folder picker, and the row for a board whose folder is gone, are `ts-0191-nv`'s.
+// it stops nothing. A board whose folder is gone says "folder not found" in its row (note 15; ts-0191-nv). In the shell
+// a button asks the person for a folder with the system's picker; the typed path stays for the pages that have no
+// picker (the bridge and the fake owner) and as the way round a picker that fails.
 import { type FormEvent, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { BoardSummary } from '../loop/types.ts'
-import { boardName, defaultLine } from './boards.ts'
+import { toOwnerError } from '../owner/index.ts'
+import { boardName, defaultLine, isMissing } from './boards.ts'
 
 export interface BoardMenuProps {
   readonly boards: readonly BoardSummary[]
@@ -16,6 +19,10 @@ export interface BoardMenuProps {
   readonly problems: readonly string[]
   readonly onChoose: (id: string) => void
   readonly onOpenFolder: (path: string) => Promise<void>
+  /** The system's folder picker: null when the page has none, which is every page but the shell's. */
+  readonly pickFolder?: (() => Promise<string | null>) | null
+  /** The menu was opened: the boards are read again, so a folder that moved since shows as missing. */
+  readonly onMenuOpen?: () => void
 }
 
 export function BoardMenu(props: BoardMenuProps) {
@@ -25,7 +32,13 @@ export function BoardMenu(props: BoardMenuProps) {
   // A folder that opens as a board makes it the board in use, and the menu has done its work.
   useEffect(() => setOpen(false), [props.boardId])
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) props.onMenuOpen?.()
+      }}
+    >
       <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" title="Board and code line">
           {current === null ? 'Boards' : boardName(current)}
@@ -47,8 +60,20 @@ export function BoardMenu(props: BoardMenuProps) {
 }
 
 /** What the menu holds, apart from the popover that shows it, so a test renders it for any boards. */
-export function BoardMenuBody({ boards, boardId, problems, onChoose, onOpenFolder }: BoardMenuProps) {
+export function BoardMenuBody({ boards, boardId, problems, onChoose, onOpenFolder, pickFolder }: BoardMenuProps) {
   const [path, setPath] = useState('')
+  const [pickProblem, setPickProblem] = useState<string | null>(null)
+  // The folder the person chose is opened at once, as a typed one is by its button.
+  const choose = async () => {
+    if (pickFolder == null) return
+    setPickProblem(null)
+    try {
+      const chosen = await pickFolder()
+      if (chosen !== null) await onOpenFolder(chosen)
+    } catch (failure) {
+      setPickProblem(`Collide could not open the folder picker: ${toOwnerError(failure).message}`)
+    }
+  }
   const submit = (event: FormEvent) => {
     event.preventDefault()
     // The typed path stays when the folder is refused, so a typo is fixed in place. A folder that opens closes the
@@ -76,6 +101,7 @@ export function BoardMenuBody({ boards, boardId, problems, onChoose, onOpenFolde
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{boardName(board)}</span>
               <span className="block truncate text-xs text-muted-foreground">
+                {isMissing(board) ? <span className="text-destructive">folder not found · </span> : null}
                 {line === null ? null : <>line <b>{line}</b> · </>}
                 {board.root}
               </span>
@@ -87,6 +113,16 @@ export function BoardMenuBody({ boards, boardId, problems, onChoose, onOpenFolde
       <form onSubmit={submit} className="flex flex-col gap-1.5 px-2 py-1">
         <p className="font-medium">Open a folder…</p>
         <p className="text-xs text-muted-foreground">Any git repo opens as a board, with no setup</p>
+        {pickFolder == null ? null : (
+          <Button type="button" variant="outline" onClick={() => void choose()}>
+            Choose a folder…
+          </Button>
+        )}
+        {pickProblem === null ? null : (
+          <p role="alert" className="text-sm text-destructive">
+            {pickProblem}
+          </p>
+        )}
         <div className="flex gap-2">
           <Input
             aria-label="Folder path"

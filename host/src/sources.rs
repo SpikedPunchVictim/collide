@@ -667,6 +667,18 @@ impl Sources {
         }
     }
 
+    /// Stops the providers of `board` and forgets its slots, so the next source asked for starts from the root the
+    /// board has then. A board that was located needs it: a provider began at the root the board had.
+    pub fn stop_board(&self, board: &str) {
+        let slots: Vec<Arc<Slot>> = locked(&self.boards)
+            .remove(board)
+            .map(|slots| slots.into_values().collect())
+            .unwrap_or_default();
+        for slot in slots {
+            slot.stop();
+        }
+    }
+
     /// Stops every provider, and starts none after. The daemon's stop calls it: no child outlives the daemon.
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);

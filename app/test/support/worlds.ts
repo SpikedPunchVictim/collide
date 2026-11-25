@@ -14,7 +14,7 @@ import {
   walkWorld,
 } from './field-world.ts'
 import { HOSTILE_BODY } from './hostile.ts'
-import { World, board, permissionItem, run } from './loop-world.ts'
+import { World, board, missingBoard, permissionItem, run } from './loop-world.ts'
 
 /** Two boards with different default lines, and a third folder that `board.open` can add. */
 export function twoBoards(): World {
@@ -22,6 +22,23 @@ export function twoBoards(): World {
   const world = new FieldWorld()
   world.boards = [board('b-alpha', '/work/alpha'), board('b-beta', '/work/beta', 'develop')]
   world.folders.set('/work/gamma', board('b-gamma', '/work/gamma'))
+  return world
+}
+
+/**
+ * One board that is there and one whose folder is gone (ts-0191-nv), and three folders to locate it at: `/work/new` is
+ * accepted, `/work/unrecorded` is accepted with a note that the check could not run, and `/work/other` is refused as
+ * another repository. `/work/gamma` can be opened as a new board.
+ */
+export function missingBoardWorld(): World {
+  const world = new FieldWorld()
+  world.boards = [board('b-alpha', '/work/alpha'), missingBoard('b-gone', '/work/gone')]
+  world.folders.set('/work/gamma', board('b-gamma', '/work/gamma'))
+  world.locateRefusals.set(
+    '/work/other',
+    '`/work/other` is a different repository: its first commit is aaaaaaaaaaaa, and the board\'s is bbbbbbbbbbbb.',
+  )
+  world.locateNotes.set('/work/unrecorded', 'Collide had no record of the old repository, so it could not check.')
   return world
 }
 
@@ -46,6 +63,7 @@ export function noBoards(): World {
 export const WORLDS: Readonly<Record<string, () => World>> = {
   'two-boards': twoBoards,
   'no-boards': noBoards,
+  'missing-board': missingBoardWorld,
   'hostile-text': hostileText,
   'field-one-source': onePlanSource,
   'field-eight': eightStatuses,

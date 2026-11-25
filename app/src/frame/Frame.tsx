@@ -22,6 +22,10 @@ export interface FrameProps {
   readonly folderProblems: readonly string[]
   readonly onChooseBoard: (id: string) => void
   readonly onOpenFolder: (path: string) => Promise<void>
+  /** The system's folder picker, which only the shell has (`ts-0191-nv`). */
+  readonly pickFolder?: (() => Promise<string | null>) | null
+  /** The board menu was opened (`ts-0191-nv`): the boards are read again. */
+  readonly onMenuOpen?: () => void
   readonly onOpenLoop: () => void
   /** The view picker, in its place in the trail after the board menu (`ts-0181-ft`). Nothing shows until given. */
   readonly viewPicker?: ReactNode
@@ -59,6 +63,8 @@ export function Frame(props: FrameProps) {
             problems={props.folderProblems}
             onChoose={props.onChooseBoard}
             onOpenFolder={props.onOpenFolder}
+            pickFolder={props.pickFolder}
+            onMenuOpen={props.onMenuOpen}
           />
           {props.viewPicker == null ? null : (
             <>

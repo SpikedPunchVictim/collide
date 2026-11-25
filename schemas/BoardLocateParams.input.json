@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.locate` params: the board whose folder moved, and the folder it is now in. `path` is any folder in the\nrepo's checkout, as `board.open`'s `root` is, and it is an absolute path.",
+  "properties": {
+    "board": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board",
+    "path"
+  ],
+  "title": "BoardLocateParams",
+  "type": "object"
+}

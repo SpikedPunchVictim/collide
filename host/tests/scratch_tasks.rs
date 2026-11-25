@@ -911,8 +911,8 @@ fn the_checkout_is_unchanged_by_create_and_by_every_set_status() {
 fn the_scratch_source_lists_one_board_and_declines_watch_and_preview() {
     let root = TempRoot::new();
     let store = Arc::new(Store::open(&root.join("store")).unwrap());
-    let first = store.open_board("/some/first").unwrap();
-    let second = store.open_board("/some/second").unwrap();
+    let first = store.open_board("/some/first", &|_| false).unwrap();
+    let second = store.open_board("/some/second", &|_| false).unwrap();
     let on_first = ScratchSource::new(store.clone(), &first);
     let on_second = ScratchSource::new(store.clone(), &second);
 

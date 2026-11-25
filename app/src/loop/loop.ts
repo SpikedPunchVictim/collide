@@ -45,6 +45,12 @@ const RELOAD_EVENTS: ReadonlySet<string> = new Set([
   'task.changed',
 ])
 
+/** What locating a board came to: `problem` when it was refused, else `note` when the daemon has something to add. */
+export interface LocateOutcome {
+  readonly problem: string | null
+  readonly note: string | null
+}
+
 export interface Loop {
   getState(): LoopState
   /** Calls `listener` after each change of the state. Gives the function that stops it. */
@@ -57,6 +63,13 @@ export interface Loop {
   idle(): Promise<void>
   chooseBoard(id: string): void
   openFolder(path: string): Promise<void>
+  /** Reads the boards again, so a folder that moved since the last read shows as missing (`ts-0191-nv`). */
+  refreshBoards(): Promise<void>
+  /**
+   * Points a board whose folder moved at the folder it is in now (`board.locate`). The board keeps its id and what it
+   * held. A refusal is the daemon's own words in `problem`, and the board stays as it was.
+   */
+  locateBoard(board: string, path: string): Promise<LocateOutcome>
   /** Makes the task and starts the run. True when the run started. */
   startRun(prompt: string): Promise<boolean>
   allowOnce(item: string): Promise<void>
@@ -101,6 +114,8 @@ class LoopController implements Loop {
     // The page hands these to components as callbacks (`LoopActions`), so each keeps its `this`.
     this.chooseBoard = this.chooseBoard.bind(this)
     this.openFolder = this.openFolder.bind(this)
+    this.refreshBoards = this.refreshBoards.bind(this)
+    this.locateBoard = this.locateBoard.bind(this)
     this.startRun = this.startRun.bind(this)
     this.allowOnce = this.allowOnce.bind(this)
     this.deny = this.deny.bind(this)
@@ -306,6 +321,22 @@ class LoopController implements Loop {
       })
     } catch (failure) {
       this.dispatch({ type: 'folder_refused', problems: [toOwnerError(failure).message] })
+    }
+  }
+
+  refreshBoards(): Promise<void> {
+    return this.reload(true)
+  }
+
+  async locateBoard(board: string, path: string): Promise<LocateOutcome> {
+    const folder = path.trim()
+    if (folder === '') return { problem: 'Type the folder, or choose it.', note: null }
+    try {
+      const located = await this.owner.rpc('board.locate', { board, path: folder })
+      this.dispatch({ type: 'board_opened', board: located.board })
+      return { problem: null, note: located.note ?? null }
+    } catch (failure) {
+      return { problem: toOwnerError(failure).message, note: null }
     }
   }
 

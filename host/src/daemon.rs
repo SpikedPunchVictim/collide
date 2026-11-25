@@ -161,22 +161,22 @@ use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
 use collide_core::item::Category;
 use collide_core::owner::{
-    BoardInitParams, BoardListResult, BoardOpenParams, BoardOpenResult, BoardSummary,
-    BoardTrustParams, BoardTrustReviewParams, ChangeWords, ChangesPlace, CommitChanges,
-    ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams, ConfigPackLinkParams,
-    ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams, ConfigSetParams,
-    ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
-    DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL,
-    OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueItem,
-    QueueListParams, QueueListResult, Request, Response, Routed, RpcError, RunDiffParams,
-    RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams, RunRecordResult,
-    RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams, RunStopResult,
-    RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult, TaskChangesParams,
-    TaskChangesResult, TaskCreateParams, TaskDiffParams, TaskDiffResult, TaskGetParams,
-    TaskGetResult, TaskListParams, TaskPreviewParams, TaskReidParams, TaskReidResult,
-    TaskSaveViewParams, TaskSaveViewResult, TaskSectionsParams, TaskViewsParams, TaskViewsResult,
-    ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued, code, encode_line, parse_request,
-    route,
+    BoardInitParams, BoardListResult, BoardLocateParams, BoardLocateResult, BoardOpenParams,
+    BoardOpenResult, BoardSummary, BoardTrustParams, BoardTrustReviewParams, ChangeWords,
+    ChangesPlace, CommitChanges, ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams,
+    ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams,
+    ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
+    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice,
+    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult,
+    QueueItem, QueueListParams, QueueListResult, Request, Response, Routed, RpcError,
+    RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
+    RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams,
+    RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
+    TaskChangesParams, TaskChangesResult, TaskCreateParams, TaskDiffParams, TaskDiffResult,
+    TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams, TaskReidParams,
+    TaskReidResult, TaskSaveViewParams, TaskSaveViewResult, TaskSectionsParams, TaskViewsParams,
+    TaskViewsResult, ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued, code, encode_line,
+    parse_request, route,
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::section::{ProposalFeatures, section_uses};
@@ -734,6 +734,38 @@ struct Shared {
 impl Shared {
     fn stopping(&self) -> bool {
         self.stop.load(Ordering::SeqCst) || SIGNALED.load(Ordering::SeqCst)
+    }
+
+    /// Whether a board name is already used on disk: its folder of the user's files, or its pack data. A new board
+    /// never takes one (ts-0191-nv).
+    fn board_name_taken(&self, name: &str) -> bool {
+        self.config.lines().board_folder_exists(name)
+            || self
+                .paths
+                .runs_dir
+                .with_file_name("pack-data")
+                .join(name)
+                .exists()
+    }
+
+    /// Records the root commits of the repository at `root` for `board`, when none are recorded. A failure is logged
+    /// and does not fail the request: the board works without them, and the next look tries again.
+    fn note_root_commits(&self, board: &str, root: &Path) {
+        match self.store.root_commits(board) {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(error) => return self.log.line(&format!("board {board}: {error}")),
+        }
+        let recorded = boards::root_commits(root, &self.git_env).and_then(|commits| {
+            self.store
+                .record_root_commits(board, &commits)
+                .map_err(|error| error.to_string())
+        });
+        if let Err(error) = recorded {
+            self.log.line(&format!(
+                "board {board}: root commits not recorded: {error}"
+            ));
+        }
     }
 
     fn warn(&self, text: String) {
@@ -2144,6 +2176,7 @@ fn call(
         Method::ConfigPackLink => config_pack_link(shared, session, params),
         Method::ConfigPackEnable => config_pack_enable(shared, session, params),
         Method::BoardOpen => board_open(shared, params),
+        Method::BoardLocate => board_locate(shared, session, params),
         Method::BoardList => board_list(shared),
         Method::BoardInit => board_init(shared, session, params),
         Method::BoardTrust => board_trust(shared, session, params),
@@ -2860,9 +2893,12 @@ fn captured_path(env: &Mutex<Option<BaseEnvironment>>) -> std::ffi::OsString {
         .unwrap_or_default()
 }
 
-/// `board.open` (ts-0075-hj): any folder in a git checkout becomes the board of that checkout's top level, and the same
-/// board each time. A folder that is not in a checkout answers no board and a failed `git_repo` check. `git init` is
-/// Stage 6a's, so `init_git` is refused.
+/// `board.open` (ts-0075-hj): any folder in a git checkout becomes the board of that checkout's repository, and the
+/// same board each time. A folder that is not in a checkout answers no board and a failed `git_repo` check. `git init`
+/// is Stage 6a's, so `init_git` is refused.
+///
+/// The board is rooted at the repository's main checkout (ts-0191-nv): a folder inside a linked worktree opens the
+/// board of its repository with the worktree as a line of it, and the main checkout opens the same board.
 fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
     let params: BoardOpenParams = read_params("board.open", params)?;
     if params.init_git {
@@ -2887,27 +2923,145 @@ fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
             ),
         ));
     }
-    let result = match boards::checkout_of(folder, &shared.git_env) {
+    let result = match boards_checkouts(shared, folder) {
         Err(message) => BoardOpenResult {
             board: None,
             checks: vec![boards::git_repo_failed(message)],
         },
-        Ok(checkout) => {
+        Ok((checkout, line)) => {
             let root = checkout.root.display().to_string();
-            let id = shared.store.open_board(&root).map_err(store_failed)?;
+            let id = shared
+                .store
+                .open_board(&root, &|name| shared.board_name_taken(name))
+                .map_err(store_failed)?;
+            shared.note_root_commits(&id, &checkout.root);
+            let checkouts: Vec<boards::Checkout> =
+                std::iter::once(checkout.clone()).chain(line).collect();
             BoardOpenResult {
                 board: Some(with_role_problems(
                     shared,
                     shared
                         .config
                         .lines()
-                        .summary(&id, &root, Some(&checkout), &tools_path(shared)),
+                        .summary(&id, &root, &checkouts, &tools_path(shared)),
                 )),
                 checks: vec![boards::git_repo_ok(&checkout)],
             }
         }
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// The board's own checkout for `folder`, and the checkout of `folder` when it is a linked worktree of it: `board.open`
+/// and `board.locate` root a board at the main checkout. `Err` is Collide's message for why the folder is not a
+/// checkout, or its repository's main checkout cannot be read.
+fn boards_checkouts(
+    shared: &Shared,
+    folder: &Path,
+) -> Result<(boards::Checkout, Option<boards::Checkout>), String> {
+    let opened = boards::checkout_of(folder, &shared.git_env)?;
+    let root = boards::board_checkout(&opened, &shared.git_env)?;
+    let line = (opened.root != root.root).then_some(opened);
+    Ok((root, line))
+}
+
+/// `board.locate` (ts-0191-nv; 0.2, Boards and lines): points a board whose folder moved at the folder it is in now.
+/// The folder must be the same repository: it shares a root commit with what the board recorded. The board keeps its
+/// name, so its scratch tasks, views and pack data stay, and its trust entry is carried to the new root. Nothing is
+/// deleted.
+fn board_locate(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: BoardLocateParams = read_params("board.locate", params)?;
+    refuse_run_agent(session, "move a board")?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let old_root = board_root(shared, &params.board)?;
+    let folder = Path::new(&params.path);
+    if !folder.is_absolute() {
+        return Err(RpcError::new(
+            code::INVALID_PARAMS,
+            format!(
+                "`path` must be an absolute path, and `{}` is not",
+                params.path
+            ),
+        ));
+    }
+    let (checkout, _) = boards_checkouts(shared, folder)
+        .map_err(|message| RpcError::new(code::INVALID_PARAMS, message))?;
+    let root = checkout.root.display().to_string();
+    let stored = shared.store.boards().map_err(store_failed)?;
+    if let Some(other) = stored
+        .iter()
+        .find(|other| other.root == root && other.id != params.board)
+    {
+        return Err(RpcError::new(
+            code::CONFLICT,
+            format!(
+                "`{root}` is already the board {}: only one board has a folder. Open that board, or choose \
+                 another folder",
+                other.id
+            ),
+        ));
+    }
+    let recorded = stored
+        .iter()
+        .find(|board| board.id == params.board)
+        .and_then(|board| board.root_commits.clone());
+    let found = boards::root_commits(&checkout.root, &shared.git_env)
+        .map_err(|message| RpcError::new(code::INTERNAL_ERROR, message))?;
+    let checked = boards::same_repository(recorded.as_deref(), &found, &checkout.root)
+        .map_err(|reason| RpcError::new(code::CONFLICT, reason))?;
+    if root != old_root {
+        shared
+            .store
+            .move_board(&params.board, &root)
+            .map_err(store_failed)?;
+        shared
+            .config
+            .lines()
+            .move_trust(&old_root, &root)
+            .map_err(|error| {
+                RpcError::new(
+                    code::INTERNAL_ERROR,
+                    format!(
+                        "the board moved to `{root}`, but what you trusted could not be carried over \
+                         ({error:?}); review and trust its line again"
+                    ),
+                )
+            })?;
+        // The providers and the corpus began at the old root; the next look starts them at the new one.
+        shared.sources.stop_board(&params.board);
+        if let Some(corpora) = shared.corpora.get() {
+            corpora.restart(&params.board, &checkout.root);
+        }
+    }
+    shared.note_root_commits(&params.board, &checkout.root);
+    let summary = with_role_problems(
+        shared,
+        shared.config.lines().summary(
+            &params.board,
+            &root,
+            std::slice::from_ref(&checkout),
+            &tools_path(shared),
+        ),
+    );
+    let note = (!checked).then(|| {
+        "Collide had no record of the old repository, so it could not check that this folder is the same one. \
+         The board now points here."
+            .to_string()
+    });
+    Ok(serde_json::to_value(BoardLocateResult {
+        board: summary,
+        note,
+    })
+    .expect("a result is JSON"))
 }
 
 /// A run's agent may not change what the person trusts, what the repo holds or the person's settings (0.9: trust is
@@ -3025,11 +3179,19 @@ fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
         .into_iter()
         .map(|board| {
             let checkout = boards::checkout_of(Path::new(&board.root), &shared.git_env).ok();
+            // A board with its folder is read for its root commits once, so a board from before they were recorded
+            // gets them at its next list (ts-0191-nv).
+            if board.root_commits.is_none()
+                && let Some(checkout) = &checkout
+            {
+                shared.note_root_commits(&board.id, &checkout.root);
+            }
             let summary = with_role_problems(
                 shared,
-                lines.summary(&board.id, &board.root, checkout.as_ref(), &tools),
+                lines.summary(&board.id, &board.root, checkout.as_slice(), &tools),
             );
             BoardSummary {
+                missing: !Path::new(&board.root).is_dir(),
                 sources_unread: shared
                     .corpora
                     .get()

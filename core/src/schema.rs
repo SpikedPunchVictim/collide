@@ -186,6 +186,8 @@ pub fn registry() -> Registry {
     registry.add::<owner::BoardInitResult>();
     registry.add::<owner::BoardListParams>();
     registry.add::<owner::BoardListResult>();
+    registry.add::<owner::BoardLocateParams>();
+    registry.add::<owner::BoardLocateResult>();
     registry.add::<owner::BoardOpenParams>();
     registry.add::<owner::BoardOpenResult>();
     registry.add::<owner::BoardTrustParams>();

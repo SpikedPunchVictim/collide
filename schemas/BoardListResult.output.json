@@ -13,6 +13,10 @@
           },
           "type": "array"
         },
+        "missing": {
+          "description": "The board's folder is gone (moved or deleted). Nothing of the board is deleted: `board.locate` points it at\nthe folder again (0.2, Boards and lines). Absent when the folder is there. Only `board.list` fills it.",
+          "type": "boolean"
+        },
         "root": {
           "type": "string"
         },

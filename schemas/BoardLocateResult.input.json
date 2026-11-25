@@ -1,0 +1,131 @@
+{
+  "$defs": {
+    "BoardSummary": {
+      "additionalProperties": false,
+      "description": "A board: the repo root and its lines, the default line first. Until lines are built (Stage 14) there is one.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/LineSummary"
+          },
+          "type": "array"
+        },
+        "missing": {
+          "description": "The board's folder is gone (moved or deleted). Nothing of the board is deleted: `board.locate` points it at\nthe folder again (0.2, Boards and lines). Absent when the folder is there. Only `board.list` fills it.",
+          "type": "boolean"
+        },
+        "root": {
+          "type": "string"
+        },
+        "sources_unread": {
+          "description": "Why the daemon's last look at the board could not read its line or its checkouts (a folder that is gone, a\nline that does not load). Absent when the last look read them. Only `board.list` fills it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "root",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "LineSummary": {
+      "additionalProperties": false,
+      "description": "One line of a board (0.12): a ref the user opened. `snapshot` is the commit its packs are read at. `problems` is\nwhy the line did not load (a bad `board.yaml`), one message each, in the first-run style. Such a line is untrusted\nat an empty hash: there is nothing to trust until the problems are fixed.",
+      "properties": {
+        "problems": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ref_name": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "$ref": "#/$defs/TrustState"
+        }
+      },
+      "required": [
+        "ref_name",
+        "root",
+        "trust"
+      ],
+      "type": "object"
+    },
+    "TrustState": {
+      "description": "Whether a line's packs and gate code are trusted (0.9, Trust). `hash` is what trust covers now: the packs, the\nlock, the pointer file, `board.yaml`, `config.yaml`, the views and the tree hashes of `protectedPaths`. It is the\nhash an `Untrusted` line would be trusted at, so the person is shown what they trust. (The domain record is plain\nRust, so the wire form is this type.)",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Nothing is trusted yet, or the hash changed since.",
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "untrusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "state": {
+              "const": "trusted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "hash"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.locate` result: the board, now rooted at the folder, with its id, scratch tasks, trust entry, views and\npack data as they were. `note` is set when the check that the folder is the same repository could not run, because\nCollide had no record of the old one: the move was made without it, and the note says so.",
+  "properties": {
+    "board": {
+      "$ref": "#/$defs/BoardSummary"
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "board"
+  ],
+  "title": "BoardLocateResult",
+  "type": "object"
+}

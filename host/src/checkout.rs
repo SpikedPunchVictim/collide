@@ -61,9 +61,16 @@ impl std::error::Error for CheckoutError {}
 
 /// The main checkout of the repository that `cwd` is in.
 pub fn main_checkout(cwd: &Path) -> Result<PathBuf, CheckoutError> {
+    main_checkout_with(cwd, &[])
+}
+
+/// [`main_checkout`] with `env` added to the environment of git, as the daemon's other git has it
+/// ([`crate::daemon::DaemonOptions::git_env`]).
+pub fn main_checkout_with(cwd: &Path, env: &[(String, String)]) -> Result<PathBuf, CheckoutError> {
     let output = Command::new("git")
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .current_dir(cwd)
+        .envs(env.iter().map(|(name, value)| (name, value)))
         .output()
         .map_err(CheckoutError::GitMissing)?;
     if !output.status.success() {

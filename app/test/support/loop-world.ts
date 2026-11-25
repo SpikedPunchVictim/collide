@@ -13,7 +13,10 @@ import type {
   TaskGetResultOutput,
   TaskOutput,
 } from '../../src/owner/generated.ts'
-import { FakeOwner } from '../../src/owner/index.ts'
+import { FakeOwner, OwnerError } from '../../src/owner/index.ts'
+
+const NOT_FOUND = -32010
+const CONFLICT = -32011
 
 export type Board = BoardListResultOutput['boards'][number]
 export type Agent = DaemonAgentVersionsResultOutput['agents'][number]
@@ -23,6 +26,11 @@ export type Diff = RunDiffResultOutput
 
 export function board(id: string, root: string, line = 'main'): Board {
   return { id, root, lines: [{ ref_name: line, root, trust: { state: 'trusted', hash: 'h' } }] }
+}
+
+/** A board whose folder is gone: the daemon lists it `missing`, with no line. */
+export function missingBoard(id: string, root: string): Board {
+  return { id, root, lines: [], missing: true }
 }
 
 export function claude(over: Partial<Agent> = {}): Agent {
@@ -156,6 +164,10 @@ export class World {
   answerResult: (params: QueueAnswerParamsInput) => QueueAnswerResultOutput = () => ({ outcome: 'done' })
   /** What changes in the world when an answer is taken. */
   onAnswer: (params: QueueAnswerParamsInput) => void = () => {}
+  /** What `board.locate` refuses a path with, by the path. */
+  locateRefusals = new Map<string, string>()
+  /** What `board.locate` adds to its answer for a path. */
+  locateNotes = new Map<string, string>()
   /** Set to make `task.apply` or `run.start` refuse. */
   refuseCreate: string | null = null
   refuseStart: string | null = null
@@ -173,6 +185,16 @@ export class World {
         return { board: known, checks: [{ id: 'git_repo', ok: true, required: true, message: 'ok' }] }
       }
       return { checks: known.checks.map((c) => failed(c.message)) }
+    })
+    owner.handle('board.locate', ({ board: id, path }) => {
+      const found = this.boards.find((b) => b.id === id)
+      if (found === undefined) throw new OwnerError(NOT_FOUND, `the daemon has no board "${id}"`)
+      const refusal = this.locateRefusals.get(path)
+      if (refusal !== undefined) throw new OwnerError(CONFLICT, refusal)
+      const moved = board(found.id, path)
+      this.boards = this.boards.map((b) => (b.id === id ? moved : b))
+      const note = this.locateNotes.get(path)
+      return note === undefined ? { board: moved } : { board: moved, note }
     })
     owner.handle('daemon.agent_versions', () => {
       if (this.versions === 'fails') throw new Error('the daemon could not read the versions')
