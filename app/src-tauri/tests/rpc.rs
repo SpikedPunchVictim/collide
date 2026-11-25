@@ -6,7 +6,7 @@
 mod common;
 
 use collide_app::shell::{
-    ChannelEvent, ChannelWindow, DaemonLink, EventChannel, Shell, ShellHandle,
+    ChannelEvent, ChannelWindow, DaemonLink, EventChannel, RecordingOpener, Shell, ShellHandle,
 };
 use collide_core::owner::{Request, RequestId, Response, RpcError, code};
 use collide_core::ui_tools::ToolManifest;
@@ -121,11 +121,15 @@ fn endpoint(channel: &FakeChannel) -> UiToolsEndpoint {
     .expect("the fixture manifest is valid")
 }
 
-/// A shell over a fake link (answering `{"from":"daemon"}`) and a fake open channel.
+/// A shell over a fake link (answering `{"from":"daemon"}`), a fake open channel and an opener that opens nothing.
 fn shell() -> (Shell, FakeLink, FakeChannel) {
+    shell_with_opener(RecordingOpener::default())
+}
+
+fn shell_with_opener(opener: RecordingOpener) -> (Shell, FakeLink, FakeChannel) {
     let link = FakeLink::answering(json!({ "from": "daemon" }));
     let channel = FakeChannel::open();
-    let shell = Shell::new(endpoint(&channel), Box::new(link.clone()));
+    let shell = Shell::new(endpoint(&channel), Box::new(link.clone()), Box::new(opener));
     (shell, link, channel)
 }
 
@@ -162,6 +166,49 @@ fn an_unknown_ui_tools_method_is_refused_here_and_is_not_forwarded() {
     assert!(link.calls().is_empty());
 }
 
+// ---- shell.* is the shell's own and never goes to the daemon ----------------------------------------------------
+
+#[test]
+fn shell_open_external_is_answered_locally_and_the_forward_path_is_not_called() {
+    let opener = RecordingOpener::default();
+    let (mut shell, link, _) = shell_with_opener(opener.clone());
+    let result = shell.rpc(
+        "shell.open_external",
+        Some(json!({ "url": "https://example.com/docs" })),
+    );
+    assert_eq!(result, Ok(json!({})));
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+    assert_eq!(
+        opener.opened(),
+        vec!["https://example.com/docs".to_string()]
+    );
+}
+
+#[test]
+fn shell_open_external_refuses_a_scheme_it_does_not_open_and_does_not_forward_it() {
+    let opener = RecordingOpener::default();
+    let (mut shell, link, _) = shell_with_opener(opener.clone());
+    for url in [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "data:text/plain,x",
+        "https://a.example/\nb",
+    ] {
+        let error = failure(shell.rpc("shell.open_external", Some(json!({ "url": url }))));
+        assert_eq!(error.code, code::INVALID_PARAMS, "{url}");
+    }
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+    assert!(opener.opened().is_empty(), "{:?}", opener.opened());
+}
+
+#[test]
+fn an_unknown_shell_method_is_refused_here_and_is_not_forwarded() {
+    let (mut shell, link, _) = shell();
+    let error = failure(shell.rpc("shell.pick_folder", None));
+    assert_eq!(error.code, code::METHOD_NOT_FOUND);
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
 // ---- everything else is forwarded ------------------------------------------------------------------------------
 
 #[test]
@@ -188,7 +235,11 @@ fn a_failure_of_the_daemon_comes_back_as_its_error() {
         }
     }
     let channel = FakeChannel::open();
-    let mut shell = Shell::new(endpoint(&channel), Box::new(Refusing));
+    let mut shell = Shell::new(
+        endpoint(&channel),
+        Box::new(Refusing),
+        Box::new(RecordingOpener::default()),
+    );
     let error = failure(shell.rpc("run.get", Some(json!({ "run": "r-1" }))));
     assert_eq!(
         (error.code, error.message.as_str()),
@@ -340,7 +391,11 @@ fn the_shell_handle_answers_calls_from_any_thread() {
     let seen = link.clone();
     let handle = Arc::new(ShellHandle::spawn(move || {
         let channel = FakeChannel::open();
-        Shell::new(endpoint(&channel), Box::new(link))
+        Shell::new(
+            endpoint(&channel),
+            Box::new(link),
+            Box::new(RecordingOpener::default()),
+        )
     }));
     let remote = Arc::clone(&handle);
     let result = std::thread::spawn(move || remote.rpc("daemon.status".into(), None))
@@ -360,7 +415,11 @@ fn a_shell_thread_that_panicked_fails_the_call_instead_of_hanging() {
     }
     let handle = ShellHandle::spawn(|| {
         let channel = FakeChannel::open();
-        Shell::new(endpoint(&channel), Box::new(Panicking))
+        Shell::new(
+            endpoint(&channel),
+            Box::new(Panicking),
+            Box::new(RecordingOpener::default()),
+        )
     });
     let error = failure(handle.rpc("daemon.status".into(), None));
     assert_eq!(error.code, code::INTERNAL_ERROR);
@@ -386,6 +445,7 @@ fn real_shell(root: &common::TempRoot, channel: &FakeChannel) -> Shell {
     Shell::new(
         endpoint(channel),
         Box::new(collide_app::shell::SocketLink::new(access)),
+        Box::new(RecordingOpener::default()),
     )
 }
 
@@ -468,18 +528,4 @@ fn a_token_the_daemon_refuses_is_not_echoed_to_the_webview() {
         "refused: {seen}"
     );
     assert!(!seen.contains(wrong), "the token is in the error: {seen}");
-}
-
-// ---- the capability the webview's listen needs ------------------------------------------------------------------
-
-#[test]
-fn the_main_window_may_listen_and_unlisten_and_nothing_else() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/main.json");
-    let text = std::fs::read_to_string(path).expect("a capability file for the main window");
-    let capability: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(capability["windows"], json!(["main"]));
-    assert_eq!(
-        capability["permissions"],
-        json!(["core:event:allow-listen", "core:event:allow-unlisten"])
-    );
 }

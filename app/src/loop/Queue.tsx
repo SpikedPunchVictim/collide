@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { QUEUE_KIND_WORDS } from '../components/words.ts'
+import { Markdown } from '../markdown/Markdown.tsx'
 import type { DiffResult, QueueItem } from './types.ts'
 import { INPUT_UNKNOWN_WORDS, REQUEST_WORDS, countWords, fileStatusWords } from './words.ts'
 
@@ -141,7 +142,7 @@ function PermissionItem({ item, sending, actions }: QueueProps & { readonly item
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
         {request.tool == null ? null : <p>{`Tool: ${request.tool}`}</p>}
-        {request.reason == null ? null : <p>{request.reason}</p>}
+        {request.reason == null ? null : <Markdown text={request.reason} />}
         <div>
           <h3 className="font-medium">What it would use</h3>
           {input == null ? (

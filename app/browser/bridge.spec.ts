@@ -2,6 +2,7 @@
 // rebinding), a foreign `Origin`, a call without the run's token and a body that is not JSON, as the S6 record's
 // endpoint did (`.collide/planning/spikes/sp-0009-bb-interface-prototype/record.md`, the MCP endpoint's checks).
 import { request } from 'node:http'
+import { bridgePageCsp } from './support/csp.ts'
 import { expect, test } from './support/fixtures.ts'
 import { firstPhase } from './support/recordings.ts'
 import { type World } from './support/world.ts'
@@ -97,4 +98,53 @@ test('a page of another origin cannot call the bridge', async ({ startWorld, ope
     { url: world.url, token: world.token },
   )
   expect(reached).toMatch(/^blocked/)
+})
+
+// ---- the policy and the shell's own method (ts-0183-ee) -------------------------------------------------------------
+
+test('the page is sent with the built app\'s content security policy', async ({ startWorld }) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  const page = await fetch(`${world.url}/`)
+  expect(page.status).toBe(200)
+  // The bridge writes the directives sorted by name, as Tauri's own map of them is; the set is what counts.
+  const directives = (policy: string | null) => (policy ?? '').split('; ').sort()
+  expect(directives(page.headers.get('content-security-policy'))).toEqual(directives(bridgePageCsp()))
+  expect(page.headers.get('content-security-policy')).toContain("connect-src 'self' ipc:")
+  // The policy names no remote origin and allows no inline code.
+  expect(bridgePageCsp()).not.toMatch(/https?:\/\/(?!ipc\.localhost)|unsafe-/)
+})
+
+/** The shell's answer to `shell.open_external`, as written: the error's code is what a test reads. */
+async function openExternal(world: World, url: unknown): Promise<{ result?: unknown; error?: { code: number } }> {
+  const answer = await fetch(`${world.url}/rpc`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${world.token}` },
+    body: JSON.stringify({ method: 'shell.open_external', params: { url } }),
+  })
+  return (await answer.json()) as { result?: unknown; error?: { code: number } }
+}
+
+test('shell.open_external opens a web or mail link, and refuses any other scheme', async ({ startWorld }) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  // No call has been made, so nothing was asked to open.
+  expect(await world.opened()).toEqual([])
+
+  for (const refused of ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/html,x', 'https://a b', '/relative']) {
+    const answer = await openExternal(world, refused)
+    expect(answer.error?.code, refused).toBe(-32602)
+  }
+  expect((await openExternal(world, 42)).error?.code).toBe(-32602)
+  expect(await world.opened()).toEqual([])
+
+  expect((await openExternal(world, 'https://example.com/docs?a=1')).result).toEqual({})
+  expect((await openExternal(world, 'mailto:team@example.com')).result).toEqual({})
+  // The bridge recorded the two links and opened neither.
+  expect(await world.opened()).toEqual(['https://example.com/docs?a=1', 'mailto:team@example.com'])
+})
+
+test('the list of opened links needs the run\'s token', async ({ startWorld }) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  const { authorization: _, ...bare } = allowed(world)
+  expect(await statusOf(world, { method: 'GET', path: '/opened', headers: bare })).toBe(401)
+  expect(await statusOf(world, { method: 'GET', path: '/opened', headers: allowed(world) })).toBe(200)
 })

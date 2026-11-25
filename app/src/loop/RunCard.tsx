@@ -3,6 +3,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { runStateWords } from '../components/words.ts'
+import { Markdown } from '../markdown/Markdown.tsx'
 import type { Followed, RunSummary } from './types.ts'
 import { phaseWords } from './words.ts'
 
@@ -46,7 +47,9 @@ export function RunCard({ run, followed }: RunCardProps) {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {followed.prompt === null ? null : (
-          <blockquote className="border-l-2 pl-3 text-sm whitespace-pre-wrap">{followed.prompt}</blockquote>
+          <blockquote className="border-l-2 pl-3 text-sm">
+            <Markdown text={followed.prompt} />
+          </blockquote>
         )}
         <p className="flex flex-wrap items-center gap-2 text-sm">
           <Badge variant="secondary">{runStateWords(run.state)}</Badge>

@@ -3,12 +3,17 @@
 //! ```text
 //! browser ── POST /rpc {method, params} ──▶ Shell ─────▶ SocketLink ──▶ collide-daemon (a child, in the root)
 //! browser ◀── GET /events (server-sent) ─── Hub ◀── pump_daemon_events ◀─┘
-//! browser ◀── GET / and the page's files ─── the built page (`bridge.html`)
+//! browser ◀── GET / and the page's files ─── the built page (`bridge.html`), with the app's CSP as a header
+//! browser ── GET /opened ──▶ the links `shell.open_external` was asked to open (it opens none)
 //! ```
 //!
 //! It hosts the shell's own [`Shell`], [`SocketLink`] and event pump (`app/src-tauri/src/shell.rs`), so a call from the
 //! page takes the path a call from the webview takes, and the daemon is started on demand as the app's is. It is built
 //! only with the feature `test-bridge`, which only the browser tests' build turns on, and nothing of it is in the app.
+//!
+//! The page is sent with the CSP of the built app, as `collide_app::csp::for_bridge_page` makes it for this page, so a
+//! browser test runs under it. The shell's `shell.open_external` is answered as in the app, but its opener only
+//! records the link: the bridge never opens one, and a test reads what was asked with `GET /opened`.
 //!
 //! It listens on the loopback only, on a port the system picks. It refuses a foreign `Host` or `Origin`, a call
 //! without the token it made for this run, and a body that is not JSON (`http.rs`). It prints one line when it listens,
@@ -23,8 +28,8 @@ mod daemon;
 mod http;
 
 use collide_app::shell::{
-    ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, Shell, ShellHandle, SocketLink,
-    pump_daemon_events,
+    ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, RecordingOpener, Shell, ShellHandle,
+    SocketLink, pump_daemon_events,
 };
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::SystemClocks;
@@ -153,6 +158,8 @@ impl EventChannel for Hub {
 struct Bridge {
     shell: ShellHandle,
     hub: Arc<Hub>,
+    opener: RecordingOpener,
+    csp: String,
     policy: Policy,
     page: PathBuf,
     daemon: Arc<ChildDaemon>,
@@ -196,6 +203,11 @@ impl Bridge {
                     "application/json",
                 ))
             }
+            ("GET", "/opened") => {
+                self.policy.check_token(request)?;
+                let opened = serde_json::to_vec(&self.opener.opened()).expect("links are JSON");
+                Ok(Outcome::Reply(opened, "application/json"))
+            }
             ("POST", "/shutdown") => {
                 self.policy.check_token(request)?;
                 http::check_json(request)?;
@@ -215,18 +227,26 @@ impl Bridge {
         let outcome = http::read_request(&mut stream).and_then(|request| self.route(&request));
         match outcome {
             Ok(Outcome::Reply(body, content_type)) => {
-                let _ = http::write_response(&mut stream, (200, "OK"), content_type, &body);
+                let headers = [("Content-Security-Policy", self.csp.as_str())];
+                let _ =
+                    http::write_response(&mut stream, (200, "OK"), content_type, &headers, &body);
             }
             Ok(Outcome::Events) => self.stream_events(stream),
             Ok(Outcome::Shutdown) => {
-                let _ = http::write_response(&mut stream, (200, "OK"), "application/json", b"{}");
+                let _ =
+                    http::write_response(&mut stream, (200, "OK"), "application/json", &[], b"{}");
                 drop(stream);
                 self.finish();
             }
             Err(refusal) => {
                 let status = refusal.status();
-                let _ =
-                    http::write_response(&mut stream, status, "text/plain", status.1.as_bytes());
+                let _ = http::write_response(
+                    &mut stream,
+                    status,
+                    "text/plain",
+                    &[],
+                    status.1.as_bytes(),
+                );
             }
         }
     }
@@ -339,6 +359,8 @@ fn main() -> ExitCode {
     let shell_access = Arc::clone(&access);
     let shell_hub = Arc::clone(&hub);
     let shell_token = token.clone();
+    let opener = RecordingOpener::default();
+    let shell_opener = opener.clone();
     let shell = ShellHandle::spawn(move || {
         // The manifest is empty, as the app's is until Stage 6 writes the real one.
         let endpoint = UiToolsEndpoint::new(
@@ -349,7 +371,11 @@ fn main() -> ExitCode {
             Box::new(SystemClocks),
         )
         .expect("an empty manifest is valid");
-        Shell::new(endpoint, Box::new(SocketLink::new(shell_access)))
+        Shell::new(
+            endpoint,
+            Box::new(SocketLink::new(shell_access)),
+            Box::new(shell_opener),
+        )
     });
 
     let pump_hub = Arc::clone(&hub);
@@ -364,6 +390,8 @@ fn main() -> ExitCode {
     let bridge = Arc::new(Bridge {
         shell,
         hub,
+        opener,
+        csp: collide_app::csp::for_bridge_page(),
         policy: Policy::new(port, token.clone()),
         page: args.page,
         daemon,

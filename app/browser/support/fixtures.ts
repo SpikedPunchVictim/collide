@@ -13,8 +13,11 @@ interface Fixtures {
   openPage: (world: World) => Promise<Page>
   /** The page built over a fake owner, served from loopback (ts-0179-ke). It needs no daemon. */
   fakeSite: FakeSite
-  /** A page of Chrome on the fake-owner page, playing the world named `world` (`test/support/worlds.ts`). */
-  openFake: (world: string) => Promise<Page>
+  /**
+   * A page of Chrome on the fake-owner page, playing the world named `world` (`test/support/worlds.ts`). `watch` is
+   * given the new page before it loads, to listen for what the load does.
+   */
+  openFake: (world: string, watch?: (page: Page) => void | Promise<void>) => Promise<Page>
 }
 
 export const test = base.extend<Fixtures>({
@@ -56,9 +59,10 @@ export const test = base.extend<Fixtures>({
 
   openFake: async ({ fakeSite }, use) => {
     let chrome: Chrome | null = null
-    await use(async (world) => {
+    await use(async (world, watch) => {
       chrome ??= await Chrome.launch()
       const page = await chrome.context.newPage()
+      await watch?.(page)
       await page.goto(`${fakeSite.url}/#world=${world}`)
       return page
     })

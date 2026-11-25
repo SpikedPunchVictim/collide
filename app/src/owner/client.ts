@@ -5,9 +5,9 @@
 // There is no token here. The shell holds the per-client token and adds it when it forwards a call, so nothing in this
 // interface, a params type or an option can carry one. `test/owner-types.test.ts` keeps it that way.
 import type { AskNoticeOutput, OwnerNoticeOutput, UiToolsRequestOutput } from './generated.ts'
-import type { ASK_METHODS, OWNER_METHODS, UI_TOOLS_METHODS } from './methods.ts'
+import type { ASK_METHODS, OWNER_METHODS, SHELL_METHODS, UI_TOOLS_METHODS } from './methods.ts'
 
-type Methods = typeof OWNER_METHODS & typeof ASK_METHODS & typeof UI_TOOLS_METHODS
+type Methods = typeof OWNER_METHODS & typeof ASK_METHODS & typeof UI_TOOLS_METHODS & typeof SHELL_METHODS
 
 /** Every method the window may call. */
 export type WindowMethod = keyof Methods

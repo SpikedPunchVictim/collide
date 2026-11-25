@@ -7,6 +7,7 @@ import { boardName } from './frame/boards.ts'
 import { Frame } from './frame/Frame.tsx'
 import { TABS, type TabId } from './frame/tabs.ts'
 import { LoopPage } from './loop/LoopPage.tsx'
+import { ExternalLinks } from './markdown/ExternalLinks.tsx'
 import { useLoop } from './loop/useLoop.ts'
 import { type OwnerClient, createTauriOwner } from './owner/index.ts'
 
@@ -20,7 +21,16 @@ export interface AppProps {
   readonly owner?: OwnerClient
 }
 
+// A link in a task's text asks before it opens, wherever the text is shown, so the window that asks is provided once.
 export function App({ owner = shellOwner }: AppProps) {
+  return (
+    <ExternalLinks owner={owner}>
+      <Window owner={owner} />
+    </ExternalLinks>
+  )
+}
+
+function Window({ owner }: { readonly owner: OwnerClient }) {
   const { state, loop } = useLoop(owner)
   const field = useField(owner, state.boardId)
   const [tab, setTab] = useState<TabId>('field')

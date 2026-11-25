@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { ASK_METHODS, OWNER_METHODS, UI_TOOLS_METHODS } from '../src/owner/methods.ts'
+import { ASK_METHODS, OWNER_METHODS, SHELL_METHODS, UI_TOOLS_METHODS } from '../src/owner/methods.ts'
 
 const root = join(import.meta.dirname, '..', '..')
 
@@ -19,7 +19,12 @@ test('the table holds every method of the owner protocol except initialize', () 
 })
 
 test('the window has no initialize', () => {
-  const all = [...Object.keys(OWNER_METHODS), ...Object.keys(ASK_METHODS), ...Object.keys(UI_TOOLS_METHODS)]
+  const all = [
+    ...Object.keys(OWNER_METHODS),
+    ...Object.keys(ASK_METHODS),
+    ...Object.keys(UI_TOOLS_METHODS),
+    ...Object.keys(SHELL_METHODS),
+  ]
   expect(all).not.toContain('initialize')
 })
 
@@ -30,4 +35,14 @@ test('the ask and ui_tools methods are the ones core names', () => {
   for (const name of Object.keys(UI_TOOLS_METHODS)) expect(uiTools).toContain(`"${name}"`)
   expect(Object.keys(ASK_METHODS)).toHaveLength(3)
   expect(Object.keys(UI_TOOLS_METHODS)).toHaveLength(3)
+})
+
+test('the shell methods are the ones the shell answers, and all of them start with `shell.`', () => {
+  const shell = readFileSync(join(root, 'app', 'src-tauri', 'src', 'shell.rs'), 'utf8')
+  expect(Object.keys(SHELL_METHODS)).toEqual(['shell.open_external'])
+  for (const name of Object.keys(SHELL_METHODS)) {
+    expect(name.startsWith('shell.')).toBe(true)
+    expect(shell).toContain(`pub const OPEN_EXTERNAL: &str = "${name}";`)
+  }
+  expect(shell).toContain('const SHELL_PREFIX: &str = "shell.";')
 })

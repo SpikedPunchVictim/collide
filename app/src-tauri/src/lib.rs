@@ -1,3 +1,4 @@
+pub mod csp;
 pub mod shell;
 
 use collide_core::owner::{RpcError, code};
@@ -8,7 +9,7 @@ use collide_host::ui_tools::{SecretStoreTokens, UiToolsEndpoint};
 use serde_json::Value;
 use shell::{
     ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, LaunchStarter, Shell, ShellHandle,
-    SocketLink, pump_daemon_events,
+    SocketLink, UsrBinOpen, pump_daemon_events,
 };
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -78,7 +79,12 @@ fn build_shell(channel: Arc<dyn EventChannel>, access: Arc<DaemonAccess>) -> She
         Box::new(SystemClocks),
     )
     .expect("an empty manifest is valid");
-    Shell::new(endpoint, Box::new(SocketLink::new(access)))
+    // The one place the real opener is made: a link the person confirmed opens in their browser.
+    Shell::new(
+        endpoint,
+        Box::new(SocketLink::new(access)),
+        Box::new(UsrBinOpen),
+    )
 }
 
 /// The files of the daemon and the way to start it, from this process's environment (0.2, Starting the daemon).

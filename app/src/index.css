@@ -169,3 +169,87 @@
     }
   }
 }
+
+/* The text of a task, an issue or an agent, drawn by `Markdown` (ts-0183-ee). The board mock's `.md`, with what its
+   small renderer has no need of: numbered lists, tables and inline code. */
+.md {
+  line-height: 1.6;
+  max-width: 65ch;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md pre,
+.md table {
+  margin: 0 0 0.7em;
+}
+
+.md ul {
+  list-style: disc;
+  padding-left: 1.2em;
+}
+
+.md ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.md ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+}
+
+.md h4 {
+  margin: 0.9em 0 0.4em;
+  font-weight: 600;
+}
+
+.md pre {
+  background: var(--muted);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+.md :not(pre) > code {
+  background: var(--muted);
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius-sm);
+}
+
+.md table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.md .gone {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+/* A kept link is a button, so it needs the look of a link. */
+.md .md-link {
+  color: var(--working);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  text-align: inherit;
+}

@@ -81,3 +81,10 @@ export const UI_TOOLS_METHODS = {
   'ui_tools.token': call<G.UiToolsTokenParamsInput, G.UiToolsTokenResultOutput>(),
   'ui_tools.rotate': call<G.UiToolsRotateParamsInput, G.UiToolsRotateResultOutput>(),
 }
+
+// The shell's own methods that are not the UI-tools endpoint's: it answers them and never forwards them
+// (`ts-0183-ee`). Their types are written here, not generated, because only the shell has them.
+export const SHELL_METHODS = {
+  /** Opens a link in the person's browser. The shell opens only `http:`, `https:` and `mailto:`. */
+  'shell.open_external': call<{ url: string }, G.AckOutput>(),
+}

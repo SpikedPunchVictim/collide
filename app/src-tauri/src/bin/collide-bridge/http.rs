@@ -174,20 +174,27 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
+/// Writes one response. `extra` are headers added to the ones every response has (a name and a value, with no line
+/// break in either).
 pub fn write_response(
     stream: &mut impl Write,
     status: (u16, &str),
     content_type: &str,
+    extra: &[(&str, &str)],
     body: &[u8],
 ) -> io::Result<()> {
     write!(
         stream,
         "HTTP/1.1 {} {}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\
-         Connection: close\r\n\r\n",
+         Connection: close\r\n",
         status.0,
         status.1,
         body.len()
     )?;
+    for (name, value) in extra {
+        write!(stream, "{name}: {value}\r\n")?;
+    }
+    stream.write_all(b"\r\n")?;
     stream.write_all(body)?;
     stream.flush()
 }
@@ -333,6 +340,19 @@ mod tests {
             check_json(&call("127.0.0.1:9", "")),
             Err(Refusal::UnsupportedMediaType)
         );
+    }
+
+    #[test]
+    fn a_response_carries_the_extra_headers_it_is_given() {
+        let mut bytes = Vec::new();
+        let extra = [("Content-Security-Policy", "default-src 'none'")];
+        write_response(&mut bytes, (200, "OK"), "text/html", &extra, b"page").unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains("\r\nContent-Security-Policy: default-src 'none'\r\n"),
+            "{text}"
+        );
+        assert!(text.ends_with("\r\n\r\npage"), "{text}");
     }
 
     #[test]

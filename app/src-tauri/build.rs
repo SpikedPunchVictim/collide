@@ -54,5 +54,10 @@ fn main() {
         let _ = fs::remove_dir_all(&copy);
     }
 
-    tauri_build::build();
+    // The app's own command is named in an app manifest, so a capability has to grant it (`allow-rpc`). Without a
+    // manifest Tauri lets every window call every command of the app. `capabilities/main.json` grants `rpc` and the
+    // event channel's listen and unlisten, and nothing else.
+    let manifest = tauri_build::AppManifest::new().commands(&["rpc"]);
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
+        .expect("tauri_build failed: check tauri.conf.json and the capability files");
 }

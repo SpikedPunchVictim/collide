@@ -1,10 +1,12 @@
 // A small `node:http` server for the page built over a fake owner (ts-0179-ke). It stands where the bridge stands for
 // the other page, with what the bridge's page route does (`collide-bridge`, `http.rs`): loopback only, a foreign `Host`
 // or `Origin` is refused, `GET` only, a path that is not a plain name below the folder is not found, and every answer
-// says `Cache-Control: no-store` and `Connection: close`. It has no `/rpc`: the fake owner is in the page.
+// says `Cache-Control: no-store` and `Connection: close`. A file is sent with the built app's CSP (ts-0183-ee). It has
+// no `/rpc`: the fake owner is in the page.
 import { readFile } from 'node:fs/promises'
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
 import { extname, join } from 'node:path'
+import { builtCsp } from './csp.ts'
 
 /** The page, as the built folder holds it: vite keeps the path of the html entry. */
 const PAGE = 'browser/fake/index.html'
@@ -36,12 +38,19 @@ export function fileFor(dir: string, path: string): string | null {
   return join(dir, ...parts)
 }
 
-function answer(response: ServerResponse, status: number, type: string, body: Buffer | string): void {
+function answer(
+  response: ServerResponse,
+  status: number,
+  type: string,
+  body: Buffer | string,
+  extra: Record<string, string> = {},
+): void {
   response.writeHead(status, {
     'Content-Type': type,
     'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
     Connection: 'close',
+    ...extra,
   })
   response.end(body)
 }
@@ -76,7 +85,8 @@ async function handle(dir: string, port: number, request: IncomingMessage, respo
   const file = fileFor(dir, (request.url ?? '').split('?')[0] ?? '')
   if (file === null) return refusal(response, 404, 'Not Found')
   try {
-    answer(response, 200, TYPES[extname(file)] ?? 'application/octet-stream', await readFile(file))
+    const type = TYPES[extname(file)] ?? 'application/octet-stream'
+    answer(response, 200, type, await readFile(file), { 'Content-Security-Policy': builtCsp() })
   } catch {
     refusal(response, 404, 'Not Found')
   }

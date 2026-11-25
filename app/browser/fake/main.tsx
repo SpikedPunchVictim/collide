@@ -1,7 +1,8 @@
 // The entry of the page the browser tests load over a fake owner (ts-0179-ke): the same `App`, with a `FakeOwner` that
 // plays the scripted world named in the fragment of the address (`#world=two-boards`; `test/support/worlds.ts`). There
 // is no Tauri, no bridge and no daemon. `window.collideFake` is the test's one view into the fake: the methods called,
-// in order, as the client sent them, and (ts-0182-ad) the way to change a Field world and announce it.
+// in order, as the client sent them, the links the shell was asked to open (ts-0183-ee), and (ts-0182-ad) the way to
+// change a Field world and announce it.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '../../src/App.tsx'
@@ -19,6 +20,8 @@ declare global {
       announce(source: string, key?: string): void
       /** The shell's notice that the daemon's event stream ended (`lost`) or came back (`back`). */
       connection(state: 'lost' | 'back'): void
+      /** The links `shell.open_external` was asked to open, in order. The fake opens none (ts-0183-ee). */
+      opened(): string[]
     }
   }
 }
@@ -33,11 +36,18 @@ function fieldWorld(): FieldWorld {
   if (!(world instanceof FieldWorld)) throw new Error(`the world "${name}" is not a Field world`)
   return world
 }
+// The shell's own method is answered here, as the shell answers it, and the call is kept for the test to read.
+const opened: string[] = []
+world.owner.handle('shell.open_external', ({ url }) => {
+  opened.push(url)
+  return {}
+})
 window.collideFake = {
   calls: () => world.owner.calls.map((call) => call.method),
   edit: (key, over) => fieldWorld().edit(key, over),
   announce: (source, key) => fieldWorld().announce(source, key),
   connection: (state) => world.owner.push({ method: 'shell.connection', params: { state } }),
+  opened: () => [...opened],
 }
 
 createRoot(document.getElementById('root')!).render(

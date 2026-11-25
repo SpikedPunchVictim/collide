@@ -224,6 +224,12 @@ export class World {
     return body.result as T
   }
 
+  /** The links `shell.open_external` was asked to open, in order. The bridge opens none (ts-0183-ee). */
+  async opened(): Promise<string[]> {
+    const answer = await fetch(`${this.url}/opened`, { headers: { authorization: `Bearer ${this.token}` } })
+    return (await answer.json()) as string[]
+  }
+
   /** What the bridge and the daemon wrote, for a failure's report. */
   diagnostics(): string {
     const parts = [

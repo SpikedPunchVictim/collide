@@ -1,6 +1,7 @@
 // The server of the fake-owner page answers as the bridge's page route does (ts-0179-ke): only on loopback, to `GET`,
 // for a plain name below the built folder, and always with `Cache-Control: no-store`.
 import { request } from 'node:http'
+import { builtCsp } from './support/csp.ts'
 import { expect, test } from './support/fixtures.ts'
 
 interface Answer {
@@ -30,6 +31,12 @@ test('the page is served with the headers of the bridge', async ({ fakeSite }) =
   expect(page.headers['content-type']).toBe('text/html; charset=utf-8')
   expect(page.headers['cache-control']).toBe('no-store')
   expect(page.headers.connection).toBe('close')
+})
+
+test('the page is served with the built app\'s content security policy', async ({ fakeSite }) => {
+  const page = await ask(fakeSite.url, '/', 'GET')
+  expect(page.headers['content-security-policy']).toBe(builtCsp())
+  expect(builtCsp()).toContain("default-src 'none'")
 })
 
 test('the server refuses a foreign Host or Origin, a write, and a path outside the page', async ({ fakeSite }) => {

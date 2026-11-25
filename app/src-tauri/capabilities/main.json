@@ -1,6 +1,6 @@
 {
   "identifier": "main-window",
-  "description": "The main window listens to the one event channel and calls the one command; nothing else is allowed.",
+  "description": "The main window calls the one command and listens to the one event channel; nothing else is allowed.",
   "windows": ["main"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": ["allow-rpc", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

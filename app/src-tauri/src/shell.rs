@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! webview ── rpc(method, params) ──▶ Shell ─ ui_tools.* ─▶ UiToolsEndpoint::rpc   (answered here, never forwarded)
+//!                                          ├ shell.* ─────▶ the shell's own methods (answered here, never forwarded)
 //!                                          └ the rest ────▶ DaemonLink::call       (adds the per-client token)
 //! webview ◀── one event channel ──── EventChannel ◀─ daemon notices, ui_tools.request
 //! ```
@@ -12,10 +13,13 @@
 //! 1. `initialize` is the shell's: it carries the per-client token, so the window cannot send it. The link makes the
 //!    handshake when it connects, with the token it read itself.
 //! 2. A `ui_tools.*` method goes to [`UiToolsEndpoint::rpc`] and is never forwarded, whatever it answers.
-//! 3. `ask.start` and `ask.test` are read in the window's shape ([`collide_core::ask::AskStartParams`]), which has no
+//! 3. A `shell.*` method is the shell's own and is never forwarded, whatever it answers. There is one,
+//!    [`OPEN_EXTERNAL`], which opens a link in the person's browser after the shell has checked its scheme
+//!    ([`open_external`]). The opener is given to [`Shell::new`], so a test never opens a real link.
+//! 4. `ask.start` and `ask.test` are read in the window's shape ([`collide_core::ask::AskStartParams`]), which has no
 //!    token field, so a window that sends one is refused. The shell then makes the daemon's shape, with the endpoint and
 //!    the ask's token, which is Stage 6b's (`shell: ask token`). `ask.cancel` has one shape and goes on as it is.
-//! 4. Everything else is forwarded, and the daemon says if the method is unknown.
+//! 5. Everything else is forwarded, and the daemon says if the method is unknown.
 //!
 //! ## One thread owns the shell
 //!
@@ -45,10 +49,11 @@ use collide_host::daemon::{DaemonPaths, check_home};
 use collide_host::launch;
 use collide_host::owner_client::{ClientError, Incoming, OwnerClient};
 use collide_host::ui_tools::{Completed, Rpc, UiToolsEndpoint, Window};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -482,19 +487,162 @@ fn forward(notice: Notification, last_seq: &mut Option<u64>, channel: &dyn Event
     channel.emit(&ChannelEvent::from(notice));
 }
 
+/// The prefix of the methods the shell answers itself. No method of the daemon starts with it.
+const SHELL_PREFIX: &str = "shell.";
+
+/// The method that opens a link in the person's browser, after the window has asked them (R5; 0.9). `app/src/owner/`
+/// has the same name (`SHELL_METHODS`); a test keeps the two equal.
+pub const OPEN_EXTERNAL: &str = "shell.open_external";
+
+/// Opens a link outside the app. The app's wiring gives [`UsrBinOpen`]; a test, and the test bridge, give
+/// [`RecordingOpener`], so nothing a test does leaves the machine.
+pub trait Opener {
+    /// Opens `url`. The caller has checked its scheme.
+    fn open(&mut self, url: &str) -> Result<(), String>;
+}
+
+/// The program that opens a link in the person's default browser (or mail program) on macOS.
+const OPEN_PROGRAM: &str = "/usr/bin/open";
+
+/// The command that opens `url`: [`OPEN_PROGRAM`] with the URL as its one argument, and nothing else. It is made, not
+/// run, so a test can read it. Its caller has checked that `url` starts with a scheme, so `open` cannot take it for a
+/// flag or a path.
+pub fn open_command(url: &str) -> Command {
+    let mut command = Command::new(OPEN_PROGRAM);
+    command.arg(url);
+    command
+}
+
+/// The real opener: runs [`open_command`]. It does not wait for the program, so a slow start never holds the shell's
+/// thread, which answers every call; a thread of its own waits, so no child is left behind.
+pub struct UsrBinOpen;
+
+impl Opener for UsrBinOpen {
+    fn open(&mut self, url: &str) -> Result<(), String> {
+        let mut child = open_command(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not run {OPEN_PROGRAM}: {error}"))?;
+        thread::Builder::new()
+            .name("collide-open".into())
+            .spawn(move || match child.wait() {
+                Ok(status) if status.success() => {}
+                Ok(status) => eprintln!("collide: {OPEN_PROGRAM} ended with {status}"),
+                Err(error) => eprintln!("collide: could not wait for {OPEN_PROGRAM}: {error}"),
+            })
+            .map(|_| ())
+            .map_err(|error| format!("could not wait for {OPEN_PROGRAM}: {error}"))
+    }
+}
+
+/// An opener that keeps what it was asked to open and opens nothing. Clones share the list.
+#[derive(Clone, Default)]
+pub struct RecordingOpener {
+    opened: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingOpener {
+    /// The links it was asked to open, in order.
+    pub fn opened(&self) -> Vec<String> {
+        self.opened
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+}
+
+impl Opener for RecordingOpener {
+    fn open(&mut self, url: &str) -> Result<(), String> {
+        self.opened
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(url.to_string());
+        Ok(())
+    }
+}
+
+/// The most a link may be, in bytes.
+const MAX_LINK: usize = 2048;
+
+/// The ways a link may start, in lower case: the web, and a mail address.
+const LINK_STARTS: [&str; 3] = ["http://", "https://", "mailto:"];
+
+/// Whether `url` may be opened: it starts with one of [`LINK_STARTS`] (in any case), says something after it, is no
+/// longer than [`MAX_LINK`], and holds no space and no control character, so a newline cannot split it into two
+/// arguments or two lines. The error says why, without repeating the link.
+fn check_link(url: &str) -> Result<(), String> {
+    if url.len() > MAX_LINK {
+        return Err(format!(
+            "it is {} bytes and the most is {MAX_LINK}",
+            url.len()
+        ));
+    }
+    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("it holds a space or a control character".to_string());
+    }
+    let lower = url.to_ascii_lowercase();
+    let after = LINK_STARTS
+        .iter()
+        .find_map(|start| lower.strip_prefix(start));
+    match after {
+        Some(rest) if !rest.is_empty() => Ok(()),
+        _ => Err("only http, https and mailto links open".to_string()),
+    }
+}
+
+/// `shell.open_external`'s params: the one link.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenExternalParams {
+    url: String,
+}
+
+/// `shell.open_external`: opens the link with `opener` after [`check_link`]. A link that fails the check is refused
+/// with `invalid params` and `opener` is not called. It never reaches the daemon.
+pub fn open_external(opener: &mut dyn Opener, params: Option<Value>) -> Result<Value, RpcError> {
+    let params: OpenExternalParams = serde_json::from_value(params.unwrap_or(Value::Null))
+        .map_err(|error| {
+            RpcError::new(
+                code::INVALID_PARAMS,
+                format!("invalid params for `{OPEN_EXTERNAL}`: {error}"),
+            )
+        })?;
+    check_link(&params.url).map_err(|why| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("`{OPEN_EXTERNAL}` refused the link: {why}"),
+        )
+    })?;
+    opener.open(&params.url).map_err(|why| {
+        RpcError::new(
+            code::INTERNAL_ERROR,
+            format!("could not open the link: {why}"),
+        )
+    })?;
+    Ok(serde_json::json!({}))
+}
+
 /// The shell. See the module doc.
 pub struct Shell {
     endpoint: UiToolsEndpoint,
     link: Box<dyn DaemonLink>,
+    opener: Box<dyn Opener>,
     next_id: i64,
     completed: Vec<Completed>,
 }
 
 impl Shell {
-    pub fn new(endpoint: UiToolsEndpoint, link: Box<dyn DaemonLink>) -> Self {
+    pub fn new(
+        endpoint: UiToolsEndpoint,
+        link: Box<dyn DaemonLink>,
+        opener: Box<dyn Opener>,
+    ) -> Self {
         Shell {
             endpoint,
             link,
+            opener,
             next_id: 0,
             completed: Vec::new(),
         }
@@ -516,6 +664,13 @@ impl Shell {
             return Err(RpcError::method_not_found(method).with_data(serde_json::json!({
                 "reason": "the shell makes the handshake; the window does not send `initialize`",
             })));
+        }
+        match method {
+            OPEN_EXTERNAL => return open_external(self.opener.as_mut(), params),
+            other if other.starts_with(SHELL_PREFIX) => {
+                return Err(RpcError::method_not_found(other));
+            }
+            _ => {}
         }
         self.next_id += 1;
         let request = Request {
@@ -625,5 +780,136 @@ impl ShellHandle {
         let stopped = || RpcError::new(code::INTERNAL_ERROR, "the shell's rpc thread has stopped");
         sent.map_err(|_| stopped())?;
         answer.recv().map_err(|_| stopped())?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn open(url: &str) -> (Result<Value, RpcError>, Vec<String>) {
+        let mut opener = RecordingOpener::default();
+        let answer = open_external(&mut opener, Some(json!({ "url": url })));
+        (answer, opener.opened())
+    }
+
+    #[test]
+    fn an_accepted_link_is_passed_to_the_opener_as_one_argument() {
+        for url in [
+            "https://example.com/docs?a=1&b=2#top",
+            "http://example.com",
+            "HTTPS://EXAMPLE.COM/Path",
+            "mailto:person@example.com?subject=hello%20there",
+        ] {
+            let (answer, opened) = open(url);
+            assert_eq!(answer, Ok(json!({})), "{url}");
+            assert_eq!(opened, vec![url.to_string()], "{url}");
+        }
+    }
+
+    #[test]
+    fn a_link_with_another_scheme_is_refused_and_nothing_is_opened() {
+        for url in [
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "file:///etc/passwd",
+            "data:text/html,<script>1</script>",
+            "ftp://example.com/file",
+            "vbscript:x",
+            "tel:+15550100",
+            "java\tscript:alert(1)",
+            "//example.com/path",
+            "example.com",
+            "/Applications/Calculator.app",
+            "-a Calculator",
+            "https:",
+            "https://",
+            "mailto:",
+            "",
+        ] {
+            let (answer, opened) = open(url);
+            let error = answer.expect_err(url);
+            assert_eq!(error.code, code::INVALID_PARAMS, "{url}");
+            assert!(opened.is_empty(), "{url} was opened");
+        }
+    }
+
+    #[test]
+    fn a_link_with_a_newline_a_space_or_a_control_character_is_refused() {
+        for url in [
+            "https://example.com/a\nhttps://other.example/",
+            "https://example.com/\n",
+            "https://example.com/\r\n",
+            "https://example.com/a b",
+            " https://example.com/",
+            "https://example.com/\u{0}",
+            "https://example.com/\u{7f}",
+            "https://example.com/\u{85}",
+            "https://example.com/\u{2028}",
+        ] {
+            let (answer, opened) = open(url);
+            let error = answer.expect_err(url);
+            assert_eq!(error.code, code::INVALID_PARAMS, "{url:?}");
+            assert!(opened.is_empty(), "{url:?} was opened");
+        }
+    }
+
+    #[test]
+    fn a_link_over_the_limit_is_refused_and_one_at_it_is_not() {
+        let at = format!(
+            "https://example.com/{}",
+            "a".repeat(MAX_LINK - "https://example.com/".len())
+        );
+        assert_eq!(at.len(), MAX_LINK);
+        assert_eq!(open(&at).0, Ok(json!({})));
+        let (answer, opened) = open(&format!("{at}a"));
+        assert_eq!(answer.expect_err("too long").code, code::INVALID_PARAMS);
+        assert!(opened.is_empty());
+    }
+
+    #[test]
+    fn a_refusal_does_not_repeat_the_link() {
+        let (answer, _) = open("javascript:steal(secret-0123)");
+        assert!(!answer.expect_err("refused").message.contains("secret-0123"));
+    }
+
+    #[test]
+    fn params_that_are_not_one_url_are_refused() {
+        for params in [
+            None,
+            Some(json!({})),
+            Some(json!({ "url": 7 })),
+            Some(json!({ "url": "https://example.com/", "also": true })),
+        ] {
+            let mut opener = RecordingOpener::default();
+            let error = open_external(&mut opener, params.clone()).expect_err("refused");
+            assert_eq!(error.code, code::INVALID_PARAMS, "{params:?}");
+            assert!(opener.opened().is_empty(), "{params:?}");
+        }
+    }
+
+    #[test]
+    fn an_opener_that_fails_gives_an_error_that_says_why() {
+        struct Failing;
+        impl Opener for Failing {
+            fn open(&mut self, _: &str) -> Result<(), String> {
+                Err("no browser".to_string())
+            }
+        }
+        let error = open_external(&mut Failing, Some(json!({ "url": "https://example.com/" })))
+            .expect_err("the opener failed");
+        assert_eq!(error.code, code::INTERNAL_ERROR);
+        assert!(error.message.contains("no browser"), "{}", error.message);
+    }
+
+    #[test]
+    fn the_real_opener_runs_usr_bin_open_with_the_link_as_its_one_argument() {
+        // The command is made and read, never run: a test opens nothing.
+        let url = "https://example.com/a?b=1&c=2";
+        let command = open_command(url);
+        assert_eq!(command.get_program(), "/usr/bin/open");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, [url]);
     }
 }
