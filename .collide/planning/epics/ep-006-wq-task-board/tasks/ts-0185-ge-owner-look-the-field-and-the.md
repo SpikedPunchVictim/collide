@@ -124,8 +124,8 @@ cargo build -p collide-host
 ```
 
    `app/src-tauri/tauri.conf.json` has `frontendDist: ../dist` and no `devUrl` or `beforeDevCommand`, so `tauri dev`
-   shows what `app/dist` holds: the third command is needed. Not confirmed from the code: that `tauri dev` serves
-   that folder. A blank window is a result: record it.
+   shows what `app/dist` holds: the third command is needed. The agent's run saw the window draw that folder's
+   page.
 
 2. In the same terminal, make `<look root>`, a fresh `HOME`, and the environment file. The `shell` script hands the
    daemon this terminal's `PATH`: a fresh `HOME` reads none of your shell's startup files, and `collide/plan` needs
@@ -161,7 +161,8 @@ git -C "$LOOK/clone" log --oneline -1
 
 4. Open a second terminal. Load the environment and start the app. It builds `collide-app` into `target/debug`, which
    starts the `collide-daemon` beside itself (`LaunchStarter` in `app/src-tauri/src/shell.rs`). The first build takes
-   minutes. Keep the terminal in view: the app's errors print there.
+   minutes. Keep the terminal in view: the app's errors print there. The window opens at 800 × 600, under the 900 px
+   of step 19, so the drawer lies over the board until you widen the window.
 
 ```sh
 . <look root>/env.sh
@@ -215,7 +216,8 @@ cd "$LOOK/clone"
     Judge the rule from that and from the mock's `columnsOf`. Record whether the underscore should show.
 
 14. Pick `ready` in the view picker. Its cards are the ones step 7 listed. The line above the board reads like the
-    CLI's own lines. An empty column says "Nothing here". Then pick `spikes`: only spikes show.
+    CLI's own lines. An empty column says "Nothing here". Then pick `collide/plan/spikes` (the picker names a pack's
+    view by its source): only spikes show. All ten are concluded, so they are in Concluded, folded.
 
 15. Make a scratch task in the look's own daemon root (it is kept in the store, in no file), and read its key.
 
@@ -348,15 +350,16 @@ new Image().src = 'https://collide-probe.invalid/x.png'
 ```
 
     Then type `location.href`. An address on Tauri's own protocol (`tauri://localhost`) is the page with the policy.
-    A `http://127.0.0.1:…` or `localhost` address is a dev server, which sends none. Not confirmed from the code which
-    `tauri dev` gives. `ts-0183-ee` Decisions say the page may come from the Vite server with no policy. If so, that is
-    the result to record, and the bundled check is `ts-0197-uj`.
+    A `http://127.0.0.1:…` or `localhost` address is a dev server, which sends none. With no `devUrl`, `tauri dev`
+    serves `app/dist` itself (step 1), so expect `tauri://localhost` under `devCsp`; the agent's run could not open
+    the inspector to see it. A dev-server address instead is the result to record, and the bundled check is
+    `ts-0197-uj`.
 
 **`claude` probe.** No prompt is ever sent. Do not run `claude` bare, with `-p`, or in a session. Use the first
 terminal, which has the real `HOME`.
 
 27. Read the help, and find the command it lists that reports login or auth status. Do not guess one. If it lists none,
-    that is the result.
+    that is the result. On the agent's run the help listed `auth`, and `claude auth --help` listed `status`.
 
 ```sh
 claude --help; echo "exit=$?"
@@ -368,8 +371,8 @@ claude --help; echo "exit=$?"
 claude <status command>; echo "exit=$?"
 ```
 
-29. Run it again with `HOME` set to an empty folder. Record the exit code and the output. Not confirmed: on macOS a
-    login may live in the keychain, so an empty `HOME` may still answer "logged in". That too is the result.
+29. Run it again with `HOME` set to an empty folder. Record the exit code and the output. On the agent's run it
+    answered `"loggedIn": false` with exit 1, and wrote `.claude/` and `.claude.json` into the folder.
 
 ```sh
 HOME="$LOOK/claude-home" claude <status command>; echo "exit=$?"
@@ -403,10 +406,28 @@ ps -ax -o pid=,command= | grep -F "$LOOK"
 ```
 
 32. Remove the look, then check that `<collide checkout>` is only built, not changed. Close the second and third
-    terminals: they hold the fresh `HOME`.
+    terminals: they hold the fresh `HOME`. The daemon keeps its pack cache read-only (`host/src/pack_cache.rs`), so
+    `rm -rf` alone fails on it.
 
 ```sh
 echo "$LOOK"
-rm -rf "$LOOK"
+chmod -R u+w "$LOOK" && rm -rf "$LOOK"
 git -C <collide checkout> status --short
 ```
+
+### The agent's run, 2026-11-24
+
+The agent ran the checklist on a throwaway look before yours. It cannot click in the app's window, so the steps after
+4 ran on the test bridge in Chrome: the same page and daemon, under the app's policy. The app's window was only seen to
+start, draw and reach its own daemon.
+
+- Passed: 1 to 5, 7 to 11, 14 to 18, 20 to 22, 24 and 25. On the bridge page the probe of step 26 was refused under
+  `img-src`. `claude`: the status command is `claude auth status`; logged in, exit 0 and `"loggedIn": true`; an empty
+  `HOME`, exit 1 and `"loggedIn": false`.
+- Fixed before your look: `tauri dev` started nothing (the crate has two binaries and named no `default-run`); below
+  900 px the drawer was as tall as its text, so the end of a long task was out of reach; Cancel in the link window
+  left the focus nowhere (Escape gave it back); step 32's `rm -rf`.
+- Left for your look: the page is at most 1152 px wide (`max-w-6xl` in `app/src/frame/Frame.tsx`), where the mock's
+  board fills the window. On a wide window the drawer takes its room from the board, and at its limit, 70% of the
+  window, it covers the board and runs past the page's edge. The window's first size is 800 × 600 (step 4).
+- Not run by the agent: 6, 12 and 13 (yours to judge), 19 in the app's window, and 23 and 26 in its inspector.
