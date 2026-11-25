@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { SourceDecl } from './field/types.ts'
 import { Button } from '@/components/ui/button'
 import { FieldPage } from './field/FieldPage.tsx'
 import { useField } from './field/useField.ts'
@@ -10,11 +11,13 @@ import { LoopPage } from './loop/LoopPage.tsx'
 import { ExternalLinks } from './markdown/ExternalLinks.tsx'
 import { useLoop } from './loop/useLoop.ts'
 import { type OwnerClient, createTauriOwner } from './owner/index.ts'
+import { Peek } from './peek/Peek.tsx'
 
 // The window is the board's frame (Stage 6a): the top bar and the five tabs. The thin loop's page (Stage 3c) stays
 // reachable from Queue and Tracks, with a way back, until Stage 9a replaces it. One loop serves both, so the board
 // chosen in the frame's menu is the board the loop page prompts, and nothing about a run resets when the page changes.
 const shellOwner = createTauriOwner()
+const NO_SOURCES: readonly SourceDecl[] = []
 
 export interface AppProps {
   /** The way to the daemon. The shell's, unless a test gives another. */
@@ -50,28 +53,30 @@ function Window({ owner }: { readonly owner: OwnerClient }) {
     )
   }
   return (
-    <Frame
-      tab={tab}
-      onTab={setTab}
-      boards={state.boards}
-      boardId={state.boardId}
-      folderProblems={state.folderProblems}
-      onChooseBoard={loop.chooseBoard}
-      onOpenFolder={loop.openFolder}
-      onOpenLoop={() => setOnLoopPage(true)}
-      viewPicker={
-        board === undefined ? null : (
-          <ViewPicker boardName={boardName(board)} views={field.views} view={field.view} onChoose={field.select} />
-        )
-      }
-      field={
-        <FieldPage
-          owner={owner}
-          boardId={state.boardId}
-          board={board === undefined ? null : { name: boardName(board), line: defaultLine(board) }}
-          field={field}
-        />
-      }
-    />
+    <Peek owner={owner} boardId={state.boardId} sources={field.data?.sources ?? NO_SOURCES} stamp={field.updatedAt}>
+      <Frame
+        tab={tab}
+        onTab={setTab}
+        boards={state.boards}
+        boardId={state.boardId}
+        folderProblems={state.folderProblems}
+        onChooseBoard={loop.chooseBoard}
+        onOpenFolder={loop.openFolder}
+        onOpenLoop={() => setOnLoopPage(true)}
+        viewPicker={
+          board === undefined ? null : (
+            <ViewPicker boardName={boardName(board)} views={field.views} view={field.view} onChoose={field.select} />
+          )
+        }
+        field={
+          <FieldPage
+            owner={owner}
+            boardId={state.boardId}
+            board={board === undefined ? null : { name: boardName(board), line: defaultLine(board) }}
+            field={field}
+          />
+        }
+      />
+    </Peek>
   )
 }

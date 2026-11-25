@@ -58,3 +58,20 @@ export function resumedPhase(words: string, steps: readonly Step[]): string {
 export function permissionPhase(): string {
   return recording('permission-request')
 }
+
+/**
+ * A Bash call that waits for the person's answer, with `before` done first and `after` done once it is allowed: a run
+ * that has written a file and is held where the person can see it, and that goes on when they answer (ts-0189-fg).
+ */
+export function heldPhase(before: readonly Step[], after: readonly Step[]): string {
+  const lines: string[] = []
+  let expects = 0
+  for (const line of recording('permission-request').split('\n')) {
+    lines.push(line)
+    if (!line.startsWith('{"expect"')) continue
+    expects += 1
+    const steps = expects === 1 ? before : expects === 2 ? after : []
+    lines.push(...steps.map((step) => JSON.stringify(step)))
+  }
+  return lines.join('\n')
+}

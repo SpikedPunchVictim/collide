@@ -38,8 +38,10 @@ async function drawer(world: FieldWorld, key: string, over: Partial<DrawerViewPr
       data={data}
       board={{ name: 'alpha', line: 'main' }}
       shut={[]}
+      changes={null}
       onFlip={noop}
       onOpenTask={noop}
+      onOpenFile={noop}
       onClose={noop}
       {...over}
     />,
@@ -57,12 +59,21 @@ function planWithField(): FieldWorld {
 describe('the drawer of a plan task', () => {
   test('shows the parts the source has something for, in 0.11 order', async () => {
     const html = await drawer(drawerWorld(), 'plan:ts-0002-bb')
-    expect(partsOfHtml(html)).toEqual(['description', 'waits', 'unblocks', 'part-of', 'copies', 'details'])
+    expect(partsOfHtml(html)).toEqual(['description', 'waits', 'unblocks', 'part-of', 'changes', 'copies', 'details'])
   })
 
   test('shows every part, Fields from the source among them, in 0.11 order', async () => {
     const html = await drawer(planWithField(), 'plan:ts-0002-bb')
-    expect(partsOfHtml(html)).toEqual(['description', 'waits', 'unblocks', 'part-of', 'fields', 'copies', 'details'])
+    expect(partsOfHtml(html)).toEqual([
+      'description',
+      'waits',
+      'unblocks',
+      'part-of',
+      'changes',
+      'fields',
+      'copies',
+      'details',
+    ])
   })
 
   test('names each part on its bar', async () => {
@@ -73,6 +84,7 @@ describe('the drawer of a plan task', () => {
       'Waits on',
       'Unblocks',
       'Part of',
+      'Changes',
       'Fields from plan',
       'In each copy of the project',
       'Details for engineers',
@@ -233,8 +245,10 @@ describe('the drawer of a collided id', () => {
         data={data}
         board={null}
         shut={[]}
+        changes={null}
         onFlip={noop}
         onOpenTask={noop}
+        onOpenFile={noop}
         onClose={noop}
       />,
     )
@@ -246,7 +260,7 @@ describe('the drawer of a collided id', () => {
 describe('the drawer of a task of another source', () => {
   test('a scratch task shows no Waits on and no Unblocks, and no copies, which are not in the repo', async () => {
     const html = await drawer(drawerWorld(), 'scratch:1')
-    expect(partsOfHtml(html)).toEqual(['description', 'details'])
+    expect(partsOfHtml(html)).toEqual(['description', 'changes', 'details'])
     expect(html).not.toContain('Nothing. It can start.')
     expect(html).not.toContain('Nothing waits on it.')
   })
@@ -282,7 +296,7 @@ describe('the drawer of a task of another source', () => {
 
   test('shows Waits on and Unblocks for a source that blocks, and no copies for a tracker', async () => {
     const html = await drawer(drawerWorld(), 'tracker:12')
-    expect(partsOfHtml(html)).toEqual(['description', 'waits', 'unblocks', 'fields', 'details'])
+    expect(partsOfHtml(html)).toEqual(['description', 'waits', 'unblocks', 'changes', 'fields', 'details'])
     expect(html).toContain('Read only. Change it in tracker.')
   })
 
@@ -357,8 +371,10 @@ describe('the drawer while it waits, and when it cannot read', () => {
         data={data}
         board={null}
         shut={[]}
+        changes={null}
         onFlip={noop}
         onOpenTask={noop}
+        onOpenFile={noop}
         onClose={noop}
       />,
     )
@@ -379,8 +395,10 @@ describe('the drawer while it waits, and when it cannot read', () => {
         data={data}
         board={null}
         shut={[]}
+        changes={null}
         onFlip={noop}
         onOpenTask={noop}
+        onOpenFile={noop}
         onClose={noop}
       />,
     )
@@ -453,12 +471,12 @@ describe('what blocks', () => {
 })
 
 describe('the parts as data', () => {
-  test('a task with nothing but a title has only Details for engineers', async () => {
+  test('a task with nothing but a title has only Changes and Details for engineers', async () => {
     const world = drawerWorld()
     world.listing = [task('scratch:2', 'Bare', 'backlog', 'backlog')]
     const data = await loadField(world.owner, 'b-alpha', null)
     const got = await world.owner.rpc('task.get', { board: 'b-alpha', id: 'scratch:2' })
     const parts = partsOf({ shown: data.tasks[0]!, got, data, board: null })
-    expect(parts.map((each) => each.id)).toEqual(['details'])
+    expect(parts.map((each) => each.id)).toEqual(['changes', 'details'])
   })
 })

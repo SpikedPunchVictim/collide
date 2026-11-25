@@ -16,10 +16,13 @@ import { type FoldStore, browserStore, memoryStore } from '../field/folds.ts'
 import type { FieldData, Task } from '../field/types.ts'
 import { actionForKey } from '../frame/actions.ts'
 import type { OwnerClient } from '../owner/client.ts'
+import type { DiffTarget } from './changes.ts'
+import { DiffWindow } from './DiffWindow.tsx'
 import { DrawerView } from './DrawerView.tsx'
 import { readShut, toggleShut } from './folds.ts'
 import { useTaskGet } from './load.ts'
 import type { BoardNote } from './types.ts'
+import { useChanges } from './useChanges.ts'
 import {
   BIG_STEP,
   DEFAULT_WIDTH,
@@ -85,6 +88,11 @@ export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpe
   const [, remember] = useState(0)
   const { got, problem } = useTaskGet(owner, boardId, shown.key, stamp)
   const { width, room, set } = useWidth(kept)
+  const shut = readShut(kept)
+  // Changes is read while its part is open, for a task the daemon names (a collided key has no changes to ask for).
+  const changes = useChanges(owner, boardId, shown.key, got?.task != null && !shut.includes('changes'))
+  // The diff window is for one task: another task shown closes it.
+  const [diff, setDiff] = useState<{ key: string; target: DiffTarget } | null>(null)
   useEscape(onClose)
   return (
     // Below 900 px it is fixed, and a fixed box follows `align-self` too: left at `start`, it would be as tall as its
@@ -104,14 +112,26 @@ export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpe
         problem={problem}
         data={data}
         board={board}
-        shut={readShut(kept)}
+        shut={shut}
+        changes={changes}
         onFlip={(part) => {
           toggleShut(kept, part)
           remember((count) => count + 1)
         }}
         onOpenTask={onOpenTask}
+        onOpenFile={(target) => setDiff({ key: shown.key, target })}
         onClose={onClose}
       />
+      {diff === null || diff.key !== shown.key ? null : (
+        <DiffWindow
+          key={`${shown.key}|${JSON.stringify(diff.target.source)}|${diff.target.file.path}`}
+          owner={owner}
+          boardId={boardId}
+          task={shown.key}
+          target={diff.target}
+          onClosed={() => setDiff(null)}
+        />
+      )}
     </div>
   )
 }

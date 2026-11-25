@@ -20,6 +20,10 @@ declare global {
       edit(key: string, over: Record<string, unknown>): void
       /** The daemon's event that a task of `source` changed (a Field world). */
       announce(source: string, key?: string): void
+      /** Sets what `task.changes` answers for a task of a Field world (nothing is announced) (ts-0189-fg). */
+      setChanges(key: string, changes: unknown): void
+      /** The daemon's event for a run of a Field world: `run.transition`, or `phase.transition` (ts-0189-fg). */
+      announceRun(run: string, event?: 'run.transition' | 'phase.transition'): void
       /** The shell's notice that the daemon's event stream ended (`lost`) or came back (`back`). */
       connection(state: 'lost' | 'back'): void
       /** The links `shell.open_external` was asked to open, in order. The fake opens none (ts-0183-ee). */
@@ -52,6 +56,8 @@ window.collideFake = {
       .map((call) => (call.params as { view?: unknown } | undefined)?.view),
   edit: (key, over) => fieldWorld().edit(key, over),
   announce: (source, key) => fieldWorld().announce(source, key),
+  setChanges: (key, changes) => fieldWorld().changes.set(key, changes as never),
+  announceRun: (run, event) => fieldWorld().announceRun(run, event),
   connection: (state) => world.owner.push({ method: 'shell.connection', params: { state } }),
   opened: () => [...opened],
 }

@@ -6,7 +6,7 @@ import type { Category, FieldData, SourceDecl, Task } from '../field/types.ts'
 import type { BoardNote, Got, GotLink } from './types.ts'
 
 /** The parts of the drawer, in the order they are drawn. */
-export type PartId = 'description' | 'waits' | 'unblocks' | 'part-of' | 'fields' | 'copies' | 'details'
+export type PartId = 'description' | 'waits' | 'unblocks' | 'part-of' | 'changes' | 'fields' | 'copies' | 'details'
 
 export interface Part {
   readonly id: PartId
@@ -225,6 +225,8 @@ export function partsOf(input: DrawerInput): Part[] {
   if (part.epic !== null || part.collections.length > 0 || part.views.length > 0) {
     parts.push({ id: 'part-of', title: 'Part of' })
   }
+  // A collided key names no task for `task.changes` to ask about, as it names none for the links above.
+  if (!isCollided(got)) parts.push({ id: 'changes', title: 'Changes' })
   if (source !== undefined && source.fields.length > 0) {
     parts.push({ id: 'fields', title: `Fields from ${source.name}` })
   }

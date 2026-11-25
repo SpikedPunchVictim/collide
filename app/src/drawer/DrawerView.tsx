@@ -10,6 +10,9 @@ import { DOT, TEXT } from '../field/colours.ts'
 import { tailOf } from '../field/model.ts'
 import type { FieldData, Task } from '../field/types.ts'
 import { Markdown } from '../markdown/Markdown.tsx'
+import { ChangesPart } from './Changes.tsx'
+import type { DiffTarget } from './changes.ts'
+import type { ChangesRead } from './changes-feed.ts'
 import {
   type CopyRow,
   type DrawerInput,
@@ -37,9 +40,13 @@ export interface DrawerViewProps {
   readonly board: BoardNote | null
   /** The parts that are folded. */
   readonly shut: readonly string[]
+  /** What the Changes part shows: the feed's state, or null before it has been asked (or when it is folded). */
+  readonly changes: ChangesRead | null
   readonly onFlip: (part: PartId) => void
   /** A task named in a link opens in the drawer, by its key. */
   readonly onOpenTask: (key: string) => void
+  /** A file of the Changes part was picked: its diff opens. */
+  readonly onOpenFile: (target: DiffTarget) => void
   readonly onClose: () => void
 }
 
@@ -102,7 +109,13 @@ export function DrawerView(props: DrawerViewProps) {
                 </h3>
                 {folded ? null : (
                   <div className="pt-1 pb-1 break-words">
-                    <PartBody id={part.id} input={input} onOpenTask={props.onOpenTask} />
+                    <PartBody
+                      id={part.id}
+                      input={input}
+                      changes={props.changes}
+                      onOpenTask={props.onOpenTask}
+                      onOpenFile={props.onOpenFile}
+                    />
                   </div>
                 )}
               </section>
@@ -132,10 +145,12 @@ function Chevron({ folded }: { folded: boolean }) {
 interface PartBodyProps {
   readonly id: PartId
   readonly input: DrawerInput
+  readonly changes: ChangesRead | null
   readonly onOpenTask: (key: string) => void
+  readonly onOpenFile: (target: DiffTarget) => void
 }
 
-function PartBody({ id, input, onOpenTask }: PartBodyProps) {
+function PartBody({ id, input, changes, onOpenTask, onOpenFile }: PartBodyProps) {
   const { got, data } = input
   const task = got.task ?? input.shown
   const source = data.sources.find((each) => each.name === task.key.slice(0, task.key.indexOf(':')))
@@ -160,6 +175,8 @@ function PartBody({ id, input, onOpenTask }: PartBodyProps) {
       )
     case 'part-of':
       return <PartOfChips input={input} />
+    case 'changes':
+      return <ChangesPart changes={changes} onOpenFile={onOpenFile} />
     case 'fields':
       return source === undefined ? null : <Fields task={task} source={source} />
     case 'copies':

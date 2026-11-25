@@ -58,6 +58,7 @@ test('a card opens the drawer with its parts in order, and Close shuts it', asyn
     /^Waits on/,
     /^Unblocks/,
     /^Part of/,
+    /^Changes/,
     /^In each copy of the project/,
     /^Details for engineers/,
   ])

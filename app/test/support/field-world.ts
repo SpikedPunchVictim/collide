@@ -2,13 +2,18 @@
 // `task.views` over plain data, as the daemon does. A world says which sources the board declares, the tasks, the
 // views with the keys each holds and what each reports. The fake-owner page and the vitest tests share them.
 import type {
+  TaskChangesResultOutput,
+  TaskDiffParamsInput,
+  TaskDiffResultOutput,
   TaskGetParamsInput,
   TaskGetResultOutput,
   TaskListResultOutput,
   TaskOutput,
   TaskViewsResultOutput,
 } from '../../src/owner/generated.ts'
+import { OwnerError } from '../../src/owner/index.ts'
 import { HOSTILE_BODY } from './hostile.ts'
+import { tailOf } from '../../src/field/model.ts'
 import { World, board } from './loop-world.ts'
 
 export type Category = TaskOutput['state']['category']
@@ -18,6 +23,10 @@ export type Report = NonNullable<TaskListResultOutput['view']>
 export type Copy = TaskGetResultOutput['copies'][number]
 export type HookLink = TaskGetResultOutput['links'][number]
 export type LinkType = NonNullable<TaskGetResultOutput['link_types']>[number]
+
+/** What `task.diff` is asked of: a run or a commit, the file, and the patch or the whole file. */
+export const diffKey = (params: Pick<TaskDiffParamsInput, 'run' | 'commit' | 'path' | 'whole'>): string =>
+  `${params.run ?? params.commit}|${params.path}|${params.whole ? 'whole' : 'patch'}`
 
 export const CATEGORY_ORDER: readonly Category[] = ['backlog', 'ready', 'active', 'review', 'done', 'dropped']
 
@@ -146,6 +155,12 @@ export class FieldWorld extends World {
    * with none here matches no task, and the daemon refuses the view as it does then.
    */
   walks = new Map<string, Held>()
+  /** What `task.changes` answers, by task key. A task with none here has no run and no commit. */
+  changes = new Map<string, TaskChangesResultOutput>()
+  /** What `task.diff` answers, by `diffKey`. A file with none here is `not found`, as a file no run changed is. */
+  fileDiffs = new Map<string, TaskDiffResultOutput>()
+  /** Set to make `task.changes` refuse with these words. */
+  refuseChanges: string | null = null
 
   /** Changes a listed task, as an edit in a checkout would. Nothing is announced: the daemon's event does that. */
   edit(key: string, over: Partial<TaskOutput>): void {
@@ -159,6 +174,18 @@ export class FieldWorld extends World {
       event === 'task.changed'
         ? { event, source, task: { ...task, from: null, to: null, diff: {} } }
         : { event, source, task: { key, cause: task.cause, checkout: task.checkout } }
+    this.owner.push({
+      method: 'daemon.event',
+      params: { seq: 1, wall_ms: 1, actor: { kind: 'workflow' }, experiment: null, body },
+    } as never)
+  }
+
+  /** The daemon's event for a run: an edit of its workspace sends none, a phase and the run's state do. */
+  announceRun(run: string, event: 'run.transition' | 'phase.transition' = 'run.transition') {
+    const body =
+      event === 'run.transition'
+        ? { event, run, from: null, to: { state: 'running' } }
+        : { event, run, phase: 'agent', round: 1, from: null, to: { state: 'running' }, log: null, transcript: null }
     this.owner.push({
       method: 'daemon.event',
       params: { seq: 1, wall_ms: 1, actor: { kind: 'workflow' }, experiment: null, body },
@@ -183,9 +210,13 @@ export class FieldWorld extends World {
    */
   protected override getTask(params: TaskGetParamsInput): TaskGetResultOutput {
     if (this.refuseGet !== null) throw new Error(this.refuseGet)
-    const entries = this.listing.filter((each) => each.key === params.id)
+    // `id` may be the short form (`12` or `ts-0001-aa`), as the daemon takes it: an exact key first, then a key's tail.
+    const exact = this.listing.filter((each) => each.key === params.id)
+    const entries = exact.length > 0 ? exact : this.listing.filter((each) => tailOf(each.key) === params.id)
     const [first] = entries
     if (first === undefined) return super.getTask(params)
+    const keys = [...new Set(entries.map((each) => each.key))]
+    if (keys.length > 1) return { ambiguous: keys, copies: [], collisions: [], runs: [], links: [] }
     const copies = this.copies.get(first.key) ?? entries.map((each) => this.copyOf(each))
     if (entries.length > 1) {
       const tail = first.key.slice(first.key.indexOf(':') + 1)
@@ -261,6 +292,17 @@ export class FieldWorld extends World {
     super()
     this.boards = [board('b-alpha', '/work/alpha')]
     this.owner.handle('task.views', () => ({ views: this.views }))
+    this.owner.handle('task.changes', ({ task }) => {
+      if (this.refuseChanges !== null) throw new OwnerError(-32000, this.refuseChanges)
+      const how = `no commit on this line names ${tailOf(task)}`
+      const place = 'Your checkout, line main'
+      return this.changes.get(task) ?? { runs: [], commits: [], commits_words: { place, how } }
+    })
+    this.owner.handle('task.diff', (params) => {
+      const found = this.fileDiffs.get(diffKey(params))
+      if (found === undefined) throw new OwnerError(-32010, `${params.path} has no change to show`)
+      return found
+    })
     this.owner.handle('task.list', (params) => {
       if (this.refuseList !== null) throw new Error(this.refuseList)
       const ref = params.view
