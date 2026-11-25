@@ -577,19 +577,55 @@ dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 /* Round 8: the epics strip, a picked epic's cards, and the epic in the panel (notes 58 to 61). */
 .estrip{flex:none;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);
   margin-bottom:12px;overflow:hidden}
-.estrip > h3{margin:0;background:var(--bar);font-size:13.5px;text-transform:none;letter-spacing:0;
+.estrip > h3,.fbar > h3{margin:0;background:var(--bar);font-size:13.5px;text-transform:none;letter-spacing:0;
   color:var(--foreground);gap:6px}
-.estrip > h3 .nm{margin-right:14px}
+.estrip > h3 .nm,.fbar > h3 .nm{margin-right:14px}
+/* Round 9: the filters under a bar that folds them, as the panel's parts are (note 38). */
+.fbar{flex:none}
+/* No overflow:hidden, so the Epic box's list can leave the bar; the bar's corners follow the card. */
+.fbar > h3{border-radius:var(--radius) var(--radius) 0 0}
+.fbar.shut > h3{border-radius:var(--radius)}
+.fbar > h3 > .dsh{border-radius:var(--radius) 0 0 0}
+.fbar.shut > h3 > .dsh{border-radius:var(--radius) 0 0 var(--radius)}
+.fbar > .dsb{padding:10px 14px 12px;display:flex;flex-direction:column;gap:8px}
+.fbar > h3 > .btn{margin-right:8px}
+.fbar .fsum{font-weight:400;font-size:13px;color:var(--muted-foreground);min-width:0}
+/* Round 9: the Epic box, a list of epics to tick, each with its count (note 62). */
+.mwrap{position:relative;display:inline-flex}
+.mbtn{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:2px 8px 2px 10px;max-width:280px;
+  border:1px solid var(--border);border-radius:999px;background:var(--card);cursor:pointer}
+.mbtn:hover{background:var(--secondary)}
+.mbtn.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary)}
+.mbtn .ml{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pop.mpop{width:min(340px,calc(100vw - 32px));min-width:0;padding:8px;display:flex;flex-direction:column;gap:6px}
+.mpop input{border:1px solid var(--input);border-radius:var(--radius-xs);padding:5px 8px;background:var(--card)}
+.mlist{max-height:300px;overflow-y:auto;display:flex;flex-direction:column}
+.mopt .mbox{width:16px;height:16px;flex:none;display:inline-grid;place-items:center;border:1.5px solid var(--input);
+  border-radius:4px}
+.mopt[aria-checked="true"] .mbox{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground)}
+.mopt .mbox .ic{width:12px;height:12px;stroke-width:3}
+.mopt .n{color:var(--muted-foreground);font-size:12px}
+.mfoot{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);padding-top:6px;font-size:12.5px}
 .estrip > .dsb{padding:12px 14px 12px}
 .etools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}
 .etools input{border:1px solid var(--input);border-radius:var(--radius-xs);padding:5px 8px;background:var(--card);
   color:inherit;font:inherit;width:240px;max-width:100%}
 .erow{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px}
 .erow.grid{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;max-height:250px}
-.ec{all:unset;box-sizing:border-box;cursor:pointer;flex:0 0 230px;display:flex;flex-direction:column;gap:7px;
-  padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);box-shadow:var(--shadow)}
+.ec{box-sizing:border-box;position:relative;flex:0 0 230px;display:flex;border:1px solid var(--border);
+  border-radius:10px;background:var(--card);box-shadow:var(--shadow)}
 .ec:hover{border-color:var(--input)}
-.ec:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.ecb{all:unset;box-sizing:border-box;cursor:pointer;flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;
+  padding:10px 12px;border-radius:10px}
+.ecb:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.ec .et{padding-right:24px}
+/* Round 9: the funnel shows only this epic's tasks (note 63). */
+.efil{all:unset;box-sizing:border-box;position:absolute;top:6px;right:6px;width:26px;height:26px;display:grid;
+  place-items:center;border-radius:6px;color:var(--muted-foreground);cursor:pointer}
+.efil:hover{background:var(--muted);color:var(--foreground)}
+.efil:focus-visible{outline:2px solid var(--ring)}
+.efil[aria-pressed="true"]{background:var(--primary-soft);color:var(--primary)}
+.efil .ic{width:15px;height:15px}
 .ec.on{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary),var(--shadow)}
 .ec .et{font-weight:600;line-height:1.3;min-height:2.6em;display:-webkit-box;-webkit-line-clamp:2;
   -webkit-box-orient:vertical;overflow:hidden}
@@ -3362,6 +3398,7 @@ const state = {
   agents: clone(AGENTS), atest: {}, tok: TOKENS[0], tokShow: false, snip: 'claude', lastCall: LAST_CALL,
   // Round 8: the picked epic, the strip folded per view, its find box, and rows in place of one row (notes 58 to 61).
   epic: null, eshut: new Set(), efind: '', egrid: false,
+  mfind: '', // round 9: the Epic box's find words
 };
 const board = () => state.boards[state.board];
 const view = () => board().views.find((v) => v.id === state.view) || board().views[0];
@@ -3519,10 +3556,11 @@ const NOTES = [
     + 'follow-up: private, raised by the session, waiting for Keep or Drop. A choice for you becomes a question in '
     + 'Decisions needed. Recommendation: as drawn.', 'Alternative: a "Parked ideas" part in the proposal, sorted '
     + 'when it is accepted.', 'new', 4],
-  ['The filters fold to one line', 'Fold, at the foot of the filters, leaves one line: the filters in force, '
-    + '"showing X of Y", and Clear. It stays folded for that board; the / key unfolds it and puts you in the '
-    + 'search. Recommendation: as drawn.', 'Alternative: the filters hide as you scroll the board down and come '
-    + 'back as you scroll up. No click, but the page moves under you.', 'new', 5],
+  ['The filters fold, as the panel\'s parts do', 'The filters sit under a bar, as each part of the panel does. A '
+    + 'click on it folds them to the bar, which then says the filters in force and "showing X of Y", with Clear. It '
+    + 'stays folded for that board; the / key unfolds it and puts you in the search. Owner, 2026-11-25: in place of '
+    + 'the Fold button.', 'Alternative: the filters hide as you scroll the board down and come back as you scroll up. '
+    + 'No click, but the page moves under you.', 'changed', 9],
   ['The task panel: parts fold, and it is as wide as you drag it', 'Each part of the panel sits under a bar, '
     + 'darker than the part, with an icon and its name. A click anywhere on the bar folds the part, and it stays '
     + 'folded for the next task. Drag the panel\'s left edge to widen it, from 360 px to 70% of the '
@@ -3635,23 +3673,31 @@ const NOTES = [
     + 'opens in the panel. A line over the board says how many cards are lit, how many sit in folded columns, and how '
     + 'many are outside the view; a folded column says how many lit cards it holds. The epic stays picked while you '
     + 'open its tasks, until a second click on it or Clear. Recommendation: as drawn.', 'Alternative: also dim every '
-    + 'other card. The epic stands out more; the rest of the board is harder to read while one is picked.', 'new', 8],
-  ['The epic in the panel, and Add to Up next', 'The panel shows the picked epic: Run it, then its open tasks in run '
-    + 'order, step by step, with any task of another epic that they wait on, then the finished ones folded. Add to Up '
-    + 'next puts the open tasks in Up next as one group, where you pick how a group runs, and Autopilot can start it '
-    + 'under its caps (Stage 11). Until Stage 11 the button is off and says when it comes. Recommendation: as drawn.',
-    'Alternative: Run this epic, which turns Autopilot on for the epic alone. One click; it skips the choice of how '
-    + 'the group runs.', 'new', 8],
+    + 'other card. The epic stands out more; the rest of the board is harder to read while one is picked.', 'kept', 8],
+  ['The epic in the panel, Add to Up next, and the graph', 'The panel shows the picked epic: Run it, then its '
+    + 'open tasks in run order, step by step, with any task of another epic that they wait on, then the finished ones '
+    + 'folded. Add to Up next puts the open tasks in Up next as one group, where you pick how a group runs, and '
+    + 'Autopilot can start it under its caps (Stage 11); until then the button is off and says when it comes. The '
+    + 'strip shows over Run order and Graph too, and a picked epic is what they draw, its own tasks lit; See the graph '
+    + 'in the panel goes there. Owner, 2026-11-25: as drawn, and the graph too.', 'Alternative: Run this epic, which '
+    + 'turns Autopilot on for the epic alone. One click; it skips the choice of how the group runs.', 'changed', 9],
   ['Fifty epics', 'The strip is one row that scrolls sideways, open work first: an epic with a task under way, then '
     + 'one with a ready task, then the rest, and finished ones last. Over 8 epics a find box narrows the row by name '
-    + 'or id. The strip keeps one height, so the board stays where it is. Recommendation: as drawn (Round 8, "50 '
+    + 'or id. The strip keeps one height, so the board stays where it is. Picking an epic leaves the row where it was; '
+    + 'it moves only to keep the picked card in sight when the panel opens. Recommendation: as drawn (Round 8, "50 '
     + 'epics").', 'Alternative: rows that wrap, at most two rows high with their own scroll (Round 8, "50 epics in '
-    + 'rows"). More epics in sight at once; the board starts lower.', 'new', 8],
-  ['The filter bar at fifty epics', 'Found with the 50 epics: the filter bar\'s Stage row has a chip for every epic, '
-    + 'so at 50 it takes five lines. Recommendation: over 8 epics, the row shows only the epics you chose, then '
-    + '"Choose epics", a list with a find box; and the row is named Epic, since another board\'s epics are not '
-    + 'stages. Not drawn yet.', 'Alternative: no epic row in the filter bar; "Show only this epic" on the lit line '
-    + 'filters to the picked one. One place for epics; filtering by two epics at once goes.', 'new', 8],
+    + 'rows"). More epics in sight at once; the board starts lower.', 'new', 9],
+  ['The Epic box in the filters', 'The Stage row had a chip for every epic, five lines at 50. It is one box now, '
+    + 'named Epic, since another board\'s epics are not stages. It says Any, the one epic chosen, or how many; it '
+    + 'opens a list of the view\'s epics, each with a tick and its count of tasks, with a find box over 8 and Clear. '
+    + 'Owner, 2026-11-25: a box with counts.', 'Alternative: keep the chips, and over 8 show only the chosen ones and '
+    + 'a "Choose epics" list. The choice stays in sight; the row still grows as you choose.', 'changed', 9],
+  ['Show only one epic\'s tasks', 'Each epic card has a funnel at its corner, always shown. A click shows only that '
+    + 'epic\'s tasks, and the funnel stays pressed. It is the Epic filter, so the Epic box shows the same choice, '
+    + 'another card\'s funnel adds its epic, and a second click or Clear filters ends it. The strip keeps every epic, '
+    + 'so you can move to another. Recommendation: as drawn (Round 9, "Only one epic").', 'Alternative: "Show only '
+    + 'this epic" on the line over the board, for the picked epic alone. No control on each card; it needs a pick '
+    + 'first.', 'new', 9],
 ];
 
 /* ---------- top bar ---------- */
@@ -3726,8 +3772,9 @@ function fieldHtml() {
   if (!visibleTasks().length) return banners.join('') + emptyHtml();
   const tasks = applyFilters(inView);
   if (view().sort) tasks.sort(view().sort);
+  const strip = state.lens || state.layout === 'next' ? '' : epicsHtml(inView) + elitHtml(tasks);
   const body = state.layout === 'next' ? upNextHtml() : state.layout === 'board' ? (state.lens ? lensHtml(inView)
-    : epicsHtml(tasks) + elitHtml(tasks) + boardHtml(tasks)) : state.layout === 'graph' ? graphHtml() : runOrderHtml();
+    : strip + boardHtml(tasks)) : strip + (state.layout === 'graph' ? graphHtml() : runOrderHtml());
   return banners.join('') + autoStripHtml() + filtersHtml(inView, tasks) + viewbarHtml(tasks) + achipHtml()
     + body;
 }
@@ -3756,18 +3803,12 @@ function celOf() {
   return parts.join('\n  && ') || 'true';
 }
 function filtersHtml(inView, shown) {
-  if (state.ffold.has(state.board)) return foldedFiltersHtml(inView, shown);
   const f = state.filt;
+  const shut = state.ffold.has(state.board);
   const chip = (g, v, label, n) => `<button class="chipbtn" data-act="chip" data-g="${g}" data-v="${esc(v)}"
     aria-pressed="${f[g].has(v)}">${label} <span class="n">${n}</span></button>`;
-  const epics = [...new Set(inView.map((t) => t.epic).filter(Boolean))];
   const srcs = [...new Set(inView.map((t) => t.src))];
-  const groups = [];
-  if (epics.length > 1) {
-    groups.push(`<div class="fgroup"><span class="lbl">Stage${
-      epics.length > 8 ? nm(62) : ''}</span>${epics.map((e) => chip('stage', e,
-      esc(EPICS[e].short), inView.filter((t) => t.epic === e).length)).join('')}</div>`);
-  }
+  const groups = [epicBoxHtml(inView)];
   groups.push(`<div class="fgroup"><span class="lbl">Where it stands</span>${CAT_ORDER.map((c) => chip('cat', c,
     `<span class="dot cat-${c}"></span>${CATS[c].word}`, inView.filter((t) => catOf(t) === c).length)).join('')}
     </div>`);
@@ -3780,7 +3821,13 @@ function filtersHtml(inView, shown) {
       aria-pressed="true" title="Remove">Has dependencies ×</button></div>`);
   }
   const any = f.stage.size || f.cat.size || f.src.size || f.text || f.deps;
-  return `<section class="filters card" aria-label="Filters">
+  const sum = filterWords();
+  return `<section class="ds fbar card${shut ? ' shut' : ''}" aria-label="Filters"><h3><button class="dsh"
+    data-act="ffold" aria-expanded="${!shut}" title="${shut ? 'Show the filters (key /)' : 'Fold the filters'}">${
+    secIcon('Filters')}<span class="dt">Filters${shut ? `<span class="fsum">${sum.length ? `${esc(sum.join(' · '))}
+    · showing ${shown.length} of ${inView.length}` : `No filters · ${inView.length} tasks`}</span>` : ''}</span>${
+    CHEV}</button>${shut && any ? '<button class="btn sm" data-act="clear">Clear filters</button>' : ''}${nm(38)}</h3>
+    <div class="dsb">
     ${askHtml(inView)}
     <div class="frow">${groups.join('')}${nm(9)}</div>
     <div class="frow"><label class="sr" for="ftext">Search tasks</label>
@@ -3789,12 +3836,34 @@ function filtersHtml(inView, shown) {
       <span class="muted" style="font-size:13px">${any ? `Showing ${shown.length} of ${inView.length}` : ''}</span>
       <span class="spacer"></span>
       <button class="btn sm" data-act="clear" ${any ? '' : 'disabled'}>Clear filters</button>
-      <button class="btn sm" data-act="save-view" ${any ? '' : 'disabled'}>Save as a view…</button>
-      <button class="btn ghost sm" data-act="ffold" aria-expanded="true" title="Fold the filters to one line"><span
-        style="display:inline-flex;transform:rotate(180deg)">${svg.down}</span>Fold</button>${nm(38)}</div>
+      <button class="btn sm" data-act="save-view" ${any ? '' : 'disabled'}>Save as a view…</button></div>
     <details class="adv"><summary>Advanced: this view as an expression (CEL, read only)</summary>
       <div class="cel"><code>${esc(celOf())}</code></div></details>
-  </section>`;
+  </div></section>`;
+}
+/* the Epic box: the view's epics to tick, each with its count of tasks (round 9; note 62) */
+function epicBoxHtml(inView) {
+  const f = state.filt;
+  const epics = [...new Set(inView.map((t) => t.epic).filter((e) => e && EPICS[e]))].sort();
+  if (epics.length < 2) return '';
+  const chosen = [...f.stage].filter((e) => EPICS[e]);
+  const open = state.menu === 'epicbox';
+  const q = state.mfind.trim().toLowerCase();
+  const list = epics.filter((e) => !q || `${e} ${EPICS[e].name}`.toLowerCase().includes(q));
+  const rows = list.map((e) => `<button class="opt mopt" role="menuitemcheckbox" data-act="epic-pick" data-v="${e}"
+    aria-checked="${f.stage.has(e)}"><span class="mbox">${f.stage.has(e) ? svg.ok : ''}</span><span class="grow">${
+    esc(EPICS[e].short)}</span><span class="n">${inView.filter((t) => t.epic === e).length}</span></button>`);
+  const pop = !open ? '' : `<div class="pop mpop" role="menu" aria-label="Epics to show">${epics.length > 8
+    ? `<label class="sr" for="mfind">Find an epic</label><input id="mfind" type="search" placeholder="Find an epic"
+      value="${esc(state.mfind)}" autocomplete="off">` : ''}<div class="mlist" data-keep="mlist">${rows.join('')
+      || '<p class="muted" style="margin:6px 8px">No epic matches.</p>'}</div><div class="mfoot"><span class="muted">${
+      chosen.length ? `${chosen.length} chosen` : 'None chosen: every epic shows'}</span><span class="spacer"></span>
+      <button class="btn ghost sm" data-act="epic-none" ${chosen.length ? '' : 'disabled'}>Clear</button></div></div>`;
+  const label = !chosen.length ? 'Any' : chosen.length === 1 ? EPICS[chosen[0]].short : `${chosen.length} epics`;
+  return `<div class="fgroup"><span class="lbl">Epic</span><span class="mwrap"><button class="mbtn ${chosen.length
+    ? 'on' : ''}" data-act="menu" data-menu="epicbox" aria-haspopup="menu" aria-expanded="${open}"
+    aria-label="Epic: ${esc(label)}"><span class="ml">${esc(label)}</span>${svg.down}</button>${pop}</span>${nm(62)}
+    </div>`;
 }
 /* ---------- describe what to show (6b) ---------- */
 const ASK_EXAMPLES = ['open Stage 6 tasks waiting on something', 'in review or done, about the daemon',
@@ -4001,8 +4070,9 @@ function epicsHtml(tasks) {
     ? `<span class="chip info">${esc(EPICS[state.epic].short)} is lit</span>` : '';
   return `<section class="ds estrip${shut ? ' shut' : ''}" aria-label="Epics"><h3><button class="dsh" data-act="estrip"
     aria-expanded="${!shut}">${secIcon('Epics')}<span class="dt">Epics <span class="muted" style="font-weight:400">${
-    all.length}</span>${picked}</span>${CHEV}</button>${nm(58)}</h3><div class="dsb">${find}
-    <div class="erow ${state.egrid ? 'grid' : ''}">${shown.map(ecardHtml).join('')
+    all.length}</span>${picked}</span>${CHEV}</button>${nm(58)}${nm(63)}</h3><div class="dsb">${find}
+    <div class="erow ${state.egrid ? 'grid' : ''}" data-keep="erow:${state.board}:${state.view}">${
+      shown.map(ecardHtml).join('')
       || '<span class="muted">No epic matches.</span>'}</div></div></section>`;
 }
 function ecardHtml(ep) {
@@ -4013,13 +4083,37 @@ function ecardHtml(ep) {
   const bar = ['done', 'dropped', 'review', 'active', 'ready', 'backlog'].map((c) => (n(c)
     ? `<span class="cat-${c}" style="flex:${n(c)}"></span>` : '')).join('');
   const on = state.epic === ep;
-  return `<button class="ec ${on ? 'on' : ''}" data-act="epic" data-id="${ep}" aria-pressed="${on}">
-    <span class="et">${esc(EPICS[ep].name)}</span><span class="ebar" aria-hidden="true">${bar}</span>
-    <span class="em"><span>${n('done')} of ${ts.length} done</span><span>·</span><span>${open ? `${open} open${busy
-      ? `, ${busy} under way` : ''}` : 'Finished'}</span></span><span class="em mono">${esc(ep)}</span></button>`;
+  const only = state.filt.stage.has(ep);
+  return `<div class="ec ${on ? 'on' : ''}" data-id="${ep}"><button class="ecb" data-act="epic" data-id="${ep}"
+    aria-pressed="${on}"><span class="et">${esc(EPICS[ep].name)}</span><span class="ebar" aria-hidden="true">${bar}
+    </span><span class="em"><span>${n('done')} of ${ts.length} done</span><span>·</span><span>${open ? `${open} open${
+      busy ? `, ${busy} under way` : ''}` : 'Finished'}</span></span><span class="em mono">${esc(ep)}</span></button>
+    <button class="efil" data-act="epic-only" data-id="${ep}" aria-pressed="${only}" title="${only ? 'Show every '
+      + 'epic\'s tasks' : 'Show only this epic\'s tasks'}" aria-label="Show only the tasks of ${esc(EPICS[ep].name)}">
+      ${FUNNEL}</button></div>`;
+}
+const FUNNEL = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>';
+// Keeps the picked card in sight in its row, which the panel may have just narrowed (note 61).
+function epicInSight(ep) {
+  const card = $(`.ec[data-id="${ep}"]`);
+  if (!card) return;
+  const row = card.parentElement, r = row.getBoundingClientRect(), c = card.getBoundingClientRect();
+  if (c.right > r.right) row.scrollLeft += c.right - r.right + 8;
+  else if (c.left < r.left) row.scrollLeft -= r.left - c.left + 8;
+  if (c.bottom > r.bottom) row.scrollTop += c.bottom - r.bottom + 8;
+  else if (c.top < r.top) row.scrollTop -= r.top - c.top + 8;
 }
 function elitHtml(tasks) {
   if (!state.epic || !EPICS[state.epic]) return '';
+  if (state.layout !== 'board') {
+    const drawn = goalsOf().includes(state.epic) ? closureSteps(state.epic).flat() : [];
+    const own = drawn.filter((t) => t.epic === state.epic).length;
+    const words = !drawn.length ? 'Nothing open in it to draw' : `${own} open task${own === 1 ? '' : 's'} lit${
+      drawn.length > own ? ` · ${drawn.length - own} of other epics they wait on` : ''}`;
+    return `<div class="elit" role="status"><span class="chip info">Epic</span><b>${esc(EPICS[state.epic].name)}</b>
+      <span class="muted">${words}</span>${nm(60)}<span class="spacer"></span>
+      <button class="btn sm ghost" data-act="epic-clear">Clear</button></div>`;
+  }
   const mode = groupMode(tasks);
   const cols = columnsOf(mode, tasks);
   const mine = tasks.filter((t) => t.epic === state.epic);
@@ -4065,7 +4159,8 @@ function epicDrawerHtml(ep) {
       epics they wait on,` : ''} to Up next as one group, in run order. Up next picks how the group runs, and
       Autopilot can start it under its caps.` : 'Nothing is open in it.'}</p>
       <div class="frow" style="gap:8px">${go}<button class="btn sm" data-act="epic-order" data-id="${ep}">See the run
-      order</button></div><p class="muted" style="margin:10px 0 0;font-size:12.5px">In the app, Add to Up next is off
+      order</button><button class="btn sm" data-act="epic-graph" data-id="${ep}">See the graph</button></div>
+      <p class="muted" style="margin:10px 0 0;font-size:12.5px">In the app, Add to Up next is off
       until Stage 11, with groups and Autopilot, and says so.</p></section>
     <section class="ds"><h3>Tasks in run order</h3>${order || '<p class="muted" style="margin:0">No open tasks.</p>'}
       ${done.length ? `<details class="edone"><summary>${done.length} done or dropped</summary>${done.map(row).join('')}
@@ -4103,6 +4198,7 @@ function closureSteps(goal) {
 }
 function pickGoal() {
   const goals = goalsOf();
+  if (state.epic && goals.includes(state.epic)) return state.epic; // a picked epic is what is drawn (note 60)
   return goals.includes(state.goal) ? state.goal : (goals.includes(view().goal) ? view().goal : goals[0]);
 }
 function goalBar(goal, steps, words) {
@@ -4152,7 +4248,8 @@ function graphHtml() {
     ? ' · can start now' : ''}</span>`);
   const nodes = [...pos].map(([id, p]) => {
     const t = byId(id), c = catOf(t);
-    return `<button class="tc gnode ${c === 'active' ? 'lit' : ''} ${state.drawer === id ? 'sel' : ''}"
+    return `<button class="tc gnode ${c === 'active' ? 'lit' : ''} ${state.drawer === id ? 'sel' : ''} ${
+      state.epic && t.epic === state.epic ? 'ehl' : ''}"
       data-act="open" data-id="${id}" style="left:${p.x}px;top:${p.y}px" title="${esc(t.title)}">
       <span class="tc-t">${esc(t.title)}</span><span class="tc-m"><span class="dot cat-${c}"></span>
       ${esc(shortId(id))} · ${esc(t.status)}</span></button>`;
@@ -5300,26 +5397,21 @@ const KEEP = {
 };
 const LIVE_RUNS = new Set(['R-121', 'R-124']);
 
-/* the filters, folded to one line (note 38) */
-function foldedFiltersHtml(inView, shown) {
+/* what the folded filter bar says is in force (note 38) */
+function filterWords() {
   const f = state.filt, parts = [];
-  if (f.stage.size) parts.push(`Stage: ${[...f.stage].map((e) => EPICS[e].short).join(', ')}`);
+  if (f.stage.size) parts.push(`Epic: ${[...f.stage].map((e) => EPICS[e].short).join(', ')}`);
   if (f.cat.size) parts.push(`Where it stands: ${[...f.cat].map((c) => CATS[c].word).join(', ')}`);
   if (f.src.size) parts.push(`Comes from: ${[...f.src].map((s) => SOURCES[s].name).join(', ')}`);
   if (f.text) parts.push(`Search: "${f.text}"`);
   if (f.deps) parts.push('Has dependencies');
-  return `<section class="filters card fold" aria-label="Filters, folded">
-    <button class="btn ghost sm" data-act="ffold" aria-expanded="false" title="Show the filters (key /)"><span
-      style="display:inline-flex;transform:rotate(-90deg)">${svg.down}</span>Filters</button>
-    <span class="muted" style="font-size:13px;min-width:0">${parts.length ? `${esc(parts.join(' · '))} · showing
-      ${shown.length} of ${inView.length}` : `No filters · ${inView.length} tasks`}</span>
-    <span class="spacer"></span>${parts.length ? '<button class="btn sm" data-act="clear">Clear filters</button>'
-      : ''}${nm(38)}</section>`;
+  return parts;
 }
 
 /* the task panel: each part has a bar that folds it (note 39) */
 const SEC_IC = {
   Epics: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+  Filters: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
   Run: '<path d="M7 5v14l12-7z"/>',
   Tasks: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
   Questions: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4M12 17h.01"/>',
@@ -6116,6 +6208,9 @@ function mockHtml() {
     <h3>Round 8: epics</h3><div class="grid">${s('epics', 'Epics: one picked')}
       ${s('epics-shut', 'Epics: the strip folded')}${s('epics-50', '50 epics')}${s('epics-50-pick', '50 epics: one '
       + 'picked')}${s('epics-50-grid', '50 epics in rows')}</div>
+    <h3>Round 9: epics and filters</h3><div class="grid">${s('epics-only', 'Only one epic')}
+      ${s('epics-graph', 'Graph: an epic picked')}${s('epics-50-graph', '50 epics: graph across epics')}
+      ${s('epics-box', 'The Epic box')}${s('filters-shut', 'Filters folded')}</div>
     <h3>Live updates (watch)</h3><div class="grid">${s('sim-finish', 'ts-0178 goes to review')}
       ${s('sim-diverge', "A run's copy moves ts-0168")}</div>
     <h3>View</h3><div class="grid"><button class="btn sm" data-act="notes" aria-pressed="${state.notes}">
@@ -6145,6 +6240,7 @@ function render() {
   else if (state.surface === 'tracks') html = tracksHtml();
   else if (state.surface === 'comms') html = commsHtml();
   else html = state.surface === 'queue' ? queueHtml() : laterHtml(state.surface);
+  const kept = [...document.querySelectorAll('[data-keep]')].map((x) => [x.dataset.keep, x.scrollLeft, x.scrollTop]);
   $('#content').innerHTML = html;
   const ep = state.drawer && state.drawer.startsWith('epic:') ? state.drawer.slice(5) : null;
   const t = !ep && state.drawer && byId(state.drawer);
@@ -6154,6 +6250,10 @@ function render() {
   else if (t) d.innerHTML = foldSections(drawerHtml(t));
   $('#dgrip').hidden = d.hidden;
   d.style.flexBasis = `${state.dw}px`;
+  for (const [k, x, y] of kept) { // round 9: a pick leaves the epic row where it was (note 61)
+    const back = $(`[data-keep="${k}"]`);
+    if (back) Object.assign(back, { scrollLeft: x, scrollTop: y });
+  }
   const dk = $('#dock');
   const docked = !!state.dock && state.screen === 'board' && (state.settings || state.surface !== 'comms');
   dk.hidden = !docked;
@@ -6211,7 +6311,7 @@ function goBoard(id, viewId) {
   state.drawer = null;
   state.goal = null;
   resetFilters();
-  Object.assign(state, { lens: null, chip: null, hl: null, epic: null, efind: '' });
+  Object.assign(state, { lens: null, chip: null, hl: null, epic: null, efind: '', egrid: false });
 }
 
 /* ---------- scenarios ---------- */
@@ -6224,6 +6324,26 @@ function scenario(v) {
       state.epic = 'ep-006-wq';
       if (v === 'epics') state.drawer = 'epic:ep-006-wq'; else state.eshut.add(`${state.board}:${state.view}`);
       break;
+    case 'epics-only':
+      state.layout = 'board'; state.groupBy = 'auto'; goBoard('harbor');
+      state.filt.stage.add(HARBOR_PICK);
+      break;
+    case 'epics-graph':
+      state.groupBy = 'auto'; goBoard('collide');
+      Object.assign(state, { layout: 'graph', epic: 'ep-006-wq', drawer: 'epic:ep-006-wq' });
+      break;
+    case 'epics-50-graph':
+      state.groupBy = 'auto'; goBoard('harbor');
+      // Accessibility pass waits on Help links, so the graph draws both and lights one.
+      Object.assign(state, { layout: 'graph', epic: 'ep-132-hb', drawer: 'epic:ep-132-hb' });
+      break;
+    case 'epics-box': case 'filters-shut':
+      state.layout = 'board'; state.groupBy = 'auto'; goBoard('harbor');
+      ['ep-117-hb', 'ep-125-hb'].forEach((e) => state.filt.stage.add(e));
+      if (v === 'filters-shut') { state.ffold.add('harbor'); break; }
+      state.menu = 'epicbox';
+      render();
+      return;
     case 'epics-50': case 'epics-50-grid': case 'epics-50-pick':
       state.layout = 'board'; state.groupBy = 'auto'; goBoard('harbor');
       state.egrid = v === 'epics-50-grid';
@@ -6378,13 +6498,14 @@ function scenario(v) {
         qa: clone(QA), qkeep: 'task', qdraft: {}, auto: clone(AUTO), unext: clone(UP_NEXT), overlap: false,
         ak: null, akUnread: false, snaps: [], askAgent: 'claude-haiku', agents: clone(AGENTS), atest: {},
         tok: TOKENS[0], tokShow: false, snip: 'claude', lastCall: LAST_CALL,
-        epic: null, eshut: new Set(), efind: '', egrid: false });
+        epic: null, eshut: new Set(), efind: '', egrid: false, mfind: '' });
       goBoard('collide');
       break;
     }
   }
   state.menu = null;
   render();
+  if (state.epic) epicInSight(state.epic);
 }
 function goTracks(phase, tab) {
   goBoard('collide');
@@ -6411,12 +6532,14 @@ document.addEventListener('click', (e) => {
   if (!el) return;
   const { act, id, v, g } = el.dataset;
   const b = board();
-  if (state.chip && state.chip.undo && ['chip', 'clear', 'group', 'deps-off'].includes(act)) {
+  if (state.chip && state.chip.undo && ['chip', 'clear', 'group', 'deps-off', 'epic-only', 'epic-pick', 'epic-none']
+    .includes(act)) {
     Object.assign(state.chip, { undo: false, ended: true });
   }
   switch (act) {
     case 'menu':
       state.menu = state.menu === el.dataset.menu ? null : el.dataset.menu;
+      if (state.menu === 'epicbox') { state.mfind = ''; setTimeout(() => ($('#mfind') || $('.mopt'))?.focus()); }
       if (/^auto/.test(state.menu || '')) setTimeout(() => $('#aview').focus());
       if (state.menu === 'ask') { state.akUnread = false; setTimeout(() => $('#akq') && $('#akq').focus()); }
       break;
@@ -6444,7 +6567,19 @@ document.addEventListener('click', (e) => {
         if (state.drawer === `epic:${id}`) state.drawer = null;
         state.epic = null;
       } else Object.assign(state, { epic: id, drawer: `epic:${id}` });
-      break;
+      render();
+      epicInSight(id);
+      $(`.ecb[data-id="${id}"]`)?.focus({ preventScroll: true });
+      return;
+    case 'epic-only': case 'epic-pick': { // the funnel and the Epic box set the same filter (notes 62, 63)
+      const key = id || v;
+      if (state.filt.stage.has(key)) state.filt.stage.delete(key); else state.filt.stage.add(key);
+      render();
+      $(act === 'epic-only' ? `.efil[data-id="${key}"]` : `.mopt[data-v="${key}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    case 'epic-none': state.filt.stage.clear(); break;
+    case 'epic-graph': state.layout = 'graph'; state.goal = id; break;
     case 'epic-open': state.drawer = `epic:${state.epic}`; break;
     case 'epic-clear':
       if (state.drawer === `epic:${state.epic}`) state.drawer = null;
@@ -6761,7 +6896,15 @@ document.addEventListener('change', (e) => {
     $('#gest').innerHTML = grpEst(document.querySelectorAll('.gpick:checked').length);
     return;
   }
-  if (e.target.id === 'goal') { state.goal = e.target.value; render(); }
+  if (e.target.id === 'goal') {
+    state.goal = e.target.value;
+    if (state.epic) { // the picked epic follows the goal, and so does its panel
+      if (state.drawer === `epic:${state.epic}`) state.drawer = `epic:${state.goal}`;
+      state.epic = state.goal;
+    }
+    render();
+    if (state.epic) epicInSight(state.epic);
+  }
   if (e.target.id === 'ttype') { state.toolType = e.target.value; render(); }
   if (e.target.id === 'tmin') { state.minSecs = Number(e.target.value); render(); }
   if (e.target.id === 'dsess') { state.dockSess = e.target.value; render(); }
@@ -6795,9 +6938,10 @@ document.addEventListener('input', (e) => {
   }
   if (id.startsWith('qans-')) { state.qdraft[`${state.drawer}:${id.slice(5)}`] = e.target.value; return; }
   if (id === 'dmsg') { state.ddraft = e.target.value; return; }
-  if (id !== 'ftext' && id !== 'cq' && id !== 'efind') return;
+  if (id !== 'ftext' && id !== 'cq' && id !== 'efind' && id !== 'mfind') return;
   if (id === 'ftext') state.filt.text = e.target.value;
   else if (id === 'efind') state.efind = e.target.value;
+  else if (id === 'mfind') state.mfind = e.target.value;
   else state.cq = e.target.value;
   const pos = e.target.selectionStart;
   render();
