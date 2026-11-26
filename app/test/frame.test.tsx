@@ -25,6 +25,7 @@ async function frameProps(over: Partial<FrameProps> = {}): Promise<FrameProps> {
     onOpenFolder: async () => {},
     onOpenLoop: noop,
     field: <p>the field page</p>,
+    settings: () => <p>the settings page</p>,
     ...over,
   }
 }

@@ -6,22 +6,55 @@
 export type SettingLayer = 'default' | 'user' | 'repo' | 'profile'
 
 /**
- * `config.get` result.
+ * `config.get` result. `problems` is empty unless the request asked for them. `files` lists the files the layers
+ * are read from: the user's, the board's own of the user's, and the repo's.
  */
 export interface ConfigGetResult {
   entries: ConfigEntry[]
+  files?: ConfigLayerFile[]
   /**
    * What is worth saying and is no error, one line each (a default budget an agent cannot enforce).
    */
   notices?: string[]
+  problems?: ConfigProblem[]
 }
 /**
  * One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS
- * keychain, and no method returns it (0.7, Secrets).
+ * keychain, and no method returns it (0.7, Secrets). `overridden` is what the effective value replaced, when a
+ * layer that sets the key was passed over (never for a secret). `is_set` is for a secret only: whether the keychain
+ * holds an item for it.
  */
 export interface ConfigEntry {
+  is_set?: boolean | null
   key: string
   layer: SettingLayer
+  overridden?: OverriddenValue | null
   secret: boolean
   value?: unknown
+}
+/**
+ * A value a higher layer replaced: what the layer below it said (the Settings page shows it struck out).
+ */
+export interface OverriddenValue {
+  layer: SettingLayer
+  value: unknown
+}
+/**
+ * A settings file of one layer, where the daemon looks for it. `for_board` marks the user's file for this board,
+ * which wins over the user's own. `exists` is false when there is no such file.
+ */
+export interface ConfigLayerFile {
+  exists: boolean
+  for_board?: boolean
+  layer: SettingLayer
+  path: string
+}
+/**
+ * One problem with a setting: the key it is about (a section or a profile key when no single setting is), the layer
+ * that holds the bad value, and the words. The words never hold a value.
+ */
+export interface ConfigProblem {
+  key: string
+  layer: SettingLayer
+  message: string
 }

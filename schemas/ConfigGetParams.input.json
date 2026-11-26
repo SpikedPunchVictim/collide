@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`config.get` params (`collide config get <key> [--profile <name>]`). With no `key`, every setting. `board` picks\nthe board whose repo layer applies, and is left out for the user's own layers. `profile` is applied as the top\nlayer.",
+  "description": "`config.get` params (`collide config get <key> [--profile <name>]`). With no `key`, every setting. `board` picks\nthe board whose repo layer applies, and is left out for the user's own layers. `profile` is applied as the top\nlayer. With `with_problems` the problems of single settings come back in the result's `problems`, and the\nentries are still given; without it they refuse the request, as they always have. A file or a pack that does\nnot load refuses it either way.",
   "properties": {
     "board": {
       "type": [
@@ -20,6 +20,10 @@
         "string",
         "null"
       ]
+    },
+    "with_problems": {
+      "default": false,
+      "type": "boolean"
     }
   },
   "title": "ConfigGetParams",

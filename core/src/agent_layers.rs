@@ -68,6 +68,8 @@ impl AgentView {
                 value: fields.get(*field).cloned(),
                 layer: self.layer(field),
                 secret: false,
+                overridden: None,
+                is_set: None,
             })
             .collect()
     }
@@ -234,6 +236,7 @@ pub fn agent_layers(inputs: &AgentInputs) -> AgentLayers {
             .collect();
         problems.push(SettingProblem {
             key: "ask.agent".into(),
+            layer: ask_agent_layer,
             message: format!(
                 "`ask.agent` names `{ask_agent}`, and no agent entry has that id; the entries are {}",
                 ids.join(", ")

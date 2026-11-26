@@ -15,9 +15,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { request } from 'node:http'
@@ -230,6 +232,33 @@ export class World {
     return (await answer.json()) as string[]
   }
 
+  /**
+   * The whole text of every log of this world: the bridge's, the daemon's, fake Claude's and any other `.log` or
+   * `.err` file below the root, but not the repository. For a test that looks for what must never be written.
+   */
+  logs(): string {
+    return filesBelow(this.root, [this.repo])
+      .filter((file) => /\.(log|err)$/.test(file) || file.startsWith(this.detachedDir))
+      .map((file) => `--- ${file}\n${readText(file)}`)
+      .join('\n')
+  }
+
+  /**
+   * The files below the root, repository included, that hold `text`. Sockets and the like are not read. A file that
+   * is gone by the time it is read is skipped: SQLite removes its `-wal` and `-shm` files as connections close, and
+   * what they held is in the store's own file by then. Any other failure to read throws.
+   */
+  filesHolding(text: string): string[] {
+    return filesBelow(this.root, []).filter((file) => {
+      try {
+        return readFileSync(file, 'utf8').includes(text)
+      } catch (failure) {
+        if ((failure as NodeJS.ErrnoException).code === 'ENOENT') return false
+        throw failure
+      }
+    })
+  }
+
   /** What the bridge and the daemon wrote, for a failure's report. */
   diagnostics(): string {
     const parts = [
@@ -296,6 +325,18 @@ export class World {
       await waitFor('the bridge to end', 30_000, () => !alive(this.bridgePid))
     })
   }
+}
+
+/** The regular files below `dir`, but not below any of `skip`. */
+function filesBelow(dir: string, skip: readonly string[]): string[] {
+  if (skip.includes(dir)) return []
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name)
+    const kind = statSync(path, { throwIfNoEntry: false })
+    if (kind === undefined) return []
+    if (kind.isDirectory()) return filesBelow(path, skip)
+    return kind.isFile() ? [path] : []
+  })
 }
 
 function readText(file: string): string {

@@ -28,8 +28,18 @@ pub enum ConfigWriteLayer {
     Repo,
 }
 
+/// A value a higher layer replaced: what the layer below it said (the Settings page shows it struck out).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OverriddenValue {
+    pub value: Value,
+    pub layer: SettingLayer,
+}
+
 /// One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS
-/// keychain, and no method returns it (0.7, Secrets).
+/// keychain, and no method returns it (0.7, Secrets). `overridden` is what the effective value replaced, when a
+/// layer that sets the key was passed over (never for a secret). `is_set` is for a secret only: whether the keychain
+/// holds an item for it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigEntry {
@@ -38,11 +48,17 @@ pub struct ConfigEntry {
     pub value: Option<Value>,
     pub layer: SettingLayer,
     pub secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overridden: Option<OverriddenValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_set: Option<bool>,
 }
 
 /// `config.get` params (`collide config get <key> [--profile <name>]`). With no `key`, every setting. `board` picks
 /// the board whose repo layer applies, and is left out for the user's own layers. `profile` is applied as the top
-/// layer.
+/// layer. With `with_problems` the problems of single settings come back in the result's `problems`, and the
+/// entries are still given; without it they refuse the request, as they always have. A file or a pack that does
+/// not load refuses it either way.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigGetParams {
@@ -52,13 +68,42 @@ pub struct ConfigGetParams {
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    #[serde(default)]
+    pub with_problems: bool,
 }
 
-/// `config.get` result.
+/// One problem with a setting: the key it is about (a section or a profile key when no single setting is), the layer
+/// that holds the bad value, and the words. The words never hold a value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigProblem {
+    pub key: String,
+    pub layer: SettingLayer,
+    pub message: String,
+}
+
+/// A settings file of one layer, where the daemon looks for it. `for_board` marks the user's file for this board,
+/// which wins over the user's own. `exists` is false when there is no such file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigLayerFile {
+    pub layer: SettingLayer,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub for_board: bool,
+    pub path: String,
+    pub exists: bool,
+}
+
+/// `config.get` result. `problems` is empty unless the request asked for them. `files` lists the files the layers
+/// are read from: the user's, the board's own of the user's, and the repo's.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigGetResult {
     pub entries: Vec<ConfigEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<ConfigProblem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<ConfigLayerFile>,
     /// What is worth saying and is no error, one line each (a default budget an agent cannot enforce).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<String>,

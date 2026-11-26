@@ -32,6 +32,7 @@ fn call(
         board: board.map(str::to_string),
         key: key.map(str::to_string),
         profile: None,
+        with_problems: false,
     };
     match fixture
         .client()

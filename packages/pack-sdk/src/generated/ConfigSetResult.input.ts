@@ -13,11 +13,22 @@ export interface ConfigSetResult {
 }
 /**
  * One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS
- * keychain, and no method returns it (0.7, Secrets).
+ * keychain, and no method returns it (0.7, Secrets). `overridden` is what the effective value replaced, when a
+ * layer that sets the key was passed over (never for a secret). `is_set` is for a secret only: whether the keychain
+ * holds an item for it.
  */
 export interface ConfigEntry {
+  is_set?: boolean | null
   key: string
   layer: SettingLayer
+  overridden?: OverriddenValue | null
   secret: boolean
   value?: unknown
+}
+/**
+ * A value a higher layer replaced: what the layer below it said (the Settings page shows it struck out).
+ */
+export interface OverriddenValue {
+  layer: SettingLayer
+  value: unknown
 }

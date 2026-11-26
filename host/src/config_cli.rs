@@ -178,6 +178,7 @@ pub fn run_with(
         board,
         key: parsed.key,
         profile: parsed.profile,
+        with_problems: false,
     };
     match client.call::<_, ConfigGetResult>("config.get", &params, None) {
         Ok(result) => {

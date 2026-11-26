@@ -214,6 +214,7 @@ fn config_value(w: &World, key: &str) -> Result<Option<serde_json::Value>, RpcEr
         board: Some(w.board.clone()),
         key: Some(key.to_string()),
         profile: None,
+        with_problems: false,
     };
     rpc::<_, ConfigGetResult>(w, "config.get", &params).map(|result| {
         result

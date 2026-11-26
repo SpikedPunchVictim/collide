@@ -15,6 +15,12 @@ import {
 } from './field-world.ts'
 import { HOSTILE_BODY } from './hostile.ts'
 import { World, board, missingBoard, permissionItem, run } from './loop-world.ts'
+import {
+  settingsProblemsWorld,
+  settingsRefusedWorld,
+  settingsSecretRefusedWorld,
+  settingsWorld,
+} from './settings-world.ts'
 
 /** Two boards with different default lines, and a third folder that `board.open` can add. */
 export function twoBoards(): World {
@@ -75,4 +81,8 @@ export const WORLDS: Readonly<Record<string, () => World>> = {
   'field-epics-strip': epicsStripWorld,
   'field-changes': changesWorld,
   'field-peek': peekWorld,
+  settings: settingsWorld,
+  'settings-problems': settingsProblemsWorld,
+  'settings-refused': settingsRefusedWorld,
+  'settings-secret-refused': settingsSecretRefusedWorld,
 }

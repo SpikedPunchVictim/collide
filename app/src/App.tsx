@@ -14,6 +14,7 @@ import { ExternalLinks } from './markdown/ExternalLinks.tsx'
 import { useLoop } from './loop/useLoop.ts'
 import { type OwnerClient, createTauriOwner } from './owner/index.ts'
 import { Peek } from './peek/Peek.tsx'
+import { SettingsPage } from './settings/SettingsPage.tsx'
 
 // The window is the board's frame (Stage 6a): the top bar and the five tabs. The thin loop's page (Stage 3c) stays
 // reachable from Queue and Tracks, with a way back, until Stage 9a replaces it. One loop serves both, so the board
@@ -97,6 +98,16 @@ function Window({ owner, shell }: { readonly owner: OwnerClient; readonly shell:
             />
           )
         }
+        settings={(back) => (
+          <SettingsPage
+            key={state.boardId ?? ''}
+            owner={owner}
+            boardId={state.boardId}
+            boardName={board === undefined ? null : boardName(board)}
+            sources={field.data?.sources ?? NO_SOURCES}
+            onBack={back}
+          />
+        )}
         field={
           board !== undefined && missing ? (
             <MissingBoard name={boardName(board)} folder={board.root} onLocate={() => setLocating(true)} />

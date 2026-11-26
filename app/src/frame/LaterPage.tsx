@@ -1,4 +1,4 @@
-// A page for a tab, or the Settings page, that is not built yet (0.11: "A tab whose stage has not shipped says which
+// A page for a tab that is not built yet (0.11: "A tab whose stage has not shipped says which
 // stage brings it"). It says what the page will hold and when it arrives, in the board mock's words (`laterHtml`).
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'

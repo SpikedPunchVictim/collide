@@ -153,12 +153,17 @@ test('with no board open, the board menu says Boards', async ({ openFake }) => {
   await expect(tab(page, 'Field')).toHaveAttribute('aria-selected', 'true')
 })
 
-test('Settings says its page is not built yet, and a tab key leaves it', async ({ openFake }) => {
+test('Settings opens its page, Back to the board returns, and a tab key leaves it', async ({ openFake }) => {
   const page = await openFake('two-boards')
   await page.getByRole('button', { name: 'Settings' }).click()
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
-  await expect(page.getByText(/Settings arrive later in Stage 6a/)).toBeVisible()
-  await expect(page.getByRole('tab', { selected: true })).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+  await expect(tab(page, 'Field')).not.toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('button', { name: 'Back to the board' }).click()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toHaveCount(0)
+  await expect(tab(page, 'Field')).toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await page.keyboard.press('1')
   await expect(page.getByRole('heading', { name: 'Settings' })).toHaveCount(0)
   await expect(tab(page, 'Field')).toHaveAttribute('aria-selected', 'true')

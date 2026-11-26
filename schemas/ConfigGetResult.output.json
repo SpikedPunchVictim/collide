@@ -2,13 +2,29 @@
   "$defs": {
     "ConfigEntry": {
       "additionalProperties": false,
-      "description": "One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS\nkeychain, and no method returns it (0.7, Secrets).",
+      "description": "One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS\nkeychain, and no method returns it (0.7, Secrets). `overridden` is what the effective value replaced, when a\nlayer that sets the key was passed over (never for a secret). `is_set` is for a secret only: whether the keychain\nholds an item for it.",
       "properties": {
+        "is_set": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "key": {
           "type": "string"
         },
         "layer": {
           "$ref": "#/$defs/SettingLayer"
+        },
+        "overridden": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OverriddenValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "secret": {
           "type": "boolean"
@@ -19,6 +35,66 @@
         "key",
         "layer",
         "secret"
+      ],
+      "type": "object"
+    },
+    "ConfigLayerFile": {
+      "additionalProperties": false,
+      "description": "A settings file of one layer, where the daemon looks for it. `for_board` marks the user's file for this board,\nwhich wins over the user's own. `exists` is false when there is no such file.",
+      "properties": {
+        "exists": {
+          "type": "boolean"
+        },
+        "for_board": {
+          "type": "boolean"
+        },
+        "layer": {
+          "$ref": "#/$defs/SettingLayer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "path",
+        "exists"
+      ],
+      "type": "object"
+    },
+    "ConfigProblem": {
+      "additionalProperties": false,
+      "description": "One problem with a setting: the key it is about (a section or a profile key when no single setting is), the layer\nthat holds the bad value, and the words. The words never hold a value.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "layer": {
+          "$ref": "#/$defs/SettingLayer"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "layer",
+        "message"
+      ],
+      "type": "object"
+    },
+    "OverriddenValue": {
+      "additionalProperties": false,
+      "description": "A value a higher layer replaced: what the layer below it said (the Settings page shows it struck out).",
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/SettingLayer"
+        },
+        "value": true
+      },
+      "required": [
+        "value",
+        "layer"
       ],
       "type": "object"
     },
@@ -50,7 +126,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`config.get` result.",
+  "description": "`config.get` result. `problems` is empty unless the request asked for them. `files` lists the files the layers\nare read from: the user's, the board's own of the user's, and the repo's.",
   "properties": {
     "entries": {
       "items": {
@@ -58,10 +134,22 @@
       },
       "type": "array"
     },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/ConfigLayerFile"
+      },
+      "type": "array"
+    },
     "notices": {
       "description": "What is worth saying and is no error, one line each (a default budget an agent cannot enforce).",
       "items": {
         "type": "string"
+      },
+      "type": "array"
+    },
+    "problems": {
+      "items": {
+        "$ref": "#/$defs/ConfigProblem"
       },
       "type": "array"
     }

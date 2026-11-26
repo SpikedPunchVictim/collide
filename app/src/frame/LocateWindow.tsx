@@ -10,7 +10,7 @@ import type { LocateOutcome } from '../loop/index.ts'
 import { toOwnerError } from '../owner/index.ts'
 
 /** The window's look: centred, with the page behind it dimmed. */
-const WINDOW = [
+export const WINDOW = [
   'm-auto w-[min(32rem,calc(100vw-2rem))] rounded-lg border bg-card p-5',
   'text-sm text-card-foreground shadow-lg backdrop:bg-black/40',
 ].join(' ')

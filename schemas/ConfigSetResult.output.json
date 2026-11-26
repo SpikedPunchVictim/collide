@@ -2,13 +2,29 @@
   "$defs": {
     "ConfigEntry": {
       "additionalProperties": false,
-      "description": "One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS\nkeychain, and no method returns it (0.7, Secrets).",
+      "description": "One setting: its effective value and the layer it came from. A secret has no `value`: it lives in the OS\nkeychain, and no method returns it (0.7, Secrets). `overridden` is what the effective value replaced, when a\nlayer that sets the key was passed over (never for a secret). `is_set` is for a secret only: whether the keychain\nholds an item for it.",
       "properties": {
+        "is_set": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "key": {
           "type": "string"
         },
         "layer": {
           "$ref": "#/$defs/SettingLayer"
+        },
+        "overridden": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OverriddenValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "secret": {
           "type": "boolean"
@@ -19,6 +35,21 @@
         "key",
         "layer",
         "secret"
+      ],
+      "type": "object"
+    },
+    "OverriddenValue": {
+      "additionalProperties": false,
+      "description": "A value a higher layer replaced: what the layer below it said (the Settings page shows it struck out).",
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/SettingLayer"
+        },
+        "value": true
+      },
+      "required": [
+        "value",
+        "layer"
       ],
       "type": "object"
     },

@@ -104,6 +104,7 @@ impl Rig {
                     board: board.map(str::to_string),
                     key: Some(key.to_string()),
                     profile: None,
+                    with_problems: false,
                 },
                 Some(Duration::from_secs(20)),
             )
@@ -215,6 +216,71 @@ fn config_get_shows_the_secret_as_set_without_its_value() {
     let entry = rig.get(Some(&board), "ferry.notifyHook").entries.remove(0);
     assert!(entry.secret);
     assert_eq!(entry.value, None);
+}
+
+/// The Settings page's request: the one key, with the problems in the result.
+fn secret_state(rig: &Rig, board: &str, key: &str) -> Option<bool> {
+    let mut result: ConfigGetResult = rig
+        .fixture
+        .client()
+        .call(
+            "config.get",
+            &ConfigGetParams {
+                board: Some(board.to_string()),
+                key: Some(key.to_string()),
+                profile: None,
+                with_problems: true,
+            },
+            Some(Duration::from_secs(20)),
+        )
+        .unwrap_or_else(|error| panic!("config.get {key}: {error}"));
+    result.entries.remove(0).is_set
+}
+
+#[test]
+fn config_get_says_not_set_before_a_secret_is_set_and_set_after() {
+    let rig = rig();
+    let board = rig.board_with_ferry();
+    assert_eq!(secret_state(&rig, &board, "ferry.notifyHook"), Some(false));
+    rig.secret(Some(&board), "ferry.notifyHook", CANARY)
+        .unwrap();
+    assert_eq!(secret_state(&rig, &board, "ferry.notifyHook"), Some(true));
+}
+
+#[test]
+fn config_set_of_a_secret_answers_set_and_a_plain_setting_has_no_state() {
+    let rig = rig();
+    let board = rig.board_with_ferry();
+    let result = rig
+        .secret(Some(&board), "ferry.notifyHook", CANARY)
+        .unwrap();
+    assert_eq!(result.entry.is_set, Some(true));
+    let plain = rig.get(Some(&board), "ferry.greeting").entries.remove(0);
+    assert_eq!(plain.is_set, None);
+}
+
+#[test]
+fn the_listing_the_page_reads_holds_the_secret_nowhere() {
+    let rig = rig();
+    let board = rig.board_with_ferry();
+    rig.secret(Some(&board), "ferry.notifyHook", CANARY)
+        .unwrap();
+    let listing = rig
+        .fixture
+        .client()
+        .call::<_, Value>(
+            "config.get",
+            &ConfigGetParams {
+                board: Some(board.clone()),
+                key: None,
+                profile: None,
+                with_problems: true,
+            },
+            Some(Duration::from_secs(20)),
+        )
+        .unwrap();
+    assert!(!listing.to_string().contains(CANARY), "{listing}");
+    assert!(!rig.log.text().contains(CANARY));
 }
 
 #[test]

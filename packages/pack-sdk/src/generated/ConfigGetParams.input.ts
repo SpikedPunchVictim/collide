@@ -3,10 +3,13 @@
 /**
  * `config.get` params (`collide config get <key> [--profile <name>]`). With no `key`, every setting. `board` picks
  * the board whose repo layer applies, and is left out for the user's own layers. `profile` is applied as the top
- * layer.
+ * layer. With `with_problems` the problems of single settings come back in the result's `problems`, and the
+ * entries are still given; without it they refuse the request, as they always have. A file or a pack that does
+ * not load refuses it either way.
  */
 export interface ConfigGetParams {
   board?: string | null
   key?: string | null
   profile?: string | null
+  with_problems?: boolean
 }

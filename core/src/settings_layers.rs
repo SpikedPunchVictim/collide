@@ -6,7 +6,7 @@
 //! names the key, and a refused value is not applied, so the layer below stays in force and `collide config get` can
 //! still print the rest. No message holds a value: a secret that reached a file by mistake must not be echoed.
 
-use crate::owner::{ConfigEntry, SettingLayer};
+use crate::owner::{ConfigEntry, ConfigProblem, OverriddenValue, SettingLayer};
 use crate::pack::SchemaObject;
 use crate::profile::{Profile, ProfileSource, user_profile_refusals};
 use crate::setting_value::check_value;
@@ -44,11 +44,23 @@ pub struct LayerInputs<'a> {
     pub profile: Option<ProfileUse<'a>>,
 }
 
-/// One refusal, with the key it is about (`ferry.lanePool`; a section or a profile key when no single setting is).
+/// One refusal, with the key it is about (`ferry.lanePool`; a section or a profile key when no single setting is) and
+/// the layer that holds what was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingProblem {
     pub key: String,
+    pub layer: SettingLayer,
     pub message: String,
+}
+
+impl From<&SettingProblem> for ConfigProblem {
+    fn from(problem: &SettingProblem) -> ConfigProblem {
+        ConfigProblem {
+            key: problem.key.clone(),
+            layer: problem.layer,
+            message: problem.message.clone(),
+        }
+    }
 }
 
 impl fmt::Display for SettingProblem {
@@ -100,6 +112,15 @@ enum Origin<'a> {
 }
 
 impl Origin<'_> {
+    /// The layer the wire names it by: both of the user's files are `User`.
+    fn layer(&self) -> SettingLayer {
+        match self {
+            Origin::User | Origin::UserBoard => SettingLayer::User,
+            Origin::Repo => SettingLayer::Repo,
+            Origin::Profile(_) => SettingLayer::Profile,
+        }
+    }
+
     /// The place, as a message names it.
     fn label(&self) -> String {
         match self {
@@ -176,6 +197,7 @@ pub fn settings_layers(inputs: &LayerInputs) -> Settings {
             .into_iter()
             .map(|refusal| SettingProblem {
                 key: refusal.key.clone(),
+                layer: SettingLayer::Repo,
                 message: refusal.to_string(),
             }),
     );
@@ -203,6 +225,7 @@ pub fn settings_layers(inputs: &LayerInputs) -> Settings {
                 .push((set.origin, set.value.clone())),
             Err(message) => problems.push(SettingProblem {
                 key: info.key.clone(),
+                layer: set.origin.layer(),
                 message,
             }),
         }
@@ -230,6 +253,8 @@ struct Set<'a> {
 }
 
 /// The layer of the key's value: the last one that set it, but the user's beats the repo's for an overridable key.
+/// `overridden` is the value of another layer that the winner passed over: the one it replaced, or the repo's that
+/// an overridable user value ignored. A default is never overridden: it is no layer's setting.
 fn entry(info: &KeyInfo, values: &[(Origin, Value)]) -> ConfigEntry {
     if info.secret {
         return ConfigEntry {
@@ -237,34 +262,45 @@ fn entry(info: &KeyInfo, values: &[(Origin, Value)]) -> ConfigEntry {
             value: None,
             layer: SettingLayer::User,
             secret: true,
+            overridden: None,
+            is_set: None,
         };
     }
     let mut winner: Option<(SettingLayer, &Value)> = None;
+    let mut passed_over: Option<(SettingLayer, &Value)> = None;
     for (origin, value) in values {
-        let layer = match origin {
-            Origin::User | Origin::UserBoard => SettingLayer::User,
-            Origin::Repo => SettingLayer::Repo,
-            Origin::Profile(_) => SettingLayer::Profile,
-        };
+        let layer = origin.layer();
         let repo_over_user = layer == SettingLayer::Repo
             && info.overridable
             && winner.is_some_and(|(l, _)| l == SettingLayer::User);
-        if !repo_over_user {
+        if repo_over_user {
+            passed_over = Some((layer, value));
+        } else {
+            // The user's two files are one layer: the board's own file replacing the global one overrides nothing.
+            passed_over = winner.filter(|(l, _)| *l != layer).or(passed_over);
             winner = Some((layer, value));
         }
     }
+    let overridden = |passed: (SettingLayer, &Value)| OverriddenValue {
+        value: passed.1.clone(),
+        layer: passed.0,
+    };
     match winner {
         Some((layer, value)) => ConfigEntry {
             key: info.key.clone(),
             value: Some(value.clone()),
             layer,
             secret: false,
+            overridden: passed_over.map(overridden),
+            is_set: None,
         },
         None => ConfigEntry {
             key: info.key.clone(),
             value: info.default_value(),
             layer: SettingLayer::Default,
             secret: false,
+            overridden: None,
+            is_set: None,
         },
     }
 }
@@ -358,6 +394,7 @@ fn read_file<'a>(
         if collide_roots().contains(&section.as_str()) {
             problems.push(SettingProblem {
                 key: section.clone(),
+                layer: origin.layer(),
                 message: format!(
                     "`config.{section}` is a name Collide's own settings use, so it is no pack: write \
                      `{section}:` at the top of the file"
@@ -383,6 +420,7 @@ fn read_profile<'a>(
         for refusal in user_profile_refusals(profile.profile) {
             problems.push(SettingProblem {
                 key: refusal.key.to_string(),
+                layer: SettingLayer::Profile,
                 message: format!("profile `{}`: {refusal}", profile.name),
             });
         }
@@ -391,6 +429,7 @@ fn read_profile<'a>(
         if section == AGENTS_ROOT {
             problems.push(SettingProblem {
                 key: section.clone(),
+                layer: SettingLayer::Profile,
                 message: format!(
                     "profile `{}` sets `agents`, which a profile may not: agent entries belong to the user's \
                      config",
@@ -440,6 +479,7 @@ fn read_section<'a>(
         };
         problems.push(SettingProblem {
             key: key.clone(),
+            layer: origin.layer(),
             message: format!(
                 "`{key}` in {} is not a setting of {owner}; it has {}",
                 origin.label(),

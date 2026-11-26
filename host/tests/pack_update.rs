@@ -111,6 +111,7 @@ fn world() -> World {
             board: Some(world.board.clone()),
             key: None,
             profile: None,
+            with_problems: false,
         },
         Some(Duration::from_secs(60)),
     );
@@ -189,6 +190,7 @@ fn a_lock_whose_commit_is_gone_is_moved_by_update_to_a_ref() {
             board: Some(w.board.clone()),
             key: None,
             profile: None,
+            with_problems: false,
         },
         Some(Duration::from_secs(60)),
     );

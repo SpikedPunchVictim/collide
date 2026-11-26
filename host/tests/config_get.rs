@@ -3,7 +3,10 @@
 //! `HEAD`, the user's layers from `~/.config/collide` of the test's own root, and the packs from a fixture. Nothing
 //! here touches the real home, a real daemon or `launchd`.
 
-use collide_core::owner::{ConfigEntry, ConfigGetParams, ConfigGetResult, SettingLayer, code};
+use collide_core::owner::{
+    ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigProblem, OverriddenValue, SettingLayer,
+    code,
+};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -15,6 +18,7 @@ fn params(board: Option<&str>, key: Option<&str>, profile: Option<&str>) -> Conf
         board: board.map(str::to_string),
         key: key.map(str::to_string),
         profile: profile.map(str::to_string),
+        with_problems: false,
     }
 }
 
@@ -638,4 +642,253 @@ fn a_pack_profile_that_reaches_past_its_pack_fails_the_load_naming_the_key() {
     assert_eq!(error_code, code::CONFLICT);
     assert!(message.contains("nosy"), "{message}");
     assert!(message.contains("config.disk"), "{message}");
+}
+
+// ---- what the Settings page reads (ts-0193-gk): the value a layer replaced, problems in place, the files ----
+
+/// The request the Settings page makes: every setting, with the problems of single settings in the result.
+fn page_params(board: &str, profile: Option<&str>) -> ConfigGetParams {
+    ConfigGetParams {
+        with_problems: true,
+        ..params(Some(board), None, profile)
+    }
+}
+
+fn overridden(value: Value, layer: SettingLayer) -> Option<OverriddenValue> {
+    Some(OverriddenValue { value, layer })
+}
+
+fn problem_of<'a>(result: &'a ConfigGetResult, key: &str) -> &'a ConfigProblem {
+    result
+        .problems
+        .iter()
+        .find(|problem| problem.key == key)
+        .unwrap_or_else(|| panic!("no problem for {key}: {:?}", result.problems))
+}
+
+#[test]
+fn a_key_set_in_both_files_says_the_users_value_was_overridden() {
+    let fixture = Fixture::new();
+    fixture.write_user("config.yaml", "ask: { budget_usd: 1.0 }\n");
+    fixture.write(".collide/config.yaml", "ask: { budget_usd: 2.5 }\n");
+    fixture.commit();
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, None));
+    let found = entry(&result, "ask.budget_usd");
+    assert_eq!(found.value, Some(json!(2.5)));
+    assert_eq!(found.layer, SettingLayer::Repo);
+    assert_eq!(found.overridden, overridden(json!(1.0), SettingLayer::User));
+}
+
+#[test]
+fn a_key_the_users_value_wins_says_the_repos_value_was_overridden() {
+    let fixture = Fixture::new();
+    fixture.write_user("config.yaml", "disk: { floor_gib: 2 }\n");
+    fixture.write(".collide/config.yaml", "disk: { floor_gib: 9 }\n");
+    fixture.commit();
+    let board = fixture.board();
+    let found = entry(&get(&fixture, &page_params(&board, None)), "disk.floor_gib");
+    assert_eq!(found.layer, SettingLayer::User);
+    assert_eq!(found.overridden, overridden(json!(9), SettingLayer::Repo));
+}
+
+#[test]
+fn a_key_set_in_one_layer_or_none_overrides_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_user("config.yaml", "ask: { budget_usd: 1.0 }\n");
+    fixture.write(".collide/config.yaml", "ask: { timeout_s: 90 }\n");
+    fixture.commit();
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, None));
+    for key in ["ask.budget_usd", "ask.timeout_s", "disk.floor_gib"] {
+        assert_eq!(entry(&result, key).overridden, None, "{key}");
+    }
+}
+
+#[test]
+fn the_users_board_file_replacing_the_users_file_overrides_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_user("config.yaml", "ask: { budget_usd: 1.0 }\n");
+    let board = fixture.board();
+    fixture.write_user(
+        &format!("boards/{board}/config.yaml"),
+        "ask: { budget_usd: 1.5 }\n",
+    );
+    let found = entry(&get(&fixture, &page_params(&board, None)), "ask.budget_usd");
+    assert_eq!(found.value, Some(json!(1.5)));
+    assert_eq!(found.overridden, None);
+}
+
+#[test]
+fn a_profile_value_says_the_layer_below_it_was_overridden() {
+    let fixture = Fixture::new();
+    fixture.write_user("config.yaml", "ask: { budget_usd: 1.0 }\n");
+    fixture.write(".collide/config.yaml", "ask: { budget_usd: 2.5 }\n");
+    fixture.write(
+        ".collide/profiles/cheap.yaml",
+        "config: { ask: { budget_usd: 0.1 } }\n",
+    );
+    fixture.commit();
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, Some("cheap")));
+    let found = entry(&result, "ask.budget_usd");
+    assert_eq!(found.layer, SettingLayer::Profile);
+    assert_eq!(found.overridden, overridden(json!(2.5), SettingLayer::Repo));
+}
+
+#[test]
+fn a_secret_has_no_overridden_value_and_none_of_its_text_is_in_the_answer() {
+    let fixture = Fixture::new();
+    fixture.ferry();
+    fixture.write(
+        ".collide/config.yaml",
+        &format!("config: {{ ferry: {{ notifyHook: \"{SECRET}\" }} }}\n"),
+    );
+    fixture.commit();
+    fixture.write_user(
+        "config.yaml",
+        &format!("config: {{ ferry: {{ notifyHook: \"{SECRET}-user\" }} }}\n"),
+    );
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, None));
+    let found = entry(&result, "ferry.notifyHook");
+    assert!(found.secret);
+    assert_eq!(found.overridden, None);
+    let text = serde_json::to_string(&result).unwrap();
+    assert!(!text.contains(SECRET), "{text}");
+}
+
+#[test]
+fn a_bad_value_in_the_users_file_is_a_problem_of_the_user_layer_and_the_entries_still_come() {
+    let fixture = Fixture::new();
+    fixture.ferry();
+    fixture.commit();
+    fixture.write_user(
+        "config.yaml",
+        &format!("config: {{ ferry: {{ lanePool: \"{SECRET}\" }} }}\n"),
+    );
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, None));
+    let found = problem_of(&result, "ferry.lanePool");
+    assert_eq!(found.layer, SettingLayer::User);
+    assert!(found.message.contains("type integer"), "{}", found.message);
+    assert!(!serde_json::to_string(&result).unwrap().contains(SECRET));
+    // The refused value is not applied: the layer below it holds.
+    assert_eq!(
+        value_and_layer(&result, "ferry.lanePool"),
+        (Some(json!(2)), SettingLayer::Default)
+    );
+}
+
+#[test]
+fn a_bad_value_in_the_repos_file_is_a_problem_of_the_repo_layer() {
+    let fixture = Fixture::new();
+    fixture.ferry();
+    fixture.write(
+        ".collide/config.yaml",
+        "config: { ferry: { lanePool: 0 } }\n",
+    );
+    fixture.commit();
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, None));
+    assert_eq!(
+        problem_of(&result, "ferry.lanePool").layer,
+        SettingLayer::Repo
+    );
+    assert_eq!(result.problems.len(), 1, "{:?}", result.problems);
+}
+
+#[test]
+fn a_bad_value_in_a_profile_is_a_problem_of_the_profile_layer() {
+    let fixture = Fixture::new();
+    fixture.write_user(
+        "profiles/greedy.yaml",
+        "config: { ask: { budget_usd: 50 } }\n",
+    );
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, Some("greedy")));
+    let found = problem_of(&result, "ask.budget_usd");
+    assert_eq!(found.layer, SettingLayer::Profile);
+    assert!(found.message.contains("overridable"), "{}", found.message);
+}
+
+#[test]
+fn a_board_with_no_problem_has_an_empty_list_and_without_the_flag_a_problem_still_refuses() {
+    let fixture = Fixture::new();
+    fixture.ferry();
+    fixture.write(
+        ".collide/config.yaml",
+        "config: { ferry: { lanePool: 0 } }\n",
+    );
+    fixture.commit();
+    let board = fixture.board();
+    let (error_code, message) = refused(&fixture, &params(Some(&board), None, None));
+    assert_eq!(error_code, code::CONFLICT);
+    assert!(message.contains("ferry.lanePool"), "{message}");
+    fixture.write(
+        ".collide/config.yaml",
+        "config: { ferry: { lanePool: 3 } }\n",
+    );
+    fixture.commit();
+    let result = get(&fixture, &page_params(&board, None));
+    assert_eq!(result.problems, Vec::<ConfigProblem>::new());
+}
+
+#[test]
+fn a_file_that_does_not_read_still_refuses_with_the_flag() {
+    let fixture = Fixture::new();
+    fixture.write_user("config.yaml", "ask: [unclosed\n");
+    let board = fixture.board();
+    let (error_code, message) = refused(&fixture, &page_params(&board, None));
+    assert_eq!(error_code, code::CONFLICT);
+    assert!(message.contains("config.yaml"), "{message}");
+}
+
+fn same_path(found: &str, expected: &std::path::Path) -> bool {
+    let found = std::fs::canonicalize(found).unwrap_or_else(|_| found.into());
+    let expected = std::fs::canonicalize(expected).unwrap_or_else(|_| expected.into());
+    found == expected
+}
+
+#[test]
+fn the_answer_lists_the_files_of_the_layers_as_the_daemon_resolves_them() {
+    let fixture = Fixture::new();
+    fixture.write_user("config.yaml", "ask: { budget_usd: 1.0 }\n");
+    fixture.write(".collide/config.yaml", "ask: { budget_usd: 2.5 }\n");
+    fixture.commit();
+    let board = fixture.board();
+    let result = get(&fixture, &page_params(&board, None));
+    let home = fixture.home();
+    let user_dir = home.join(".config/collide");
+    let [user, for_board, repo] = &result.files[..] else {
+        panic!("three files expected: {:?}", result.files);
+    };
+    assert_eq!(
+        (user.layer, user.for_board, user.exists),
+        (SettingLayer::User, false, true)
+    );
+    assert!(
+        same_path(&user.path, &user_dir.join("config.yaml")),
+        "{}",
+        user.path
+    );
+    assert_eq!(
+        (for_board.layer, for_board.for_board, for_board.exists),
+        (SettingLayer::User, true, false)
+    );
+    let own = user_dir.join("boards").join(&board).join("config.yaml");
+    assert!(same_path(&for_board.path, &own), "{}", for_board.path);
+    assert_eq!((repo.layer, repo.exists), (SettingLayer::Repo, true));
+    let repo_file = fixture.repo.work().join(".collide/config.yaml");
+    assert!(same_path(&repo.path, &repo_file), "{}", repo.path);
+}
+
+#[test]
+fn with_no_board_the_answer_lists_only_the_users_file() {
+    let fixture = Fixture::new();
+    let result = get(&fixture, &params(None, None, None));
+    let [user] = &result.files[..] else {
+        panic!("one file expected: {:?}", result.files);
+    };
+    assert_eq!((user.layer, user.exists), (SettingLayer::User, false));
 }

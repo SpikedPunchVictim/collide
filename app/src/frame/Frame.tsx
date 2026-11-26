@@ -1,7 +1,8 @@
 // The window's frame (Stage 6a; ts-0179-ke): the top bar with the trail (the board menu, then a place for the view
-// picker) and the Settings button, the five tabs with their subtitles and keys, and the page of the tab. It is a
-// function of its props, so a test renders it for any state with no browser; `App.tsx` holds the state. The loop page
-// is not part of it: `onOpenLoop` asks `App` to show that page until Stage 9a replaces it.
+// picker) and the Settings button, the five tabs with their subtitles and keys, and the page of the tab, or the
+// Settings page the button opens. It is a function of its props, so a test renders it for any state with no browser;
+// `App.tsx` holds the state. The loop page is not part of it: `onOpenLoop` asks `App` to show that page until Stage
+// 9a replaces it.
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -31,6 +32,8 @@ export interface FrameProps {
   readonly viewPicker?: ReactNode
   /** The page of the Field tab. */
   readonly field: ReactNode
+  /** The Settings page (`ts-0193-gk`), given the way back to the board. */
+  readonly settings: (back: () => void) => ReactNode
 }
 
 export function Frame(props: FrameProps) {
@@ -99,7 +102,7 @@ export function Frame(props: FrameProps) {
       </header>
       <main className="flex w-full flex-col gap-3 p-4">
         {settings ? (
-          <SettingsPage />
+          props.settings(() => setSettings(false))
         ) : (
           <TabsContent value={tab} className="flex flex-col gap-3">
             <Page tab={tab} field={props.field} onOpenLoop={onOpenLoop} />
@@ -158,16 +161,6 @@ function Page({ tab, field, onOpenLoop }: { tab: TabId; field: ReactNode; onOpen
         />
       )
   }
-}
-
-function SettingsPage() {
-  return (
-    <LaterPage
-      title="Settings"
-      what="One table of every setting, its value and where the value comes from."
-      arrives="Settings arrive later in Stage 6a."
-    />
-  )
 }
 
 function Logo() {

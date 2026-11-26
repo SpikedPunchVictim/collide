@@ -4,10 +4,11 @@
 //! `~/.config/collide` ([`crate::settings_files`]). The merge is `core`'s ([`settings_layers`]); this file only gathers
 //! its inputs and says how a failure is told.
 //!
-//! The wire has no place for problems, so a failure is the error of the request: [`GetError::Refused`] (the files or
-//! packs have problems, one per line, each naming its key or file) is `CONFLICT`, and [`GetError::NotFound`] (a key, a
-//! profile or a board that is not there) is `NOT_FOUND`. With no board the answer is the user's layers over Collide's
-//! own keys, and no pack is loaded.
+//! A failure is the error of the request: [`GetError::Refused`] (the files or packs have problems, one per line, each
+//! naming its key or file) is `CONFLICT`, and [`GetError::NotFound`] (a key, a profile or a board that is not there) is
+//! `NOT_FOUND`. A request that sets `with_problems` (the Settings page, ts-0193-gk) gets the problems of single
+//! settings in the result instead, with the entries the layers still give; a file or a pack that does not load still
+//! refuses it. With no board the answer is the user's layers over Collide's own keys, and no pack is loaded.
 //!
 //! The agent entries ([`collide_core::agent_layers`]) answer `agents.<id>.<field>`, and `agents.<id>` for every field
 //! of one entry; the whole listing stays Collide's own keys and the packs'. A notice (a default budget an agent cannot
@@ -36,16 +37,18 @@ use crate::settings_files::{UserFiles, read_user_files, user_config_dir};
 use crate::user_packs::UserScope;
 use collide_core::agent_layers::{AgentInputs, AgentLayers, agent_layers};
 use collide_core::owner::{
-    ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigPackAddParams, ConfigPackEnableParams,
-    ConfigPackLinkParams, ConfigPackResult, ConfigPackUpdateParams, ConfigPackUpdateResult,
-    ConfigSetParams, ConfigSetResult, ConfigWriteLayer, PackEntry, SettingLayer,
+    ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigLayerFile, ConfigPackAddParams,
+    ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackResult, ConfigPackUpdateParams,
+    ConfigPackUpdateResult, ConfigSetParams, ConfigSetResult, ConfigWriteLayer, PackEntry,
+    SettingLayer,
 };
 use collide_core::profile::{FoundProfile, Profile, ProfileLookupError, find_profile};
 use collide_core::resolve::is_safe_token;
 use collide_core::setting_value::{check_value, value_from_text};
 use collide_core::settings::ConfigFile;
 use collide_core::settings_layers::{
-    KeyInfo, LayerInputs, PackSettings, ProfileUse, Settings, find_setting, settings_layers,
+    KeyInfo, LayerInputs, PackSettings, ProfileUse, SettingProblem, Settings, find_setting,
+    settings_layers,
 };
 use collide_core::settings_registry::{MIN_FLOOR_GIB, collide_roots};
 use collide_core::yaml_out::{has_comment, to_yaml};
@@ -152,11 +155,19 @@ struct Resolved {
 }
 
 impl Resolved {
-    /// Every problem of the layers and of the agent entries, one line each.
-    fn problems(&self) -> Vec<String> {
+    /// Every problem of the layers and of the agent entries.
+    fn problem_items(&self) -> Vec<SettingProblem> {
         let settings = self.settings.problems.iter();
         let agents = self.agents.problems.iter();
-        settings.chain(agents).map(ToString::to_string).collect()
+        settings.chain(agents).cloned().collect()
+    }
+
+    /// Every problem of the layers and of the agent entries, one line each.
+    fn problems(&self) -> Vec<String> {
+        self.problem_items()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
     }
 }
 
@@ -391,29 +402,106 @@ impl ConfigService {
         });
         let resolved = resolve(user, line.as_ref(), profile);
 
-        let mut problems = resolved.problems();
+        let mut problems = resolved.problem_items();
         let board_root = board.map(|board| board.root);
-        problems.extend(
-            check_agent_environment(
-                &resolved.agents.agents,
-                board_root,
-                self.secret_store.as_ref(),
-            )
-            .into_iter()
-            .map(|problem| problem.message),
-        );
-        if !problems.is_empty() {
-            return Err(GetError::Refused(problems.join("\n")));
-        }
+        problems.extend(check_agent_environment(
+            &resolved.agents.agents,
+            board_root,
+            self.secret_store.as_ref(),
+        ));
 
         let notices = resolved.agents.notices.clone();
-        let entries = narrow(resolved, params.key.as_deref()).ok_or_else(|| {
+        let mut narrowed = narrow(resolved, params.key.as_deref());
+        if let Some(entries) = narrowed.as_mut() {
+            let packs = pack_settings(line.as_ref());
+            problems.extend(self.secret_state(entries, &packs));
+        }
+        if !params.with_problems && !problems.is_empty() {
+            let lines: Vec<String> = problems.iter().map(ToString::to_string).collect();
+            return Err(GetError::Refused(lines.join("\n")));
+        }
+        let entries = narrowed.ok_or_else(|| {
             GetError::NotFound(not_found(
                 params.key.as_deref().unwrap_or(""),
                 board.is_some(),
             ))
         })?;
-        Ok(ConfigGetResult { entries, notices })
+        Ok(ConfigGetResult {
+            entries,
+            problems: problems.iter().map(Into::into).collect(),
+            files: self.layer_files(board, line.as_ref()),
+            notices,
+        })
+    }
+
+    /// Whether the keychain holds each secret of `entries`, put in `is_set`. Only the item's presence is asked, never
+    /// its value. A keychain that cannot say is a problem naming the key, and leaves `is_set` out.
+    fn secret_state(
+        &self,
+        entries: &mut [ConfigEntry],
+        packs: &[PackSettings],
+    ) -> Vec<SettingProblem> {
+        let mut problems = Vec::new();
+        for entry in entries.iter_mut().filter(|entry| entry.secret) {
+            let Some(pack) = find_setting(packs, &entry.key).and_then(|info| info.pack) else {
+                continue;
+            };
+            let item = pack_item(&pack, &entry.key[pack.len() + 1..]);
+            match self.secret_store.contains(&item) {
+                Ok(held) => entry.is_set = Some(held),
+                Err(error) => problems.push(SettingProblem {
+                    key: entry.key.clone(),
+                    layer: SettingLayer::User,
+                    message: format!("`{}`: the keychain cannot be asked: {error}", entry.key),
+                }),
+            }
+        }
+        problems
+    }
+
+    /// The files the layers are read from, as this daemon resolves them: the user's, the user's for this board, and
+    /// the repo's (read at the checkout's `HEAD`, from the Collide folder the line found).
+    fn layer_files(
+        &self,
+        board: Option<BoardRef>,
+        line: Option<&LoadedLine>,
+    ) -> Vec<ConfigLayerFile> {
+        let Some(home) = self.home.as_deref() else {
+            return Vec::new();
+        };
+        let user_dir = user_config_dir(home);
+        let user_file = |layer, for_board, dir: PathBuf| {
+            let path = dir.join("config.yaml");
+            ConfigLayerFile {
+                layer,
+                for_board,
+                exists: path.is_file(),
+                path: path.display().to_string(),
+            }
+        };
+        let mut files = vec![user_file(SettingLayer::User, false, user_dir.clone())];
+        let Some(board) = board else {
+            return files;
+        };
+        if is_safe_token(board.id) {
+            let dir = user_dir.join("boards").join(board.id);
+            files.push(user_file(SettingLayer::User, true, dir));
+        }
+        let collide_dir = line
+            .and_then(|line| line.collide_dir.as_deref())
+            .unwrap_or(".collide");
+        let repo = board.root.join(collide_dir).join("config.yaml");
+        files.push(ConfigLayerFile {
+            layer: SettingLayer::Repo,
+            for_board: false,
+            exists: line.is_some_and(|line| {
+                line.trust_inputs()
+                    .iter()
+                    .any(|(name, _)| name == "config.yaml")
+            }),
+            path: repo.display().to_string(),
+        });
+        files
     }
 
     /// `config.pack_update`: moves a `git:` pack to a new pin. See [`crate::pack_update`].
@@ -547,6 +635,8 @@ impl ConfigService {
                 value: None,
                 layer: SettingLayer::User,
                 secret: true,
+                overridden: None,
+                is_set: Some(true),
             },
         })
     }

@@ -9,6 +9,7 @@
 
 use crate::secret_store::SecretStore;
 use collide_core::agent_layers::AgentView;
+use collide_core::owner::SettingLayer;
 use collide_core::settings_layers::SettingProblem;
 use std::path::{Path, PathBuf};
 
@@ -42,6 +43,7 @@ pub fn check_agent_environment(
             {
                 problems.push(SettingProblem {
                     key: format!("agents.{id}.read"),
+                    layer: SettingLayer::User,
                     message: format!(
                         "`agents.{id}.read`: the folder `{}` does not exist",
                         folder.display()
@@ -58,7 +60,11 @@ pub fn check_agent_environment(
                 ),
                 Err(error) => format!("`{key}`: the item `{item}` cannot be looked up: {error}"),
             };
-            problems.push(SettingProblem { key, message });
+            problems.push(SettingProblem {
+                key,
+                layer: SettingLayer::User,
+                message,
+            });
         }
     }
     problems
