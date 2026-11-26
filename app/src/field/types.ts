@@ -9,6 +9,7 @@ export type SourceDecl = ListResult['sources'][number]
 export type Divergence = ListResult['divergence'][number]
 export type DivergentCopy = Divergence['copies'][number]
 export type Collision = ListResult['collisions'][number]
+export type BranchOnly = ListResult['branch_only'][number]
 export type ViewReport = NonNullable<ListResult['view']>
 export type ViewEntry = TaskViewsResultOutput['views'][number]
 export type Collection = ListResult['collections'][number]
@@ -27,6 +28,8 @@ export interface FieldData {
   readonly sources: readonly SourceDecl[]
   readonly collisions: readonly Collision[]
   readonly divergence: readonly Divergence[]
+  /** The tasks whose only copy is in a worktree, with the branch it is on. */
+  readonly branchOnly: readonly BranchOnly[]
   /** What the selected view said of itself. Null for the whole board. */
   readonly report: ViewReport | null
   /** What the sources list as collections (an epic is one), from the first page of the listing. */

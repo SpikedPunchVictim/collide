@@ -99,6 +99,7 @@ export async function loadField(
     sources: all.sources,
     collisions: all.collisions,
     divergence: all.divergence,
+    branchOnly: all.branch_only,
     report: shown.view ?? null,
     collections: all.collections,
     walked: walked.report,

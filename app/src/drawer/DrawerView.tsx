@@ -16,12 +16,17 @@ import type { ChangesRead } from './changes-feed.ts'
 import {
   type CopyRow,
   type DrawerInput,
+  type LinkRow,
   type PartId,
   blockingLinks,
   categoryWords,
   copyRows,
   detailsOf,
   fieldRows,
+  checklistRows,
+  claimRows,
+  coverageLines,
+  linkRows,
   linkWords,
   partOf,
   partsOf,
@@ -190,8 +195,16 @@ function PartBody({ id, input, changes, onOpenTask, onOpenFile }: PartBodyProps)
           onOpenTask={onOpenTask}
         />
       )
+    case 'links':
+      return <TypedLinks rows={linkRows(got, source)} onOpenTask={onOpenTask} />
     case 'part-of':
       return <PartOfChips input={input} />
+    case 'checklist':
+      return <Checklist task={task} />
+    case 'claims':
+      return <Claims task={task} />
+    case 'coverage':
+      return <Coverage task={task} />
     case 'changes':
       return <ChangesPart changes={changes} onOpenFile={onOpenFile} />
     case 'fields':
@@ -243,6 +256,66 @@ function LinkRows({
         ),
       )}
     </div>
+  )
+}
+
+/** The links of every other type, each under what it is to this task, and the feature it reaches if it names one. */
+function TypedLinks({ rows, onOpenTask }: { rows: readonly LinkRow[]; onOpenTask: (key: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {rows.map(({ link, label }) => (
+        <div key={`${link.type}|${link.dir}|${link.key}|${link.feature ?? ''}`} className="flex items-baseline gap-2">
+          <span className="w-28 shrink-0 text-xs text-muted-foreground">{label}</span>
+          <div className="min-w-0 flex-1">
+            <LinkRows links={[link]} empty="" onOpenTask={onOpenTask} />
+          </div>
+          {link.feature === undefined || link.feature === null ? null : (
+            <Badge variant="outline" className="font-mono font-normal">
+              {link.feature}
+            </Badge>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** A checklist, read only: the boxes are shown and cannot be changed here. */
+function Checklist({ task }: { task: Task }) {
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {checklistRows(task).map((row) => (
+        <li key={row.id} className="flex items-baseline gap-2">
+          <input type="checkbox" checked={row.checked} disabled readOnly aria-label={row.id} />
+          <span className="font-mono text-xs">{row.id}</span>
+          <span className="text-xs text-muted-foreground">{row.state}</span>
+          {row.note === '' ? null : <span className="min-w-0 flex-1 text-xs break-words">{row.note}</span>}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Claims({ task }: { task: Task }) {
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {claimRows(task).map((row) => (
+        <li key={row.id} className="flex items-baseline gap-2">
+          <span className="font-mono text-xs">{row.id}</span>
+          <span>{row.words}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Coverage({ task }: { task: Task }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {coverageLines(task).map((line) => (
+        <li key={line}>{line}</li>
+      ))}
+    </ul>
   )
 }
 

@@ -946,6 +946,29 @@
       ],
       "type": "object"
     },
+    "TaskBranchOnly": {
+      "additionalProperties": false,
+      "description": "A key whose only copy is in a worktree, with its checkout and the branch that checkout is on, if any.",
+      "properties": {
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checkout": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "checkout"
+      ],
+      "type": "object"
+    },
     "TaskCollision": {
       "additionalProperties": false,
       "description": "`task.collision`: one short id at different paths in several checkouts. It is a collision, never a divergence.",
@@ -1150,8 +1173,16 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `divergence`, `collisions`, `stale_sources`, `not_started`,\n`sources`), `sources_started` and `sources_unread` come with the first page only. They are additive: a reader that\ndoes not know them reads the rest. `divergent` is the keys alone, which the CLI prints; `divergence` says how\neach differs.\n`sources` are the sources of the board that started, in name order: a source that did not is in `not_started`.",
+  "description": "`task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide\nlists (`collections`, `invalid`, `divergent`, `divergence`, `branch_only`, `collisions`, `stale_sources`,\n`not_started`, `sources`), `sources_started` and `sources_unread` come with the first page only. They are\nadditive: a reader that does not know them reads the rest. `divergent` is the keys alone, which the CLI prints;\n`divergence` says how each differs.\n`sources` are the sources of the board that started, in name order: a source that did not is in `not_started`.",
   "properties": {
+    "branch_only": {
+      "default": [],
+      "description": "The keys whose only copy is off the default line's root, each with its checkout and branch.",
+      "items": {
+        "$ref": "#/$defs/TaskBranchOnly"
+      },
+      "type": "array"
+    },
     "collections": {
       "default": [],
       "items": {
@@ -1262,6 +1293,7 @@
     "invalid",
     "divergent",
     "divergence",
+    "branch_only",
     "sources",
     "collisions",
     "stale_sources",

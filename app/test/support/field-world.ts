@@ -2,6 +2,7 @@
 // `task.views` over plain data, as the daemon does. A world says which sources the board declares, the tasks, the
 // views with the keys each holds and what each reports. The fake-owner page and the vitest tests share them.
 import type {
+  SectionsOutput,
   TaskChangesResultOutput,
   TaskDiffParamsInput,
   TaskDiffResultOutput,
@@ -143,6 +144,10 @@ export class FieldWorld extends World {
   held = new Map<string, Held>()
   collisions: TaskListResultOutput['collisions'] = []
   divergence: TaskListResultOutput['divergence'] = []
+  /** The keys whose only copy is in a worktree (`task.list`), each with its checkout and branch. */
+  branchOnly: TaskListResultOutput['branch_only'] = []
+  /** What `task.sections` answers: the sections in use and the near-duplicate groups, as scripted. */
+  sections: SectionsOutput = { sections: [], nearDuplicates: [] }
   /** What the daemon says while its first listing runs, and of a source that did not start. */
   refreshing = false
   notStarted: TaskListResultOutput['not_started'] = []
@@ -266,11 +271,18 @@ export class FieldWorld extends World {
   }
 
   /** A link as `task.get` gives it: the other end's state and title, and `missing` for a key the board lacks. */
-  private hookLink(type: string, dir: 'out' | 'in', key: string, other: TaskOutput | undefined): HookLink {
+  private hookLink(
+    type: string,
+    dir: 'out' | 'in',
+    key: string,
+    other: TaskOutput | undefined,
+    feature?: string,
+  ): HookLink {
     if (other === undefined) {
       return { type, dir, key, kind: '', status: '', category: 'backlog', missing: true, stale: false }
     }
     return {
+      ...(feature === undefined ? {} : { feature }),
       type,
       dir,
       key: other.key,
@@ -285,15 +297,19 @@ export class FieldWorld extends World {
 
   private linksOf(task: TaskOutput): HookLink[] {
     const source = task.key.slice(0, task.key.indexOf(':'))
-    const keyOf = (to: string) => (to.includes(':') ? to : `${source}:${to}`)
+    // A feature link names `pr-0001-aa#F1`: the item, and the feature of it.
+    const reach = (to: string) => {
+      const [item, feature] = to.split('#') as [string, string | undefined]
+      return { key: item.includes(':') ? item : `${source}:${item}`, feature }
+    }
     const out = task.links.map((link) => {
-      const key = keyOf(link.to)
-      return this.hookLink(link.type, 'out', key, this.listing.find((each) => each.key === key))
+      const { key, feature } = reach(link.to)
+      return this.hookLink(link.type, 'out', key, this.listing.find((each) => each.key === key), feature)
     })
     const incoming = this.listing.flatMap((holder) =>
       holder.links
-        .filter((link) => keyOf(link.to) === task.key)
-        .map((link) => this.hookLink(link.type, 'in', holder.key, holder)),
+        .filter((link) => reach(link.to).key === task.key)
+        .map((link) => this.hookLink(link.type, 'in', holder.key, holder, reach(link.to).feature)),
     )
     return [...out, ...incoming]
   }
@@ -302,6 +318,7 @@ export class FieldWorld extends World {
     super()
     this.boards = [board('b-alpha', '/work/alpha')]
     this.owner.handle('task.views', () => ({ shared: this.shared, views: this.views }))
+    this.owner.handle('task.sections', () => this.sections)
     this.owner.handle('task.save_view', ({ view, target, overwrite }) => {
       const found = this.views.find((each) => each.view.name === view.name && each.source.type === target)
       if (found !== undefined && overwrite !== true) throw new OwnerError(-32000, `a view named ${view.name} exists`)
@@ -355,6 +372,7 @@ export class FieldWorld extends World {
         collisions: this.collisions,
         divergence: this.divergence,
         divergent: this.divergence.map((entry) => entry.key),
+        branch_only: this.branchOnly,
         invalid: [],
         not_started: this.notStarted,
         refreshing: this.refreshing,

@@ -83,11 +83,12 @@ test('Queue and Comms say what arrives and in which stage', async ({ openFake })
   await expect(page.getByText(/It arrives in Stage 9b/)).toBeVisible()
 })
 
-test('Field shows the board, and Planning a placeholder', async ({ openFake }) => {
+test('Field shows the board, and Planning the plan', async ({ openFake }) => {
   const page = await openFake('two-boards')
   await expect(page.getByRole('region', { name: 'Field' })).toBeVisible()
   await page.keyboard.press('4')
-  await expect(page.getByRole('heading', { name: 'Planning' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Planning' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Planning', level: 1 })).toBeVisible()
 })
 
 test('Tracks shows the still preview and its banner, and calls nothing', async ({ openFake }) => {

@@ -283,6 +283,7 @@ describe('the chips of a card', () => {
       walked: null,
       walkProblem: null,
       filterProblem: null,
+      branchOnly: [],
       inView: [],
       settling: false,
     }
@@ -302,6 +303,7 @@ describe('the chips of a card', () => {
       walked: null,
       walkProblem: null,
       filterProblem: null,
+      branchOnly: [],
       inView: [],
       settling: false,
     }
@@ -321,6 +323,7 @@ describe('the chips of a card', () => {
       walked: null,
       walkProblem: null,
       filterProblem: null,
+      branchOnly: [],
       inView: [],
       settling: false,
     }
@@ -345,6 +348,7 @@ describe('the chips of a card', () => {
         walked: null,
         walkProblem: null,
         filterProblem: null,
+        branchOnly: [],
         inView: [],
         settling: false,
       }
@@ -373,6 +377,7 @@ describe('the chips of a card', () => {
         walked: null,
         walkProblem: null,
         filterProblem: null,
+        branchOnly: [],
         inView: [],
         settling: false,
       }
@@ -449,6 +454,7 @@ describe('the chips of a card', () => {
       walked: null,
       walkProblem: null,
       filterProblem: null,
+      branchOnly: [],
       inView: [],
       settling: false,
     }

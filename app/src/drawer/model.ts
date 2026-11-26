@@ -6,7 +6,19 @@ import type { Category, FieldData, SourceDecl, Task } from '../field/types.ts'
 import type { BoardNote, Got, GotLink } from './types.ts'
 
 /** The parts of the drawer, in the order they are drawn. */
-export type PartId = 'description' | 'waits' | 'unblocks' | 'part-of' | 'changes' | 'fields' | 'copies' | 'details'
+export type PartId =
+  | 'description'
+  | 'waits'
+  | 'unblocks'
+  | 'links'
+  | 'part-of'
+  | 'checklist'
+  | 'claims'
+  | 'coverage'
+  | 'changes'
+  | 'fields'
+  | 'copies'
+  | 'details'
 
 export interface Part {
   readonly id: PartId
@@ -207,6 +219,82 @@ export function detailsOf(input: DrawerInput): Details {
   return { rows, raw: JSON.stringify(raw, null, 2) }
 }
 
+export interface LinkRow {
+  readonly link: GotLink
+  /** What the link is to this task: its type going out, the type's `inverse` coming in. */
+  readonly label: string
+}
+
+/**
+ * The links the Waits on and Unblocks parts do not show, both ways, outgoing first: a link of any other type, named by
+ * its type going out and by the type's `inverse` coming in (`implemented by`, `included in`). An incoming link of a
+ * type with no inverse is "<type> (incoming)", as `collide task` prints it. An outgoing `part-of` is left out, since
+ * Part of names it.
+ */
+export function linkRows(got: Got, source?: SourceDecl): LinkRow[] {
+  const types = got.link_types ?? []
+  const held = blockingLinks(got, source)
+  const blocking = new Set([...(held?.waits ?? []), ...(held?.unblocks ?? [])])
+  const rows = got.links
+    .filter((link) => !blocking.has(link) && !(link.type === 'part-of' && link.dir === 'out'))
+    .map((link) => {
+      const inverse = types.find((each) => each.name === link.type)?.inverse
+      const incoming = inverse === undefined || inverse === null ? `${link.type} (incoming)` : inverse
+      return { link, label: link.dir === 'out' ? link.type : incoming }
+    })
+  return [...rows.filter((row) => row.link.dir === 'out'), ...rows.filter((row) => row.link.dir === 'in')]
+}
+
+export interface ChecklistRow {
+  readonly id: string
+  readonly state: string
+  readonly checked: boolean
+  /** Who marked it and when, what it rests on, or why it is suggested or not applicable. */
+  readonly note: string
+}
+
+/** The checklist of a task, item by item, as it is written. Nothing here marks an item. */
+export function checklistRows(task: Task): ChecklistRow[] {
+  return (task.checklist?.items ?? []).map((item) => {
+    const who = [item.by, item.date].filter((each) => each !== undefined && each !== null && each !== '')
+    const marked = who.length === 0 ? '' : `by ${who.join(', ')}`
+    const evidence = item.evidence ?? ''
+    const reason = item.reason ?? ''
+    const note = [marked, evidence].filter((each) => each !== '').join(' · ')
+    return { id: item.id, state: item.state, checked: item.state === 'done', note: note === '' ? reason : note }
+  })
+}
+
+export interface ClaimRow {
+  readonly id: string
+  readonly words: string
+}
+
+/** A spike's claims: the label, whether the result hangs on it, and whether it can be checked. */
+export function claimRows(task: Task): ClaimRow[] {
+  return (task.claims ?? []).map((claim) => ({
+    id: claim.id,
+    words: [
+      claim.label,
+      claim.loadBearing ? 'load-bearing' : '',
+      claim.verifiable === true ? 'verifiable' : claim.verifiable === false ? 'not verifiable' : '',
+    ]
+      .filter((each) => each !== '')
+      .join(' · '),
+  }))
+}
+
+/** What a proposal's features and included tasks leave uncovered, as lines; one line when both are covered. */
+export function coverageLines(task: Task): string[] {
+  const { coverage } = task
+  if (coverage === undefined || coverage === null) return []
+  const lines = [
+    ...coverage.featuresWithoutTask.map((id) => `${id} has no task`),
+    ...coverage.tasksWithoutFeature.map((id) => `${id} has no feature`),
+  ]
+  return lines.length === 0 ? ['Every feature has a task, and every included task has a feature'] : lines
+}
+
 /** The parts that have something to say about the task, in order. Details for engineers is always there. */
 export function partsOf(input: DrawerInput): Part[] {
   const { got, data } = input
@@ -221,10 +309,17 @@ export function partsOf(input: DrawerInput): Part[] {
   if (!isCollided(got) && blockingLinks(got, source) !== null) {
     parts.push({ id: 'waits', title: 'Waits on' }, { id: 'unblocks', title: 'Unblocks' })
   }
+  if (!isCollided(got) && linkRows(got, source).length > 0) parts.push({ id: 'links', title: 'Links' })
   const part = partOf(input)
   if (part.epic !== null || part.collections.length > 0 || part.views.length > 0) {
     parts.push({ id: 'part-of', title: 'Part of' })
   }
+  // The planning parts are read only, and a task with none of them has none of these.
+  if (checklistRows(task).length > 0) {
+    parts.push({ id: 'checklist', title: `Checklist · ${task.checklist?.template ?? ''}` })
+  }
+  if (claimRows(task).length > 0) parts.push({ id: 'claims', title: 'Claims' })
+  if (coverageLines(task).length > 0) parts.push({ id: 'coverage', title: 'Coverage' })
   // A collided key names no task for `task.changes` to ask about, as it names none for the links above.
   if (!isCollided(got)) parts.push({ id: 'changes', title: 'Changes' })
   if (source !== undefined && source.fields.length > 0) {

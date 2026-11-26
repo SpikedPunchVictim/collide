@@ -19,13 +19,17 @@ export type ChecklistState = 'open' | 'suggested' | 'done' | 'n/a'
 
 /**
  * `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
- * lists (`collections`, `invalid`, `divergent`, `divergence`, `collisions`, `stale_sources`, `not_started`,
- * `sources`), `sources_started` and `sources_unread` come with the first page only. They are additive: a reader that
- * does not know them reads the rest. `divergent` is the keys alone, which the CLI prints; `divergence` says how
- * each differs.
+ * lists (`collections`, `invalid`, `divergent`, `divergence`, `branch_only`, `collisions`, `stale_sources`,
+ * `not_started`, `sources`), `sources_started` and `sources_unread` come with the first page only. They are
+ * additive: a reader that does not know them reads the rest. `divergent` is the keys alone, which the CLI prints;
+ * `divergence` says how each differs.
  * `sources` are the sources of the board that started, in name order: a source that did not is in `not_started`.
  */
 export interface TaskListResult {
+  /**
+   * The keys whose only copy is off the default line's root, each with its checkout and branch.
+   */
+  branch_only?: TaskBranchOnly[]
   collections?: Collection[]
   /**
    * The keys that are at different paths in different checkouts.
@@ -67,6 +71,14 @@ export interface TaskListResult {
    * What the view said of itself, for a request that named or gave one.
    */
   view?: ViewReport | null
+}
+/**
+ * A key whose only copy is in a worktree, with its checkout and the branch that checkout is on, if any.
+ */
+export interface TaskBranchOnly {
+  branch?: string | null
+  checkout: string
+  key: string
 }
 /**
  * A grouping the source holds itself, such as an epic or a milestone (0.10). Each task names the collections it

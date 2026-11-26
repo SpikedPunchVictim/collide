@@ -34,8 +34,8 @@ use crate::feature::parse_feature_target;
 use crate::hook::HookLink;
 use crate::item::{Category, KindDecl, Link, LinkDir, LinkTarget, LinkTypeDecl, StatusDecl};
 use crate::owner::task::{
-    BoardSource, DivergentCopy, StaleSource, TaskCopy, TaskDivergence, TaskGetResult,
-    TaskListResult,
+    BoardSource, DivergentCopy, StaleSource, TaskBranchOnly, TaskCopy, TaskDivergence,
+    TaskGetResult, TaskListResult,
 };
 use crate::provider::{
     ChangeCause, Collection, CollectionsChanged, FieldDecl, InitializeResult, ListResult,
@@ -69,6 +69,8 @@ pub enum CheckoutKind {
 pub struct CheckoutInfo {
     pub path: String,
     pub kind: CheckoutKind,
+    /// The branch the checkout is on, or `None` when it is on none or the caller does not know.
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,6 +313,8 @@ pub struct CorpusReadiness {
 #[derive(Debug, Clone, Default)]
 pub struct Corpus {
     checkouts: BTreeMap<String, CheckoutKind>,
+    /// The branch of each checkout that is on one, by path.
+    branches: BTreeMap<String, String>,
     sources: BTreeMap<String, SourceState>,
     entries: BTreeMap<String, Entry>,
     /// An old key to the key it was renamed to. An entry under the old key wins.
@@ -340,6 +344,7 @@ fn empty_list() -> TaskListResult {
         next_cursor: None,
         divergent: Vec::new(),
         divergence: Vec::new(),
+        branch_only: Vec::new(),
         sources: Vec::new(),
         collisions: Vec::new(),
         stale_sources: Vec::new(),
@@ -448,6 +453,10 @@ impl Corpus {
     /// indexed by them, so this may be called again at any time.
     pub fn set_checkouts(&mut self, checkouts: Vec<CheckoutInfo>) {
         self.touch();
+        self.branches = checkouts
+            .iter()
+            .filter_map(|info| Some((info.path.clone(), info.branch.clone()?)))
+            .collect();
         self.checkouts = checkouts
             .into_iter()
             .map(|info| (info.path, info.kind))
@@ -1043,6 +1052,7 @@ impl Corpus {
             next_cursor: None,
             divergent: Vec::new(),
             divergence: Vec::new(),
+            branch_only: Vec::new(),
             sources: Vec::new(),
             collisions: Vec::new(),
             stale_sources: Vec::new(),
@@ -1102,6 +1112,7 @@ impl Corpus {
         if first {
             result.divergent = self.divergent_keys();
             result.divergence = self.divergence_entries();
+            result.branch_only = self.branch_only_entries();
             result.sources = self.declarations();
             result.collisions = self.collisions();
             result.stale_sources = self
@@ -1229,6 +1240,24 @@ impl Corpus {
                 short_id_pattern: state.short_id_pattern.clone(),
             })
             .collect()
+    }
+
+    /// The keys whose only copy is off the default line's root, in key order, a key once, with the checkout of the
+    /// shown copy and its branch.
+    pub fn branch_only_entries(&self) -> Vec<TaskBranchOnly> {
+        let mut found: Vec<TaskBranchOnly> = Vec::new();
+        for row in self.rows().into_iter().filter(|row| row.branch_only) {
+            if found.last().is_some_and(|last| last.key == row.task.key) {
+                continue;
+            }
+            let checkout = row.task.checkout.clone().unwrap_or_default();
+            found.push(TaskBranchOnly {
+                key: row.task.key.clone(),
+                branch: self.branches.get(&checkout).cloned(),
+                checkout,
+            });
+        }
+        found
     }
 
     /// The divergent keys with the copies that differ, in key order and then checkout order. `run` is the caller's to

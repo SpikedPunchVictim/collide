@@ -114,11 +114,21 @@ pub struct TaskDivergence {
     pub copies: Vec<DivergentCopy>,
 }
 
+/// A key whose only copy is in a worktree, with its checkout and the branch that checkout is on, if any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskBranchOnly {
+    pub key: String,
+    pub checkout: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
 /// `task.list` result. `invalid` holds each item that could not be read, counted on the view (0.10). The board-wide
-/// lists (`collections`, `invalid`, `divergent`, `divergence`, `collisions`, `stale_sources`, `not_started`,
-/// `sources`), `sources_started` and `sources_unread` come with the first page only. They are additive: a reader that
-/// does not know them reads the rest. `divergent` is the keys alone, which the CLI prints; `divergence` says how
-/// each differs.
+/// lists (`collections`, `invalid`, `divergent`, `divergence`, `branch_only`, `collisions`, `stale_sources`,
+/// `not_started`, `sources`), `sources_started` and `sources_unread` come with the first page only. They are
+/// additive: a reader that does not know them reads the rest. `divergent` is the keys alone, which the CLI prints;
+/// `divergence` says how each differs.
 /// `sources` are the sources of the board that started, in name order: a source that did not is in `not_started`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -136,6 +146,9 @@ pub struct TaskListResult {
     /// The same keys, each with the copies that differ: their status, category and checkout, and their run.
     #[serde(default)]
     pub divergence: Vec<TaskDivergence>,
+    /// The keys whose only copy is off the default line's root, each with its checkout and branch.
+    #[serde(default)]
+    pub branch_only: Vec<TaskBranchOnly>,
     /// What each started source declared, for the Field's columns and the drawer's fields.
     #[serde(default)]
     pub sources: Vec<BoardSource>,

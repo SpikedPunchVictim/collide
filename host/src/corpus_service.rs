@@ -488,7 +488,11 @@ impl Inner {
             } else {
                 CheckoutKind::Other
             };
-            found.push(CheckoutInfo { path, kind });
+            found.push(CheckoutInfo {
+                path,
+                kind,
+                branch: worktree.branch,
+            });
         }
         Ok(found)
     }
@@ -774,6 +778,7 @@ impl Inner {
             .map(|path| CheckoutInfo {
                 path: path.to_string(),
                 kind: CheckoutKind::Other,
+                branch: None,
             })
             .collect();
         let inits: BTreeMap<String, InitializeResult> = cache.sources.iter().cloned().collect();

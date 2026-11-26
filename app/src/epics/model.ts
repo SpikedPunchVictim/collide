@@ -10,14 +10,14 @@ import { stepsOf } from '../field/walk.ts'
 const isOpen = (task: Task) => task.state.category !== 'done' && task.state.category !== 'dropped'
 
 /** The tasks of the board, one for each key: the first copy a listing gives, since a collided key is listed twice. */
-function distinct(tasks: readonly Task[]): Task[] {
+export function distinct(tasks: readonly Task[]): Task[] {
   const first = new Map<string, Task>()
   for (const task of tasks) if (!first.has(task.key)) first.set(task.key, task)
   return [...first.values()]
 }
 
 /** Every task of the board, which a card's counts are over: the shown ones when the board was not read whole. */
-const boardOf = (data: FieldData): readonly Task[] => (data.corpus.length > 0 ? data.corpus : data.tasks)
+export const boardOf = (data: FieldData): readonly Task[] => (data.corpus.length > 0 ? data.corpus : data.tasks)
 
 /** The tasks of the board in a collection, one for each key. */
 export function tasksIn(tasks: readonly Task[], collection: string): Task[] {

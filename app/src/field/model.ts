@@ -162,7 +162,7 @@ export function collisionWords(collision: Collision): string {
 }
 
 /** The tasks of the board by key, and by `source:alias`, which is how a link names a task by another of its names. */
-function indexOf(corpus: readonly Task[]): Map<string, Task> {
+export function indexOf(corpus: readonly Task[]): Map<string, Task> {
   const index = new Map<string, Task>()
   for (const task of corpus) {
     if (!index.has(task.key)) index.set(task.key, task)
@@ -180,7 +180,7 @@ function indexOf(corpus: readonly Task[]): Map<string, Task> {
  * How many tasks this one waits on that are still open. A link counts when it says it blocks, or says nothing and is a
  * `blocked-by` of a source that has blocking links: the wire has the link types' own flags only on `task.get`.
  */
-function openBlockers(task: Task, sources: readonly SourceDecl[], index: Map<string, Task>): number {
+export function openBlockers(task: Task, sources: readonly SourceDecl[], index: Map<string, Task>): number {
   const source = sources.find((each) => each.name === sourceOf(task.key))
   const blocking = (type: string, flag: boolean | null | undefined) =>
     flag ?? (type === 'blocked-by' && (source?.blocking_links ?? true))

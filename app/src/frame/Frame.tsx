@@ -32,6 +32,8 @@ export interface FrameProps {
   readonly viewPicker?: ReactNode
   /** The page of the Field tab. */
   readonly field: ReactNode
+  /** The page of the Planning tab (`ts-0195-ju`). */
+  readonly planning: ReactNode
   /** The Settings page (`ts-0193-gk`), given the way back to the board. */
   readonly settings: (back: () => void) => ReactNode
 }
@@ -105,7 +107,7 @@ export function Frame(props: FrameProps) {
           props.settings(() => setSettings(false))
         ) : (
           <TabsContent value={tab} className="flex flex-col gap-3">
-            <Page tab={tab} field={props.field} onOpenLoop={onOpenLoop} />
+            <Page tab={tab} field={props.field} planning={props.planning} onOpenLoop={onOpenLoop} />
           </TabsContent>
         )}
       </main>
@@ -126,7 +128,14 @@ function useTabKeys(show: (tab: TabId) => void) {
   }, [show])
 }
 
-function Page({ tab, field, onOpenLoop }: { tab: TabId; field: ReactNode; onOpenLoop: () => void }) {
+interface PageProps {
+  readonly tab: TabId
+  readonly field: ReactNode
+  readonly planning: ReactNode
+  readonly onOpenLoop: () => void
+}
+
+function Page({ tab, field, planning, onOpenLoop }: PageProps) {
   switch (tab) {
     case 'field':
       return field
@@ -145,13 +154,7 @@ function Page({ tab, field, onOpenLoop }: { tab: TabId; field: ReactNode; onOpen
         />
       )
     case 'planning':
-      return (
-        <LaterPage
-          title="Planning"
-          what="What to build next: the epics, the proposals and the features by section, read only."
-          arrives="It arrives later in Stage 6a."
-        />
-      )
+      return planning
     case 'comms':
       return (
         <LaterPage

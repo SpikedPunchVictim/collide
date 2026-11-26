@@ -22,6 +22,7 @@ import { ExternalLinks } from './markdown/ExternalLinks.tsx'
 import { useLoop } from './loop/useLoop.ts'
 import { type OwnerClient, createTauriOwner, toOwnerError } from './owner/index.ts'
 import { Peek } from './peek/Peek.tsx'
+import { PlanningPage } from './planning/PlanningPage.tsx'
 import { AddPackWindow } from './settings/AddPackWindow.tsx'
 import { SettingsPage } from './settings/SettingsPage.tsx'
 
@@ -172,6 +173,14 @@ function Window({ owner, shell }: { readonly owner: OwnerClient; readonly shell:
             onBack={back}
           />
         )}
+        planning={
+          <PlanningPage
+            owner={owner}
+            boardId={missing ? null : state.boardId}
+            board={board === undefined ? null : { name: boardName(board), line: defaultLine(board) }}
+            field={field}
+          />
+        }
         field={
           first !== null || noBoards ? (
             <FirstRunPage

@@ -25,6 +25,7 @@ async function frameProps(over: Partial<FrameProps> = {}): Promise<FrameProps> {
     onOpenFolder: async () => {},
     onOpenLoop: noop,
     field: <p>the field page</p>,
+    planning: <p>the planning page</p>,
     settings: () => <p>the settings page</p>,
     ...over,
   }
@@ -186,9 +187,9 @@ describe('the board menu lists', () => {
 describe('what each tab shows', () => {
   const shown = async (tab: TabId) => show({ tab })
 
-  test('Field shows the page it is given, and Planning a placeholder', async () => {
+  test('Field and Planning show the pages they are given', async () => {
     expect(await shown('field')).toContain('the field page')
-    expect(await shown('planning')).toContain('What to build next')
+    expect(await shown('planning')).toContain('the planning page')
   })
 
   test('Queue says what arrives, in which stage, and offers the Loop page', async () => {

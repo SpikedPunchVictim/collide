@@ -8,7 +8,7 @@ use collide_core::corpus::{
 };
 use collide_core::hook::HookLink;
 use collide_core::item::{Category, KindDecl, LinkDir, LinkTarget, LinkTypeDecl, StatusDecl};
-use collide_core::owner::task::{TaskGetResult, TaskListResult};
+use collide_core::owner::task::{TaskBranchOnly, TaskGetResult, TaskListResult};
 use collide_core::ports::TaskProvider;
 use collide_core::provider::{
     ChangeCause, Collection, CollectionGroup, CollectionMember, CollectionsChanged, ListParams,
@@ -134,17 +134,21 @@ fn checkouts() -> Vec<CheckoutInfo> {
     let info = |path: &str, kind| CheckoutInfo {
         path: path.into(),
         kind,
+        branch: None,
     };
     let workspace = |root: &str| CheckoutKind::Workspace {
         forked_from: root.into(),
     };
-    vec![
+    let mut found = vec![
         info(ROOT, CheckoutKind::Line { default: true }),
         info(WS_A, workspace(ROOT)),
         info(WS_B, workspace(ROOT)),
         info(OTHER_ROOT, CheckoutKind::Line { default: false }),
         info(OTHER_WS, workspace(OTHER_ROOT)),
-    ]
+    ];
+    // `WS_A` is on a branch, `WS_B` is detached.
+    found[1].branch = Some("plan/ui-first".into());
+    found
 }
 
 /// What `plan`'s `list` gives for `checkout` when the provider holds `tasks`.
@@ -367,6 +371,72 @@ fn a_task_only_in_a_workspace_is_shown_from_it_as_branch_only() {
 }
 
 #[test]
+fn a_branch_only_task_is_listed_with_its_checkout_and_branch() {
+    let tasks = [at("T-01", "doing", WS_A), at("T-02", "ready", ROOT)];
+    let corpus = plan_corpus(&tasks, &[ROOT, WS_A]);
+
+    let listed = first_page(&corpus);
+
+    assert_eq!(
+        listed.branch_only,
+        [TaskBranchOnly {
+            key: "plan:T-01".into(),
+            checkout: WS_A.into(),
+            branch: Some("plan/ui-first".into()),
+        }]
+    );
+}
+
+#[test]
+fn a_branch_only_task_on_a_detached_checkout_has_no_branch() {
+    let corpus = plan_corpus(&[at("T-01", "doing", WS_B)], &[ROOT, WS_B]);
+
+    let listed = first_page(&corpus);
+
+    assert_eq!(listed.branch_only.len(), 1);
+    assert_eq!(listed.branch_only[0].checkout, WS_B);
+    assert_eq!(listed.branch_only[0].branch, None);
+}
+
+#[test]
+fn a_task_in_two_checkouts_is_branch_only_once() {
+    let tasks = [at("T-01", "doing", WS_B), at("T-01", "ready", WS_A)];
+    let corpus = plan_corpus(&tasks, &[ROOT, WS_A, WS_B]);
+
+    let listed = first_page(&corpus);
+
+    assert_eq!(listed.branch_only.len(), 1);
+    assert_eq!(listed.branch_only[0].checkout, WS_A, "the shown copy's");
+}
+
+#[test]
+fn a_task_at_the_default_root_is_listed_as_branch_only_by_no_one() {
+    let corpus = plan_corpus(&[at("T-01", "ready", ROOT)], &[ROOT]);
+    assert!(first_page(&corpus).branch_only.is_empty());
+}
+
+#[test]
+fn only_the_first_page_carries_branch_only() {
+    let tasks = [at("T-01", "doing", WS_A), at("T-02", "doing", WS_A)];
+    let corpus = plan_corpus(&tasks, &[ROOT, WS_A]);
+    let limited = Page {
+        limit: Some(1),
+        cursor: None,
+    };
+    let first = corpus.list(&ListFilter::default(), &limited);
+    assert_eq!(first.branch_only.len(), 2, "the board's, not the page's");
+    let cursor = first.next_cursor.expect("a second page");
+    let second = corpus.list(
+        &ListFilter::default(),
+        &Page {
+            limit: Some(1),
+            cursor: Some(&cursor),
+        },
+    );
+    assert!(second.branch_only.is_empty());
+}
+
+#[test]
 fn a_task_at_the_default_root_is_not_branch_only() {
     let tasks = [at("T-01", "ready", ROOT)];
     let corpus = plan_corpus(&tasks, &[ROOT]);
@@ -401,12 +471,14 @@ fn the_default_roots_copy_is_shown_even_when_another_checkout_comes_first_in_pat
         CheckoutInfo {
             path: late_root.into(),
             kind: CheckoutKind::Line { default: true },
+            branch: None,
         },
         CheckoutInfo {
             path: early.into(),
             kind: CheckoutKind::Workspace {
                 forked_from: late_root.into(),
             },
+            branch: None,
         },
     ]);
     corpus.declare_source("plan", &plan_init());

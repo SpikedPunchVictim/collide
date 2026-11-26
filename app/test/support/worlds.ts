@@ -22,6 +22,7 @@ import {
 } from './first-run-world.ts'
 import { HOSTILE_BODY } from './hostile.ts'
 import { World, board, missingBoard, permissionItem, run } from './loop-world.ts'
+import { planningWorld } from './planning-world.ts'
 import {
   settingsProblemsWorld,
   settingsRefusedWorld,
@@ -93,6 +94,7 @@ export const WORLDS: Readonly<Record<string, () => World>> = {
   'field-epics-strip': epicsStripWorld,
   'field-changes': changesWorld,
   'field-peek': peekWorld,
+  planning: planningWorld,
   settings: settingsWorld,
   'settings-problems': settingsProblemsWorld,
   'settings-refused': settingsRefusedWorld,

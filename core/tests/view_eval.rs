@@ -257,10 +257,12 @@ fn a_key_at_two_paths_is_one_member() {
         CheckoutInfo {
             path: "/repo".into(),
             kind: CheckoutKind::Line { default: true },
+            branch: None,
         },
         CheckoutInfo {
             path: "/repo-line".into(),
             kind: CheckoutKind::Line { default: false },
+            branch: None,
         },
     ]);
     corpus.declare_source("plan", &init(Scope::Ref));
@@ -1192,10 +1194,12 @@ fn a_member_held_at_two_paths_counts_its_problems_once() {
         CheckoutInfo {
             path: "/repo".into(),
             kind: CheckoutKind::Line { default: true },
+            branch: None,
         },
         CheckoutInfo {
             path: "/repo-line".into(),
             kind: CheckoutKind::Line { default: false },
+            branch: None,
         },
     ]);
     corpus.declare_source("plan", &init(Scope::Ref));
