@@ -204,6 +204,10 @@ Write these first.
   `board.open` already had ("Run `git init` in it, or open a folder that is inside a checkout"); the page's Make it
   one replaces the first half, which is for `ts-0194-qp` to word.
 
+- **Owner's choice (2026-11-25): the install command.** The fix names Claude Code's own installer,
+  `curl -fsSL https://claude.ai/install.sh | bash`, in place of the npm command above (`INSTALL_COMMAND`). Claude
+  Code's setup page lists npm as an alternative.
+
 ### Not done, by design
 
 - No UI: the page, its rows, Copy, Check again and the Make it one window are `ts-0194-qp`'s. The fakes of the app

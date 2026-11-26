@@ -26,8 +26,9 @@ use std::time::Duration;
 /// an open waits for them; Check again asks once more.
 pub const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// What the install fix tells a person to run.
-pub const INSTALL_COMMAND: &str = "npm install -g @anthropic-ai/claude-code";
+/// What the install fix tells a person to run: Claude Code's own installer for macOS (the owner's choice, 2026-11-25).
+/// Its setup page also lists npm, as an alternative.
+pub const INSTALL_COMMAND: &str = "curl -fsSL https://claude.ai/install.sh | bash";
 
 /// What the checks ask of `claude`: the daemon's cache of versions, its login probe, and the wait on each.
 pub struct ClaudeProbes<'a> {

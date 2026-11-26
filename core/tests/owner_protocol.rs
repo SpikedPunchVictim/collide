@@ -223,7 +223,7 @@ fn samples() -> Vec<(Method, Value, Value)> {
                 {
                     "id": "claude_installed", "ok": false, "required": false,
                     "message": "Claude Code is not installed.",
-                    "copy": "npm install -g @anthropic-ai/claude-code"
+                    "copy": "curl -fsSL https://claude.ai/install.sh | bash"
                 },
                 {
                     "id": "claude_logged_in", "ok": true, "required": false,

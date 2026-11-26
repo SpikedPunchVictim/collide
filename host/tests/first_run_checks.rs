@@ -35,7 +35,7 @@ use std::time::Duration;
 const LONG: Duration = Duration::from_secs(60);
 const CUT_AT: Duration = Duration::from_secs(10);
 
-const INSTALL: &str = "npm install -g @anthropic-ai/claude-code";
+const INSTALL: &str = "curl -fsSL https://claude.ai/install.sh | bash";
 const ACCOUNT: &str = "tester@example.invalid";
 const ORGANIZATION: &str = "Example Org";
 /// The variable the adapter strips from what the daemon starts (the one that makes a hook believe it runs in Claude).

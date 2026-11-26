@@ -5736,7 +5736,7 @@ function welcomeHtml() {
     : 'Collide needs git to keep each agent\'s work apart. Making it one adds a <code>.git</code> folder and changes'
     + ' nothing else.', w.git ? '' : '<button class="btn sm main" data-act="gitinit">Make it one…</button>');
   const claude = row(w.claude, w.claude ? 'Claude Code is installed' : 'Claude Code is not installed', w.claude
-    ? 'version 2.1.330' : 'Install it, then check again: <code>npm install -g @anthropic-ai/claude-code</code>',
+    ? 'version 2.1.330' : 'Install it, then check again: <code>curl -fsSL https://claude.ai/install.sh | bash</code>',
     w.claude ? '' : '<button class="btn sm" data-act="copy">Copy</button>');
   const login = !w.claude ? '' : row(w.login, w.login ? 'Claude Code is logged in' : 'Claude Code is not logged in',
     w.login ? '' : 'Run <code>claude</code> in a terminal and log in. You can open the board now; runs need it.',
