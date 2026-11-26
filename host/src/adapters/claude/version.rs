@@ -195,13 +195,23 @@ impl VersionCache {
         binary: &Path,
         env: &BTreeMap<String, String>,
     ) -> Result<(ClaudeVersion, BinaryKey), VersionError> {
+        self.version_within(binary, env, VERSION_TIMEOUT)
+    }
+
+    /// [`VersionCache::version`] with its own limit on the read (the first-run checks wait for less than a phase does).
+    pub fn version_within(
+        &self,
+        binary: &Path,
+        env: &BTreeMap<String, String>,
+        timeout: Duration,
+    ) -> Result<(ClaudeVersion, BinaryKey), VersionError> {
         let key = binary_key(binary).map_err(|error| VersionError::NotRun {
             message: format!("{}: {error}", binary.display()),
         })?;
         if let Some(version) = self.lock().get(&key) {
             return Ok((*version, key));
         }
-        let version = read_version(binary, env)?;
+        let version = read_version_within(binary, env, timeout)?;
         let mut read = self.lock();
         // An older reading of the same path is of a binary that is gone.
         read.retain(|old, _| old.path != key.path);

@@ -1750,7 +1750,7 @@ fn write_snapshot(request: &LaunchRequest, dir: &Path) -> Result<(), Halt> {
 }
 
 /// The first file called `program` in a folder of `path` that is a file with an execute bit.
-fn find_on_path(program: &str, path: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn find_on_path(program: &str, path: Option<&str>) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     path?
         .split(':')

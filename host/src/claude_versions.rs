@@ -15,8 +15,8 @@
 //!   "this daemon does not look it up" when none ever will be (ts-0166-rq).
 
 use crate::adapters::claude::version::{
-    BinaryKey, ClaudeVersion, PUBLISHED_URL, PublishedTags, SmokeOutcome, TESTED, VersionCache,
-    VersionError, parse_dist_tags, smoke_check,
+    BinaryKey, ClaudeVersion, PUBLISHED_URL, PublishedTags, SmokeOutcome, TESTED, VERSION_TIMEOUT,
+    VersionCache, VersionError, parse_dist_tags, smoke_check,
 };
 use crate::http_get::{CurlGet, HttpGet};
 use collide_core::owner::{
@@ -324,7 +324,17 @@ impl ClaudeVersions {
         binary: &Path,
         env: &BTreeMap<String, String>,
     ) -> Result<ClaudeVersion, VersionError> {
-        match self.cache.version(binary, env) {
+        self.read_within(binary, env, VERSION_TIMEOUT)
+    }
+
+    /// [`ClaudeVersions::read`] with its own limit on a read that is not cached (the first-run checks).
+    pub fn read_within(
+        &self,
+        binary: &Path,
+        env: &BTreeMap<String, String>,
+        timeout: Duration,
+    ) -> Result<ClaudeVersion, VersionError> {
+        match self.cache.version_within(binary, env, timeout) {
             Ok((version, key)) => {
                 let mut state = locked(&self.state);
                 state.in_use = Some((version, key));

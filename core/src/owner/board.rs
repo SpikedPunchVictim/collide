@@ -77,6 +77,10 @@ pub enum CheckId {
 }
 
 /// One first-run check. `message` is Collide's own words and names the fix when `ok` is false.
+///
+/// `copy` is the command the fix names, for a Copy button; absent when the fix is not a command. `could_not_check` says
+/// the check did not run to an answer (the login probe timed out, or its answer made no sense): `ok` is then true,
+/// because that is not a failure, and `message` says "could not check".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FirstRunCheck {
@@ -85,10 +89,15 @@ pub struct FirstRunCheck {
     /// Whether a failure stops the board from opening usefully.
     pub required: bool,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub could_not_check: bool,
 }
 
 /// `board.open` params. `root` is any folder in the repo or its root. `init_git` says yes to `git init` when the
-/// folder is not a repo (0.11 offers it).
+/// folder is not in a repo (0.11 offers it): the daemon runs it there and opens the folder. In a repo it does nothing
+/// more.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BoardOpenParams {
@@ -98,12 +107,28 @@ pub struct BoardOpenParams {
 }
 
 /// `board.open` result. `board` is absent when the folder is not a repo and `init_git` was not given: the
-/// `git_repo` check says so. Opening needs no setup: the built-in packs and the default aliases are in place.
+/// `git_repo` check says so. Opening needs no setup: the built-in packs and the default aliases are in place. Only a
+/// failed `git_repo` stops the board from opening; a missing or logged-out `claude` is named and the board opens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BoardOpenResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<BoardSummary>,
+    pub checks: Vec<FirstRunCheck>,
+}
+
+/// `board.checks` params: the folder to check, as `board.open`'s `root` is, an absolute path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardChecksParams {
+    pub root: String,
+}
+
+/// `board.checks` result: the checks `board.open` would answer for the folder, for the page's Check again. It opens
+/// nothing and writes nothing: no board, no store row, no folder, no trust entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardChecksResult {
     pub checks: Vec<FirstRunCheck>,
 }
 

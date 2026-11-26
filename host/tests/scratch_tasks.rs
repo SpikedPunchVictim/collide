@@ -738,11 +738,12 @@ fn a_folder_that_is_not_a_checkout_opens_no_board_and_fails_the_git_repo_check_w
 
     let opened = open(&mut client, &plain);
     assert!(opened.board.is_none());
-    assert_eq!(opened.checks.len(), 1);
+    // The `git_repo` check comes first; the `claude` checks after it are first_run_checks.rs's to test.
     let check = &opened.checks[0];
     assert_eq!(check.id, CheckId::GitRepo);
     assert!(!check.ok);
     assert!(check.required);
+    assert!(opened.checks[1..].iter().all(|check| !check.required));
     assert!(
         check.message.contains("not inside a git checkout"),
         "{}",
@@ -784,10 +785,11 @@ fn a_relative_root_is_refused() {
 }
 
 #[test]
-fn init_git_is_refused_as_not_built_yet() {
+fn init_git_makes_the_repository_and_opens_it() {
     let root = TempRoot::new();
     let plain = root.join("plain");
     fs::create_dir(&plain).unwrap();
+    let plain = fs::canonicalize(plain).unwrap();
     let daemon = start(&root);
     let mut client = connect(&daemon);
 
@@ -795,12 +797,19 @@ fn init_git_is_refused_as_not_built_yet() {
         root: plain.to_str().unwrap().to_string(),
         init_git: true,
     };
-    let (number, message) = rpc_error(&mut client, "board.open", &params);
-    assert_eq!(number, code::INVALID_PARAMS);
-    assert!(message.contains("not built yet"), "{message}");
-    assert!(message.contains("git init"), "{message}");
-    assert!(!plain.join(".git").exists(), "nothing was initialised");
-    assert!(list(&mut client).is_empty());
+    let opened: BoardOpenResult = call(&mut client, "board.open", &params);
+
+    assert!(opened.checks[0].ok, "{:?}", opened.checks[0]);
+    assert_eq!(opened.checks[0].id, CheckId::GitRepo);
+    let board = board_of(opened);
+    assert_eq!(board.root, plain.to_str().unwrap());
+    assert!(plain.join(".git").is_dir(), "git init ran in the folder");
+    assert_eq!(list(&mut client).len(), 1);
+    let again = board_of(open(&mut client, &plain));
+    assert_eq!(
+        again, board,
+        "the repository opens as the same board without init_git"
+    );
 }
 
 #[test]

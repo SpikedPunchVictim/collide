@@ -216,6 +216,22 @@ fn samples() -> Vec<(Method, Value, Value)> {
             }),
         ),
         (
+            Method::BoardChecks,
+            json!({ "root": "/work/repo" }),
+            json!({ "checks": [
+                { "id": "git_repo", "ok": true, "required": true, "message": "a git repo" },
+                {
+                    "id": "claude_installed", "ok": false, "required": false,
+                    "message": "Claude Code is not installed.",
+                    "copy": "npm install -g @anthropic-ai/claude-code"
+                },
+                {
+                    "id": "claude_logged_in", "ok": true, "required": false,
+                    "message": "Could not check whether Claude Code is logged in.", "could_not_check": true
+                }
+            ] }),
+        ),
+        (
             Method::BoardLocate,
             json!({ "board": "bd-1", "path": "/work/moved" }),
             json!({ "board": board(), "note": "the old repository was never recorded" }),
@@ -586,6 +602,70 @@ fn every_method_says_what_it_serves() {
             method.name()
         );
     }
+}
+
+// The first-run checks.
+
+#[test]
+fn a_check_with_no_command_and_one_that_ran_writes_neither_optional_field() {
+    use collide_core::owner::{CheckId, FirstRunCheck};
+    round_trip(
+        FirstRunCheck {
+            id: CheckId::GitRepo,
+            ok: true,
+            required: true,
+            message: "a git repo".into(),
+            copy: None,
+            could_not_check: false,
+        },
+        json!({ "id": "git_repo", "ok": true, "required": true, "message": "a git repo" }),
+    );
+}
+
+#[test]
+fn a_check_writes_its_command_to_copy_and_that_it_could_not_check() {
+    use collide_core::owner::{CheckId, FirstRunCheck};
+    round_trip(
+        FirstRunCheck {
+            id: CheckId::ClaudeLoggedIn,
+            ok: true,
+            required: false,
+            message: "Could not check.".into(),
+            copy: Some("claude".into()),
+            could_not_check: true,
+        },
+        json!({
+            "id": "claude_logged_in", "ok": true, "required": false, "message": "Could not check.",
+            "copy": "claude", "could_not_check": true
+        }),
+    );
+}
+
+#[test]
+fn a_check_refuses_a_field_it_does_not_have() {
+    use collide_core::owner::FirstRunCheck;
+    let read = serde_json::from_value::<FirstRunCheck>(json!({
+        "id": "git_repo", "ok": true, "required": true, "message": "m", "account": "x"
+    }));
+    assert!(read.is_err());
+}
+
+#[test]
+fn board_checks_takes_only_a_root_and_answers_only_checks() {
+    use collide_core::owner::{BoardChecksParams, BoardChecksResult};
+    round_trip(
+        BoardChecksParams {
+            root: "/work/repo".into(),
+        },
+        json!({ "root": "/work/repo" }),
+    );
+    round_trip(
+        BoardChecksResult { checks: vec![] },
+        json!({ "checks": [] }),
+    );
+    let extra =
+        serde_json::from_value::<BoardChecksParams>(json!({ "root": "/w", "init_git": true }));
+    assert!(extra.is_err(), "Check again never makes a repository");
 }
 
 // Round trips.

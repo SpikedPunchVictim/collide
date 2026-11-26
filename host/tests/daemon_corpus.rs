@@ -3097,6 +3097,25 @@ fn a_run_agent_may_not_locate_a_board_and_the_board_stays_where_it_is() {
 }
 
 #[test]
+fn a_run_agent_may_not_make_a_folder_a_repository_and_nothing_is_made() {
+    use collide_core::owner::code::NOT_PERMITTED;
+    let rig = rig();
+    let plain = rig.f().home().join("plain-folder");
+    std::fs::create_dir_all(&plain).unwrap();
+
+    let replies = as_a_run_agent(
+        &rig,
+        "run-1",
+        &[("board.open", json!({ "root": plain, "init_git": true }))],
+    );
+
+    assert_eq!(replies, [json!(NOT_PERMITTED)], "{replies:?}");
+    assert!(!plain.join(".git").exists(), "no repository was made");
+    let boards: BoardListResult = rpc(&rig, "board.list", &BoardListParams {}).unwrap();
+    assert!(boards.boards.is_empty());
+}
+
+#[test]
 fn save_view_refuses_an_invalid_view_an_unsafe_name_and_an_overwrite_with_no_flag() {
     let rig = rig();
     let board = rig.board_with(&[&FILES], "");

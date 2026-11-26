@@ -38,10 +38,33 @@ pub fn cut_message(what: &str) -> String {
 /// within `timeout`. The input is written while the output is read, so neither waits on the other. The process is the
 /// caller's own child, so killing it is safe.
 pub fn run_bounded(
-    mut command: Command,
+    command: Command,
     stdin: Option<&[u8]>,
     timeout: Duration,
 ) -> Result<Captured, String> {
+    run(command, stdin, timeout, false)
+}
+
+/// [`run_bounded`] for a process that may start children of its own (a `claude` runs a runtime that does): it runs in a
+/// process group of its own, and a run that is cut ends the whole group, not only the process, so no child outlives
+/// the wait holding the pipes. The group is the child's own, so killing it is safe.
+pub fn run_bounded_in_group(
+    command: Command,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<Captured, String> {
+    run(command, stdin, timeout, true)
+}
+
+fn run(
+    mut command: Command,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    own_group: bool,
+) -> Result<Captured, String> {
+    if own_group {
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    }
     command
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -75,6 +98,9 @@ pub fn run_bounded(
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
             Ok(None) if Instant::now() >= until => {
+                if own_group {
+                    end_group(child.id());
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 break Err(format!("it did not end within {} s", timeout.as_secs_f32()));
@@ -96,4 +122,14 @@ pub fn run_bounded(
         stdout: stdout.unwrap_or_default(),
         stderr: stderr.unwrap_or_default(),
     })
+}
+
+/// Ends the process group `leader` leads, which `process_group(0)` made for it: its id is the group's. The leader is
+/// the caller's own child, not yet waited for, so its pid cannot name another group.
+fn end_group(leader: u32) {
+    // SAFETY: `killpg` takes two integers. The group is the one this run's child leads, and the child has not been
+    // waited for, so the id still names that group.
+    unsafe {
+        libc::killpg(leader as libc::pid_t, libc::SIGKILL);
+    }
 }

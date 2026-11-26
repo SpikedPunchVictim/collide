@@ -2,9 +2,10 @@
 //! checkout, found from any folder in it, and the branch it is on now. The boards the user opened are the store's
 //! ([`crate::scratch_store`]); this file reads git. The line a board has, with its trust, is [`crate::board_lines`].
 //!
-//! Only the `git_repo` check is made here. The checks for `claude` come with the no-setup open (Stage 6a), and
-//! `git init` for a folder that is not a checkout is that stage's too.
+//! The `git_repo` check is made here, and `git init` for a folder that is not a checkout (Make it one, ts-0192-es). The
+//! checks for `claude` are [`crate::first_run`]'s.
 
+use crate::bounded_run::tail;
 use crate::checkout::{CheckoutError, main_checkout_with, root_busy};
 use collide_core::owner::{CheckId, FirstRunCheck};
 use std::path::{Path, PathBuf};
@@ -136,6 +137,39 @@ fn git(folder: &Path, env: &[(String, String)], args: &[&str]) -> Result<Option<
     }
     Ok(Some(
         String::from_utf8_lossy(&output.stdout).trim().to_string(),
+    ))
+}
+
+/// Whether `folder` is in a git checkout. `Err` says that the folder is gone, or that git is not installed.
+pub fn in_checkout(folder: &Path, env: &[(String, String)]) -> Result<bool, String> {
+    Ok(git(folder, env, &["rev-parse", "--show-toplevel"])?.is_some())
+}
+
+/// Makes `folder` a git repository (`git init`), with `env` as for the workspace's git. Nothing else in the folder is
+/// touched. `Err` is Collide's message for why it could not: the folder is gone, git is not installed, or git said no.
+pub fn init_repository(folder: &Path, env: &[(String, String)]) -> Result<(), String> {
+    if !folder.is_dir() {
+        return Err(format!(
+            "`{}` is not a folder (it is gone or was moved), so there is nothing to make a repository of; \
+             check that the folder is still there",
+            folder.display()
+        ));
+    }
+    let output = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(folder)
+        .env("LC_ALL", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .envs(env.iter().map(|(name, value)| (name, value)))
+        .output()
+        .map_err(|error| format!("`git` did not run ({error}); install git and try again"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "`git init` failed in `{}`: {}",
+        folder.display(),
+        tail(&output.stderr)
     ))
 }
 
@@ -338,5 +372,7 @@ fn git_repo_check(ok: bool, message: String) -> FirstRunCheck {
         ok,
         required: true,
         message,
+        copy: None,
+        could_not_check: false,
     }
 }

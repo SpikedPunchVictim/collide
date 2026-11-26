@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "CheckId": {
+      "description": "What a first-run check looks at (0.11, First run works with no pack and no tasks).",
+      "oneOf": [
+        {
+          "enum": [
+            "claude_installed",
+            "claude_logged_in",
+            "git_repo"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "gh_logged_in",
+          "description": "`gh` is optional: a GitHub source needs it, nothing else does.",
+          "type": "string"
+        }
+      ]
+    },
+    "FirstRunCheck": {
+      "additionalProperties": false,
+      "description": "One first-run check. `message` is Collide's own words and names the fix when `ok` is false.\n\n`copy` is the command the fix names, for a Copy button; absent when the fix is not a command. `could_not_check` says\nthe check did not run to an answer (the login probe timed out, or its answer made no sense): `ok` is then true,\nbecause that is not a failure, and `message` says \"could not check\".",
+      "properties": {
+        "copy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "could_not_check": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/$defs/CheckId"
+        },
+        "message": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "required": {
+          "description": "Whether a failure stops the board from opening usefully.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "ok",
+        "required",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.checks` result: the checks `board.open` would answer for the folder, for the page's Check again. It opens\nnothing and writes nothing: no board, no store row, no folder, no trust entry.",
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/FirstRunCheck"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "checks"
+  ],
+  "title": "BoardChecksResult",
+  "type": "object"
+}

@@ -182,6 +182,8 @@ pub fn registry() -> Registry {
     registry.add::<owner::Notice>();
     registry.add::<owner::RpcError>();
     registry.add::<owner::Ack>();
+    registry.add::<owner::BoardChecksParams>();
+    registry.add::<owner::BoardChecksResult>();
     registry.add::<owner::BoardInitParams>();
     registry.add::<owner::BoardInitResult>();
     registry.add::<owner::BoardListParams>();

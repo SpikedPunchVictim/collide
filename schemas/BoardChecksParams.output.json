@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.checks` params: the folder to check, as `board.open`'s `root` is, an absolute path.",
+  "properties": {
+    "root": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "root"
+  ],
+  "title": "BoardChecksParams",
+  "type": "object"
+}

@@ -106,6 +106,8 @@
 //! | `daemon: event stream` | [`Hub`], `subscribe` | `daemon.subscribe`, the replay, the live events, `queue.changed` |
 //! | `daemon: adopt shims` | [`adopt_shims`], [`Phases::adopt`] | scan `runs_dir`, classify each shim by `exit.json` and by pid plus start time, reattach, settle |
 
+use crate::adapters::claude::auth_status::{LoginProbe, NotChecked};
+use crate::adapters::claude::env_strip;
 use crate::auth::{
     self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer, Verdict,
 };
@@ -123,6 +125,7 @@ use crate::disk::{FloorSource, FreeSpace, SystemFreeSpace};
 use crate::event_hub::{Hub, Subscription};
 use crate::file_run::quick_run::RunDiffError;
 use crate::file_run::{AnswerError, FileRunConfig, FileRuns};
+use crate::first_run::{CHECK_TIMEOUT, ClaudeProbes, claude_checks};
 use crate::follow_ups::{RunTask, shape_create};
 use crate::launch::{Launchctl, boot_out_recorded_job};
 use crate::login::{self, LoginSessions, SystemLoginSession};
@@ -161,12 +164,13 @@ use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
 use collide_core::item::Category;
 use collide_core::owner::{
-    BoardInitParams, BoardListResult, BoardLocateParams, BoardLocateResult, BoardOpenParams,
-    BoardOpenResult, BoardSummary, BoardTrustParams, BoardTrustReviewParams, ChangeWords,
-    ChangesPlace, CommitChanges, ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams,
-    ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams,
-    ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
-    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, MAX_MESSAGE_BYTES, Method, Notice,
+    BoardChecksParams, BoardChecksResult, BoardInitParams, BoardListResult, BoardLocateParams,
+    BoardLocateResult, BoardOpenParams, BoardOpenResult, BoardSummary, BoardTrustParams,
+    BoardTrustReviewParams, ChangeWords, ChangesPlace, CommitChanges, ConfigGetParams,
+    ConfigPackAddParams, ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams,
+    ConfigPackListResult, ConfigPackUpdateParams, ConfigSetParams, ConfigWriteLayer,
+    DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
+    DaemonSubscribeResult, EnvCapture, FirstRunCheck, MAX_MESSAGE_BYTES, Method, Notice,
     OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult,
     QueueItem, QueueListParams, QueueListResult, Request, Response, Routed, RpcError,
     RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
@@ -580,6 +584,12 @@ pub struct DaemonOptions {
     /// Where the published `claude` version comes from. `Off` (the default) never fetches: only the daemon's own binary
     /// asks for the registry, and only when no root is overridden (ts-0068-wx).
     pub claude_published: PublishedChoice,
+    /// How the first-run checks ask whether `claude` is logged in (ts-0192-es). [`DaemonOptions::new`] gives
+    /// [`NotChecked`], which never starts `claude` ("could not check"): only the daemon's own binary gives the real
+    /// probe, and only when no root is overridden ([`probe_from_env`]).
+    pub claude_login: Arc<dyn LoginProbe>,
+    /// The longest the first-run checks wait on one `claude` process ([`CHECK_TIMEOUT`]). A test passes its own.
+    pub claude_check_timeout: Duration,
     /// How often the published version is fetched again ([`REFRESH_EVERY`]). A test passes a short one.
     pub claude_refresh_every: Duration,
     /// How many notices a subscriber may have waiting before the daemon ends its subscription ([`SUBSCRIBER_QUEUE`]).
@@ -660,6 +670,8 @@ impl DaemonOptions {
             limit_min_pause: LIMIT_MIN_PAUSE,
             sampler_tick: TICK,
             claude_published: PublishedChoice::Off,
+            claude_login: Arc::new(NotChecked),
+            claude_check_timeout: CHECK_TIMEOUT,
             claude_refresh_every: REFRESH_EVERY,
             subscriber_queue: SUBSCRIBER_QUEUE,
             feed_rebuilder: None,
@@ -717,6 +729,9 @@ struct Shared {
     hub: Arc<Hub>,
     /// The version of `claude` and the published one; the thread that refreshes the second.
     claude: Arc<ClaudeVersions>,
+    /// How the first-run checks ask whether `claude` is logged in, and how long they wait on one `claude` process.
+    claude_login: Arc<dyn LoginProbe>,
+    claude_check_timeout: Duration,
     claude_refresher: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// What `config.get` reads: the user's files and the loader.
     config: ConfigService,
@@ -843,6 +858,8 @@ impl Daemon {
             limit_min_pause,
             sampler_tick,
             claude_published,
+            claude_login,
+            claude_check_timeout,
             claude_refresh_every,
             subscriber_queue,
             write_poll,
@@ -1150,6 +1167,8 @@ impl Daemon {
             next_connection: AtomicU64::new(1),
             hub,
             claude,
+            claude_login,
+            claude_check_timeout,
             claude_refresher: Mutex::new(None),
             config,
             sources,
@@ -2175,7 +2194,8 @@ fn call(
         Method::ConfigPackAdd => config_pack_add(shared, session, params),
         Method::ConfigPackLink => config_pack_link(shared, session, params),
         Method::ConfigPackEnable => config_pack_enable(shared, session, params),
-        Method::BoardOpen => board_open(shared, params),
+        Method::BoardOpen => board_open(shared, session, params),
+        Method::BoardChecks => board_checks(shared, params),
         Method::BoardLocate => board_locate(shared, session, params),
         Method::BoardList => board_list(shared),
         Method::BoardInit => board_init(shared, session, params),
@@ -2894,18 +2914,21 @@ fn captured_path(env: &Mutex<Option<BaseEnvironment>>) -> std::ffi::OsString {
 }
 
 /// `board.open` (ts-0075-hj): any folder in a git checkout becomes the board of that checkout's repository, and the
-/// same board each time. A folder that is not in a checkout answers no board and a failed `git_repo` check. `git init`
-/// is Stage 6a's, so `init_git` is refused.
+/// same board each time. A folder that is not in a checkout answers no board and a failed `git_repo` check. With
+/// `init_git` the daemon runs `git init` there first (Make it one, ts-0192-es), and opens the new repository as any
+/// other; in a checkout `init_git` does nothing more. The answer also carries the checks for `claude`
+/// ([`claude_checks`]): they name a fix and never stop the board.
 ///
 /// The board is rooted at the repository's main checkout (ts-0191-nv): a folder inside a linked worktree opens the
 /// board of its repository with the worktree as a line of it, and the main checkout opens the same board.
-fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+fn board_open(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
     let params: BoardOpenParams = read_params("board.open", params)?;
     if params.init_git {
-        return Err(RpcError::new(
-            code::INVALID_PARAMS,
-            "`init_git` is not built yet (Stage 6a). Run `git init` in the folder, then open it again.",
-        ));
+        refuse_run_agent(session, "make a folder a git repository")?;
     }
     if shared.stopping() {
         return Err(RpcError::new(
@@ -2913,20 +2936,16 @@ fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
             "the daemon is shutting down",
         ));
     }
-    let folder = Path::new(&params.root);
-    if !folder.is_absolute() {
-        return Err(RpcError::new(
-            code::INVALID_PARAMS,
-            format!(
-                "`root` must be an absolute path, and `{}` is not",
-                params.root
-            ),
-        ));
+    let folder = absolute_root(&params.root)?;
+    if params.init_git {
+        make_repository(shared, folder)?;
     }
-    let result = match boards_checkouts(shared, folder) {
+    let git = boards_checkouts(shared, folder);
+    let claude = claude_first_run_checks(shared);
+    let result = match git {
         Err(message) => BoardOpenResult {
             board: None,
-            checks: vec![boards::git_repo_failed(message)],
+            checks: first_run_checks(boards::git_repo_failed(message), claude),
         },
         Ok((checkout, line)) => {
             let root = checkout.root.display().to_string();
@@ -2945,11 +2964,83 @@ fn board_open(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
                         .lines()
                         .summary(&id, &root, &checkouts, &tools_path(shared)),
                 )),
-                checks: vec![boards::git_repo_ok(&checkout)],
+                checks: first_run_checks(boards::git_repo_ok(&checkout), claude),
             }
         }
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `board.checks` (ts-0192-es): the checks `board.open` answers for a folder, and nothing else, for the page's Check
+/// again. It opens no board and writes nothing: no store row, no folder, no trust entry, and never `git init`.
+fn board_checks(
+    shared: &Shared,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: BoardChecksParams = read_params("board.checks", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let folder = absolute_root(&params.root)?;
+    let git = match boards_checkouts(shared, folder) {
+        Ok((checkout, _)) => boards::git_repo_ok(&checkout),
+        Err(message) => boards::git_repo_failed(message),
+    };
+    let checks = first_run_checks(git, claude_first_run_checks(shared));
+    Ok(serde_json::to_value(BoardChecksResult { checks }).expect("a result is JSON"))
+}
+
+/// `root` as a path, which must be absolute.
+fn absolute_root(root: &str) -> Result<&Path, RpcError> {
+    let folder = Path::new(root);
+    if folder.is_absolute() {
+        return Ok(folder);
+    }
+    Err(RpcError::new(
+        code::INVALID_PARAMS,
+        format!("`root` must be an absolute path, and `{root}` is not"),
+    ))
+}
+
+/// Runs `git init` in `folder` when it is a folder that is in no checkout. A folder in a checkout is left as it is, and
+/// so is one that is gone: `board.open` then answers what it finds, as it does without `init_git`.
+fn make_repository(shared: &Shared, folder: &Path) -> Result<(), RpcError> {
+    let in_checkout = match boards::in_checkout(folder, &shared.git_env) {
+        Ok(in_checkout) => in_checkout,
+        Err(_) => return Ok(()),
+    };
+    if in_checkout {
+        return Ok(());
+    }
+    boards::init_repository(folder, &shared.git_env)
+        .map_err(|message| RpcError::new(code::INTERNAL_ERROR, message))?;
+    shared
+        .log
+        .line(&format!("made `{}` a git repository", folder.display()));
+    Ok(())
+}
+
+/// The checks for `claude`, in the base environment: it waits for the first capture, which always ends within its own
+/// timeout, and then for at most [`CHECK_TIMEOUT`] on `claude` itself (the two reads side by side).
+fn claude_first_run_checks(shared: &Shared) -> Vec<FirstRunCheck> {
+    let base = wait_for_environment(&shared.env, shared.capture.timeout + CAPTURE_WAIT_MARGIN);
+    let env = base.map(|base| base.for_child(&env_strip(), &BTreeMap::new()));
+    claude_checks(
+        env.as_ref(),
+        &ClaudeProbes {
+            versions: &shared.claude,
+            login: shared.claude_login.as_ref(),
+            timeout: shared.claude_check_timeout,
+        },
+    )
+}
+
+/// The `git_repo` check first, as the page lists them, then the checks for `claude`.
+fn first_run_checks(git: FirstRunCheck, claude: Vec<FirstRunCheck>) -> Vec<FirstRunCheck> {
+    std::iter::once(git).chain(claude).collect()
 }
 
 /// The board's own checkout for `folder`, and the checkout of `folder` when it is a linked worktree of it: `board.open`

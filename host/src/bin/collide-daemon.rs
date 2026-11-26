@@ -68,6 +68,10 @@ fn main() -> ExitCode {
             options.claude_published = collide_host::claude_versions::published_from_env(
                 std::env::var(ROOT_ENV).ok().as_deref(),
             );
+            // `claude auth status` is asked only by a daemon that is not under an overridden root.
+            options.claude_login = collide_host::adapters::claude::auth_status::probe_from_env(
+                std::env::var(ROOT_ENV).ok().as_deref(),
+            );
             // Secrets are kept in the OS keychain only when the daemon is not under an overridden root.
             options.secret_store = collide_host::secret_store::secret_store_for_root(
                 std::env::var(ROOT_ENV).ok().as_deref(),

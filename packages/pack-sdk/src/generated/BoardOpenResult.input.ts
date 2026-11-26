@@ -22,7 +22,8 @@ export type CheckId = ('claude_installed' | 'claude_logged_in' | 'git_repo') | '
 
 /**
  * `board.open` result. `board` is absent when the folder is not a repo and `init_git` was not given: the
- * `git_repo` check says so. Opening needs no setup: the built-in packs and the default aliases are in place.
+ * `git_repo` check says so. Opening needs no setup: the built-in packs and the default aliases are in place. Only a
+ * failed `git_repo` stops the board from opening; a missing or logged-out `claude` is named and the board opens.
  */
 export interface BoardOpenResult {
   board?: BoardSummary | null
@@ -60,8 +61,14 @@ export interface LineSummary {
 }
 /**
  * One first-run check. `message` is Collide's own words and names the fix when `ok` is false.
+ *
+ * `copy` is the command the fix names, for a Copy button; absent when the fix is not a command. `could_not_check` says
+ * the check did not run to an answer (the login probe timed out, or its answer made no sense): `ok` is then true,
+ * because that is not a failure, and `message` says "could not check".
  */
 export interface FirstRunCheck {
+  copy?: string | null
+  could_not_check?: boolean
   id: CheckId
   message: string
   ok: boolean

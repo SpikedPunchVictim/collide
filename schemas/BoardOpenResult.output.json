@@ -55,8 +55,17 @@
     },
     "FirstRunCheck": {
       "additionalProperties": false,
-      "description": "One first-run check. `message` is Collide's own words and names the fix when `ok` is false.",
+      "description": "One first-run check. `message` is Collide's own words and names the fix when `ok` is false.\n\n`copy` is the command the fix names, for a Copy button; absent when the fix is not a command. `could_not_check` says\nthe check did not run to an answer (the login probe timed out, or its answer made no sense): `ok` is then true,\nbecause that is not a failure, and `message` says \"could not check\".",
       "properties": {
+        "copy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "could_not_check": {
+          "type": "boolean"
+        },
         "id": {
           "$ref": "#/$defs/CheckId"
         },
@@ -155,7 +164,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`board.open` result. `board` is absent when the folder is not a repo and `init_git` was not given: the\n`git_repo` check says so. Opening needs no setup: the built-in packs and the default aliases are in place.",
+  "description": "`board.open` result. `board` is absent when the folder is not a repo and `init_git` was not given: the\n`git_repo` check says so. Opening needs no setup: the built-in packs and the default aliases are in place. Only a\nfailed `git_repo` stops the board from opening; a missing or logged-out `claude` is named and the board opens.",
   "properties": {
     "board": {
       "anyOf": [

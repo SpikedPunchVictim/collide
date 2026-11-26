@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`board.open` params. `root` is any folder in the repo or its root. `init_git` says yes to `git init` when the\nfolder is not a repo (0.11 offers it).",
+  "description": "`board.open` params. `root` is any folder in the repo or its root. `init_git` says yes to `git init` when the\nfolder is not in a repo (0.11 offers it): the daemon runs it there and opens the folder. In a repo it does nothing\nmore.",
   "properties": {
     "init_git": {
       "default": false,

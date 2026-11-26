@@ -42,7 +42,7 @@
 //! | family | module | methods |
 //! |---|---|---|
 //! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions`, `daemon.subscribe` |
-//! | board | [`board`] | `board.list`, `board.open`, `board.locate`, `board.init`, `board.trust` |
+//! | board | [`board`] | `board.list`, `board.open`, `board.checks`, `board.locate`, `board.init`, `board.trust` |
 //! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.create`, `task.reid`, `task.preview`, `task.views`, `task.save_view`, `task.sections`, `task.changes`, `task.diff` |
 //! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.record`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
 //! | queue | [`queue`] | `queue.list`, `queue.context`, `queue.answer` |
@@ -546,6 +546,9 @@ methods! {
     BoardOpen, "board.open", Board,
         "0.11, opening a repo with no setup, and its first-run checks",
         BoardOpenParams, BoardOpenResult;
+    BoardChecks, "board.checks", Board,
+        "0.11, the first-run checks alone, for Check again: nothing is opened and nothing is written",
+        BoardChecksParams, BoardChecksResult;
     BoardLocate, "board.locate", Board,
         "0.2, After a restart, Boards and lines: pointing a board whose folder moved at the folder it is in now",
         BoardLocateParams, BoardLocateResult;

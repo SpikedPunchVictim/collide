@@ -6,7 +6,7 @@
 //! This module and its children are the only place a Claude environment variable name may appear (the no-names check
 //! of ts-0013-nz): the variables the adapter strips ([`env_strip`]) and the three it sets for context options
 //! ([`launch`]). Also here: the snapshot files the line names ([`snapshot`]) and the user's own hooks and settings
-//! `env` a phase loads ([`user_config`]).
+//! `env` a phase loads ([`user_config`]), and the probe that asks whether `claude` is logged in ([`auth_status`]).
 //!
 //! | tag | where | what it does |
 //! |---|---|---|
@@ -29,6 +29,7 @@ use collide_core::agent::{
     SystemPrompt, UsageQuality, UsageReport, UsageScope,
 };
 
+pub mod auth_status;
 pub mod instructions;
 pub mod launch;
 pub mod session;

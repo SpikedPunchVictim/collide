@@ -2,7 +2,8 @@
 
 /**
  * `board.open` params. `root` is any folder in the repo or its root. `init_git` says yes to `git init` when the
- * folder is not a repo (0.11 offers it).
+ * folder is not in a repo (0.11 offers it): the daemon runs it there and opens the folder. In a repo it does nothing
+ * more.
  */
 export interface BoardOpenParams {
   init_git?: boolean

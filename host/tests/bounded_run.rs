@@ -1,7 +1,8 @@
 //! `run_bounded` (ts-0068-wx): a process with more input than a pipe holds still ends, and its timeout still holds.
-//! A pipe that is not read to its end in time is flagged cut (ts-0154-gr).
+//! A pipe that is not read to its end in time is flagged cut (ts-0154-gr). A run in its own group ends the children it
+//! started when it is cut (ts-0192-es).
 
-use collide_host::bounded_run::run_bounded;
+use collide_host::bounded_run::{run_bounded, run_bounded_in_group};
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -113,6 +114,50 @@ fn a_stderr_a_grandchild_holds_open_is_flagged_cut_and_stdout_is_not() {
 #[test]
 fn a_run_whose_pipes_close_has_neither_pipe_flagged() {
     let run = run_bounded(
+        shell("echo out\necho err >&2"),
+        None,
+        Duration::from_secs(20),
+    )
+    .unwrap();
+    assert_eq!(run.code, Some(0));
+    assert!(!run.stdout_cut && !run.stderr_cut);
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "out\n");
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "err\n");
+}
+
+#[test]
+fn a_run_in_its_own_group_that_times_out_ends_the_children_it_started_too() {
+    let root = TempRoot::new();
+    let pid_file = root.join("pid");
+    let mut grandchild = Grandchild::new(pid_file.clone());
+    // The shell starts a sleeper that holds both pipes, and waits for it; neither would end within the timeout.
+    let body = format!("sleep 30 &\necho $! > {}\nwait", pid_file.display());
+    let started = Instant::now();
+    let run = std::thread::spawn(move || {
+        run_bounded_in_group(shell(&body), None, Duration::from_secs(5)).map(|_| ())
+    });
+    // The sleeper's pid is read while it runs, so its start time is kept and a reused pid is never signalled.
+    let pid = grandchild.pid(Duration::from_secs(30));
+    let error = run
+        .join()
+        .unwrap()
+        .expect_err("a run past its time is an error");
+    let waited = started.elapsed();
+    assert!(error.contains("did not end within"), "{error}");
+    common::wait_until(
+        "the sleeper to end with the shell",
+        Duration::from_secs(10),
+        || !common::pid_alive(pid),
+    );
+    assert!(
+        waited < Duration::from_secs(25),
+        "the sleeper held the run for {waited:?}"
+    );
+}
+
+#[test]
+fn a_run_in_its_own_group_that_ends_in_time_answers_as_run_bounded_does() {
+    let run = run_bounded_in_group(
         shell("echo out\necho err >&2"),
         None,
         Duration::from_secs(20),
