@@ -7,7 +7,11 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 31.** Revision 31 lets a saved view's name hold spaces. A view keeps the words the person typed
+**Status: revision 32.** Revision 32 opens a window on the board the person last opened or picked, not the first
+board in the list, at start, on a reload and in and out of Start with defaults, so Reset… acts on the board the person
+was on (Stage 6a, Line selector; `ts-0218-sc` after `ts-0217-dy`; owner, 2026-11-26). The agent's run of `ts-0197-uj`
+found the first board opening.
+Revision 31 lets a saved view's name hold spaces. A view keeps the words the person typed
 as its name, and Collide makes its file name from them (`Slow spots` in `slow-spots.yaml`), as the plan's view example
 always had it (Stage 4, Views; Stage 6a, `ts-0217-dy` after `ts-0215-gt`; owner, 2026-11-26). The S6 smoke run found
 the refusal (`ts-0196-uw`).
@@ -4913,6 +4917,10 @@ note; the look (colour, shading, spacing) is taken from the mock, not from this 
 - **Line selector** (0.11): every open board with its default line, at the top left beside the view picker
   (note 1). Switching swaps views and workflows in place and stops nothing. A missing board's row says "folder not
   found" (note 15).
+  - **The board a window opens on** (revision 32; owner, 2026-11-26): the one last opened or picked, in any window.
+    The daemon records each pick; a pick in Start with defaults is not recorded, since the mode saves nothing. A
+    window opens on it at start, on a reload and in and out of Start with defaults, so Reset… acts on that board
+    (`ts-0218-sc`).
 - **Settings** (note 12): one table. Each key shows its effective value and its layer as a badge: Default, You or
   This repo (0.7); a value the repo overrides shows beside it, struck out. Secrets show Set or Not set, never the
   value, and are set into the keychain from here. The Agents page is part of it (6b).
@@ -4989,13 +4997,13 @@ from phase heads and from commits; the filter fold and the id peek in a browser;
 fixture, per connection, and Reset's move. The epics strip in a browser over a board of 50 epics: its order, find, a
 pick and a funnel (revision 30).
 Planning: planning-view counts against the CLI; the branch-only chip.
-**Status**: In Progress; `ts-0179-ke` to `ts-0196-uw`, `ts-0215-gt` and `ts-0216-ve` are done. Split into `ts-0179-ke`
-to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`, built one at a time in id order (part L), with
-`ts-0216-ve` (revision 30) between `ts-0190-tz` and `ts-0191-nv`, `ts-0215-gt` (revision 29) after `ts-0196-uw`, and
-`ts-0217-dy` (revision 31) after `ts-0215-gt`; `ts-0197-uj` is last. It runs after `ts-0178-fw` and before Stage 5.
-Nothing in it runs a real `claude`. The owner's midway look is `ts-0185-ge`; the S6 walkthrough and the bundled-app
-checks are the owner's, in `ts-0197-uj`. New dependencies (owner, 2026-11-24): `react-markdown` 10.1.0 and `remark-gfm`
-4.0.1 (`ts-0183-ee`), `tauri-plugin-dialog` 2.x (`ts-0191-nv`).
+**Status**: In Progress; `ts-0179-ke` to `ts-0196-uw`, `ts-0215-gt`, `ts-0216-ve` and `ts-0217-dy` are done. Split into
+`ts-0179-ke` to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`, built one at a time in id order (part L),
+with `ts-0216-ve` (revision 30) between `ts-0190-tz` and `ts-0191-nv`, `ts-0215-gt` (revision 29) after `ts-0196-uw`,
+and `ts-0217-dy` (revision 31) after `ts-0215-gt`, and `ts-0218-sc` (revision 32) after `ts-0217-dy`; `ts-0197-uj` is
+last. It runs after `ts-0178-fw` and before Stage 5. Nothing in it runs a real `claude`. The owner's midway look is
+`ts-0185-ge`; the S6 walkthrough and the bundled-app checks are the owner's, in `ts-0197-uj`. New dependencies (owner,
+2026-11-24): `react-markdown` 10.1.0 and `remark-gfm` 4.0.1 (`ts-0183-ee`), `tauri-plugin-dialog` 2.x (`ts-0191-nv`).
 
 ### Stage 6b: The in-app agent
 
