@@ -206,6 +206,24 @@ fn init_copies_the_saved_views_of_this_board_byte_for_byte_and_leaves_the_origin
 }
 
 #[test]
+fn a_view_saved_as_slow_spots_is_shared_under_its_made_file_name_with_its_name_kept() {
+    let fixture = Fixture::new();
+    let board = fixture.board();
+    let text = "name: Slow spots\ninclude: [plan:1]\n";
+    personal_view(&fixture, &board, "slow-spots.yaml", text);
+    let result = init(&fixture, &board, false).unwrap();
+    assert!(
+        result
+            .files
+            .contains(&".collide/views/slow-spots.yaml".to_string()),
+        "{:?}",
+        result.files
+    );
+    let copy = fixture.repo.work().join(".collide/views/slow-spots.yaml");
+    assert_eq!(fs::read_to_string(copy).unwrap(), text);
+}
+
+#[test]
 fn another_boards_views_a_note_and_a_link_are_not_copied() {
     let fixture = Fixture::new();
     let board = fixture.board();

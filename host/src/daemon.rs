@@ -157,8 +157,9 @@ use crate::store::{Store, StoreError};
 use crate::supervisor::SupervisorPolicy;
 use crate::task_changes;
 use crate::views::{
-    BeforeParse, Loaded, Lookup, SaveError, ViewCache, builtin_candidates, find_view,
-    pack_candidates, personal_candidates, personal_dir, repo_candidates, repo_dir, save_view,
+    BeforeParse, Loaded, Lookup, SaveError, ViewCache, builtin_candidates, check_view_name,
+    find_view, pack_candidates, personal_candidates, personal_dir, repo_candidates, repo_dir,
+    save_view,
 };
 use crate::workspace::Git;
 use crate::write_guard::{
@@ -3810,10 +3811,10 @@ fn view_entry(
     entry
 }
 
-/// `task.save_view` (ts-0119-tj): Save as View. The view is checked as a load checks it, and its name must be a safe
-/// file name. The repo's file goes below the line's Collide folder, in the working tree, and the personal one in the
-/// board's folder of the user's settings. An existing file is refused unless `overwrite`. Nothing is committed. A run's
-/// agent may not save one.
+/// `task.save_view` (ts-0119-tj, ts-0217-dy): Save as View. The view is checked as a load checks it. Its name is the
+/// words typed ([`check_view_name`]) and its file name is made from them. The repo's file goes below the line's Collide
+/// folder, in the working tree, and the personal one in the board's folder of the user's settings. A view of the same
+/// name is refused unless `overwrite`. Nothing is committed. A run's agent may not save one.
 fn task_save_view(
     shared: &Shared,
     session: &Session,
@@ -3823,6 +3824,9 @@ fn task_save_view(
     let params: TaskSaveViewParams = read_params("task.save_view", params)?;
     let root = board_root(shared, &params.board)?;
     let service = corpus_of(shared, &params.board, &root)?;
+    // The name first, so its refusal says what to change before any other check speaks.
+    check_view_name(&params.view.name)
+        .map_err(|message| RpcError::new(code::INVALID_PARAMS, message))?;
     let tasks = service.read(|corpus| corpus.rows().len());
     shared
         .views

@@ -22,15 +22,17 @@
 //! again only when the board's corpus has changed ([`ViewCache`]), not at each call.
 //!
 //! **Writing.** [`save_view`] writes one file, atomically, and never commits it. The repo's file lands in the
-//! working tree, and the line has it once the person commits it.
+//! working tree, and the line has it once the person commits it. A view's name is the words typed
+//! ([`check_view_name`]); its file name is made from them ([`view_file_stem`]), unless a file of the folder already
+//! holds that name.
 
 use crate::atomic_write::write_atomically;
 use crate::board_lines::SourceLine;
 use crate::board_load::{PackOrigin, ViewFile};
+use crate::git_fetch::fnv1a;
 use crate::user_packs::UserScope;
 use collide_core::corpus::Corpus;
 use collide_core::owner::{TrustState, ViewSource};
-use collide_core::resolve::is_safe_token;
 use collide_core::view::View;
 use collide_core::view_builtin::BuiltinView;
 use collide_core::view_eval::{
@@ -437,14 +439,20 @@ impl Lookup {
         match self {
             Lookup::Missing { name, names } => format!(
                 "the board has no view {name:?}; its views are: {}",
-                names.join(", ")
+                quoted(names)
             ),
             Lookup::Ambiguous { name, names } => format!(
                 "more than one view is called {name:?}: say which with its full name: {}",
-                names.join(", ")
+                quoted(names)
             ),
         }
     }
+}
+
+/// The names, each in quotes, so a name with a space reads as one name.
+fn quoted(names: &[String]) -> String {
+    let names: Vec<String> = names.iter().map(|name| format!("{name:?}")).collect();
+    names.join(", ")
 }
 
 /// The view `name` names. The whole name first. Then the part after the last `/` of a pack view's name: one view with
@@ -506,8 +514,107 @@ pub enum SaveError {
     Failed(String),
 }
 
-/// Writes `view` as `<folder>/<name>.yaml`, atomically, with `mode`, and returns the path. The name is a safe token
-/// (0.5), so it cannot leave `folder`. An existing file is replaced only with `overwrite`. Nothing is committed.
+/// The picker's name for the whole board. It is not a view, so no view takes it (`app/src/field/ViewPicker.tsx`).
+const ALL_TASKS: &str = "All tasks";
+
+/// The longest view name, in characters, and the longest file name made from one (before `.yaml`).
+const LONGEST: usize = 64;
+
+/// The name a person typed, as the view's name: the words with spaces at the ends trimmed, or what to change. A name is
+/// 1 to 64 characters with no control character and no `/` (which marks a pack's view), and is not a built-in's name or
+/// the picker's All tasks, matched without regard to case. A name with a space in it is a name.
+pub fn check_view_name(typed: &str) -> Result<String, String> {
+    let name = typed.trim();
+    if name.is_empty() {
+        return Err("the view needs a name: type a word or two for it".to_string());
+    }
+    let length = name.chars().count();
+    if length > LONGEST {
+        return Err(format!(
+            "the view name is {length} characters: use {LONGEST} or fewer"
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(format!(
+            "the view name {name:?} has a control character (a tab or a line break, for one): leave it out"
+        ));
+    }
+    if name.contains('/') {
+        return Err(format!(
+            "the view name {name:?} has a `/`, which marks a pack's view (`collide/plan/spikes`): leave it out"
+        ));
+    }
+    if BuiltinView::ALL
+        .iter()
+        .any(|view| view.name().eq_ignore_ascii_case(name))
+    {
+        return Err(format!(
+            "`{}` is a built-in view, and no view takes its name: use another name",
+            name.to_lowercase()
+        ));
+    }
+    if name.eq_ignore_ascii_case(ALL_TASKS) {
+        return Err(format!(
+            "`{ALL_TASKS}` is the whole board in the picker, not a view: use another name"
+        ));
+    }
+    Ok(name.to_string())
+}
+
+/// The file name, without `.yaml`, that a view named `name` is saved in: lowercased, each run of characters other than
+/// `a-z`, `0-9`, `.` and `_` made one `-`, `-` and `.` trimmed from the ends, and cut to 64 characters, with a `-` or
+/// `.` the cut ends on trimmed. A run of dots is one dot, so the result never holds `..`. A name that leaves nothing
+/// (one in another script) is `view-` and eight hex digits of a hash of it. The result is always a safe token
+/// (`collide_core::resolve::is_safe_token`).
+pub fn view_file_stem(name: &str) -> String {
+    let mut made = String::new();
+    for found in name.to_lowercase().chars() {
+        let kept =
+            found.is_ascii_lowercase() || found.is_ascii_digit() || matches!(found, '.' | '_');
+        let piece = if kept { found } else { '-' };
+        if matches!(piece, '-' | '.') && made.ends_with(piece) {
+            continue;
+        }
+        made.push(piece);
+    }
+    let cut: String = made
+        .trim_matches(['-', '.'])
+        .chars()
+        .take(LONGEST)
+        .collect();
+    // The cut can end on a `-` or a `.`, which are trimmed again.
+    let stem = cut.trim_end_matches(['-', '.']);
+    if stem.is_empty() {
+        return format!("view-{:08x}", fnv1a(name));
+    }
+    stem.to_string()
+}
+
+/// The file of `folder` that holds a view named exactly `name`, by file name order as the views are listed: the first
+/// regular `.yaml` file that parses as a view of that name. A folder that is not there holds none.
+fn file_holding(folder: &Path, name: &str) -> Result<Option<String>, SaveError> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(SaveError::Failed(format!("{}: {error}", folder.display()))),
+    };
+    let mut files: Vec<String> = entries
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|file| file.ends_with(".yaml"))
+        .collect();
+    files.sort();
+    Ok(files.into_iter().find(|file| {
+        let path = folder.join(file);
+        fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file())
+            && load_yaml_file::<View>(&path).is_ok_and(|held| held.name == name)
+    }))
+}
+
+/// Writes `view` atomically, with `mode`, and returns the path. The name is the words typed ([`check_view_name`]).
+/// The file is the one of `folder` that holds a view of that exact name, whatever its file name; otherwise the file
+/// name made from the name ([`view_file_stem`]). The file of a view of that name is replaced only with `overwrite`. A
+/// file at the made name that holds another name, or does not parse, is never replaced: the name is refused, so two
+/// names that make one file name ("Slow Spots" beside "Slow spots") are not two views. Nothing is committed.
 /// Each folder from `base` (not itself checked) down to `folder` that exists must be a real folder, and the file, if
 /// there, a regular one: a link would make the write land outside `base`, and a repository can commit one.
 pub fn save_view(
@@ -517,29 +624,47 @@ pub fn save_view(
     overwrite: bool,
     mode: u32,
 ) -> Result<PathBuf, SaveError> {
-    if !is_safe_token(&view.name) {
-        return Err(SaveError::Invalid(format!(
-            "the view name {:?} cannot be a file name: use 1 to 64 letters, digits, `.`, `_` or `-`, \
-             not starting with `-` or `.`",
-            view.name
-        )));
-    }
-    let text = to_yaml(view, "")
+    let name = check_view_name(&view.name).map_err(SaveError::Invalid)?;
+    let view = View {
+        name: name.clone(),
+        ..view.clone()
+    };
+    let text = to_yaml(&view, "")
         .map_err(|error| SaveError::Failed(format!("the view cannot be written: {error}")))?;
-    let file = format!("{}.yaml", view.name);
+    let made = format!("{}.yaml", view_file_stem(&name));
+    check_not_links(base, folder, &folder.join(&made))?;
+    let held = file_holding(folder, &name)?;
+    let file = held.clone().unwrap_or(made);
     let path = folder.join(&file);
     check_not_links(base, folder, &path)?;
-    if !overwrite && fs::symlink_metadata(&path).is_ok() {
-        return Err(SaveError::Exists(format!(
-            "{} is already there: save with overwrite to replace it",
-            path.display()
-        )));
+    if fs::symlink_metadata(&path).is_ok() {
+        if held.is_none() {
+            return Err(SaveError::Exists(clash(&path, &file)));
+        }
+        if !overwrite {
+            return Err(SaveError::Exists(format!(
+                "{} is already there: save with overwrite to replace it",
+                path.display()
+            )));
+        }
     }
     fs::create_dir_all(folder)
         .map_err(|error| SaveError::Failed(format!("{}: {error}", folder.display())))?;
     write_atomically(folder, &file, text.as_bytes(), mode, |file| file)
         .map_err(|error| SaveError::Failed(error.to_string()))?;
     Ok(path)
+}
+
+/// Why the file at the made name is not this view's, in the person's words: what it holds, and to use another name.
+fn clash(path: &Path, file: &str) -> String {
+    let holds = match load_yaml_file::<View>(path) {
+        Ok(other) => format!("the view {:?}", other.name),
+        Err(_) => "something that is not a view".to_string(),
+    };
+    format!(
+        "{file} is made from this name and already holds {holds}: save the view under another name ({})",
+        path.display()
+    )
 }
 
 /// Refuses a folder between `base` and `folder`, or the file `path`, that is there and is a link or the wrong kind.

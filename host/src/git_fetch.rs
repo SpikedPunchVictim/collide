@@ -41,8 +41,9 @@ const REFSPECS: [&str; 3] = [
     "+HEAD:refs/collide/head",
 ];
 
-/// FNV-1a, 32 bits, which has no seed: the same URL gives the same name in every build and on every machine.
-fn fnv1a(text: &str) -> u32 {
+/// FNV-1a, 32 bits, which has no seed: the same URL gives the same name in every build and on every machine. A view's
+/// file name made from a name that leaves nothing uses it too (`crate::views::view_file_stem`).
+pub(crate) fn fnv1a(text: &str) -> u32 {
     text.bytes().fold(0x811c_9dc5, |hash, byte| {
         (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
     })

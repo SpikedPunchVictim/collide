@@ -75,9 +75,10 @@ collide tasks: list the board's items (epics, tasks, proposals, spikes and quest
 collide tasks --ready: the members of the built-in `ready` view: the items that can be started now. A blocked-by cycle
   and a blocked-by target that is no item keep their items from being ready and are reported on stderr.
 collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a
-  pack's), in the order the daemon lists them. --ready and --kind apply on top. A view with an error of its own lists
-  no task, prints the error and exits 10. Tasks a view could not check, and problems in the parts of its items, are
-  counted on stderr, and the rest are listed. An unknown view exits 3 and names the board's views.
+  pack's), in the order the daemon lists them. Quote a name that has a space: --view 'Slow spots'. --ready and
+  --kind apply on top. A view with an error of its own lists no task, prints the error and exits 10. Tasks a view
+  could not check, and problems in the parts of its items, are counted on stderr, and the rest are listed. An unknown
+  view exits 3 and names the board's views, each in quotes.
 collide tasks --checkout <path>: only the tasks that have a copy in that checkout, which must be an entry of `git
   worktree list` (anything else exits 2). It takes --view too.
 collide task <id>: show one item: its title, kind, status, why it is or is not ready, its epic, the fields its source

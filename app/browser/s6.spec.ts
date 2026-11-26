@@ -11,11 +11,10 @@
 //   Stage E-07 chip the Epic filter: the funnel on the epic's card in the strip, or the Epic box in the filter bar.
 //   Ready chip      the Where it stands chip Ready (the category `ready`).
 //   perf chip       the Labels chip perf.
-//   Save as view    Save as a view… in the filter bar, with the name; a view of the person's own. A view's name is
-//                   its file name (letters, digits, `.`, `_`, `-`), so the card's "Slow spots" is refused, with the
-//                   reason, and the run goes on with "Slow-spots".
-//   S2.detect       a saved view named Slow spots (or Slow-spots) whose members, read with `task.list` and the view's
-//                   name, are the five tasks of `S2_TARGET`.
+//   Save as view    Save as a view… in the filter bar, with the name; a view of the person's own. The name is kept as
+//                   typed, spaces included ("Slow spots"), and the host makes the file name (ts-0217-dy).
+//   S2.detect       a saved view named exactly Slow spots whose members, read with `task.list` and the view's name,
+//                   are the five tasks of `S2_TARGET`.
 import { type Page } from '@playwright/test'
 import { cpSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -35,9 +34,8 @@ const S1_TASK = 'Add a --quiet flag to the CLI'
 
 /** `S2_TARGET` of S6's `src/scenarios.ts`: the epic E-07 tasks that are ready and carry the label perf. */
 const S2_TARGET = ['T-07-001', 'T-07-004', 'T-07-007', 'T-07-010', 'T-07-013'].map((id) => `s6:${id}`)
-/** The card's name, which the host refuses as a view name (it has a space), and the name that stands for it. */
-const CARD_NAME = 'Slow spots'
-const SLOW_SPOTS = 'Slow-spots'
+/** The card's name for the view. */
+const SLOW_SPOTS = 'Slow spots'
 
 /** Prints the time from `startedAt` to now beside the limit. The time is never asserted. */
 function report(scenario: keyof typeof LIMIT, startedAt: number) {
@@ -65,17 +63,11 @@ async function viewNames(world: World, board: string): Promise<string[]> {
   return answer.views.map((each) => each.view.name)
 }
 
-/**
- * S6's `S2.detect`: a view named Slow spots (any case, trimmed) whose members are exactly the five targets. A hyphen
- * may stand for the space, because a view's name cannot hold one.
- */
+/** S6's `S2.detect`: a view named exactly Slow spots whose members are exactly the five targets. */
 async function slowSpotsDetected(world: World, board: string): Promise<boolean> {
-  const names = (await viewNames(world, board)).filter((name) => /^slow[ -]spots$/i.test(name.trim()))
-  for (const name of new Set(names)) {
-    const found = await members(world, board, name)
-    if (found.length === S2_TARGET.length && found.every((key, at) => key === [...S2_TARGET].sort()[at])) return true
-  }
-  return false
+  if (!(await viewNames(world, board)).includes(SLOW_SPOTS)) return false
+  const found = await members(world, board, SLOW_SPOTS)
+  return found.length === S2_TARGET.length && found.every((key, at) => key === [...S2_TARGET].sort()[at])
 }
 
 /**
@@ -174,12 +166,6 @@ test('S6 scenario 2: Performance, Ready and perf, saved as Slow spots, is the fi
   await expect(page.getByText('5 tasks', { exact: true })).toBeVisible()
   await bar(page).getByRole('button', { name: 'Save as a view…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Save as a view' })
-  // The card's own words are refused: a name is a file name. The popover says why, and nothing is saved.
-  await dialog.getByRole('textbox', { name: 'Name' }).fill(CARD_NAME)
-  await dialog.getByRole('button', { name: 'Save view' }).click()
-  await expect(dialog.getByRole('alert')).toContainText('cannot be a file name')
-  expect(await viewNames(world, board)).not.toContain(CARD_NAME)
-  expect(await slowSpotsDetected(world, board)).toBe(false)
   await dialog.getByRole('textbox', { name: 'Name' }).fill(SLOW_SPOTS)
   await dialog.getByRole('button', { name: 'Save view' }).click()
   await expect(page.getByRole('heading', { name: SLOW_SPOTS })).toBeVisible()

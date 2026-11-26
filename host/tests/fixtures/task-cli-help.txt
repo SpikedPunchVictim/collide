@@ -15,9 +15,10 @@ Each waits for the daemon's full listing of the board. After a restart that can 
 half a second is said once on stderr.
 
 collide tasks --view <name>: the members of the board's view of that name (the person's, the repository's or a
-  pack's), in the order the daemon lists them. --ready and --kind apply on top. A view with an error of its own lists
-  no task, prints the error and exits 10. Tasks a view could not check, and problems in the parts of its items, are
-  counted on stderr, and the rest are listed. An unknown view exits 3 and names the board's views.
+  pack's), in the order the daemon lists them. Quote a name that has a space: --view 'Slow spots'. --ready and
+  --kind apply on top. A view with an error of its own lists no task, prints the error and exits 10. Tasks a view
+  could not check, and problems in the parts of its items, are counted on stderr, and the rest are listed. An unknown
+  view exits 3 and names the board's views, each in quotes.
 
 collide tasks --checkout <path>: only the tasks that have a copy in that checkout, which must be an entry of `git
   worktree list` (anything else exits 2). It takes --view too.

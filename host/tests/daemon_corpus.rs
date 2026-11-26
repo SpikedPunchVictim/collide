@@ -3103,7 +3103,7 @@ fn a_run_agent_may_not_make_a_folder_a_repository_and_nothing_is_made() {
 }
 
 #[test]
-fn save_view_refuses_an_invalid_view_an_unsafe_name_and_an_overwrite_with_no_flag() {
+fn save_view_refuses_an_invalid_view_a_name_that_cannot_be_a_view_and_an_overwrite_with_no_flag() {
     let rig = rig();
     let board = rig.board_with(&[&FILES], "");
     rig.settled(&board);
@@ -3117,8 +3117,9 @@ fn save_view_refuses_an_invalid_view_an_unsafe_name_and_an_overwrite_with_no_fla
             json!({ "name": "bad", "where": "tasks.size() > 0" }),
             json!({ "name": "../evil" }),
             json!({ "name": "a/b" }),
-            json!({ "name": "has space" }),
-            json!({ "name": ".hidden" }),
+            json!({ "name": "has/slash" }),
+            json!({ "name": "Ready" }),
+            json!({ "name": "   " }),
             json!({ "name": "" }),
         ] {
             let refused = rig
@@ -3143,6 +3144,118 @@ fn save_view_refuses_an_invalid_view_an_unsafe_name_and_an_overwrite_with_no_fla
         assert_eq!(fs::read_to_string(&first.path).unwrap(), before);
         rig.save_view(&board, changed, target, true).unwrap();
         assert_ne!(fs::read_to_string(&first.path).unwrap(), before);
+    }
+}
+
+/// The person's "Slow spots": a name with a space, which `task.save_view` keeps as typed (ts-0217-dy).
+fn slow_spots() -> Value {
+    json!({ "name": "Slow spots", "where": "status == 'todo'" })
+}
+
+#[test]
+fn a_view_saved_as_slow_spots_is_listed_and_listed_through_under_that_name_and_its_file_is_slow_spots_yaml()
+ {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    let root = rig.root();
+    rig.task(&root, "1.json", "1", "todo", "v1");
+    rig.settled(&board);
+
+    let result = rig
+        .save_view(&board, slow_spots(), "personal", false)
+        .unwrap();
+
+    let file = rig.personal_dir(&board).join("slow-spots.yaml");
+    assert_eq!(PathBuf::from(&result.path), file);
+    let written: View = load_yaml_file(&file).unwrap();
+    assert_eq!(written.name, "Slow spots");
+    let views = rig.views(&board);
+    assert_eq!(entry(&views, "Slow spots").source, ViewSource::Personal {});
+    let listed = rig.named(&board, "Slow spots", json!({})).unwrap();
+    assert_eq!(listed.view.expect("a view report").name, "Slow spots");
+    assert!(!listed.tasks.is_empty(), "the view lists its task");
+}
+
+#[test]
+fn a_view_saved_to_the_repo_as_slow_spots_is_the_view_of_that_name_once_committed() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+
+    let result = rig.save_view(&board, slow_spots(), "repo", false).unwrap();
+
+    let file = rig.root().join(".collide/views/slow-spots.yaml");
+    assert_eq!(PathBuf::from(&result.path), file);
+    rig.f().commit();
+    rig.trust(&board);
+    let views = rig.views(&board);
+    assert_eq!(entry(&views, "Slow spots").source, ViewSource::Repo {});
+}
+
+#[test]
+fn save_view_refuses_slow_spots_again_and_slow_spots_in_another_case_and_overwrite_replaces_the_same_file()
+ {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    let first = rig
+        .save_view(&board, slow_spots(), "personal", false)
+        .unwrap();
+    let folder = rig.personal_dir(&board);
+
+    let again = rig
+        .save_view(&board, slow_spots(), "personal", false)
+        .unwrap_err();
+    let other_case = rig
+        .save_view(
+            &board,
+            json!({ "name": "Slow Spots", "where": "true" }),
+            "personal",
+            true,
+        )
+        .unwrap_err();
+
+    assert_eq!(again.code, -32011, "{}", again.message);
+    assert_eq!(other_case.code, -32011, "{}", other_case.message);
+    assert!(
+        other_case.message.contains("another name"),
+        "{}",
+        other_case.message
+    );
+    let mut changed = slow_spots();
+    changed["where"] = json!("true");
+    let replaced = rig.save_view(&board, changed, "personal", true).unwrap();
+    assert_eq!(replaced.path, first.path);
+    let files: Vec<_> = fs::read_dir(folder).unwrap().collect();
+    assert_eq!(files.len(), 1, "no second file");
+}
+
+#[test]
+fn save_view_says_what_to_change_for_a_name_with_a_slash_or_a_built_ins_name_or_only_spaces() {
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+    for (name, says) in [
+        ("a/b", "/"),
+        ("Ready", "built-in"),
+        ("all tasks", "All tasks"),
+        ("   ", "name"),
+    ] {
+        let refused = rig
+            .save_view(&board, json!({ "name": name }), "personal", false)
+            .unwrap_err();
+
+        assert_eq!(refused.code, -32602, "{name:?}");
+        assert!(
+            refused.message.contains(says),
+            "{name:?}: {}",
+            refused.message
+        );
+        assert!(
+            refused.message.contains("name"),
+            "{name:?}: {}",
+            refused.message
+        );
     }
 }
 

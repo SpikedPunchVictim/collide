@@ -840,6 +840,31 @@ fn a_view_name_no_view_has_exits_3_and_lists_the_full_names() {
 }
 
 #[test]
+fn a_view_named_with_a_space_is_listed_by_its_quoted_name_and_an_unknown_name_lists_the_names_quoted()
+ {
+    let rig = Rig::with_files(&[
+        (
+            ".collide/planning/spikes/sp-0001-aa-one/record.md",
+            spike_text("sp-0001-aa", "# Spike\n"),
+        ),
+        (
+            ".collide/views/slow-spots.yaml",
+            "name: Slow spots\ninclude: [plan:sp-0001-aa]\n".to_string(),
+        ),
+    ]);
+
+    let (code, out, err) = rig.cli(&["tasks", "--view", "Slow spots"]);
+
+    assert_eq!((code, err.as_str()), (exit::OK, ""));
+    assert_eq!(first_words(&out), ["plan:sp-0001-aa"]);
+    let (code, out, err) = rig.cli(&["tasks", "--view", "slow spots"]);
+    assert_eq!((code, out.as_str()), (exit::ID, ""));
+    assert!(err.contains("\"Slow spots\""), "{err}");
+    assert!(err.contains("\"ready\""), "{err}");
+    assert!(err.contains("\"collide/plan/spikes\""), "{err}");
+}
+
+#[test]
 fn the_built_in_ready_view_lists_what_the_ready_flag_lists() {
     let rig = Rig::new();
 
