@@ -33,7 +33,7 @@ use collide_host::store::Store;
 use collide_host::supervisor::{BackoffPolicy, SupervisorPolicy};
 use common::config_fixture::{CapturedLog, Fixture};
 use common::git_repo::{GitRepo, git_command};
-use common::{TempRoot, node_missing_message, pid_alive, wait_until};
+use common::{TempRoot, clean_shell, node_missing_message, pid_alive, wait_until};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -52,20 +52,6 @@ const CANARY: &str = "canary-3b7d1c-never-written";
 const PROVIDER: &str = include_str!("fixtures/fake_pack_provider.mjs");
 
 // ---- the rig ------------------------------------------------------------------------------------------------------
-
-/// A login shell that prints a cleared environment, as the capture asks: `HOME` and `COLLIDE_DAEMON_ROOT` of the
-/// test's root and the `PATH` the tests run with, and nothing else of the test process's own.
-fn clean_shell(root: &Path) -> String {
-    let path = std::env::var("PATH").expect("the tests run with a PATH");
-    let home = root.display();
-    let script = format!(
-        "#!/bin/sh\nexec /usr/bin/env -i HOME='{home}' COLLIDE_DAEMON_ROOT='{home}' PATH='{path}' /bin/sh -c \"$4\"\n"
-    );
-    let file = root.join("clean-shell");
-    fs::write(&file, script).unwrap();
-    fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    file.to_str().unwrap().to_string()
-}
 
 struct Rig {
     fixture: Fixture,

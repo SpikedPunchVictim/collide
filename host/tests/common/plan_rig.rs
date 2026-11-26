@@ -6,7 +6,7 @@
 //! keychain or a real daemon.
 
 use super::config_fixture::Fixture;
-use super::{Bundle, node_missing_message, wait_until};
+use super::{Bundle, clean_shell, node_missing_message, wait_until};
 use collide_core::owner::{
     BoardTrustParams, BoardTrustResult, BoardTrustReviewParams, BoardTrustReviewResult, RpcError,
     TaskListResult, TrustState,
@@ -21,8 +21,7 @@ use collide_host::pack_location::bundle_sdk;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,19 +35,6 @@ pub fn task(id: &str) -> String {
     format!(
         "---\nid: {id}\nkind: task\nstatus: ready\ntitle: \"Made-up item\"\nowners: []\nlinks: []\n---\n\n## Goal\n"
     )
-}
-
-/// A login shell that prints a cleared environment, as the capture asks.
-pub fn clean_shell(root: &Path) -> String {
-    let path = std::env::var("PATH").expect("the tests run with a PATH");
-    let home = root.display();
-    let script = format!(
-        "#!/bin/sh\nexec /usr/bin/env -i HOME='{home}' COLLIDE_DAEMON_ROOT='{home}' PATH='{path}' /bin/sh -c \"$4\"\n"
-    );
-    let file = root.join("clean-shell");
-    fs::write(&file, script).unwrap();
-    fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    file.to_str().unwrap().to_string()
 }
 
 /// The daemon, and the built bundle whose `collide/plan` pack it runs (the bundle is removed when the rig drops).

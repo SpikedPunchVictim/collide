@@ -28,13 +28,12 @@ use collide_host::run_store::RunLaunch;
 use collide_host::task_cli::{Command, exit, parse_sections, parse_task, parse_tasks};
 use collide_host::task_daemon::run_noticing_after;
 use common::git_repo::{GitRepo, git_command};
-use common::{Bundle, repo_root, wait_until};
+use common::{Bundle, repo_root, wait_until, write_executable};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -307,8 +306,7 @@ fn git_env(root: &Path) -> Vec<(String, String)> {
 /// A login shell that clears the environment, so the daemon's capture never runs the user's own shell.
 fn clean_shell(root: &Path) -> String {
     let shell = root.join("fake-shell");
-    fs::write(&shell, "#!/bin/sh\neval \"$4\"\n").unwrap();
-    fs::set_permissions(&shell, fs::Permissions::from_mode(0o755)).unwrap();
+    write_executable(&shell, "#!/bin/sh\neval \"$4\"\n");
     shell.display().to_string()
 }
 

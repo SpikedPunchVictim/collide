@@ -83,9 +83,11 @@
 //! `run.stop` is [`Phases::stop_run`] ([`crate::stop`]): it answers when the stop is done, with the run's state, the
 //! number of processes signalled and the survivors. A run's agent may stop its own run and no other. When the daemon
 //! itself stops it first ends the environment captures in flight ([`crate::base_env::CaptureSessions`]), so no login
-//! shell outlives it, then ends its watchers and then boots out the launchd job its start recorded
-//! ([`crate::launch::boot_out_recorded_job`], through [`DaemonOptions::launchctl`]); that is the last thing it does,
-//! because booting the job out ends the process. The shims go on.
+//! shell outlives it, and the `claude --version` read in flight ([`crate::bounded_run::GroupSessions`], through
+//! [`crate::claude_versions::ClaudeVersions::end_reads`]), so no `claude` outlives it either. Then it ends its watchers
+//! and then boots out the launchd job its start recorded ([`crate::launch::boot_out_recorded_job`], through
+//! [`DaemonOptions::launchctl`]); that is the last thing it does, because booting the job out ends the process. The
+//! shims go on.
 //!
 //! ## The log
 //!
@@ -1317,6 +1319,8 @@ impl Drop for Daemon {
         self.shared.stop.store(true, Ordering::SeqCst);
         // A capture runs in a session of its own, which nothing else ends: the daemon would leave its shell behind.
         self.shared.captures.end_all();
+        // The same for a `claude --version` in flight, which runs in a group of its own.
+        self.shared.claude.end_reads();
         self.join();
         // The providers of the sources end with the daemon: no child outlives it.
         self.shared.sources.stop();

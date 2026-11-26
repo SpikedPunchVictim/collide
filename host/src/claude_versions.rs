@@ -434,7 +434,14 @@ impl ClaudeVersions {
         })
     }
 
+    /// Ends the version reads in flight and refuses the ones that come after ([`VersionCache::end_reads`]). The daemon
+    /// does this first when it stops, so no `claude --version` outlives it.
+    pub fn end_reads(&self) {
+        self.cache.end_reads();
+    }
+
     pub fn stop(&self) {
+        self.end_reads();
         locked(&self.state).stop = true;
         self.wake.notify_all();
     }

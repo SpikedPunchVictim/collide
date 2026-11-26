@@ -34,6 +34,30 @@ pub fn scratch(name: &str) -> PathBuf {
     Path::new(env!("CARGO_TARGET_TMPDIR")).join(name)
 }
 
+/// Writes an executable as a new file renamed over `path`. An executable rewritten in place, after it ran, can be
+/// killed with SIGKILL when it runs again (macOS 26.3: ten runs in ten); a new file is not. A daemon restarted over
+/// the same root writes its shell again, so the restart tests need this.
+pub fn write_executable(path: &Path, contents: &str) {
+    let name = path.file_name().expect("an executable has a file name");
+    let fresh = path.with_file_name(format!(".{}.new", name.to_string_lossy()));
+    fs::write(&fresh, contents).unwrap();
+    fs::set_permissions(&fresh, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::rename(&fresh, path).unwrap();
+}
+
+/// A login shell that prints a cleared environment, as the capture asks: `HOME` and `COLLIDE_DAEMON_ROOT` of the
+/// test's root and the `PATH` the tests run with, and nothing else of the test process's own.
+pub fn clean_shell(root: &Path) -> String {
+    let path = std::env::var("PATH").expect("the tests run with a PATH");
+    let home = root.display();
+    let script = format!(
+        "#!/bin/sh\nexec /usr/bin/env -i HOME='{home}' COLLIDE_DAEMON_ROOT='{home}' PATH='{path}' /bin/sh -c \"$4\"\n"
+    );
+    let file = root.join("clean-shell");
+    write_executable(&file, &script);
+    file.to_str().unwrap().to_string()
+}
+
 /// The build script rebuilds the SDK's `dist/` in place, so two builds must not overlap.
 static BUILD_LOCK: Mutex<()> = Mutex::new(());
 
@@ -319,6 +343,37 @@ impl Drop for Grandchild {
             unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
         }
     }
+}
+
+/// A `claude` in `dir` whose `--version` writes its pid to `dir/version.pid`, then waits for `dir/release` and prints a
+/// version. It waits for up to 60 s and ends sooner only when something ends it: a test that reads the version of it
+/// and ends the read early has ended it by that. `dir/ran` is written first, so a test sees whether it ever started.
+pub fn claude_waiting_for_release(dir: &Path) {
+    let body = format!(
+        "#!/bin/sh\necho started > '{ran}'\necho $$ > '{pid}'\ni=0\n\
+         while [ ! -f '{release}' ] && [ $i -lt 600 ]; do /bin/sleep 0.1; i=$((i+1)); done\n\
+         echo '2.1.324 (Claude Code)'\n",
+        ran = dir.join("ran").display(),
+        pid = dir.join("version.pid").display(),
+        release = dir.join("release").display(),
+    );
+    let path = dir.join("claude");
+    fs::write(&path, body).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The command lines of the processes whose command line names `root`, from the process table (read only).
+pub fn processes_naming(root: &Path) -> Vec<String> {
+    let listing = Command::new("/bin/ps")
+        .env_clear()
+        .args(["-axo", "pid=,command="])
+        .output()
+        .expect("ps runs");
+    String::from_utf8_lossy(&listing.stdout)
+        .lines()
+        .filter(|line| line.contains(root.to_str().unwrap()))
+        .map(|line| line.trim().to_string())
+        .collect()
 }
 
 /// Sends `signal` to `pid` only when the process there started at `started_us`, so a pid that was reused is never hit.

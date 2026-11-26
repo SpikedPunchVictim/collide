@@ -419,8 +419,9 @@ fn a_reprompt_that_cannot_start_puts_the_item_back_and_the_task_stays_in_review(
         run_get(&mut first.fx, &runs[0]).summary.state,
         RunState::Failed {}
     ));
-    // Once `claude` is back the same item works.
-    fs::rename(&away, &first.fx.claude.path).unwrap();
+    // Once `claude` is back the same item works. It comes back as a new file: an executable moved away and back can be
+    // killed with SIGKILL when it runs again (macOS 26.3; see `common::write_executable`).
+    fs::copy(&away, &first.fx.claude.path).unwrap();
     let second = first.reprompted(WORDS);
     wait_ended(&mut first.fx, &second.run);
     assert_eq!(

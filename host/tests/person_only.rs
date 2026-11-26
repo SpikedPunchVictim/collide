@@ -27,13 +27,12 @@ use collide_host::clock::{Clock, Clocks, Reading, SystemClocks};
 use collide_host::daemon::DaemonOptions;
 use collide_host::owner_client::ClientError;
 use common::config_fixture::Fixture;
-use common::{StopsAtThisTest, node_missing_message, wait_until};
+use common::{StopsAtThisTest, clean_shell, node_missing_message, wait_until};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -86,20 +85,6 @@ impl ProcessTree for CallerTree {
     fn is_app(&self, pid: u32) -> bool {
         (pid == std::process::id() && self.app.load(Ordering::SeqCst)) || self.inner.is_app(pid)
     }
-}
-
-/// A login shell that prints a cleared environment, as the capture asks: `HOME` and `COLLIDE_DAEMON_ROOT` of the
-/// test's root and the `PATH` the tests run with, and nothing else of the test process's own.
-fn clean_shell(root: &Path) -> String {
-    let path = std::env::var("PATH").expect("the tests run with a PATH");
-    let home = root.display();
-    let script = format!(
-        "#!/bin/sh\nexec /usr/bin/env -i HOME='{home}' COLLIDE_DAEMON_ROOT='{home}' PATH='{path}' /bin/sh -c \"$4\"\n"
-    );
-    let file = root.join("clean-shell");
-    fs::write(&file, script).unwrap();
-    fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
-    file.to_str().unwrap().to_string()
 }
 
 fn pack_yaml() -> &'static str {

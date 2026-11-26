@@ -2,7 +2,7 @@
 // settings file of the user's and one of the repo's, in a world of its own (`support/world.ts`). The daemon keeps the
 // secret in memory, as every daemon under a test root does. The secret here is made up and easy to search for: it must
 // be in no text of the page, in no answer of the owner's protocol that the page saw, and in no file of the world.
-import { type Page } from '@playwright/test'
+import { type APIResponse, type Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { expect, test } from './support/fixtures.ts'
@@ -43,19 +43,49 @@ async function openBoard(world: World): Promise<string> {
   return opened.board.id
 }
 
-/** What an answer is recorded as when the page closed before its body was read. */
-const UNREAD = '<unread: the page closed first>'
-
 /**
- * Keeps the answer of every call the page makes to the owner's protocol, as text. An answer that comes after the test
- * has read them all is never awaited, so it must not reject when the page closes; a check asserts that none of the
- * answers it read is `UNREAD`.
+ * Keeps the text of every answer of the owner's protocol that the page got. Each answer is read here, before the page
+ * gets it (`route.fetch`, then `route.fulfill` with the text that was read), so a page that reloads while a body is on
+ * the way cannot make a read fail: the read is not the page's. An answer that cannot be read is not passed on, and is
+ * listed in `unread`, which a check asserts is empty. A call that the page dropped on a reload has no answer to read.
  */
-function recordAnswers(into: Promise<string>[]) {
-  return (page: Page) => {
-    page.on('response', (answer) => {
-      if (new URL(answer.url()).pathname === '/rpc') into.push(answer.text().catch(() => UNREAD))
-    })
+class Answers {
+  readonly texts: string[] = []
+  /** The calls whose answer came and was not read. */
+  readonly unread: string[] = []
+
+  readonly watch = async (page: Page) => {
+    await page.route(
+      (url) => url.pathname === '/rpc',
+      async (route) => {
+        const call = route.request().url()
+        let answer: APIResponse
+        try {
+          answer = await route.fetch()
+        } catch (failure) {
+          // A page that is gone took its call with it. Any other failure is a call with no answer: it is listed.
+          if (!page.isClosed()) this.unread.push(`${call}: ${String(failure)}`)
+          await route.abort().catch(() => undefined)
+          return
+        }
+        let text: string
+        try {
+          text = await answer.text()
+        } catch (failure) {
+          this.unread.push(`${call}: ${String(failure)}`)
+          await route.abort().catch(() => undefined)
+          return
+        }
+        this.texts.push(text)
+        // The page may have reloaded meanwhile; the text is kept either way.
+        await route.fulfill({ response: answer, body: text }).catch(() => undefined)
+      },
+    )
+  }
+
+  /** Every answer so far, as one text. */
+  all(): string {
+    return this.texts.join('\n')
   }
 }
 
@@ -97,8 +127,8 @@ test('Packs lists the board\'s packs, and a secret is set, then reported Set, an
 }) => {
   const world = await start(startWorld)
   const board = await openBoard(world)
-  const answers: Promise<string>[] = []
-  const page = await openPage(world, recordAnswers(answers))
+  const answers = new Answers()
+  const page = await openPage(world, answers.watch)
   await openSettings(page)
 
   await page.getByRole('tab', { name: 'Packs' }).click()
@@ -126,7 +156,7 @@ test('Packs lists the board\'s packs, and a secret is set, then reported Set, an
   const entry = read.entries.find((each) => each.key === 'ferry.notifyHook')
   expect(entry?.is_set).toBe(true)
   expect(entry?.value).toBeUndefined()
-  answers.push(Promise.resolve(JSON.stringify(read)))
+  answers.texts.push(JSON.stringify(read))
 
   // A page that is loaded again says Set too, and shows no value.
   await page.reload()
@@ -134,8 +164,8 @@ test('Packs lists the board\'s packs, and a secret is set, then reported Set, an
   await page.getByRole('tab', { name: 'Secrets' }).click()
   await expect(page.getByRole('row').filter({ hasText: 'notifyHook' })).toContainText('Set')
 
-  const seen = (await Promise.all(answers)).join('\n')
-  expect(seen).not.toContain(UNREAD)
+  const seen = answers.all()
+  expect(answers.unread).toEqual([])
   expect(seen).toContain('"is_set":true')
   expect(seen).not.toContain(SECRET)
   expect(await page.evaluate(() => document.documentElement.outerHTML + location.href)).not.toContain(SECRET)
@@ -149,10 +179,13 @@ test('a secret the daemon refuses shows the daemon\'s words, clears the box, and
 }) => {
   const world = await start(startWorld)
   await openBoard(world)
-  const answers: Promise<string>[] = []
-  const page = await openPage(world, recordAnswers(answers))
+  const answers = new Answers()
+  const page = await openPage(world, answers.watch)
   await openSettings(page)
   await page.getByRole('tab', { name: 'Secrets' }).click()
+  // The page reads the settings once, when it opens. A file that is broken before that read is answered gives the
+  // page the daemon's error and no row, so the file is broken only once the row is there.
+  await expect(page.getByRole('row').filter({ hasText: 'notifyHook' })).toContainText('Not set')
 
   // The user's file stops reading after the page has loaded, so the daemon refuses the call.
   writeUser(world, 'config: [unclosed\n')
@@ -166,8 +199,8 @@ test('a secret the daemon refuses shows the daemon\'s words, clears the box, and
   await window.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.getByRole('row').filter({ hasText: 'notifyHook' })).toContainText('Not set')
 
-  const seen = (await Promise.all(answers)).join('\n')
-  expect(seen).not.toContain(UNREAD)
+  const seen = answers.all()
+  expect(answers.unread).toEqual([])
   expect(seen).not.toContain(SECRET)
   expect(await page.evaluate(() => document.documentElement.outerHTML + location.href)).not.toContain(SECRET)
   expect(world.logs()).not.toContain(SECRET)

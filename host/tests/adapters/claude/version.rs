@@ -446,3 +446,72 @@ fn a_smoke_check_whose_stdout_a_grandchild_holds_open_says_so() {
     };
     assert!(reason.contains("not read in time"), "{reason}");
 }
+
+// ---- a version read that the daemon's stop ends (ts-0165-ab's way, for `claude --version`) ---------------------
+
+mod stop {
+    use super::*;
+    use crate::common::{claude_waiting_for_release, processes_naming, wait_until};
+    use collide_host::claude_versions::{ClaudeVersions, VersionsOptions};
+    use std::sync::Arc;
+    use std::sync::mpsc;
+
+    /// How long a test waits for a process of its own to start or to end. The gates run on a loaded machine.
+    const WAIT: Duration = Duration::from_secs(15);
+
+    fn versions(root: &TempRoot) -> Arc<ClaudeVersions> {
+        ClaudeVersions::new(VersionsOptions::new(
+            Some(root.path().to_str().unwrap().to_string()),
+            Arc::new(|_| {}),
+        ))
+    }
+
+    #[test]
+    fn a_stop_ends_a_version_read_in_flight_and_leaves_no_process_of_the_root() {
+        let root = TempRoot::new();
+        claude_waiting_for_release(root.path());
+        // Ends the fake `claude` when the test ends, whatever happened.
+        let mut waiting = Grandchild::new(root.join("version.pid"));
+        let versions = versions(&root);
+        let (send, answer) = mpsc::channel();
+        {
+            let (versions, claude, env) = (versions.clone(), root.join("claude"), env(&root));
+            // A limit far above the test's waits, so only the stop can end the read early.
+            std::thread::spawn(move || {
+                let _ = send.send(versions.read_within(&claude, &env, Duration::from_secs(120)));
+            });
+        }
+        waiting.pid(WAIT);
+
+        versions.stop();
+
+        let read = answer
+            .recv_timeout(WAIT)
+            .expect("the read ended when the daemon stopped");
+        let Err(VersionError::NotRun { message }) = read else {
+            panic!("expected NotRun, got {read:?}")
+        };
+        assert!(message.contains("stopping"), "{message}");
+        wait_until("no process of the root is left", WAIT, || {
+            processes_naming(root.path()).is_empty()
+        });
+    }
+
+    #[test]
+    fn a_read_after_the_stop_is_refused_and_starts_nothing() {
+        let root = TempRoot::new();
+        claude_waiting_for_release(root.path());
+        // With this file there the fake answers at once, so a read that is not refused succeeds: the test fails fast.
+        fs::write(root.join("release"), "").unwrap();
+        let versions = versions(&root);
+        versions.stop();
+
+        let read = versions.read(&root.join("claude"), &env(&root));
+
+        let Err(VersionError::NotRun { message }) = read else {
+            panic!("expected NotRun, got {read:?}")
+        };
+        assert!(message.contains("stopping"), "{message}");
+        assert!(!root.join("ran").exists(), "the fake claude was started");
+    }
+}

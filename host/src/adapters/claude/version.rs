@@ -15,7 +15,7 @@
 
 use super::launch::FIXED_ARGV;
 use super::session::ClaudeSession;
-use crate::bounded_run::{cut_message, run_bounded, tail};
+use crate::bounded_run::{GroupSessions, cut_message, run_bounded, run_bounded_tracked, tail};
 use collide_core::adapter::{AgentSession, StampedEvent};
 use collide_core::agent::{AgentEvent, SessionStart, TurnEndReason, UsageScope};
 use serde_json::Value;
@@ -145,10 +145,23 @@ pub fn read_version_within(
     env: &BTreeMap<String, String>,
     timeout: Duration,
 ) -> Result<ClaudeVersion, VersionError> {
+    read_version_in(binary, env, timeout, &GroupSessions::default())
+}
+
+/// [`read_version_within`] with the read's process group kept in `sessions`, so that [`GroupSessions::end_all`] ends it
+/// while it runs and refuses one that comes after. The read is in a group of its own: `claude` starts a runtime.
+pub fn read_version_in(
+    binary: &Path,
+    env: &BTreeMap<String, String>,
+    timeout: Duration,
+    sessions: &GroupSessions,
+) -> Result<ClaudeVersion, VersionError> {
     let mut command = Command::new(binary);
     command.arg("--version").env_clear().envs(env);
-    let run = run_bounded(command, None, timeout).map_err(|error| VersionError::NotRun {
-        message: format!("{}: {error}", binary.display()),
+    let run = run_bounded_tracked(command, None, timeout, sessions).map_err(|error| {
+        VersionError::NotRun {
+            message: format!("{}: {error}", binary.display()),
+        }
     })?;
     if run.code != Some(0) {
         return Err(VersionError::NotRun {
@@ -182,11 +195,19 @@ pub fn binary_key(binary: &Path) -> std::io::Result<BinaryKey> {
 #[derive(Debug, Default)]
 pub struct VersionCache {
     read: Mutex<HashMap<BinaryKey, ClaudeVersion>>,
+    /// The reads in flight, which [`VersionCache::end_reads`] ends.
+    reads: GroupSessions,
 }
 
 impl VersionCache {
     pub fn new() -> VersionCache {
         VersionCache::default()
+    }
+
+    /// Ends the reads in flight, and refuses the ones that come after: the daemon is stopping, and a `claude` in a
+    /// group of its own would outlive it.
+    pub fn end_reads(&self) {
+        self.reads.end_all();
     }
 
     /// The version of `binary` and the key it was cached under.
@@ -211,7 +232,7 @@ impl VersionCache {
         if let Some(version) = self.lock().get(&key) {
             return Ok((*version, key));
         }
-        let version = read_version_within(binary, env, timeout)?;
+        let version = read_version_in(binary, env, timeout, &self.reads)?;
         let mut read = self.lock();
         // An older reading of the same path is of a binary that is gone.
         read.retain(|old, _| old.path != key.path);

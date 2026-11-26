@@ -33,13 +33,12 @@ use collide_host::write_guard::{
     canonical,
 };
 use common::git_repo::{GitRepo, git_command};
-use common::{Bundle, TempRoot, repo_root, wait_until};
+use common::{Bundle, TempRoot, clean_shell, repo_root, wait_until};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -472,20 +471,6 @@ fn the_guard_forgets_the_oldest_fate_after_it_holds_as_many_as_it_keeps() {
 }
 
 // ---- the daemon ---------------------------------------------------------------------------------------------------
-
-/// A login shell that prints a cleared environment, as the capture asks: `HOME` and `COLLIDE_DAEMON_ROOT` of the
-/// test's root and the `PATH` the tests run with, and nothing else of the test process's own.
-fn clean_shell(root: &Path) -> String {
-    let path = std::env::var("PATH").expect("the tests run with a PATH");
-    let home = root.display();
-    let script = format!(
-        "#!/bin/sh\nexec /usr/bin/env -i HOME='{home}' COLLIDE_DAEMON_ROOT='{home}' PATH='{path}' /bin/sh -c \"$4\"\n"
-    );
-    let file = root.join("clean-shell");
-    fs::write(&file, script).unwrap();
-    fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
-    file.to_str().unwrap().to_string()
-}
 
 fn copy_tree(from: &Path, repo: &GitRepo, to: &str) {
     for entry in fs::read_dir(from).unwrap() {

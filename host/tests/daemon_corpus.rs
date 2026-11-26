@@ -37,7 +37,7 @@ use collide_host::task_cli::{parse_task, parse_tasks};
 use collide_host::task_daemon::{WAIT_NOTICE_AFTER, run_noticing_after};
 use common::config_fixture::{CapturedLog, Fixture};
 use common::git_repo::{GitRepo, git_command};
-use common::{node_missing_message, wait_until};
+use common::{clean_shell, node_missing_message, wait_until};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -56,19 +56,6 @@ const RECHECK: Duration = Duration::from_millis(150);
 const PROVIDER: &str = include_str!("fixtures/corpus_pack_provider.mjs");
 
 // ---- the rig ------------------------------------------------------------------------------------------------------
-
-/// A login shell that prints a cleared environment, as the capture asks.
-fn clean_shell(root: &Path) -> String {
-    let path = std::env::var("PATH").expect("the tests run with a PATH");
-    let home = root.display();
-    let script = format!(
-        "#!/bin/sh\nexec /usr/bin/env -i HOME='{home}' COLLIDE_DAEMON_ROOT='{home}' PATH='{path}' /bin/sh -c \"$4\"\n"
-    );
-    let file = root.join("clean-shell");
-    fs::write(&file, script).unwrap();
-    fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    file.to_str().unwrap().to_string()
-}
 
 type Configure = Arc<dyn Fn(&mut DaemonOptions) + Send + Sync>;
 

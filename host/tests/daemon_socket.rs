@@ -793,6 +793,45 @@ fn a_daemon_with_no_published_source_says_it_does_not_look_it_up_right_after_the
     assert!(published["latest"].is_null(), "{published}");
 }
 
+/// A daemon whose start thread is reading `claude --version`, which waits for a release that never comes.
+#[test]
+fn a_daemon_that_stops_ends_the_claude_version_read_in_flight() {
+    let root = TempRoot::new();
+    let bin = root.join("bin");
+    fs::create_dir(&bin).unwrap();
+    common::claude_waiting_for_release(&bin);
+    // Ends the fake `claude` when the test ends, whatever happened.
+    let mut waiting = common::Grandchild::new(bin.join("version.pid"));
+    let shell = root.script(
+        "path-shell",
+        &format!(
+            "#!/bin/sh\nexport PATH='{}':/usr/bin:/bin\neval \"$4\"\n",
+            bin.display()
+        ),
+    );
+    let mut opts = options(&root, Box::new(LogBuf::default()));
+    opts.shell = shell.to_str().unwrap().to_string();
+    opts.home = Some(root.path().to_str().unwrap().to_string());
+    opts.claude_published = PublishedChoice::Off;
+    let daemon = Daemon::start(opts).expect("the daemon starts");
+    // The start thread's read of the version has begun.
+    let pid = waiting.pid(Duration::from_secs(60));
+
+    drop(daemon);
+
+    // The read has a limit of 15 s of its own: a wait shorter than that sees only the stop's work.
+    common::wait_until(
+        "the fake claude to be gone",
+        Duration::from_secs(10),
+        || !common::pid_alive(pid),
+    );
+    common::wait_until(
+        "no process of the root is left",
+        Duration::from_secs(10),
+        || common::processes_naming(root.path()).is_empty(),
+    );
+}
+
 #[test]
 fn the_socket_answers_while_the_base_environment_is_still_being_captured() {
     let root = TempRoot::new();
