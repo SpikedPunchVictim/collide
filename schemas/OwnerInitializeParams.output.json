@@ -9,6 +9,10 @@
         "null"
       ]
     },
+    "defaults": {
+      "description": "Start with defaults: this connection reads only the Default layer, the built-in packs and the built-in views,\nand its writes are refused. Other connections are unchanged. Absent means a normal connection.",
+      "type": "boolean"
+    },
     "protocol": {
       "format": "uint32",
       "minimum": 0,

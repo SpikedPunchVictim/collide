@@ -28,6 +28,7 @@ const ENDPOINT_TOKEN: &str = "endpoint-token-0001";
 #[derive(Clone)]
 struct FakeLink {
     calls: Arc<Mutex<Vec<Request>>>,
+    modes: Arc<Mutex<Vec<bool>>>,
     result: Value,
 }
 
@@ -35,8 +36,14 @@ impl FakeLink {
     fn answering(result: Value) -> Self {
         FakeLink {
             calls: Arc::default(),
+            modes: Arc::default(),
             result,
         }
+    }
+
+    /// The modes the shell told the link, in order.
+    fn modes(&self) -> Vec<bool> {
+        self.modes.lock().unwrap().clone()
     }
 
     fn calls(&self) -> Vec<Request> {
@@ -45,6 +52,10 @@ impl FakeLink {
 }
 
 impl DaemonLink for FakeLink {
+    fn set_defaults(&mut self, defaults: bool) {
+        self.modes.lock().unwrap().push(defaults);
+    }
+
     fn call(&mut self, request: &Request) -> Response {
         self.calls.lock().unwrap().push(request.clone());
         Response::success(request.id.clone(), self.result.clone())
@@ -593,4 +604,37 @@ fn a_token_the_daemon_refuses_is_not_echoed_to_the_webview() {
         "refused: {seen}"
     );
     assert!(!seen.contains(wrong), "the token is in the error: {seen}");
+}
+
+// ---- shell.set_defaults (ts-0215-gt) -------------------------------------------------------------------------
+
+#[test]
+fn shell_set_defaults_tells_the_link_the_mode_and_does_not_forward_it() {
+    let (mut shell, link, _) = shell();
+    assert_eq!(
+        shell.rpc("shell.set_defaults", Some(json!({ "defaults": true }))),
+        Ok(json!({}))
+    );
+    assert_eq!(
+        shell.rpc("shell.set_defaults", Some(json!({ "defaults": false }))),
+        Ok(json!({}))
+    );
+    assert_eq!(link.modes(), [true, false]);
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
+#[test]
+fn shell_set_defaults_refuses_params_it_does_not_have_and_changes_nothing() {
+    let (mut shell, link, _) = shell();
+    for params in [
+        None,
+        Some(json!({})),
+        Some(json!({ "defaults": "yes" })),
+        Some(json!({ "defaults": true, "token": "x" })),
+    ] {
+        let error = failure(shell.rpc("shell.set_defaults", params.clone()));
+        assert_eq!(error.code, code::INVALID_PARAMS, "{params:?}");
+    }
+    assert!(link.modes().is_empty(), "{:?}", link.modes());
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
 }

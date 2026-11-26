@@ -297,6 +297,7 @@ fn a_person_only_operation_from_a_run_agent_is_refused() {
                 protocol: collide_core::owner::OWNER_PROTOCOL,
                 token: Some("secret".to_string()),
                 client: None,
+                defaults: false,
             },
             "secret",
         )

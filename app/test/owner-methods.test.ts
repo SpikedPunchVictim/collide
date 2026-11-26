@@ -39,7 +39,11 @@ test('the ask and ui_tools methods are the ones core names', () => {
 
 test('the shell methods are the ones the shell answers, and all of them start with `shell.`', () => {
   const shell = readFileSync(join(root, 'app', 'src-tauri', 'src', 'shell.rs'), 'utf8')
-  const constants = { 'shell.open_external': 'OPEN_EXTERNAL', 'shell.pick_folder': 'PICK_FOLDER' }
+  const constants = {
+    'shell.open_external': 'OPEN_EXTERNAL',
+    'shell.pick_folder': 'PICK_FOLDER',
+    'shell.set_defaults': 'SET_DEFAULTS',
+  }
   expect(Object.keys(SHELL_METHODS)).toEqual(Object.keys(constants))
   for (const [name, constant] of Object.entries(constants)) {
     expect(name.startsWith('shell.')).toBe(true)

@@ -69,6 +69,7 @@ export const OWNER_METHODS = {
   'config.pack_link': call<G.ConfigPackLinkParamsInput, G.ConfigPackResultOutput>(),
   'config.pack_enable': call<G.ConfigPackEnableParamsInput, G.ConfigPackResultOutput>(),
   'config.pack_update': call<G.ConfigPackUpdateParamsInput, G.ConfigPackUpdateResultOutput>(),
+  'config.reset': call<G.ConfigResetParamsInput, G.ConfigResetResultOutput>(),
 }
 
 // The ask methods, in the window's shape. They are not in `OWNER_METHODS`: the owner protocol answers `method not
@@ -96,4 +97,10 @@ export const SHELL_METHODS = {
    * and the fake owner have no picker, and the window shows the picker only in the shell.
    */
   'shell.pick_folder': call<Record<never, never>, { path: string | null }>(),
+  /**
+   * Tells the shell that this window started with defaults (`true`), or left that mode (`false`) (`ts-0215-gt`). The
+   * window cannot send `initialize`, so the shell makes its connection to the daemon with the flag. The bridge's shell
+   * and the fake owner answer it too.
+   */
+  'shell.set_defaults': call<{ defaults: boolean }, G.AckOutput>(),
 }

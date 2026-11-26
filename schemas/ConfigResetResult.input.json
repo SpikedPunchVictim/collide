@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.reset` result: the folder the files were moved into, and each file or folder moved, as a path under it.\nNothing is deleted. A file that was not there is not listed.",
+  "properties": {
+    "folder": {
+      "type": "string"
+    },
+    "moved": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "moved"
+  ],
+  "title": "ConfigResetResult",
+  "type": "object"
+}

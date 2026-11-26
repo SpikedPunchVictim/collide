@@ -59,6 +59,12 @@ world.owner.handle('shell.open_external', ({ url }) => {
 // The shell's folder picker, as the fake answers it: only a page told it is the shell's (`#shell=1`) shows it.
 let nextPick: string | null = null
 world.owner.handle('shell.pick_folder', () => ({ path: nextPick }))
+// The shell's mode, as the fake answers it (ts-0215-gt), and the owner's reset, which moves nothing and names a folder.
+world.owner.handle('shell.set_defaults', () => ({}))
+world.owner.handle('config.reset', () => ({
+  folder: '/fake/.config/collide/set-aside/2026-11-26-101507',
+  moved: ['config.yaml', 'packs.yaml', 'packs.lock'],
+}))
 window.collideFake = {
   calls: () => world.owner.calls.map((call) => call.method),
   views: () =>

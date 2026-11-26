@@ -206,6 +206,8 @@ pub fn registry() -> Registry {
     registry.add::<owner::ConfigPackResult>();
     registry.add::<owner::ConfigPackUpdateParams>();
     registry.add::<owner::ConfigPackUpdateResult>();
+    registry.add::<owner::ConfigResetParams>();
+    registry.add::<owner::ConfigResetResult>();
     registry.add::<owner::PackPin>();
     registry.add::<owner::PackFileChange>();
     registry.add::<owner::PackFileChangeKind>();

@@ -9,11 +9,11 @@ import {
   type PointerEvent,
   type ReactNode,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react'
-import { type FoldStore, browserStore, memoryStore } from '../field/folds.ts'
+import { useKeptStore } from '../defaults/mode.ts'
+import { type FoldStore } from '../field/folds.ts'
 import type { FieldData, Task } from '../field/types.ts'
 import { actionForKey } from '../frame/actions.ts'
 import type { OwnerClient } from '../owner/client.ts'
@@ -115,7 +115,7 @@ export function DrawerShell({ store, onClose, children }: DrawerShellProps) {
 }
 
 export function Drawer({ owner, boardId, shown, data, board, stamp, store, onOpenTask, onClose }: DrawerProps) {
-  const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
+  const kept = useKeptStore(store)
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
   const { got, problem } = useTaskGet(owner, boardId, shown.key, stamp)

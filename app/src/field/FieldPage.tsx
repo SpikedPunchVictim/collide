@@ -17,7 +17,8 @@ import type { OwnerClient } from '../owner/client.ts'
 import { CardButton } from './CardButton.tsx'
 import { DOT } from './colours.ts'
 import { agoWords } from './live.ts'
-import { type FoldStore, browserStore, isShut, memoryStore, readFolds, toggleFold } from './folds.ts'
+import { useKeptStore } from '../defaults/mode.ts'
+import { type FoldStore, isShut, readFolds, toggleFold } from './folds.ts'
 import { type LayoutKind, layoutOf, writeLayout } from './layout.ts'
 import { LayoutSwitch, WalkView } from './Layouts.tsx'
 import { type Column, type Lane, cardIdOf, lanesOf, reportLines } from './model.ts'
@@ -136,7 +137,7 @@ interface BoardProps {
 function Board(props: BoardProps) {
   const { owner, boardId, board, view, entry, goal, onGoal, data, groupBy, flashed, updatedAt, store, notices } = props
   const { filters, onFilters, onSave } = props
-  const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
+  const kept = useKeptStore(store)
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
   const folds = readFolds(kept, boardId, view)

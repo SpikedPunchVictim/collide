@@ -63,6 +63,16 @@ pub struct OwnerClient {
 impl OwnerClient {
     /// Connects to the daemon at `paths.socket` and initializes as `client` (a name for the daemon's log).
     pub fn connect(paths: &DaemonPaths, client: &str) -> Result<OwnerClient, ClientError> {
+        OwnerClient::connect_as(paths, client, false)
+    }
+
+    /// Like [`OwnerClient::connect`], with `defaults` asking for Start with defaults: the daemon reads only the Default
+    /// layer, the built-in packs and the built-in views for this connection, and refuses its writes.
+    pub fn connect_as(
+        paths: &DaemonPaths,
+        client: &str,
+        defaults: bool,
+    ) -> Result<OwnerClient, ClientError> {
         let io_error = |context: String| move |source| ClientError::Io { context, source };
         let token = auth::read_token_file(&paths.token_file).map_err(|error| ClientError::Io {
             context: "reading the token file".to_string(),
@@ -87,6 +97,7 @@ impl OwnerClient {
                 protocol: OWNER_PROTOCOL,
                 token: Some(token.trim().to_string()),
                 client: Some(client.to_string()),
+                defaults,
             },
             Some(Duration::from_secs(10)),
         )?;

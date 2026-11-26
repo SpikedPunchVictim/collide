@@ -13,11 +13,12 @@
 //! 1. `initialize` is the shell's: it carries the per-client token, so the window cannot send it. The link makes the
 //!    handshake when it connects, with the token it read itself.
 //! 2. A `ui_tools.*` method goes to [`UiToolsEndpoint::rpc`] and is never forwarded, whatever it answers.
-//! 3. A `shell.*` method is the shell's own and is never forwarded, whatever it answers. There are two.
+//! 3. A `shell.*` method is the shell's own and is never forwarded, whatever it answers. There are three.
 //!    [`OPEN_EXTERNAL`] opens a link in the person's browser after the shell has checked its scheme
 //!    ([`open_external`]). The opener is given to [`Shell::new`], so a test never opens a real link. [`PICK_FOLDER`]
 //!    asks the person for a folder ([`pick_folder`]). The picker is given to [`Shell::with_picker`], so a test never
-//!    opens a real window.
+//!    opens a real window. [`SET_DEFAULTS`] tells the link that the window started with defaults (ts-0215-gt), so its
+//!    connection to the daemon is made with the flag on `initialize` ([`set_defaults`]).
 //! 4. `ask.start` and `ask.test` are read in the window's shape ([`collide_core::ask::AskStartParams`]), which has no
 //!    token field, so a window that sends one is refused. The shell then makes the daemon's shape, with the endpoint and
 //!    the ask's token, which is Stage 6b's (`shell: ask token`). `ask.cancel` has one shape and goes on as it is.
@@ -121,6 +122,10 @@ impl Window for ChannelWindow {
 /// made, and nothing in a request carries the token.
 pub trait DaemonLink {
     fn call(&mut self, request: &Request) -> Response;
+
+    /// Tells the link that the window started with defaults, or came back from it. The next call goes over a
+    /// connection made in that mode. A link that has no modes ignores it.
+    fn set_defaults(&mut self, _defaults: bool) {}
 }
 
 /// Starts the daemon when its socket does not answer (0.2, Starting the daemon).
@@ -207,6 +212,12 @@ impl DaemonAccess {
     /// does, unless [`launch::RestartPolicy`] says the app has failed to start one too often lately: then it only
     /// connects, so a daemon someone else started is still used.
     pub fn connect(&self) -> Result<OwnerClient, RpcError> {
+        self.connect_as(false)
+    }
+
+    /// [`DaemonAccess::connect`] with the defaults flag on `initialize` when `defaults` is set (ts-0215-gt): the daemon
+    /// reads only the Default layer and the built-in packs and views for that connection, and refuses its writes.
+    pub fn connect_as(&self, defaults: bool) -> Result<OwnerClient, RpcError> {
         // First, before the app's file below the run folder is written: that folder can be below the home.
         check_home(self.home.as_deref())
             .map_err(|reason| unavailable(format!("the daemon could not be started: {reason}")))?;
@@ -220,7 +231,7 @@ impl DaemonAccess {
                 .ensure_running()
                 .map_err(|reason| self.start_failed(reason))?;
         }
-        OwnerClient::connect(&self.paths, CLIENT_NAME).map_err(|error| {
+        OwnerClient::connect_as(&self.paths, CLIENT_NAME, defaults).map_err(|error| {
             unavailable(
                 self.stopped_trying()
                     .unwrap_or_else(|| format!("could not connect to the daemon: {error}")),
@@ -297,6 +308,8 @@ fn dropped(what: &str, error: &ClientError, wait: Duration) -> RpcError {
 pub struct SocketLink {
     access: Arc<DaemonAccess>,
     client: Option<OwnerClient>,
+    /// Whether the connection is made with the defaults flag.
+    defaults: bool,
     call_wait: Duration,
 }
 
@@ -305,6 +318,7 @@ impl SocketLink {
         SocketLink {
             access,
             client: None,
+            defaults: false,
             call_wait: CALL_WAIT,
         }
     }
@@ -320,7 +334,7 @@ impl SocketLink {
             self.client = None;
         }
         if self.client.is_none() {
-            self.client = Some(self.access.connect()?);
+            self.client = Some(self.access.connect_as(self.defaults)?);
         }
         let client = self.client.as_mut().expect("the connection was just made");
         match client.call::<Value, Value>(&request.method, &request.params, Some(self.call_wait)) {
@@ -335,6 +349,14 @@ impl SocketLink {
 }
 
 impl DaemonLink for SocketLink {
+    fn set_defaults(&mut self, defaults: bool) {
+        if self.defaults != defaults {
+            // The mode rides the connection, so the old one is dropped and the next call makes a new one.
+            self.defaults = defaults;
+            self.client = None;
+        }
+    }
+
     fn call(&mut self, request: &Request) -> Response {
         match self.call_value(request) {
             Ok(result) => Response::success(request.id.clone(), result),
@@ -488,6 +510,11 @@ fn forward(notice: Notification, last_seq: &mut Option<u64>, channel: &dyn Event
     }
     channel.emit(&ChannelEvent::from(notice));
 }
+
+/// The method that tells the shell the window started with defaults, or left that mode (ts-0215-gt). The window cannot
+/// send `initialize`, so this is how the flag reaches the connection. `app/src/owner/` has the same name
+/// (`SHELL_METHODS`); a test keeps the two equal.
+pub const SET_DEFAULTS: &str = "shell.set_defaults";
 
 /// The prefix of the methods the shell answers itself. No method of the daemon starts with it.
 const SHELL_PREFIX: &str = "shell.";
@@ -741,6 +768,26 @@ pub fn pick_folder(
     Ok(serde_json::json!({ "path": path }))
 }
 
+/// `shell.set_defaults`'s params: the mode. A window that sends another field is refused.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetDefaultsParams {
+    defaults: bool,
+}
+
+/// `shell.set_defaults`: tells `link` the mode. It never reaches the daemon as a call.
+pub fn set_defaults(link: &mut dyn DaemonLink, params: Option<Value>) -> Result<Value, RpcError> {
+    let params: SetDefaultsParams =
+        serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|error| {
+            RpcError::new(
+                code::INVALID_PARAMS,
+                format!("invalid params for `{SET_DEFAULTS}`: {error}"),
+            )
+        })?;
+    link.set_defaults(params.defaults);
+    Ok(serde_json::json!({}))
+}
+
 /// The shell. See the module doc.
 pub struct Shell {
     endpoint: UiToolsEndpoint,
@@ -793,6 +840,7 @@ impl Shell {
         match method {
             OPEN_EXTERNAL => return open_external(self.opener.as_mut(), params),
             PICK_FOLDER => return pick_folder(self.picker.as_mut(), params),
+            SET_DEFAULTS => return set_defaults(self.link.as_mut(), params),
             other if other.starts_with(SHELL_PREFIX) => {
                 return Err(RpcError::method_not_found(other));
             }

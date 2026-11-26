@@ -22,7 +22,7 @@
 use crate::agent_checks::check_agent_environment;
 use crate::atomic_write::write_atomically;
 use crate::board_lines::Lines;
-use crate::board_load::{LoadContext, LoadedLine, load_line};
+use crate::board_load::{LoadContext, LoadProblem, LoadedLine, load_defaults, load_line};
 use crate::boards;
 use crate::builtin_packs::{BuiltinPacks, Environment};
 use crate::disk::Floor;
@@ -40,7 +40,7 @@ use collide_core::owner::{
     ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigLayerFile, ConfigPackAddParams,
     ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackResult, ConfigPackUpdateParams,
     ConfigPackUpdateResult, ConfigSetParams, ConfigSetResult, ConfigWriteLayer, PackEntry,
-    SettingLayer,
+    PackOrigin, SettingLayer,
 };
 use collide_core::profile::{FoundProfile, Profile, ProfileLookupError, find_profile};
 use collide_core::resolve::is_safe_token;
@@ -169,6 +169,12 @@ impl Resolved {
             .map(ToString::to_string)
             .collect()
     }
+}
+
+/// The problems of a load, one on each line.
+fn problem_lines(problems: &[LoadProblem]) -> String {
+    let lines: Vec<String> = problems.iter().map(ToString::to_string).collect();
+    lines.join("\n")
 }
 
 fn pack_settings(line: Option<&LoadedLine>) -> Vec<PackSettings<'_>> {
@@ -368,6 +374,39 @@ impl ConfigService {
         if !gathered.problems.is_empty() {
             return Err(GetError::Refused(gathered.problems.join("\n")));
         }
+        let files = self.layer_files(board, gathered.line.as_ref());
+        self.answer(params, board, gathered, files)
+    }
+
+    /// [`ConfigService::get`] for a defaults connection (ts-0215-gt): the Default layer over the built-in packs alone.
+    /// No settings file, no user pack and nothing of the repo is read, so none of their problems can show, and no
+    /// file is named as a layer's.
+    pub fn get_defaults(
+        &self,
+        params: &ConfigGetParams,
+        board: Option<BoardRef>,
+        path: &OsStr,
+    ) -> Result<ConfigGetResult, GetError> {
+        let context = (self.load_context)(path)
+            .map_err(|message| GetError::Refused(format!("the loader cannot start: {message}")))?;
+        let line = load_defaults(&context)
+            .map_err(|problems| GetError::Refused(problem_lines(&problems)))?;
+        let gathered = Gathered {
+            user: UserFiles::default(),
+            line: Some(line),
+            problems: Vec::new(),
+        };
+        self.answer(params, board, gathered, Vec::new())
+    }
+
+    /// The answer to `config.get` over what was gathered, with `files` as the layers' files.
+    fn answer(
+        &self,
+        params: &ConfigGetParams,
+        board: Option<BoardRef>,
+        gathered: Gathered,
+        files: Vec<ConfigLayerFile>,
+    ) -> Result<ConfigGetResult, GetError> {
         let Gathered { user, line, .. } = &gathered;
 
         let no_profiles = BTreeMap::new();
@@ -429,7 +468,7 @@ impl ConfigService {
         Ok(ConfigGetResult {
             entries,
             problems: problems.iter().map(Into::into).collect(),
-            files: self.layer_files(board, line.as_ref()),
+            files,
             notices,
         })
     }
@@ -548,6 +587,28 @@ impl ConfigService {
     /// `config.pack_list`: the board's packs, the user's, and the working copies on offer. See [`crate::pack_manage`].
     pub fn pack_list(&self, board: BoardRef, path: &OsStr) -> Result<Vec<PackEntry>, PackError> {
         self.with_pack_site(board, path, pack_list)
+    }
+
+    /// [`ConfigService::pack_list`] for a defaults connection (ts-0215-gt): the built-in packs, and no other. The
+    /// user's files, the board's and the repo's checkout are not read.
+    pub fn pack_list_defaults(&self, path: &OsStr) -> Result<Vec<PackEntry>, PackError> {
+        let context = (self.load_context)(path)
+            .map_err(|message| PackError::Failed(format!("the loader cannot start: {message}")))?;
+        let line = load_defaults(&context)
+            .map_err(|problems| PackError::Failed(problem_lines(&problems)))?;
+        Ok(line
+            .packs
+            .iter()
+            .map(|pack| PackEntry {
+                name: pack.name.clone(),
+                source: "builtin".to_string(),
+                origin: PackOrigin::Builtin,
+                enabled: true,
+                dev: false,
+                working_copy: false,
+                review: None,
+            })
+            .collect())
     }
 
     /// `config.pack_add`: a user pack, shown and then, with `confirm`, written.

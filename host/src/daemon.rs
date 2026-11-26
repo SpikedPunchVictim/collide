@@ -114,6 +114,7 @@ use crate::auth::{
 use crate::base_env::{BaseEnvironment, CaptureOptions, CaptureSessions, EnvSource};
 use crate::board_lines::LineError;
 use crate::boards;
+use crate::builtin_packs::BuiltinPacks;
 use crate::checkout::root_busy;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
 use crate::clock::{Clock, ClockPair, Clocks, Reading, SystemClocks, civil_date, local_utc_offset};
@@ -143,6 +144,8 @@ use crate::run_summary::summarize;
 use crate::sampler::{Sampler, TICK};
 use crate::scratch;
 use crate::secret_store::{MemorySecretStore, SecretStore};
+use crate::set_aside;
+use crate::settings_files::user_config_dir;
 use crate::shim::{ChildIdentity, DaemonStart, files as shim_files};
 use crate::sources::{
     PLANNING_SOURCE, Source, SourceError, Sources, SourcesConfig, changed_event, plan,
@@ -168,19 +171,19 @@ use collide_core::owner::{
     BoardLocateResult, BoardOpenParams, BoardOpenResult, BoardSummary, BoardTrustParams,
     BoardTrustReviewParams, ChangeWords, ChangesPlace, CommitChanges, ConfigGetParams,
     ConfigPackAddParams, ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams,
-    ConfigPackListResult, ConfigPackUpdateParams, ConfigSetParams, ConfigWriteLayer,
-    DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
-    DaemonSubscribeResult, EnvCapture, FirstRunCheck, MAX_MESSAGE_BYTES, Method, Notice,
-    OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams, QueueAnswerResult,
-    QueueItem, QueueListParams, QueueListResult, Request, Response, Routed, RpcError,
-    RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult, RunRecordParams,
-    RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult, RunStopParams,
-    RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams, TaskApplyResult,
-    TaskChangesParams, TaskChangesResult, TaskCreateParams, TaskDiffParams, TaskDiffResult,
-    TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams, TaskReidParams,
-    TaskReidResult, TaskSaveViewParams, TaskSaveViewResult, TaskSectionsParams, TaskViewsParams,
-    TaskViewsResult, ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued, code, encode_line,
-    parse_request, route,
+    ConfigPackListResult, ConfigPackUpdateParams, ConfigResetParams, ConfigResetResult,
+    ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
+    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, FirstRunCheck, MAX_MESSAGE_BYTES,
+    Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams,
+    QueueAnswerResult, QueueItem, QueueListParams, QueueListResult, Request, Response, Routed,
+    RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult,
+    RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult,
+    RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams,
+    TaskApplyResult, TaskChangesParams, TaskChangesResult, TaskCreateParams, TaskDiffParams,
+    TaskDiffResult, TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams,
+    TaskReidParams, TaskReidResult, TaskSaveViewParams, TaskSaveViewResult, TaskSectionsParams,
+    TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued,
+    code, encode_line, parse_request, route,
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::section::{ProposalFeatures, section_uses};
@@ -2117,12 +2120,58 @@ fn run_pump(log: &DaemonLog, conn: &Conn, pump: Pump) {
     }
 }
 
+/// The methods a defaults connection is served (ts-0215-gt): the reads of what it may see, and `config.reset`, which
+/// is how a window gets out of a mode it cannot write in. Every other method is refused, so a method added later is
+/// refused in defaults mode until it is named here: a write cannot get through by being new.
+fn defaults_serves(method: Method) -> bool {
+    matches!(
+        method,
+        Method::DaemonStatus
+            | Method::DaemonAgentVersions
+            | Method::DaemonSubscribe
+            | Method::BoardList
+            | Method::BoardOpen
+            | Method::BoardChecks
+            | Method::BoardTrustReview
+            | Method::TaskList
+            | Method::TaskGet
+            | Method::TaskViews
+            | Method::TaskSections
+            | Method::TaskChanges
+            | Method::TaskDiff
+            | Method::RunList
+            | Method::RunGet
+            | Method::RunDiff
+            | Method::RunOutput
+            | Method::QueueList
+            | Method::QueueContext
+            | Method::WorkspaceList
+            | Method::ConfigGet
+            | Method::ConfigPackList
+            | Method::ConfigReset
+    )
+}
+
+/// The refusal of a write on a defaults connection. It names the mode, so the person knows why and how to leave it.
+fn refused_in_defaults(what: &str) -> RpcError {
+    RpcError::new(
+        code::NOT_PERMITTED,
+        format!(
+            "this window started with defaults, so `{what}` is refused: your settings, views and packs are set aside \
+             for it. Start normally to change them"
+        ),
+    )
+}
+
 fn call(
     shared: &Shared,
     session: &Session,
     method: Method,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
+    if session.defaults() && !defaults_serves(method) {
+        return Err(refused_in_defaults(method.name()));
+    }
     match method {
         Method::DaemonStatus => {
             let uptime = shared.clocks.read(Clock::Uptime);
@@ -2187,22 +2236,23 @@ fn call(
         Method::RunGet => run_get(shared, params),
         Method::QueueList => queue_list(shared, params),
         Method::QueueAnswer => queue_answer(shared, session, params),
-        Method::ConfigGet => config_get(shared, params),
+        Method::ConfigGet => config_get(shared, session, params),
         Method::ConfigSet => config_set(shared, session, params),
         Method::ConfigPackUpdate => config_pack_update(shared, session, params),
-        Method::ConfigPackList => config_pack_list(shared, params),
+        Method::ConfigPackList => config_pack_list(shared, session, params),
+        Method::ConfigReset => config_reset(shared, session, params),
         Method::ConfigPackAdd => config_pack_add(shared, session, params),
         Method::ConfigPackLink => config_pack_link(shared, session, params),
         Method::ConfigPackEnable => config_pack_enable(shared, session, params),
         Method::BoardOpen => board_open(shared, session, params),
         Method::BoardChecks => board_checks(shared, params),
         Method::BoardLocate => board_locate(shared, session, params),
-        Method::BoardList => board_list(shared),
+        Method::BoardList => board_list(shared, session),
         Method::BoardInit => board_init(shared, session, params),
         Method::BoardTrust => board_trust(shared, session, params),
-        Method::BoardTrustReview => board_trust_review(shared, params),
-        Method::TaskList => task_list(shared, params),
-        Method::TaskGet => task_get(shared, params),
+        Method::BoardTrustReview => board_trust_review(shared, session, params),
+        Method::TaskList => task_list(shared, session, params),
+        Method::TaskGet => task_get(shared, session, params),
         Method::TaskApply => task_apply(shared, session, params),
         Method::TaskCreate => task_create(shared, session, params),
         Method::TaskReid => task_reid(shared, session, params),
@@ -2210,7 +2260,7 @@ fn call(
         Method::TaskChanges => task_changes(shared, params),
         Method::TaskDiff => task_diff(shared, params),
         Method::TaskPreview => task_preview(shared, session, params),
-        Method::TaskViews => task_views(shared, params),
+        Method::TaskViews => task_views(shared, session, params),
         Method::TaskSaveView => task_save_view(shared, session, params),
         other => Err(RpcError::new(
             code::METHOD_NOT_FOUND,
@@ -2687,7 +2737,11 @@ fn board_root(shared: &Shared, board: &str) -> Result<String, RpcError> {
 /// `config.get` (ts-0098-nx): the settings of a board (the user's layers alone with no board), each with the layer it
 /// came from. A problem in a file or a pack is a `CONFLICT` whose message has one line for each, and a key, a profile
 /// or a board that is not there is `NOT_FOUND` ([`crate::config_get`]).
-fn config_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+fn config_get(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
     let params: ConfigGetParams = read_params("config.get", params)?;
     if shared.stopping() {
         return Err(RpcError::new(
@@ -2701,7 +2755,13 @@ fn config_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
         .as_deref()
         .zip(root.as_deref())
         .map(|(id, root)| BoardRef { id, root });
-    match shared.config.get(&params, board, &tools_path(shared)) {
+    let tools = tools_path(shared);
+    let answer = if session.defaults() {
+        shared.config.get_defaults(&params, board, &tools)
+    } else {
+        shared.config.get(&params, board, &tools)
+    };
+    match answer {
         Ok(result) => Ok(serde_json::to_value(result).expect("a result is JSON")),
         Err(GetError::NotFound(message)) => Err(RpcError::new(code::NOT_FOUND, message)),
         Err(GetError::Refused(message)) => Err(RpcError::new(code::CONFLICT, message)),
@@ -2762,6 +2822,7 @@ fn pack_board(shared: &Shared, id: &str) -> Result<std::path::PathBuf, RpcError>
 /// `config.pack_list` (ts-0101-bd): `collide pack list`.
 fn config_pack_list(
     shared: &Shared,
+    session: &Session,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     let params: ConfigPackListParams = read_params("config.pack_list", params)?;
@@ -2770,11 +2831,61 @@ fn config_pack_list(
         id: &params.board,
         root: &root,
     };
-    let packs = shared
-        .config
-        .pack_list(board, &tools_path(shared))
-        .map_err(pack_error)?;
+    let packs = if session.defaults() {
+        shared.config.pack_list_defaults(&tools_path(shared))
+    } else {
+        shared.config.pack_list(board, &tools_path(shared))
+    }
+    .map_err(pack_error)?;
     Ok(serde_json::to_value(ConfigPackListResult { packs }).expect("a result is JSON"))
+}
+
+/// `config.reset` (ts-0215-gt): the person's `config.yaml`, `packs.yaml` and `packs.lock`, and the folder of the board
+/// it names, moved into a new folder of `~/.config/collide/set-aside/` ([`crate::set_aside`]). Nothing is deleted, and
+/// the repo, the trust record, other boards' folders and the keychain are not touched. A defaults connection may call
+/// it: it is how a window leaves a mode it cannot write in.
+fn config_reset(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: ConfigResetParams = read_params("config.reset", params)?;
+    refuse_run_agent(session, "move the user's files aside")?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    if let Some(board) = &params.board {
+        board_root(shared, board)?;
+    }
+    let lines = shared.config.lines();
+    let home = lines.home().ok_or_else(|| {
+        RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon knows no home directory, so the user's files cannot be found",
+        )
+    })?;
+    let wall = shared.clocks.read(Clock::Wall).nanos;
+    let offset = shared
+        .utc_offset_secs
+        .unwrap_or_else(|| local_utc_offset(wall));
+    let done = set_aside::reset(
+        &user_config_dir(home),
+        params.board.as_deref(),
+        &set_aside::stamp(wall, offset),
+    )
+    .map_err(|message| RpcError::new(code::INTERNAL_ERROR, message))?;
+    shared.log.line(&format!(
+        "the user's files were set aside in {}",
+        done.folder.display()
+    ));
+    let result = ConfigResetResult {
+        folder: done.folder.display().to_string(),
+        moved: done.moved,
+    };
+    Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
 
 /// `config.pack_add` (ts-0101-bd): `collide pack add`. No board: a user pack is the user's on every board. A fetch
@@ -2929,6 +3040,9 @@ fn board_open(
     let params: BoardOpenParams = read_params("board.open", params)?;
     if params.init_git {
         refuse_run_agent(session, "make a folder a git repository")?;
+        if session.defaults() {
+            return Err(refused_in_defaults("board.open` with `init_git"));
+        }
     }
     if shared.stopping() {
         return Err(RpcError::new(
@@ -2956,14 +3070,17 @@ fn board_open(
             shared.note_root_commits(&id, &checkout.root);
             let checkouts: Vec<boards::Checkout> =
                 std::iter::once(checkout.clone()).chain(line).collect();
-            BoardOpenResult {
-                board: Some(with_role_problems(
+            let lines = shared.config.lines();
+            let summary = if session.defaults() {
+                lines.summary_defaults(&id, &root, &checkouts)
+            } else {
+                with_role_problems(
                     shared,
-                    shared
-                        .config
-                        .lines()
-                        .summary(&id, &root, &checkouts, &tools_path(shared)),
-                )),
+                    lines.summary(&id, &root, &checkouts, &tools_path(shared)),
+                )
+            };
+            BoardOpenResult {
+                board: Some(summary),
                 checks: first_run_checks(boards::git_repo_ok(&checkout), claude),
             }
         }
@@ -3261,6 +3378,7 @@ fn board_trust(
 /// `board.trust_review` (ts-0102-vu): what a person sees before they trust a line. It writes nothing.
 fn board_trust_review(
     shared: &Shared,
+    session: &Session,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
     let params: BoardTrustReviewParams = read_params("board.trust_review", params)?;
@@ -3269,6 +3387,10 @@ fn board_trust_review(
         id: &params.board,
         root: &root,
     };
+    if session.defaults() {
+        let nothing = shared.config.lines().review_defaults();
+        return Ok(serde_json::to_value(nothing).expect("a result is JSON"));
+    }
     let result = shared
         .config
         .lines()
@@ -3294,7 +3416,7 @@ fn with_role_problems(shared: &Shared, mut summary: BoardSummary) -> BoardSummar
 /// `board.list`: the boards opened before, from the store. A board's line is the branch its checkout is on now, read
 /// from git; a board whose folder is gone or is no longer a checkout is listed with no line, and with the reason the
 /// corpus gives for not reading its sources.
-fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
+fn board_list(shared: &Shared, session: &Session) -> Result<serde_json::Value, RpcError> {
     let lines = shared.config.lines();
     let tools = tools_path(shared);
     let boards = shared
@@ -3311,17 +3433,24 @@ fn board_list(shared: &Shared) -> Result<serde_json::Value, RpcError> {
             {
                 shared.note_root_commits(&board.id, &checkout.root);
             }
-            let summary = with_role_problems(
-                shared,
-                lines.summary(&board.id, &board.root, checkout.as_slice(), &tools),
-            );
+            let defaults = session.defaults();
+            let summary = if defaults {
+                lines.summary_defaults(&board.id, &board.root, checkout.as_slice())
+            } else {
+                with_role_problems(
+                    shared,
+                    lines.summary(&board.id, &board.root, checkout.as_slice(), &tools),
+                )
+            };
             BoardSummary {
                 missing: !Path::new(&board.root).is_dir(),
+                // The sources the person's files could not give are not a defaults connection's to see.
                 sources_unread: shared
                     .corpora
                     .get()
                     .and_then(|corpora| corpora.get(&board.id))
-                    .and_then(|service| service.sources_unread()),
+                    .and_then(|service| service.sources_unread())
+                    .filter(|_| !defaults),
                 ..summary
             }
         })
@@ -3357,8 +3486,13 @@ fn source_failed(error: SourceError) -> RpcError {
 /// and a view that has an error lists no task and carries the error in `view`. An inline view is checked as a saved one
 /// is, and a bad one is `INVALID_PARAMS` with the reason. `ready`, `kind` and `checkout` narrow what the view gives,
 /// `limit` and `cursor` page it, and the board-wide lists come with the first page.
-fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+fn task_list(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
     let params: TaskListParams = read_params("task.list", params)?;
+    let defaults = session.defaults();
     let root = board_root(shared, &params.board)?;
     let service = corpus_of(shared, &params.board, &root)?;
     if let Some(kind) = &params.kind {
@@ -3389,7 +3523,7 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
         Some(ViewRef::Named { name }) => {
             let BoardViews {
                 loaded, supplying, ..
-            } = loaded_views(shared, &params.board, &root, &service)?;
+            } = loaded_views(shared, &params.board, &root, &service, defaults)?;
             let found = find_view(&loaded, name, &supplying).map_err(|lookup| {
                 let kind = match lookup {
                     Lookup::Missing { .. } => code::NOT_FOUND,
@@ -3413,6 +3547,11 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
     let only: Option<BTreeSet<String>> = through
         .as_ref()
         .map(|(_, members)| members.iter().cloned().collect());
+    let only = if defaults {
+        Some(defaults_only(&service, only))
+    } else {
+        only
+    };
     let mut result = service.list(
         &ListFilter {
             ready: params.ready,
@@ -3434,6 +3573,43 @@ fn task_list(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::
         }
     }
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// Whether a defaults connection may see the tasks of `source`: the scratch source, which lives in Collide's own
+/// store, and a source of a built-in pack. The packs of the person and of the repo are not loaded in defaults mode, so
+/// their tasks are not shown. `packs` is the pack of each source, as the board's corpus read its line.
+fn defaults_allows(packs: &BTreeMap<String, String>, source: &str) -> bool {
+    source == scratch::SOURCE
+        || packs
+            .get(source)
+            .is_some_and(|pack| BuiltinPacks::names().contains(&pack.as_str()))
+}
+
+/// The keys a defaults connection may list: `only` (everything when there is none) cut to the sources it may see.
+fn defaults_only(
+    service: &crate::corpus_service::BoardCorpus,
+    only: Option<BTreeSet<String>>,
+) -> BTreeSet<String> {
+    let packs = service.packs();
+    let shown: BTreeSet<String> = service.read(|corpus| {
+        corpus
+            .rows()
+            .iter()
+            .filter(|row| {
+                let source = row
+                    .task
+                    .key
+                    .split_once(':')
+                    .map_or("", |(source, _)| source);
+                defaults_allows(&packs, source)
+            })
+            .map(|row| row.task.key.clone())
+            .collect()
+    });
+    match only {
+        Some(only) => only.intersection(&shown).cloned().collect(),
+        None => shown,
+    }
 }
 
 /// A view's report and members, as `task.list` holds them before it pages.
@@ -3496,11 +3672,15 @@ fn narrowed(
 /// `task.views` (ts-0119-tj): the board's views with their counts, for the Field's view menu: the person's, the
 /// repo's and the packs' ([`crate::views`]). One view's error is on that view and hides no other. A line that does not
 /// load is `CONFLICT` with its problems.
-fn task_views(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+fn task_views(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
     let params: TaskViewsParams = read_params("task.views", params)?;
     let root = board_root(shared, &params.board)?;
     let service = corpus_of(shared, &params.board, &root)?;
-    let found = loaded_views(shared, &params.board, &root, &service)?;
+    let found = loaded_views(shared, &params.board, &root, &service, session.defaults())?;
     let views = found
         .loaded
         .iter()
@@ -3527,19 +3707,24 @@ fn loaded_views(
     board: &str,
     root: &str,
     service: &crate::corpus_service::BoardCorpus,
+    defaults: bool,
 ) -> Result<BoardViews, RpcError> {
     let lines = shared.config.lines();
-    let line = lines
-        .for_sources(
+    // A defaults connection reads the built-in packs alone: no personal view, no repo view, no repo or user pack.
+    let line = if defaults {
+        lines.for_defaults(&tools_path(shared))
+    } else {
+        lines.for_sources(
             BoardRef {
                 id: board,
                 root: Path::new(root),
             },
             &tools_path(shared),
         )
-        .map_err(line_error)?;
+    }
+    .map_err(line_error)?;
     let mut candidates = builtin_candidates();
-    if let Some(home) = lines.home() {
+    if let (Some(home), false) = (lines.home(), defaults) {
         candidates.extend(
             personal_candidates(home, board)
                 .map_err(|message| RpcError::new(code::CONFLICT, message))?,
@@ -3724,10 +3909,27 @@ fn corpus_of(
 /// says so. An id the corpus knows (a key, an old key, a short id) also brings the task's copies, the collision of a
 /// key held at two paths, the keys a short id fits, its runs newest first (those of its old keys too) and its latest
 /// finished run.
-fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+fn task_get(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
     let params: TaskGetParams = read_params("task.get", params)?;
     let root = board_root(shared, &params.board)?;
     let (prefix, id) = scratch::split_id(&params.id);
+    let defaults = session.defaults();
+    if defaults && let Some(source) = prefix {
+        let packs = corpus_of(shared, &params.board, &root)?.packs();
+        if !defaults_allows(&packs, source) {
+            return Err(RpcError::new(
+                code::NOT_FOUND,
+                format!(
+                    "this window started with defaults, so the source `{source}` is not read: only the scratch \
+                     source and the built-in packs are"
+                ),
+            ));
+        }
+    }
     let known = match prefix {
         Some(_) => corpus_of(shared, &params.board, &root)?.read(|corpus| {
             let found = corpus.get(&params.id);
@@ -3793,7 +3995,7 @@ fn task_get(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::V
         result.runs = rows.into_iter().map(|row| row.run).collect();
         result.ops = ops_of(shared, &params.board, &root, task);
         let key = task.key.clone();
-        result.views = views_holding(shared, &params.board, &root, &key)?;
+        result.views = views_holding(shared, &params.board, &root, &key, defaults)?;
     }
     Ok(serde_json::to_value(result).expect("a result is JSON"))
 }
@@ -3806,9 +4008,11 @@ fn views_holding(
     board: &str,
     root: &str,
     key: &str,
+    defaults: bool,
 ) -> Result<Vec<String>, RpcError> {
     let service = corpus_of(shared, board, root)?;
-    let Ok(BoardViews { loaded, .. }) = loaded_views(shared, board, root, &service) else {
+    let Ok(BoardViews { loaded, .. }) = loaded_views(shared, board, root, &service, defaults)
+    else {
         return Ok(Vec::new());
     };
     Ok(loaded

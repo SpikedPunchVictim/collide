@@ -9,7 +9,9 @@
 //! a `dev:` folder never trusted ([`LoadProblem::needs_dev_trust`]). So `board.trust` with an empty hash records the
 //! approvals it is given, for what the load needs only, and trusts nothing.
 
-use crate::board_load::{LoadContext, LoadProblem, LoadedLine, PackOrigin, load_line};
+use crate::board_load::{
+    LoadContext, LoadProblem, LoadedLine, PackOrigin, load_defaults, load_line,
+};
 use crate::boards::{self, Checkout};
 use crate::config_get::{BoardRef, LoadContextFactory, WorkspaceRoots};
 use crate::pack_manage::review_data;
@@ -143,6 +145,24 @@ impl Lines {
         })
     }
 
+    /// The line Start with defaults reads (ts-0215-gt): the built-in packs and nothing of the person's or the repo's.
+    /// It never opens the user's files, the trust store or the repository, and it is untrusted with no hash, so no
+    /// pack of the repo's would load from it. The git directory is empty: nothing is read from it.
+    pub fn for_defaults(&self, tools: &OsStr) -> Result<SourceLine, LineError> {
+        let context = (self.load_context)(tools)
+            .map_err(|message| LineError::Failed(format!("the loader cannot start: {message}")))?;
+        let line = load_defaults(&context)
+            .map_err(|problems| LineError::Refused(texts(&problems).join("\n")))?;
+        Ok(SourceLine {
+            git_dir: PathBuf::new(),
+            ref_name: "defaults".to_string(),
+            line,
+            trust: unknown_trust(),
+            problems: Vec::new(),
+            context,
+        })
+    }
+
     /// The commit `line` names, or why it names none.
     fn resolve(&self, opened: &Opened, line: &str) -> Result<String, LineError> {
         opened
@@ -175,6 +195,42 @@ impl Lines {
             lines,
             sources_unread: None,
             missing: false,
+        }
+    }
+
+    /// [`Lines::summary`] for a defaults connection: the same lines, each untrusted with no hash and no problem. The
+    /// user's files, the trust store and the line's files are not read, so nothing of them can show.
+    pub fn summary_defaults(&self, id: &str, root: &str, checkouts: &[Checkout]) -> BoardSummary {
+        let lines = checkouts
+            .iter()
+            .filter_map(|checkout| {
+                Some(LineSummary {
+                    ref_name: checkout.line_branch().to_string(),
+                    root: checkout.root.display().to_string(),
+                    snapshot: Some(boards::line_commit(checkout, &self.git_env)?),
+                    trust: unknown_trust(),
+                    problems: Vec::new(),
+                })
+            })
+            .collect();
+        BoardSummary {
+            id: id.to_string(),
+            root: root.to_string(),
+            lines,
+            sources_unread: None,
+            missing: false,
+        }
+    }
+
+    /// What `board.trust_review` answers a defaults connection: nothing to review, and no hash to trust.
+    pub fn review_defaults(&self) -> BoardTrustReviewResult {
+        BoardTrustReviewResult {
+            trust: unknown_trust(),
+            problems: Vec::new(),
+            changes: Vec::new(),
+            packs: Vec::new(),
+            hosts: Vec::new(),
+            dev_folders: Vec::new(),
         }
     }
 
@@ -399,6 +455,13 @@ impl Lines {
             hosts: Vec::new(),
             dev_folders: Vec::new(),
         })
+    }
+}
+
+/// Untrusted at an empty hash: what a line is when there is nothing to trust yet.
+fn unknown_trust() -> TrustState {
+    TrustState::Untrusted {
+        hash: String::new(),
     }
 }
 

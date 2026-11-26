@@ -252,13 +252,7 @@ pub fn load_line(
         Some(dir) => load.read_files(dir),
         None => Files::default(),
     };
-    let mut names = Names::default();
-    // A pack's setting is `<pack>.<key>`, so a pack named like a root of Collide's own keys would name two things.
-    for root in collide_roots() {
-        names
-            .0
-            .push((root.to_string(), format!("Collide's own `{root}` settings")));
-    }
+    let mut names = root_names();
     let mut packs = load.builtin_packs(&mut names);
     if let (Some(dir), Some(board)) = (&dir, &files.board) {
         load.board_packs(dir, board, &files.lock, &mut names, &mut packs);
@@ -281,6 +275,48 @@ pub fn load_line(
         views: files.views,
         packs,
         inputs,
+    })
+}
+
+/// The names Collide's own settings take, so a pack named like one is a clash. A pack's setting is `<pack>.<key>`, so
+/// such a pack would name two things.
+fn root_names() -> Names {
+    let mut names = Names::default();
+    for root in collide_roots() {
+        names
+            .0
+            .push((root.to_string(), format!("Collide's own `{root}` settings")));
+    }
+    names
+}
+
+/// The line Start with defaults reads (ts-0215-gt): the built-in packs and nothing else. No repository is read, so
+/// there is no `.collide/`, no board file, no lock, no repo settings, profiles or views, and no user pack: it is the
+/// line of a repository that has no Collide folder, whatever the repository holds.
+pub fn load_defaults(context: &LoadContext) -> Result<LoadedLine, Vec<LoadProblem>> {
+    let mut load = Load {
+        repo: Path::new(""),
+        context,
+        commit: String::new(),
+        problems: Vec::new(),
+        inputs: Vec::new(),
+        tools: BTreeMap::new(),
+        sdk: None,
+    };
+    let packs = load.builtin_packs(&mut root_names());
+    if !load.problems.is_empty() {
+        return Err(load.problems);
+    }
+    Ok(LoadedLine {
+        commit: String::new(),
+        collide_dir: None,
+        board: Board::default(),
+        lock: PackLock::default(),
+        config: ConfigFile::default(),
+        profiles: BTreeMap::new(),
+        views: Vec::new(),
+        packs,
+        inputs: Vec::new(),
     })
 }
 

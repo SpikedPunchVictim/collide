@@ -209,9 +209,11 @@ impl Admitted {
         read: impl FnOnce() -> OwnerInitializeParams,
         expected_token: &str,
     ) -> Result<Session, RpcError> {
-        check_initialize(&read(), expected_token)?;
+        let params = read();
+        check_initialize(&params, expected_token)?;
         Ok(Session {
             caller: self.caller,
+            defaults: params.defaults,
         })
     }
 }
@@ -220,11 +222,18 @@ impl Admitted {
 #[derive(Debug)]
 pub struct Session {
     caller: Caller,
+    defaults: bool,
 }
 
 impl Session {
     pub fn caller(&self) -> &Caller {
         &self.caller
+    }
+
+    /// The connection asked for Start with defaults at `initialize`: it reads only the Default layer, the built-in
+    /// packs and views, and its writes are refused. Fixed for the connection's life, as the caller is.
+    pub fn defaults(&self) -> bool {
+        self.defaults
     }
 
     /// The `actor` for the events this connection causes, which no request can change (0.10).

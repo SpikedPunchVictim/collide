@@ -65,6 +65,7 @@ pub mod scratch;
 pub mod scratch_store;
 pub mod secret_store;
 pub mod section_view;
+pub mod set_aside;
 pub mod settings_files;
 pub mod shim;
 pub mod shim_link;

@@ -546,6 +546,11 @@ fn samples() -> Vec<(Method, Value, Value)> {
                 "written": true,
             }),
         ),
+        (
+            Method::ConfigReset,
+            json!({ "board": "bd-1" }),
+            json!({ "folder": "/home/me/.config/collide/set-aside/2026-11-26-101507", "moved": ["config.yaml"] }),
+        ),
     ]
 }
 
@@ -1094,6 +1099,7 @@ fn hello(protocol: u32, token: Option<&str>) -> OwnerInitializeParams {
         protocol,
         token: token.map(str::to_string),
         client: Some("collide-cli".into()),
+        defaults: false,
     }
 }
 

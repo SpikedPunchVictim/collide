@@ -312,6 +312,12 @@ impl BoardCorpus {
         result
     }
 
+    /// The pack that provides each source of the board's line, as the last look read it. Scratch has none, and a line
+    /// that could not be read gives none.
+    pub fn packs(&self) -> BTreeMap<String, String> {
+        locked(&self.inner.state).packs.clone()
+    }
+
     /// Reads the corpus.
     pub fn read<R>(&self, read: impl FnOnce(&Corpus) -> R) -> R {
         read(&locked(&self.inner.state).corpus)

@@ -800,3 +800,28 @@ fn a_first_connection_that_works_says_nothing_and_the_return_after_it_says_back(
         .collect();
     assert_eq!(told, ["event 5", "lost", "back", "event 6"]);
 }
+
+// ---- the mode of the connection (ts-0215-gt) --------------------------------------------------------------------
+
+/// `config.pack_enable` of a board the daemon does not have: a normal connection says the board is not there, and a
+/// defaults connection refuses the write before it looks.
+fn enable(link: &mut SocketLink, id: i64) -> Result<Value, collide_core::owner::RpcError> {
+    let params = json!({ "board": "nowhere", "name": "p", "enabled": true });
+    result_of(link.call(&request(id, "config.pack_enable", params)))
+}
+
+#[test]
+fn a_link_told_defaults_makes_a_defaults_connection_and_a_link_told_not_makes_a_normal_one_again() {
+    let root = TempRoot::new();
+    let _daemon = start_daemon(&root, Box::new(std::io::sink()), None);
+    let mut link = link(&root, AlreadyThere);
+    let normal = enable(&mut link, 1).expect_err("there is no such board");
+    assert_eq!(normal.code, code::NOT_FOUND, "{normal:?}");
+    link.set_defaults(true);
+    let refused = enable(&mut link, 2).expect_err("a defaults connection writes nothing");
+    assert_eq!(refused.code, code::NOT_PERMITTED, "{refused:?}");
+    assert!(refused.message.contains("defaults"), "{}", refused.message);
+    link.set_defaults(false);
+    let again = enable(&mut link, 3).expect_err("there is no such board");
+    assert_eq!(again.code, code::NOT_FOUND, "{again:?}");
+}

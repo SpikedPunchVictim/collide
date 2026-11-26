@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { type EpicCard, type EpicRun, cardOf, epicTitleOf, outsideSteps, runOf } from '../epics/model.ts'
 import { DOT } from '../field/colours.ts'
-import { type FoldStore, browserStore, memoryStore } from '../field/folds.ts'
+import { useKeptStore } from '../defaults/mode.ts'
+import { type FoldStore } from '../field/folds.ts'
 import type { LayoutKind } from '../field/layout.ts'
 import { shortIdOf } from '../field/model.ts'
 import type { Collection, FieldData, Task } from '../field/types.ts'
@@ -36,7 +37,7 @@ export interface EpicDrawerProps {
 
 export function EpicDrawer(props: EpicDrawerProps) {
   const { owner, boardId, collection, data, stamp, store, onOpenTask, onLayout, onClose } = props
-  const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
+  const kept = useKeptStore(store)
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
   const { report, problem } = useEpicWalk(owner, boardId, collection.id, stamp)

@@ -327,3 +327,21 @@ pub struct ConfigPackUpdateResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lock_file: Option<String>,
 }
+
+/// `config.reset` params (Start with defaults, Reset): the board whose own folder is moved aside with the global files.
+/// With no board only the global files move.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigResetParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
+}
+
+/// `config.reset` result: the folder the files were moved into, and each file or folder moved, as a path under it.
+/// Nothing is deleted. A file that was not there is not listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigResetResult {
+    pub folder: String,
+    pub moved: Vec<String>,
+}

@@ -536,6 +536,7 @@ fn params(token: Option<&str>) -> OwnerInitializeParams {
         protocol: collide_core::owner::OWNER_PROTOCOL,
         token: token.map(str::to_string),
         client: None,
+        defaults: false,
     }
 }
 

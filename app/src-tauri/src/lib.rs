@@ -1,4 +1,5 @@
 pub mod csp;
+pub mod menu;
 pub mod shell;
 
 use collide_core::owner::{RpcError, code};
@@ -6,6 +7,10 @@ use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::SystemClocks;
 use collide_host::daemon::{DaemonPaths, ROOT_ENV};
 use collide_host::ui_tools::{SecretStoreTokens, UiToolsEndpoint};
+use menu::{
+    Reloader, START_WITH_DEFAULTS, START_WITH_DEFAULTS_KEY, START_WITH_DEFAULTS_LABEL,
+    on_menu_event, reload_script,
+};
 use serde_json::Value;
 use shell::{
     ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, FolderPicker, LaunchStarter, Shell,
@@ -16,6 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
+use tauri::menu::{Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
@@ -88,6 +94,69 @@ impl FolderPicker for DialogPicker {
     }
 }
 
+/// The window's reload (ts-0215-gt): [`reload_script`] run in the main window. The menu's handler asks for it.
+struct WebviewReloader(tauri::AppHandle);
+
+impl Reloader for WebviewReloader {
+    fn reload(&self, defaults: bool) -> Result<(), String> {
+        let window = self
+            .0
+            .get_webview_window(MAIN_WINDOW)
+            .ok_or_else(|| "the window is not open".to_string())?;
+        window
+            .eval(reload_script(defaults))
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// The app's menu: the standard items a window of text needs (macOS drops them when an app sets a menu of its own), and
+/// "Start with Defaults..." in the app's own menu, with its accelerator.
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let defaults = MenuItemBuilder::with_id(START_WITH_DEFAULTS, START_WITH_DEFAULTS_LABEL)
+        .accelerator(START_WITH_DEFAULTS_KEY)
+        .build(app)?;
+    let application = Submenu::with_items(
+        app,
+        "Collide",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &defaults,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+    Menu::with_items(app, &[&application, &edit, &window])
+}
+
 fn build_shell(
     channel: Arc<dyn EventChannel>,
     access: Arc<DaemonAccess>,
@@ -136,6 +205,10 @@ const EVENT_RETRY: Duration = Duration::from_secs(1);
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .menu(build_menu)
+        .on_menu_event(|app, event| {
+            on_menu_event(event.id().as_ref(), &WebviewReloader(app.clone()));
+        })
         .setup(|app| {
             let channel: Arc<dyn EventChannel> = Arc::new(WebviewChannel(app.handle().clone()));
             let access = daemon_access()?;

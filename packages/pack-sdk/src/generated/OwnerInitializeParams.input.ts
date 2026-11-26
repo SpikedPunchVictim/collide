@@ -6,6 +6,11 @@
  */
 export interface OwnerInitializeParams {
   client?: string | null
+  /**
+   * Start with defaults: this connection reads only the Default layer, the built-in packs and the built-in views,
+   * and its writes are refused. Other connections are unchanged. Absent means a normal connection.
+   */
+  defaults?: boolean
   protocol: number
   token?: string | null
 }

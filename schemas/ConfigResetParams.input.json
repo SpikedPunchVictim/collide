@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.reset` params (Start with defaults, Reset): the board whose own folder is moved aside with the global files.\nWith no board only the global files move.",
+  "properties": {
+    "board": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "ConfigResetParams",
+  "type": "object"
+}

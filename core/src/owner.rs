@@ -334,6 +334,10 @@ pub struct OwnerInitializeParams {
     pub token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
+    /// Start with defaults: this connection reads only the Default layer, the built-in packs and the built-in views,
+    /// and its writes are refused. Other connections are unchanged. Absent means a normal connection.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub defaults: bool,
 }
 
 /// `initialize` result: the daemon's version and protocol, and the actor it recorded for this connection.
@@ -678,6 +682,9 @@ methods! {
     ConfigPackUpdate, "config.pack_update", Config,
         "collide pack, moving a git pack to a new commit",
         ConfigPackUpdateParams, ConfigPackUpdateResult;
+    ConfigReset, "config.reset", Config,
+        "0.7 Layers, Start with defaults: the user's settings, packs and this board's folder moved aside",
+        ConfigResetParams, ConfigResetResult;
 }
 
 /// What [`route`] found.

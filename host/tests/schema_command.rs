@@ -477,7 +477,7 @@ fn schema_lists_the_owner_protocol_envelope_and_every_method_type() {
     );
     assert_eq!(
         keys(&types, "OwnerInitializeParams"),
-        ["client", "protocol", "token"]
+        ["client", "defaults", "protocol", "token"]
     );
     let registry = collide_core::schema::registry().render();
     for method in Method::ALL {

@@ -1,8 +1,18 @@
-import { useCallback, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import type { SourceDecl } from './field/types.ts'
 import { Button } from '@/components/ui/button'
+import { DefaultsBanner, ResetNotice, ResetWindow } from './defaults/DefaultsBanner.tsx'
+import {
+  StateStoreProvider,
+  clearStoredState,
+  defaultsFromHash,
+  hashForNormalStart,
+  hashWithoutReset,
+  resetFolderFromHash,
+} from './defaults/mode.ts'
 import { EmptyBoard } from './firstrun/EmptyBoard.tsx'
 import { FieldPage } from './field/FieldPage.tsx'
+import { memoryStore } from './field/folds.ts'
 import { FirstRunPage } from './firstrun/FirstRunPage.tsx'
 import { GitInitWindow } from './firstrun/GitInitWindow.tsx'
 import type { Check } from './firstrun/model.ts'
@@ -41,17 +51,73 @@ export interface AppProps {
    * typed path. A test says which.
    */
   readonly shell?: boolean
+  /**
+   * Whether the window started with defaults (`ts-0215-gt`): the shell reloaded it with `defaults` in the fragment of
+   * its address. The default asks the page. In defaults mode the window tells the shell before it asks the daemon
+   * anything, reads and writes no stored state, and shows a banner.
+   */
+  readonly defaults?: boolean
 }
 
 const inShell = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+const currentHash = () => (typeof window === 'undefined' ? '' : window.location.hash)
+const startedWithDefaults = () => defaultsFromHash(currentHash())
+
+/** Reloads the page with the fragment `hash` and no other change to its address. */
+function reloadWith(hash: string) {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
+  window.location.reload()
+}
 
 // A link in a task's text asks before it opens, wherever the text is shown, so the window that asks is provided once.
-export function App({ owner = shellOwner, shell = inShell() }: AppProps) {
+export function App({ owner = shellOwner, shell = inShell(), defaults = startedWithDefaults() }: AppProps) {
   return (
     <ExternalLinks owner={owner}>
-      <Window owner={owner} shell={shell} />
+      {defaults ? (
+        <DefaultsMode owner={owner}>
+          <Window owner={owner} shell={shell} defaults />
+        </DefaultsMode>
+      ) : (
+        <Window owner={owner} shell={shell} defaults={false} />
+      )}
     </ExternalLinks>
   )
+}
+
+/**
+ * Tells the shell the window is in defaults mode before the window asks the daemon for anything, so the shell's
+ * connection is made with the flag, and gives the window a store that lives as long as the page. A shell that cannot be
+ * told is said, and the window is not shown: it would read the person's files after saying it did not.
+ */
+function DefaultsMode({ owner, children }: { readonly owner: OwnerClient; readonly children: ReactNode }) {
+  const [told, setTold] = useState<true | string | null>(null)
+  const store = useMemo(() => memoryStore(), [])
+  useEffect(() => {
+    let live = true
+    owner.rpc('shell.set_defaults', { defaults: true }).then(
+      () => live && setTold(true),
+      (failure: unknown) => live && setTold(toOwnerError(failure).message),
+    )
+    return () => {
+      live = false
+    }
+  }, [owner])
+  if (told === null) return null
+  if (told !== true) {
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-3 p-4">
+        <p role="alert" className="whitespace-pre-wrap text-destructive">
+          Could not start with defaults: {told}
+        </p>
+        <div>
+          <Button variant="outline" size="sm" onClick={() => reloadWith(hashForNormalStart(currentHash(), null))}>
+            Start normally
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  return <StateStoreProvider value={store}>{children}</StateStoreProvider>
 }
 
 /** The folder the first-run page is looking at (`ts-0194-qp`): its checks while they are read, and what went wrong. */
@@ -62,7 +128,15 @@ interface FirstRun {
   readonly busy: boolean
 }
 
-function Window({ owner, shell }: { readonly owner: OwnerClient; readonly shell: boolean }) {
+function Window({
+  owner,
+  shell,
+  defaults,
+}: {
+  readonly owner: OwnerClient
+  readonly shell: boolean
+  readonly defaults: boolean
+}) {
   const { state, loop } = useLoop(owner)
   const board = state.boards.find((each) => each.id === state.boardId)
   const missing = board !== undefined && isMissing(board)
@@ -76,6 +150,10 @@ function Window({ owner, shell }: { readonly owner: OwnerClient; readonly shell:
   const [makingRepo, setMakingRepo] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [addingPack, setAddingPack] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [leaveProblem, setLeaveProblem] = useState<string | null>(null)
+  // The folder a Reset moved the files to, which the fragment of this start names until the person dismisses it.
+  const [resetFolder, setResetFolder] = useState(() => resetFolderFromHash(currentHash()))
   // The boards whose `.collide/` this window wrote and the person has not committed yet.
   const [written, setWritten] = useState<readonly string[]>([])
   const trust = useTrust(
@@ -116,6 +194,57 @@ function Window({ owner, shell }: { readonly owner: OwnerClient; readonly shell:
     return null
   }
   const noBoards = !state.loading && state.boards.length === 0
+  // Leaves defaults mode: the shell is told first, so the connection the next start makes is a normal one.
+  const startNormally = async (folder: string | null): Promise<string | null> => {
+    try {
+      await owner.rpc('shell.set_defaults', { defaults: false })
+    } catch (failure) {
+      return toOwnerError(failure).message
+    }
+    reloadWith(hashForNormalStart(currentHash(), folder))
+    return null
+  }
+  const reset = async (): Promise<string | null> => {
+    try {
+      const { folder } = await owner.rpc('config.reset', state.boardId === null ? {} : { board: state.boardId })
+      // The files are moved. The stored state is cleared next, then the window starts normally and names the folder.
+      try {
+        clearStoredState(window.localStorage)
+      } catch {
+        // Storage that cannot be used has no state of ours to clear.
+      }
+      return (await startNormally(folder)) ?? null
+    } catch (failure) {
+      return toOwnerError(failure).message
+    }
+  }
+  const top: ReactNode = defaults ? (
+    <div className="flex flex-col gap-2 px-4 pt-4">
+      <DefaultsBanner
+        onNormal={() => void startNormally(null).then(setLeaveProblem)}
+        onReset={() => setResetting(true)}
+      />
+      {leaveProblem === null ? null : (
+        <p role="alert" className="whitespace-pre-wrap text-destructive">
+          {leaveProblem}
+        </p>
+      )}
+    </div>
+  ) : resetFolder === null ? null : (
+    <div className="px-4 pt-4">
+      <ResetNotice
+        folder={resetFolder}
+        onDismiss={() => {
+          window.history.replaceState(
+            null,
+            '',
+            `${window.location.pathname}${window.location.search}${hashWithoutReset(currentHash())}`,
+          )
+          setResetFolder(null)
+        }}
+      />
+    </div>
+  )
   if (onLoopPage) {
     const from = TABS.find((entry) => entry.id === tab)?.name ?? 'the tabs'
     return (
@@ -136,6 +265,7 @@ function Window({ owner, shell }: { readonly owner: OwnerClient; readonly shell:
       sources={field.data?.sources ?? NO_SOURCES}
       stamp={field.updatedAt}
     >
+      {top}
       <Frame
         tab={tab}
         onTab={setTab}
@@ -254,6 +384,13 @@ function Window({ owner, shell }: { readonly owner: OwnerClient; readonly shell:
       ) : null}
       {addingPack ? (
         <AddPackWindow owner={owner} onAdded={field.reload} onClosed={() => setAddingPack(false)} />
+      ) : null}
+      {resetting ? (
+        <ResetWindow
+          boardName={board === undefined ? null : boardName(board)}
+          onConfirm={reset}
+          onClosed={() => setResetting(false)}
+        />
       ) : null}
       {trust.open && trust.prompt !== null && board !== undefined ? (
         <TrustWindow

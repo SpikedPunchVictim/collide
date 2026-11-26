@@ -1,7 +1,7 @@
 ---
 id: ts-0215-gt
 kind: task
-status: ready
+status: done
 title: "App: start with defaults, a way back from broken settings and views"
 owners: []
 links:
@@ -110,3 +110,127 @@ Write these first.
   `ts-0197-uj`, whose owner check covers the menu item and key in the bundled app.
 - Owner decisions (2026-11-24): the owner asked for this item. The item decisions above are recommendations for the
   builder.
+
+### Built
+
+- Wire (`core/src/owner.rs`, `core/src/owner/config.rs`, `core/src/schema.rs`; `pnpm gen` ran, the generated files
+  are its output): `OwnerInitializeParams.defaults` (absent means a normal connection); `config.reset` with
+  `ConfigResetParams { board }` and `ConfigResetResult { folder, moved }`.
+- Daemon, per connection (`host/src/auth.rs` `Session.defaults`; `host/src/owner_client.rs` `connect_as`):
+  - `host/src/daemon.rs` `defaults_serves` is the list of methods a defaults connection may call. Any other method
+    gets `NOT_PERMITTED` from `refused_in_defaults`: "this window started with defaults, so `<method>` is refused:
+    your settings, views and packs are set aside for it. Start normally to change them". The gate is the first thing
+    `call` does, so no write can forget it. The refused ones include `config.set`, `task.save_view`,
+    `config.pack_add`, `config.pack_link`, `config.pack_enable` and `board.init`, and also `board.trust`,
+    `board.locate`, `task.apply` and every run, queue and daemon write.
+  - Reads: `config.get` (`host/src/config_get.rs` `get_defaults`, over `board_load.rs` `load_defaults`: the Default
+    layer and the built-in packs, no file read); `config.pack_list` (`pack_list_defaults`); `board.list`,
+    `board.open`, `board.trust_review` (`board_lines.rs` `for_defaults`, `summary_defaults`, `review_defaults`: an
+    empty line, no problems, no trust, no review); `task.views` and `task.list` with a view (`daemon.rs`
+    `loaded_views` with the flag: the built-in views and the built-in packs' views, no personal or repo view);
+    `task.list` and `task.get` show only the scratch source and the built-in packs' sources (`defaults_allows`,
+    `defaults_only`, `BoardCorpus::packs` in `host/src/corpus_service.rs`).
+  - The trust record is never read or written by a defaults connection, and the trust check is unchanged.
+- Reset (`host/src/set_aside.rs`, `daemon.rs` `config_reset`): moves `config.yaml`, `packs.yaml`, `packs.lock` and
+  `boards/<id>` out of `~/.config/collide/` into `set-aside/<YYYY-MM-DD-HHMMSS>/`, keeping their paths, by `rename`.
+  A folder that exists gets `-2`, `-3`, so two resets in a second make two folders. The folder is made `0700`. Nothing
+  is deleted, a file that is not there is skipped, a failure names the file and what had moved, and the set-aside
+  folder is never in the list. A defaults connection may call it: it is the way out.
+- Shell (`app/src-tauri/src/shell.rs`, `menu.rs`, `lib.rs`):
+  - `shell.set_defaults { defaults }` (`SET_DEFAULTS`, `set_defaults`, `DaemonLink::set_defaults`,
+    `DaemonAccess::connect_as`, `SocketLink`): the window cannot send `initialize`, so it tells the shell, and the
+    shell drops its connection and makes the next with the flag. `app/src/owner/methods.ts` `SHELL_METHODS` has it.
+  - `menu.rs`: the id, label and key of the item, the `Reloader` trait, `on_menu_event` and `reload_script`.
+    `lib.rs` `build_menu` makes the app menu (About, the new item, Hide, Quit; Edit; Window) and `WebviewReloader`
+    runs the script in the main window. The script sets or clears the `defaults` key of the fragment and keeps the
+    other keys, then reloads.
+- UI (`app/src/defaults/mode.ts`, `DefaultsBanner.tsx`, `App.tsx`):
+  - `App` reads `defaults` from the fragment. `DefaultsMode` tells the shell first and renders nothing until it has
+    answered, so no call goes out on a normal connection; a shell that refuses is said, with Start normally.
+  - The window's stored state goes to a memory store in defaults mode (`StateStoreProvider`, `useKeptStore`, used by
+    `FieldPage`, `Drawer` and `EpicDrawer`), so nothing stored is read and nothing is written.
+  - `DefaultsBanner` (the item's words, Start normally, Reset…), `ResetWindow` (lists what it moves and leaves),
+    `ResetNotice` (names the folder after the next start). A confirmed Reset calls `config.reset`, runs
+    `clearStoredState`, tells the shell `false` and reloads without the flag and with `reset=<folder>` on the fragment.
+- Where the UI keeps its state, all in the webview's `localStorage` through the `FoldStore` seam:
+  `collide.drawer.width`, `collide.drawer.folds`, `collide.field.folds:<board>:<view>`,
+  `collide.field.layout:<board>:<view>`, `collide.field.filters.folded:<board>` and
+  `collide.field.epics.folded:<board>:<view>`. The last tab (`App` `useState`) and the last view (`useField`) are in
+  memory only, so they need no clearing. `clearStoredState` removes every key that starts with `collide.`.
+- The key. Ctrl-Option-Shift-Escape. Checked: macOS reserves Option-Command-Escape (Force Quit) and Option-Command-
+  Shift-Escape (force quit the front app, held); this chord is neither. In `app/src/` the Escape handlers
+  (`Drawer.tsx`, `Peek.tsx`, and the dialogs) take plain Escape, and `Drawer.tsx` and the other key handlers
+  (`Frame.tsx`, `FieldPage.tsx`, `filters/keys.ts`) return when Control, Option or Command is down. `frame/actions.ts`
+  and `ui/actions.ts` bind no chord. A menu accelerator is taken by the system menu before the page sees the key.
+- Tests, with those seen red at runtime (a stub of my own function, never a guard):
+  - `host/tests/daemon_defaults.rs` (11): the first run had 10 of 11 red, the defaults flag ignored. Names:
+    `the_broken_files_break_a_normal_connection`, `defaults_open_the_board_with_the_built_in_views_and_the_fixtures_
+    tasks`, `defaults_show_every_setting_at_default_and_read_no_settings_file`, `defaults_list_the_built_in_packs_and_
+    no_other`, `defaults_show_no_problems_no_trust_and_no_review`, `a_normal_connection_on_the_same_daemon_still_sees_
+    the_persons_files_and_problems`, `every_write_is_refused_in_defaults_mode_with_words_that_name_it_and_changes_no_
+    file`, `a_trusted_repos_views_and_packs_do_not_load_and_its_trust_record_is_unchanged`,
+    `reset_moves_the_listed_files_aside_and_deletes_nothing`, `a_reset_of_an_unknown_board_is_refused_and_moves_
+    nothing`, `after_a_reset_a_normal_connection_reads_the_defaults_too`. The first test passes before the change by
+    design: it proves the fixture breaks a normal connection. The secret store is a `MemorySecretStore` and is
+    checked unchanged in the reset test.
+  - `host/tests/set_aside.rs` (6): five red with `reset` stubbed to move nothing; the stamp test is new code.
+  - `app/src-tauri/tests/menu.rs` (5): two red with the handler asking for the wrong mode.
+    `app/src-tauri/tests/rpc.rs` `shell_set_defaults_*` (2): the first red with the link not told.
+    `app/src-tauri/tests/daemon_link.rs` `a_link_told_defaults_makes_a_defaults_connection_*`: red with the link
+    ignoring the mode.
+  - `app/test/defaults.test.tsx` (16): three red with the fragment flag, the store and the clearing stubbed.
+  - `app/browser/fake-defaults.spec.ts` (6, fake owner): five red with the fragment flag stubbed.
+    `app/browser/defaults.spec.ts` (3, bridge, real daemon on a temp root with the broken fixture): all three red with
+    the shell ignoring the mode.
+- No new crate or package. `is_safe_token` and `save_view`'s name rule are unchanged.
+
+### Decisions for the owner
+
+- **The key.** Ctrl-Option-Shift-Escape (checks above). Alternative: no key, the menu item alone. Recommend the key:
+  it is a chord nothing else uses, and a person with a blank page cannot reach a button.
+- **How the window enters the mode.** The shell reloads with the `defaults` key on the fragment, as the item says. The
+  item's "the UI passes `defaults: true` on `initialize`" cannot be literal: the window never sends `initialize`
+  (`Shell::rpc` refuses it, and the token is the shell's). Instead the UI sends `shell.set_defaults` first, and the
+  shell's connection carries the flag on `initialize`, so the flag still rides the connection and no method can
+  forget it. Alternative: the menu handler sets the shell's mode itself, and the page asks nothing. Recommend what is
+  built: it also works for the bridge page, which has no menu, and the fragment stays the page's one source.
+  Known gap: the shell's mode is set by the page, so a page that loads without the flag while the shell is still in
+  defaults mode reads with the flag. Only the page's own exits (Start normally, a Reset) drop the flag, and each
+  tells the shell first.
+- **Writes.** Refused, with words that name defaults mode, by one gate before dispatch that allows a list of reads
+  and Reset. Alternative: allow writes to the person's files. Recommend refusing: nothing saves into files Reset
+  would move. A new method is refused until someone adds it to `defaults_serves`, which fails safe.
+- **Reset's scope.** The global files plus this board's folder, as recommended. Alternative: this board's folder
+  only. A Reset with no board open moves the global files alone.
+- **The event stream.** The shell's event pump keeps its own, normal connection. It carries notices only, and the
+  window asks for data over the defaults connection. Alternative: the pump also reconnects with the flag. Recommend
+  leaving it: a second reconnect path for no read the window makes.
+- **Where the flag lives on the page.** A fragment key beside the others (`#token=` of the bridge, `#world=` of the
+  fake). Alternative: a query string, which the bridge and the app's own server would see. Recommend the fragment.
+- **A notice after Reset.** The folder reaches the next start in the fragment (`reset=<folder>`), so the page keeps no
+  stored state for it; Dismiss takes it off. Alternative: `sessionStorage`.
+- **Plan text to propose** (Stage 6a, Start with defaults, after "Writes are refused"): "A defaults connection may
+  list and read tasks of the scratch source and of the built-in packs, the built-in views, the Default layer and the
+  built-in packs; it may call `config.reset`. The shell makes its connection with the flag after the window tells it
+  (`shell.set_defaults`), because the window cannot send `initialize`."
+
+- Review (2026-11-26): `set_aside.rs` `GLOBAL_FILES` names `PACKS_FILE` and `LOCK_FILE` from `user_packs.rs`
+  instead of spelling them again. Checked: the gate is first in `call` and fails closed; Reset renames, never
+  deletes; the page tells the shell before its first call, and Start normally tells it `false` before the reload.
+  Full gates passed but for `browser/settings.spec.ts`, whose reload can land while a poll's answer is read and whose
+  refused-secret case times out under load; both predate this item and are fixed in their own commit.
+
+### Not done, by design
+
+- Counts of a built-in view still cover every task of the board's corpus, including tasks from repo packs that the
+  window does not list. Defaults mode filters the tasks it returns, not the counts the corpus keeps. A later item can
+  give a defaults connection its own corpus; the cost is a second corpus for one window.
+- A built-in pack's tasks come from the board's shared corpus, which reads its sources through the normal line. With a
+  user pack folder gone the normal line fails, so a corpus started after the files broke may list only the scratch
+  source. The bridge test's plan tasks were read before the files were broken, and the host test's tasks are scratch
+  ones, so a corpus that starts broken is not covered. A later item can read the built-in sources for a defaults
+  connection through its own line.
+- The owner check of the menu item and the key in the bundled app is `ts-0197-uj`'s. No `tauri build` ran, and the app
+  was never launched; the menu code compiles and its handler is unit-tested.
+- A way to move a set-aside folder back is not built. The folder keeps the paths, so a person can copy it by hand.
+- The Reset window cannot yet list the board's views by name; it names the board and says "your views".
