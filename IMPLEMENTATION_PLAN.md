@@ -7,7 +7,11 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 30.** Revision 30 writes in the epics the owner designed in rounds 8 to 10 of the board mock
+**Status: revision 31.** Revision 31 lets a saved view's name hold spaces. A view keeps the words the person typed
+as its name, and Collide makes its file name from them (`Slow spots` in `slow-spots.yaml`), as the plan's view example
+always had it (Stage 4, Views; Stage 6a, `ts-0217-dy` after `ts-0215-gt`; owner, 2026-11-26). The S6 smoke run found
+the refusal (`ts-0196-uw`).
+Revision 30 writes in the epics the owner designed in rounds 8 to 10 of the board mock
 (notes 58-63, and 38 changed; owner, 2026-11-25): a strip of epic cards over the Field in every layout, a picked epic
 lit on the board and drawn by run order and graph, the epic in the drawer, a funnel on each card, and one Epic box in
 the filter bar, which now folds under its own header (Stage 6a, `ts-0216-ve` after `ts-0190-tz`). Adding an epic to Up
@@ -2525,6 +2529,10 @@ workflow: orchard/loop                                    # default for runs lau
 layout: { default: board, groupBy: category }
 ```
 
+- **A view's name and its file** (revision 31; owner, 2026-11-26). `name` is the words the person typed, spaces
+  included: 1 to 64 characters, no `/` and not a built-in's name. Loading reads the name from the file. Saving makes
+  the file name from it (`Slow spots` in `slow-spots.yaml`), replaces the file that already holds that name, and
+  refuses a name whose file holds another (`ts-0217-dy`).
 - **Membership = (where ∪ include ∪ closure) − exclude.**
 - **Fields:**
   - Normalized fields are always present: `key`, `source`, `title`, `status`, `category`, `labels` (empty when a
@@ -4981,12 +4989,13 @@ from phase heads and from commits; the filter fold and the id peek in a browser;
 fixture, per connection, and Reset's move. The epics strip in a browser over a board of 50 epics: its order, find, a
 pick and a funnel (revision 30).
 Planning: planning-view counts against the CLI; the branch-only chip.
-**Status**: In Progress; `ts-0179-ke` to `ts-0185-ge` are done. Split into `ts-0179-ke` to `ts-0197-uj` (revision 27,
-2026-11-24), in epic `ep-006-wq`, built one at a time in id order (part L), with `ts-0216-ve` (revision 30) between
-`ts-0190-tz` and `ts-0191-nv`, and `ts-0215-gt` (revision 29) between `ts-0196-uw` and `ts-0197-uj`. It runs after
-`ts-0178-fw` and before Stage 5. Nothing in it runs a real `claude`. The owner's midway look is `ts-0185-ge`; the S6
-walkthrough and the bundled-app checks are the owner's, in `ts-0197-uj`. New dependencies (owner, 2026-11-24):
-`react-markdown` 10.1.0 and `remark-gfm` 4.0.1 (`ts-0183-ee`), `tauri-plugin-dialog` 2.x (`ts-0191-nv`).
+**Status**: In Progress; `ts-0179-ke` to `ts-0196-uw`, `ts-0215-gt` and `ts-0216-ve` are done. Split into `ts-0179-ke`
+to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`, built one at a time in id order (part L), with
+`ts-0216-ve` (revision 30) between `ts-0190-tz` and `ts-0191-nv`, `ts-0215-gt` (revision 29) after `ts-0196-uw`, and
+`ts-0217-dy` (revision 31) after `ts-0215-gt`; `ts-0197-uj` is last. It runs after `ts-0178-fw` and before Stage 5.
+Nothing in it runs a real `claude`. The owner's midway look is `ts-0185-ge`; the S6 walkthrough and the bundled-app
+checks are the owner's, in `ts-0197-uj`. New dependencies (owner, 2026-11-24): `react-markdown` 10.1.0 and `remark-gfm`
+4.0.1 (`ts-0183-ee`), `tauri-plugin-dialog` 2.x (`ts-0191-nv`).
 
 ### Stage 6b: The in-app agent
 

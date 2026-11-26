@@ -5,7 +5,7 @@ status: ready
 title: "Owner check: the board and S6's walkthrough"
 owners: []
 links:
-  - { type: blocked-by, to: ts-0215-gt }
+  - { type: blocked-by, to: ts-0217-dy }
 ---
 
 ## Goal
