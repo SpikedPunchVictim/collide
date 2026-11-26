@@ -2,8 +2,13 @@
 
 /**
  * `board.init` result: every file written, or with `dry_run` every file that would be, relative to the board root.
+ *
+ * `trusted` says the daemon recorded the hash of what it wrote as trusted for this line of this board, so a commit
+ * of exactly these files asks the person nothing. It is false for a dry run, when the line already holds a Collide
+ * folder, and when recording it failed.
  */
 export interface BoardInitResult {
   files: string[]
+  trusted?: boolean
   written: boolean
 }

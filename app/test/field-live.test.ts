@@ -6,6 +6,7 @@ import {
   FieldFeed,
   type FieldRead,
   LIVE_DEBOUNCE_MS,
+  SETTLE_POLL_MS,
   agoWords,
   changedCards,
   isBoardEvent,
@@ -332,6 +333,32 @@ describe('the feed', () => {
     await feed.idle()
     expect(last().data?.tasks).toHaveLength(keep.length)
     expect(last().flashed.size).toBe(0)
+    feed.stop()
+  })
+
+  test('a board that is still settling is read again, with no event, until it has settled (ts-0194-qp)', async () => {
+    const world = onePlanSource()
+    world.listing = []
+    world.refreshing = true
+    const { feed, clock, last } = await feedOf(world)
+    expect(last().data?.settling).toBe(true)
+    // The daemon finishes with nothing to announce: a board with no task has no event to send.
+    world.refreshing = false
+    clock.advance(SETTLE_POLL_MS)
+    await feed.idle()
+    clock.advance(LIVE_DEBOUNCE_MS)
+    await feed.idle()
+    expect(last().data?.settling).toBe(false)
+    feed.stop()
+  })
+
+  test('a board that has settled is not read again on a timer', async () => {
+    const world = onePlanSource()
+    const { feed, clock } = await feedOf(world)
+    const before = world.lists()
+    clock.advance(SETTLE_POLL_MS * 3)
+    await feed.idle()
+    expect(world.lists()).toBe(before)
     feed.stop()
   })
 

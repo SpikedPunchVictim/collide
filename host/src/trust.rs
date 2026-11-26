@@ -273,11 +273,47 @@ impl Trust {
             .map(|(name, id)| TrustInput::new(name, id))
             .collect();
         inputs.extend(self.protected_inputs(repo, line)?);
+        self.hashed(repo, inputs)
+    }
+
+    /// The hash of `inputs`, sorted and made unique, and the inputs.
+    fn hashed(&self, repo: &Path, mut inputs: Vec<TrustInput>) -> Result<LineHash, TrustError> {
         inputs.sort();
         inputs.dedup();
         let text = canonical_text(&inputs)?;
         let hash = digest(&self.git, repo, &text)?;
         Ok(LineHash { hash, inputs })
+    }
+
+    /// Records as trusted what `line` would hold once `files` are committed with it (ts-0194-qp): the person just
+    /// wrote them. `files` are each file's name as [`LoadedLine::trust_inputs`] names it (`board.yaml`,
+    /// `views/<file>`) and its bytes, and the line must hold none of those names already. The hash is of the line's
+    /// inputs with the git id of each file added, so it is the hash the commit will have when it adds exactly these
+    /// files and changes nothing else the hash covers. A commit that differs in any way has another hash, and asks.
+    pub fn trust_written(
+        &self,
+        site: &LineSite,
+        line: &LoadedLine,
+        files: &[(String, Vec<u8>)],
+    ) -> Result<TrustState, TrustError> {
+        let current = self.line_hash(site.repo, line)?;
+        let mut inputs = current.inputs;
+        for (name, bytes) in files {
+            let id = self.git.hash_object(site.repo, bytes)?;
+            inputs.push(TrustInput::new(name.clone(), id));
+        }
+        let after = self.hashed(site.repo, inputs)?;
+        let mut file = self.store.load()?;
+        file.set_line(
+            site.root,
+            site.ref_name,
+            LineTrust {
+                hash: after.hash.clone(),
+                inputs: after.inputs,
+            },
+        );
+        self.store.save(&file)?;
+        Ok(TrustState::Trusted { hash: after.hash })
     }
 
     /// The tree (or file) id at the line's commit of the folder each loaded pack's `protectedPaths` glob starts in.

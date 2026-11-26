@@ -1,7 +1,7 @@
 // The Field (ts-0181-ft; 0.11; notes 3 to 7 of the board mock): the board's tasks as columns over the selected view,
 // a line for what the view says of itself, and a place for the drawer, which `ts-0184-hv` fills. The columns come from
 // the sources' declared statuses (`model.ts`); a fold is kept per board and view (`folds.ts`).
-import { type KeyboardEvent, useEffect, useMemo, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card as Panel } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
@@ -37,6 +37,10 @@ export interface FieldPageProps {
   readonly field: FieldState
   /** Where folds are kept. The webview's own, unless a test gives another. */
   readonly store?: FoldStore | null
+  /** The banners above the board: Share with team and the trust notice (`ts-0194-qp`). */
+  readonly notices?: ReactNode
+  /** What the page shows in place of the board when the board has no task at all (`ts-0194-qp`). */
+  readonly empty?: ReactNode
 }
 
 const NO_LIT: ReadonlyMap<string, number> = new Map()
@@ -48,7 +52,7 @@ const ARROWS: Record<string, Direction> = {
   'card-left': 'left',
 }
 
-export function FieldPage({ owner, boardId, board = null, field, store }: FieldPageProps) {
+export function FieldPage({ owner, boardId, board = null, field, store, notices, empty }: FieldPageProps) {
   if (boardId === null) {
     return (
       <Panel aria-label="Field" className="mx-auto w-full max-w-xl items-center px-6 text-center">
@@ -71,9 +75,18 @@ export function FieldPage({ owner, boardId, board = null, field, store }: FieldP
       </p>
     )
   }
+  if (empty !== undefined && field.data.corpus.length === 0 && !field.data.settling) {
+    return (
+      <section aria-label="Field" className="flex flex-col gap-3">
+        {notices}
+        {empty}
+      </section>
+    )
+  }
   return (
     <Board
       key={boardId}
+      notices={notices}
       owner={owner}
       boardId={boardId}
       board={board}
@@ -117,10 +130,11 @@ interface BoardProps {
   readonly flashed: ReadonlySet<string>
   readonly updatedAt: number | null
   readonly store?: FoldStore | null
+  readonly notices?: ReactNode
 }
 
 function Board(props: BoardProps) {
-  const { owner, boardId, board, view, entry, goal, onGoal, data, groupBy, flashed, updatedAt, store } = props
+  const { owner, boardId, board, view, entry, goal, onGoal, data, groupBy, flashed, updatedAt, store, notices } = props
   const { filters, onFilters, onSave } = props
   const kept = useMemo(() => store ?? browserStore() ?? memoryStore(), [store])
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
@@ -223,6 +237,7 @@ function Board(props: BoardProps) {
           : walkWords(walkSteps, pickedEpic.id)
   return (
     <section aria-label="Field" className="flex flex-col gap-3">
+      {notices}
       {lines.length === 0 ? null : (
         <div
           role="status"

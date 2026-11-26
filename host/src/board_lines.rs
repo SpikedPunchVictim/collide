@@ -292,6 +292,40 @@ impl Lines {
         }
     }
 
+    /// Records as trusted the files `board.init` wrote, for the line the board's checkout is on (ts-0194-qp), so the
+    /// person's own commit of them asks nothing. `files` are named relative to the Collide folder. It records nothing,
+    /// and says so with `false`, when the line at its commit already has a Collide folder (what is there is not the
+    /// person's own work) or does not load. A failure to read or write the trust file is the error.
+    pub fn trust_written(
+        &self,
+        board: BoardRef,
+        tools: &OsStr,
+        files: &[(String, Vec<u8>)],
+    ) -> Result<bool, LineError> {
+        let checkout = boards::checkout_of(board.root, &self.git_env).map_err(LineError::Failed)?;
+        let Some(commit) = boards::line_commit(&checkout, &self.git_env) else {
+            return Ok(false);
+        };
+        let opened = self.open(board, tools)?;
+        let Ok(line) = opened.load(&commit) else {
+            return Ok(false);
+        };
+        if line.collide_dir.is_some() {
+            return Ok(false);
+        }
+        let root = board.root.display().to_string();
+        let site = LineSite {
+            repo: &opened.git_dir,
+            root: &root,
+            ref_name: checkout.line_branch(),
+        };
+        opened
+            .trust
+            .trust_written(&site, &line, files)
+            .map_err(|error| LineError::Failed(error.to_string()))?;
+        Ok(true)
+    }
+
     /// `board.trust_review`: what a person sees before they trust the line `line`. It writes nothing.
     pub fn review(
         &self,

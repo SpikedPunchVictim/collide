@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from '../../src/App.tsx'
 import '../../src/index.css'
 import { FieldWorld } from '../../test/support/field-world.ts'
+import { FirstRunWorld } from '../../test/support/first-run-world.ts'
 import { WORLDS } from '../../test/support/worlds.ts'
 
 declare global {
@@ -31,6 +32,10 @@ declare global {
       opened(): string[]
       /** What the next `shell.pick_folder` answers: the folder the person chose, or null for a cancel (ts-0191-nv). */
       pickNext(path: string | null): void
+      /** The params of each call to `method`, in order (ts-0194-qp). */
+      callsTo(method: string): unknown[]
+      /** The files a Share wrote were committed: the board's line now holds them (a first-run world, ts-0194-qp). */
+      commit(): void
     }
   }
 }
@@ -68,6 +73,11 @@ window.collideFake = {
   opened: () => [...opened],
   pickNext: (path) => {
     nextPick = path
+  },
+  callsTo: (method) => world.callsTo(method),
+  commit: () => {
+    if (!(world instanceof FirstRunWorld)) throw new Error(`the world "${name}" is not a first-run world`)
+    world.commit()
   },
 }
 

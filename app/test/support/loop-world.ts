@@ -186,6 +186,13 @@ export class World {
       }
       return { checks: known.checks.map((c) => failed(c.message)) }
     })
+    owner.handle('board.checks', ({ root }) => {
+      const known = this.folders.get(root)
+      if (known !== undefined && 'id' in known) {
+        return { checks: [{ id: 'git_repo', ok: true, required: true, message: 'This folder is a git repository.' }] }
+      }
+      return { checks: [failed('This folder is not a git repository.')] }
+    })
     owner.handle('board.locate', ({ board: id, path }) => {
       const found = this.boards.find((b) => b.id === id)
       if (found === undefined) throw new OwnerError(NOT_FOUND, `the daemon has no board "${id}"`)
@@ -205,6 +212,7 @@ export class World {
       const key = `scratch:${this.nextTask++}`
       const prompt = String((apply.args as { prompt?: string } | undefined)?.prompt ?? '')
       this.tasksOf(boardId).set(key, { key, prompt, runs: [] })
+      this.created(key, prompt)
       return { result: { outcome: 'ok', files: [], items: [], task: taskOf(key, prompt), version: 'v1' } }
     })
     // A method of the world, so a world that holds more (the Field's) answers for what it holds and leaves the rest.
@@ -306,6 +314,9 @@ export class World {
     const task = taskOf(stored.key, stored.prompt)
     return { task, ambiguous: [], copies: [], collisions: [], links: [], runs: stored.runs }
   }
+
+  /** A scratch task was made. A world that lists tasks lists it here. */
+  protected created(_key: string, _prompt: string): void {}
 
   callsTo(method: string): unknown[] {
     return this.owner.calls.filter((c) => c.method === method).map((c) => c.params)

@@ -39,6 +39,8 @@ async function page({ view = null, layout, goal = null, world = walkWorld(), ove
     filters: NO_FILTERS,
     setFilters: noop,
     shared: false,
+    sharedRead: true,
+    reload: noop,
     reloadViews: noop,
     saveView: () => Promise.resolve(),
     shareView: () => Promise.resolve(''),

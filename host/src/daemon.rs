@@ -3168,7 +3168,9 @@ fn refuse_run_agent(session: &Session, what: &str) -> Result<(), RpcError> {
     }
 }
 
-/// `board.init` (ts-0102-vu): `collide init`, the starter `.collide/board.yaml` of a board ([`crate::board_init`]).
+/// `board.init` (ts-0102-vu, ts-0194-qp): `collide init`, the starter `.collide/board.yaml` of a board and a copy of
+/// the person's saved views of it ([`crate::board_init`]). A write is then recorded as trusted for this line of this
+/// board, so the person's own commit of it asks nothing.
 fn board_init(
     shared: &Shared,
     session: &Session,
@@ -3177,13 +3179,45 @@ fn board_init(
     let params: BoardInitParams = read_params("board.init", params)?;
     refuse_run_agent(session, "write a board's files")?;
     let root = pack_board(shared, &params.board)?;
-    let result = crate::board_init::init(&root, params.dry_run).map_err(|error| match error {
-        crate::board_init::InitError::Exists(message) => RpcError::new(code::CONFLICT, message),
-        crate::board_init::InitError::Failed(message) => {
-            RpcError::new(code::INTERNAL_ERROR, message)
-        }
-    })?;
-    Ok(serde_json::to_value(result).expect("a result is JSON"))
+    let lines = shared.config.lines();
+    let views = match lines.home() {
+        Some(home) => Some(
+            personal_dir(home, &params.board)
+                .map_err(|message| RpcError::new(code::CONFLICT, message))?,
+        ),
+        None => None,
+    };
+    let written =
+        crate::board_init::init(&root, views.as_deref(), params.dry_run).map_err(|error| {
+            match error {
+                crate::board_init::InitError::Exists(message) => {
+                    RpcError::new(code::CONFLICT, message)
+                }
+                crate::board_init::InitError::Failed(message) => {
+                    RpcError::new(code::INTERNAL_ERROR, message)
+                }
+            }
+        })?;
+    let trusted = written.written
+        && lines
+            .trust_written(
+                BoardRef {
+                    id: &params.board,
+                    root: &root,
+                },
+                &tools_path(shared),
+                &written.inputs(),
+            )
+            .unwrap_or_else(|error| {
+                // The files are written; the person is asked to trust them as a teammate would be.
+                shared.log.line(&format!(
+                    "board {}: recording what Share wrote as trusted failed: {}",
+                    params.board,
+                    line_error(error).message
+                ));
+                false
+            });
+    Ok(serde_json::to_value(written.result(trusted)).expect("a result is JSON"))
 }
 
 fn line_error(error: LineError) -> RpcError {

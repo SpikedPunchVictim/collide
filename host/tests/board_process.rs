@@ -83,6 +83,8 @@ fn init_writes_board_yaml_in_the_checkout_and_trust_yes_then_trusts_the_committe
             .unwrap()
             .contains("packs: []")
     );
+    // `init` trusts exactly what it wrote (ts-0194-qp), so the commit adds a view of the team's own: that asks.
+    repo.write(".collide/views/team.yaml", b"name: team\nwhere: \"true\"\n");
     repo.commit_all("share");
     let trust = collide(&repo, &["trust", "--yes"]);
     assert_eq!(trust.status.code(), Some(0), "{}", text(&trust.stderr));
@@ -97,9 +99,21 @@ fn init_writes_board_yaml_in_the_checkout_and_trust_yes_then_trusts_the_committe
 }
 
 #[test]
+fn a_commit_of_exactly_what_init_wrote_is_already_trusted() {
+    let (repo, _guard) = repo();
+    assert_eq!(collide(&repo, &["init"]).status.code(), Some(0));
+    repo.commit_all("share");
+    let trust = collide(&repo, &["trust"]);
+    assert_eq!(trust.status.code(), Some(0), "{}", text(&trust.stderr));
+    assert!(text(&trust.stdout).contains("already trusted"));
+}
+
+#[test]
 fn trust_with_no_terminal_and_no_yes_exits_5_and_trusts_nothing() {
     let (repo, _guard) = repo();
     assert_eq!(collide(&repo, &["init"]).status.code(), Some(0));
+    // `init` trusts exactly what it wrote (ts-0194-qp), so the commit adds a view of the team's own: that asks.
+    repo.write(".collide/views/team.yaml", b"name: team\nwhere: \"true\"\n");
     repo.commit_all("share");
     let refused = collide(&repo, &["trust"]);
     assert_eq!(refused.status.code(), Some(5), "{}", text(&refused.stdout));
@@ -184,7 +198,10 @@ fn a_runs_agent_may_not_trust_add_switch_or_set_anything_for_the_person() {
     // person's packs, trust and settings is refused to a run's agent, as `board.trust` is.
     let (repo, _guard) = repo();
     assert_eq!(collide(&repo, &["init"]).status.code(), Some(0));
+    // `init` trusts exactly what it wrote (ts-0194-qp), so the commit adds a view of the team's own: that asks.
+    repo.write(".collide/views/team.yaml", b"name: team\nwhere: \"true\"\n");
     repo.commit_all("share");
+    let trust_before = fs::read(repo.root().path().join(".config/collide/trust.yaml")).ok();
     let folder = repo.root().path().join("mine");
     fs::create_dir_all(&folder).unwrap();
     fs::write(
@@ -212,8 +229,14 @@ fn a_runs_agent_may_not_trust_add_switch_or_set_anything_for_the_person() {
             "{args:?}: {stderr}"
         );
     }
+    // The person's own `init` above recorded the trust of what it wrote; the agent's calls changed nothing.
     let config = repo.root().path().join(".config/collide");
-    for file in ["packs.yaml", "trust.yaml", "settings.json"] {
+    for file in ["packs.yaml", "settings.json"] {
         assert!(!config.join(file).exists(), "{file} was written");
     }
+    assert_eq!(
+        fs::read(config.join("trust.yaml")).ok(),
+        trust_before,
+        "trust.yaml was written"
+    );
 }

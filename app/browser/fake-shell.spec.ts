@@ -133,18 +133,26 @@ test('the board menu lists every board with its default line, and switching stop
   expect(after.filter((method) => /stop|cancel/.test(method))).toEqual([])
 })
 
-test('a folder typed into the board menu opens as a board, and a refused one says why', async ({ openFake }) => {
+test('a folder typed into the board menu is looked at first: a refused one says why, and an open one opens', async ({
+  openFake,
+}) => {
   const page = await openFake('two-boards')
   await openBoardMenu(page)
   await page.getByLabel('Folder path').fill('/work/nowhere')
   await page.getByRole('button', { name: 'Open folder' }).click()
-  await expect(boardMenu(page).getByRole('alert')).toContainText('This folder is not a git repository.')
+  await expect(boardMenu(page)).toHaveCount(0)
+  const first = page.getByLabel('Open a folder', { exact: true })
+  await expect(first).toContainText('Not a git repository')
+  await expect(first.getByRole('button', { name: 'Open the board' })).toBeDisabled()
+  expect(await calls(page)).not.toContain('board.open')
 
+  await openBoardMenu(page)
   await page.getByLabel('Folder path').fill('/work/gamma')
   await page.getByRole('button', { name: 'Open folder' }).click()
-  await expect(boardMenu(page)).toHaveCount(0)
+  await first.getByRole('button', { name: 'Open the board' }).click()
+  await expect(first).toHaveCount(0)
   await expect(boardButton(page, /gamma/)).toContainText('main')
-  expect((await calls(page)).filter((method) => method === 'board.open')).toHaveLength(2)
+  expect((await calls(page)).filter((method) => method === 'board.open')).toHaveLength(1)
 })
 
 test('with no board open, the board menu says Boards', async ({ openFake }) => {

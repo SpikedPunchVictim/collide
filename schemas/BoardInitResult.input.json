@@ -1,13 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`board.init` result: every file written, or with `dry_run` every file that would be, relative to the board root.",
+  "description": "`board.init` result: every file written, or with `dry_run` every file that would be, relative to the board root.\n\n`trusted` says the daemon recorded the hash of what it wrote as trusted for this line of this board, so a commit\nof exactly these files asks the person nothing. It is false for a dry run, when the line already holds a Collide\nfolder, and when recording it failed.",
   "properties": {
     "files": {
       "items": {
         "type": "string"
       },
       "type": "array"
+    },
+    "trusted": {
+      "type": "boolean"
     },
     "written": {
       "type": "boolean"

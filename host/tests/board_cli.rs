@@ -163,9 +163,25 @@ fn a_bad_init_command_line_exits_2_with_the_usage() {
 }
 
 #[test]
-fn after_init_and_a_commit_the_line_is_untrusted_at_a_real_hash() {
+fn after_init_and_a_commit_of_exactly_that_the_line_is_trusted() {
+    // `init` records the hash of what it wrote (ts-0194-qp), so the person's own commit of it asks nothing.
     let fixture = Fixture::new();
     assert_eq!(init(&fixture, fixture.repo.work(), &[]).code, exit::OK);
+    fixture.commit();
+    match state(&fixture) {
+        TrustState::Trusted { hash } => assert!(!hash.is_empty()),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn after_init_and_a_commit_that_adds_more_the_line_is_untrusted_at_a_real_hash() {
+    let fixture = Fixture::new();
+    assert_eq!(init(&fixture, fixture.repo.work(), &[]).code, exit::OK);
+    fixture.write(
+        ".collide/views/extra.yaml",
+        "name: extra\nwhere: \"true\"\n",
+    );
     fixture.commit();
     match state(&fixture) {
         TrustState::Untrusted { hash } => assert!(!hash.is_empty()),

@@ -63,6 +63,12 @@ export interface Loop {
   idle(): Promise<void>
   chooseBoard(id: string): void
   openFolder(path: string): Promise<void>
+  /**
+   * Opens a folder as a board, and says whether it opened (`ts-0194-qp`). With `initGit` a folder that is not a git
+   * repository is made one first. When it did not open, `problems` is the daemon's own words, as `folderProblems`
+   * keeps them.
+   */
+  openChecked(path: string, initGit?: boolean): Promise<FolderOutcome>
   /** Reads the boards again, so a folder that moved since the last read shows as missing (`ts-0191-nv`). */
   refreshBoards(): Promise<void>
   /**
@@ -90,6 +96,12 @@ export interface Loop {
   openItem(item: string): Promise<void>
 }
 
+/** What opening a folder did: it opened, or it did not and here is why. */
+export interface FolderOutcome {
+  readonly opened: boolean
+  readonly problems: readonly string[]
+}
+
 export function createLoop(owner: OwnerClient): Loop {
   return new LoopController(owner)
 }
@@ -114,6 +126,7 @@ class LoopController implements Loop {
     // The page hands these to components as callbacks (`LoopActions`), so each keeps its `this`.
     this.chooseBoard = this.chooseBoard.bind(this)
     this.openFolder = this.openFolder.bind(this)
+    this.openChecked = this.openChecked.bind(this)
     this.refreshBoards = this.refreshBoards.bind(this)
     this.locateBoard = this.locateBoard.bind(this)
     this.startRun = this.startRun.bind(this)
@@ -306,22 +319,26 @@ class LoopController implements Loop {
   }
 
   async openFolder(path: string): Promise<void> {
+    await this.openChecked(path)
+  }
+
+  async openChecked(path: string, initGit = false): Promise<FolderOutcome> {
     const root = path.trim()
-    if (root === '') return
+    if (root === '') return { opened: false, problems: [] }
+    let problems: readonly string[]
     try {
-      const { board, checks } = await this.owner.rpc('board.open', { root })
+      const { board, checks } = await this.owner.rpc('board.open', initGit ? { root, init_git: true } : { root })
       if (board != null) {
         this.dispatch({ type: 'board_opened', board })
-        return
+        return { opened: true, problems: [] }
       }
       const failed = checks.filter((c) => !c.ok).map((c) => c.message)
-      this.dispatch({
-        type: 'folder_refused',
-        problems: failed.length > 0 ? failed : ['Collide could not open this folder.'],
-      })
+      problems = failed.length > 0 ? failed : ['Collide could not open this folder.']
     } catch (failure) {
-      this.dispatch({ type: 'folder_refused', problems: [toOwnerError(failure).message] })
+      problems = [toOwnerError(failure).message]
     }
+    this.dispatch({ type: 'folder_refused', problems })
+    return { opened: false, problems }
   }
 
   refreshBoards(): Promise<void> {

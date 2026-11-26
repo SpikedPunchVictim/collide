@@ -126,6 +126,10 @@ test('in the shell the menu opens the folder the person chose with the picker', 
   await page.evaluate(() => window.collideFake.pickNext('/work/gamma'))
   await openBoardMenu(page)
   await boardMenu(page).getByRole('button', { name: 'Choose a folder…' }).click()
+  // The folder is looked at on the first-run page, and opens when the person says so.
+  await expect.poll(() => calls(page)).toContain('board.checks')
+  expect(await calls(page)).not.toContain('board.open')
+  await page.getByRole('button', { name: 'Open the board' }).click()
   await expect.poll(() => calls(page)).toContain('board.open')
   await expect(page.getByRole('button', { name: /gamma/ })).toBeVisible()
 })
@@ -136,6 +140,7 @@ test('in the shell a cancelled picker opens nothing', async ({ openFake }) => {
   await openBoardMenu(page)
   await boardMenu(page).getByRole('button', { name: 'Choose a folder…' }).click()
   await expect.poll(() => calls(page)).toContain('shell.pick_folder')
+  expect(await calls(page)).not.toContain('board.checks')
   expect(await calls(page)).not.toContain('board.open')
 })
 

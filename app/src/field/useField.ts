@@ -28,6 +28,10 @@ export interface FieldState {
   readonly setFilters: (filters: Filters) => void
   /** The board's line has a Collide folder, so a personal view can be shared into it. */
   readonly shared: boolean
+  /** The views have been read, so `shared` is the daemon's answer and not its default (`ts-0194-qp`). */
+  readonly sharedRead: boolean
+  /** Reads the board and its views again, as after the repo's trust changed (`ts-0194-qp`). */
+  readonly reload: () => void
   /** Reads the board's views again, as when the picker is opened. */
   readonly reloadViews: () => void
   /** Writes a view of the person's own, lists it and selects it. A refusal is thrown with the daemon's words. */
@@ -66,6 +70,8 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
   const [views, setViews] = useState<{ boardId: string; views: readonly ViewEntry[]; shared: boolean } | null>(null)
   // Counted up to read the views again, after one is saved or shared.
   const [listed, setListed] = useState(0)
+  // Counted up to start the feed again, which reads the board afresh.
+  const [fed, setFed] = useState(0)
   const [read, setRead] = useState<Read | null>(null)
   const view = pick.boardId === boardId ? pick.view : null
   const select = useCallback((next: string | null) => setPick({ boardId, view: next }), [boardId])
@@ -124,6 +130,10 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
   }, [owner, boardId, listed])
 
   const reloadViews = useCallback(() => setListed((count) => count + 1), [])
+  const reload = useCallback(() => {
+    setListed((count) => count + 1)
+    setFed((count) => count + 1)
+  }, [])
   const saveView = useCallback(
     async (input: ViewInput) => {
       if (boardId === null) return
@@ -163,7 +173,7 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
     })
     void feed.start()
     return () => feed.stop()
-  }, [owner, boardId, view, goal, filter])
+  }, [owner, boardId, view, goal, filter, fed])
 
   const shown = read !== null && read.boardId === boardId && read.view === view ? read : null
   return {
@@ -175,6 +185,8 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
     filters,
     setFilters,
     shared: views !== null && views.boardId === boardId && views.shared,
+    sharedRead: views !== null && views.boardId === boardId,
+    reload,
     reloadViews,
     saveView,
     shareView,

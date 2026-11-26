@@ -55,6 +55,8 @@ export interface Plan {
   readonly resumed?: string
   /** Folders put on the `PATH` of the daemon's login shell, after fake Claude's: where `node` is, for a pack. */
   readonly path?: readonly string[]
+  /** `none` leaves fake Claude out, so the daemon finds no `claude` on its `PATH` (ts-0194-qp). */
+  readonly claude?: 'fake' | 'none'
 }
 
 /**
@@ -160,8 +162,10 @@ export class World {
       resumed = join(root, 'resumed.jsonl')
       writeFileSync(resumed, plan.resumed)
     }
-    writeFileSync(join(bin, 'claude'), fakeClaude(join(bin, 'claude-calls.log'), first, resumed), { mode: 0o755 })
-    chmodSync(join(bin, 'claude'), 0o755)
+    if (plan.claude !== 'none') {
+      writeFileSync(join(bin, 'claude'), fakeClaude(join(bin, 'claude-calls.log'), first, resumed), { mode: 0o755 })
+      chmodSync(join(bin, 'claude'), 0o755)
+    }
     // The login shell the daemon runs to read its base environment: it puts fake Claude first on the PATH.
     const shell = join(root, 'fake-shell')
     const path = [bin, ...(plan.path ?? []), '/usr/bin', '/bin'].join(':')

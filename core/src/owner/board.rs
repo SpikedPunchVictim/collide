@@ -152,7 +152,8 @@ pub struct BoardLocateResult {
     pub note: Option<String>,
 }
 
-/// `board.init` params: Share with team, `collide init` (0.11). `dry_run` lists the files without writing them,
+/// `board.init` params: Share with team, `collide init` (0.11). It writes `.collide/board.yaml` and a copy of each of
+/// the person's saved views of this board into `.collide/views/`. `dry_run` lists the files without writing them,
 /// which is the Share preview's list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -163,11 +164,17 @@ pub struct BoardInitParams {
 }
 
 /// `board.init` result: every file written, or with `dry_run` every file that would be, relative to the board root.
+///
+/// `trusted` says the daemon recorded the hash of what it wrote as trusted for this line of this board, so a commit
+/// of exactly these files asks the person nothing. It is false for a dry run, when the line already holds a Collide
+/// folder, and when recording it failed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BoardInitResult {
     pub files: Vec<String>,
     pub written: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trusted: bool,
 }
 
 /// `board.trust` params: trust a line's packs at `hash`. The daemon computes the hash again and refuses when it

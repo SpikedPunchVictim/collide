@@ -32,6 +32,8 @@ const IDLE: FieldState = {
   filters: NO_FILTERS,
   setFilters: noop,
   shared: false,
+  sharedRead: true,
+  reload: noop,
   reloadViews: noop,
   saveView: () => Promise.resolve(),
   shareView: () => Promise.resolve(''),

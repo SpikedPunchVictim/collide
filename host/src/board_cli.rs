@@ -1,9 +1,10 @@
 //! `collide init` and `collide trust` (ts-0102-vu; 0.11 Share with team, 0.9 Trust), through the daemon's
 //! `board.init`, `board.trust_review` and `board.trust`.
 //!
-//! - `init [--dry-run]`: writes `.collide/board.yaml` (a short comment and `packs: []`) in the checkout you are in and
-//!   nothing else. It never commits and never edits `.gitignore`. It refuses when `.collide` exists. `--dry-run` says
-//!   what would be written and writes nothing.
+//! - `init [--dry-run]`: writes `.collide/board.yaml` (a short comment and `packs: []`) in the checkout you are in,
+//!   and a copy of each of your saved views of the board in `.collide/views/`, and nothing else. It never commits and
+//!   never edits `.gitignore`. It refuses when `.collide` exists. `--dry-run` says what would be written and writes
+//!   nothing.
 //! - `trust [--line <ref>] [--yes] [--allow-host <host>] [--allow-dev <folder>]`: shows the line's trust hash, each
 //!   change since it was trusted with its diff, and the review of each pack its repo supplies. Then it asks
 //!   `Trust this? [y/N]`, and what is recorded is the hash that was shown. With no terminal and no `--yes` it

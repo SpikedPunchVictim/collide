@@ -18,6 +18,12 @@ export const LIVE_DEBOUNCE_MS = 300
 /** A card flashes for this long. The animation (`index.css`, `field-flash`) is two seconds. */
 export const FLASH_MS = 2100
 
+/**
+ * How long a board that is still settling waits before it is read again. The daemon announces a task that changed, and
+ * a board with no task has none to announce when its first listing ends, so a settling board is asked for again.
+ */
+export const SETTLE_POLL_MS = 1500
+
 /** The daemon events that say a task of a source changed. The rest (a run, the Queue) are not the Field's. */
 const TASK_EVENTS: ReadonlySet<string> = new Set([
   'task.changed',
@@ -182,6 +188,7 @@ export class FieldFeed {
   private data: FieldData | null = null
   private flashed: ReadonlySet<string> = new Set()
   private flashTimer: unknown = null
+  private settleTimer: unknown = null
   private updatedAt: number | null = null
 
   constructor(options: FeedOptions) {
@@ -211,6 +218,8 @@ export class FieldFeed {
     this.burst.stop()
     if (this.flashTimer !== null) this.clock.clearTimeout(this.flashTimer)
     this.flashTimer = null
+    if (this.settleTimer !== null) this.clock.clearTimeout(this.settleTimer)
+    this.settleTimer = null
     this.stopListening?.()
     this.stopListening = null
   }
@@ -241,12 +250,25 @@ export class FieldFeed {
     }
     if (this.stopped) return
     const before = this.data
-    if (before !== null && sameData(before, next)) return
+    if (before !== null && sameData(before, next)) {
+      this.watchSettling()
+      return
+    }
     this.data = next
     this.updatedAt = this.now()
     // A board that was still coming in is filling, not changing: its cards do not flash.
     if (before !== null && !before.settling) this.flash(changedCards(before, next, groupBy()))
     this.publish({})
+    this.watchSettling()
+  }
+
+  /** While the board is settling, reads it again after `SETTLE_POLL_MS`, whether or not an event came. */
+  private watchSettling(): void {
+    if (this.stopped || this.settleTimer !== null || this.data === null || !this.data.settling) return
+    this.settleTimer = this.clock.setTimeout(() => {
+      this.settleTimer = null
+      this.burst.poke()
+    }, SETTLE_POLL_MS)
   }
 
   /** Marks cards as flashing, and takes the mark off `flashMs` after the last change. */

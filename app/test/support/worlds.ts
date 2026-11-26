@@ -13,6 +13,13 @@ import {
   onePlanSource,
   walkWorld,
 } from './field-world.ts'
+import {
+  emptyBoardWorld,
+  firstRunWorld,
+  shareRefusedWorld,
+  sharedBoardWorld,
+  trustBoardWorld,
+} from './first-run-world.ts'
 import { HOSTILE_BODY } from './hostile.ts'
 import { World, board, missingBoard, permissionItem, run } from './loop-world.ts'
 import {
@@ -69,6 +76,11 @@ export function noBoards(): World {
 export const WORLDS: Readonly<Record<string, () => World>> = {
   'two-boards': twoBoards,
   'no-boards': noBoards,
+  'first-run': firstRunWorld,
+  'empty-board': emptyBoardWorld,
+  'shared-board': sharedBoardWorld,
+  'share-refused': shareRefusedWorld,
+  'trust-board': trustBoardWorld,
   'missing-board': missingBoardWorld,
   'hostile-text': hostileText,
   'field-one-source': onePlanSource,

@@ -53,6 +53,11 @@ export function BoardMenu(props: BoardMenuProps) {
             props.onChoose(id)
             setOpen(false)
           }}
+          // A folder is looked at on the first-run page (`ts-0194-qp`), which is not in the menu, so the menu is done.
+          onOpenFolder={async (path) => {
+            await props.onOpenFolder(path)
+            setOpen(false)
+          }}
         />
       </PopoverContent>
     </Popover>
