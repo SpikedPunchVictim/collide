@@ -27,8 +27,8 @@ fn pack_dirs() -> Vec<PathBuf> {
 }
 
 #[test]
-fn there_are_five_pack_directories() {
-    assert_eq!(pack_dirs().len(), 5, "found: {:?}", pack_dirs());
+fn there_are_six_pack_directories() {
+    assert_eq!(pack_dirs().len(), 6, "found: {:?}", pack_dirs());
 }
 
 #[test]

@@ -1,0 +1,9 @@
+apiVersion: collide/v0
+name: s6-board
+version: 0.1.0
+
+# The board of S6's scenario 2 (ts-0196-uw): a source of fixed tasks that carry labels and name the epic they are in.
+# No built-in source gives labels. A browser test copies this folder into a temp repo's `.collide/packs/` and names
+# it in `.collide/board.yaml`; the provider is run with `node`, as a repo pack's provider is.
+providers:
+  s6: { script: providers/s6.mjs }

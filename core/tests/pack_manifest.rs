@@ -1,4 +1,4 @@
-//! Tests for the `pack.yaml` contract (ts-0012): the five real manifests against the generated schema, an unknown
+//! Tests for the `pack.yaml` contract (ts-0012): the six real manifests against the generated schema, an unknown
 //! key at any depth, `minLength: 1`, a gate on an `after_*` point, paths, the manifest checks, and the invalid
 //! fixtures in `fixtures/manifests/invalid/`, read through the hardened YAML loader.
 
@@ -46,11 +46,11 @@ fn refusal_text(body: &str) -> String {
         .join("\n")
 }
 
-// The five manifests.
+// The six manifests.
 
-/// The two built-in packs and the three fixture packs (the reference pack's copy, and the two others), found by
-/// listing the pack roots, as `host/tests/layout.rs` does.
-fn five() -> Vec<String> {
+/// The two built-in packs and the four fixture packs (the reference pack's copy, the two others, and the S6 board's),
+/// found by listing the pack roots, as `host/tests/layout.rs` does.
+fn six() -> Vec<String> {
     let mut found = vec![
         "packs/collide/pack.yaml".to_string(),
         "packs/plan/pack.yaml".to_string(),
@@ -65,13 +65,13 @@ fn five() -> Vec<String> {
             .iter()
             .map(|dir| format!("fixtures/packs/{dir}/pack.yaml")),
     );
-    assert_eq!(found.len(), 5, "{found:?}");
+    assert_eq!(found.len(), 6, "{found:?}");
     found
 }
 
 /// The reference pack's fixture copy: the one fixture manifest that has a `record` key.
 fn reference_manifest() -> PackManifest {
-    five()
+    six()
         .iter()
         .map(|path| load_yaml_file::<PackManifest>(&repo(path)).unwrap())
         .find(|manifest| manifest.record.is_some())
@@ -79,8 +79,8 @@ fn reference_manifest() -> PackManifest {
 }
 
 #[test]
-fn the_five_manifests_load_and_pass_the_manifest_check() {
-    for path in five() {
+fn the_six_manifests_load_and_pass_the_manifest_check() {
+    for path in six() {
         let path = path.as_str();
         let manifest: PackManifest =
             load_yaml_file(&repo(path)).unwrap_or_else(|error| panic!("{path}: {error}"));
@@ -89,9 +89,9 @@ fn the_five_manifests_load_and_pass_the_manifest_check() {
 }
 
 #[test]
-fn the_five_manifests_validate_against_the_generated_schema() {
+fn the_six_manifests_validate_against_the_generated_schema() {
     let input = schema_file("PackManifest.input.json");
-    for path in five() {
+    for path in six() {
         let path = path.as_str();
         let doc: Value =
             load_yaml_file(&repo(path)).unwrap_or_else(|error| panic!("{path}: {error}"));
@@ -104,9 +104,9 @@ fn the_five_manifests_validate_against_the_generated_schema() {
 }
 
 #[test]
-fn the_five_manifests_round_trip_and_the_output_schema_accepts_what_is_written() {
+fn the_six_manifests_round_trip_and_the_output_schema_accepts_what_is_written() {
     let output = schema_file("PackManifest.output.json");
-    for path in five() {
+    for path in six() {
         let path = path.as_str();
         let manifest: PackManifest = load_yaml_file(&repo(path)).unwrap();
         // Through JSON text, not `Value`: a `Value` map is sorted and would lose the phases' declaration order.

@@ -1,7 +1,7 @@
 ---
 id: ts-0196-uw
 kind: task
-status: ready
+status: done
 title: "Browser: S6 scenarios 1 and 2 ported, and the smoke run"
 owners: []
 links:
@@ -81,3 +81,69 @@ Write these first.
   share `app/`, `core`, `host` and the generated files. No builder runs `tauri build`.
 - Nothing here runs a real `claude`: the checks find the world's fake `claude`.
 - Owner decisions (2026-11-24): the owner took the recommendations at the split.
+
+### Built
+
+- `app/browser/s6.spec.ts` (new, three tests, bridge, real daemon, installed Chrome). Its header table maps each S6
+  control to the app's.
+  - Scenario 1, up to the board: the world's repository (no `.collide/`) and a fresh daemon root; type the folder,
+    Check this folder; `git_repo` and `claude_installed` are `ok` and no row is `no` (the login stays "could not
+    check", never a failure; no way to run the probe was added); Open the board; the empty board shows once the board
+    settles; Start with a task with "Add a --quiet flag to the CLI"; the end state is the card on the board and
+    `task.list` holding one `scratch` task with that title.
+  - Scenario 2: the board comes from the `s6-board` fixture pack (below), copied into the temp repo's
+    `.collide/packs/`, named in `.collide/board.yaml`, committed, opened and trusted (`board.trust_review`, then
+    `board.trust`, as `octo-board.ts` does; the daemon's rule is unchanged). The start state is asserted first: the
+    CEL for epic E-07, ready and perf lists exactly the five of `S2_TARGET`. Then the epic's funnel, the Ready chip,
+    the perf chip, Save as a view…. The card's name "Slow spots" is tried first and refused (Decisions); then
+    "Slow-spots". The end state is `slowSpotsDetected`: `task.views` names, and for each name that reads as Slow
+    spots, `task.list` with that view's name gives exactly the five.
+  - Wrong filter: only the epic, picked through the Epic box this time, saved as "Slow-spots": the view is there, holds
+    all 13 tasks of E-07, and `slowSpotsDetected` is false.
+  - Times: `report` prints each scenario's time from its first action to its detected end beside its advisory limit
+    (S1 150 s, S2 60 s) and adds it to the test's annotations. Nothing asserts a time.
+  - Full-suite run on this machine: S1 3.5 s (limit 150 s); S2 2.1 s (limit 60 s), with the refused name in it.
+- `fixtures/packs/s6-board/` (new): `pack.yaml` and `providers/s6.mjs`, a fixed source of 17 tasks in three epics
+  (E-04 Cache layer, E-06 Config and CLI, E-07 Performance) with labels. E-07 has S6's five targets and its decoys
+  (a ready task with no perf label, perf tasks that are backlog, active or done, and ready perf tasks in E-04 and
+  E-06). Each task names its epic in `collections`, and the provider lists the three epics as collections, so the
+  strip and the Epic box have epics. It has no logic beyond that table, so it has no test of its own: the start-state
+  check in scenario 2 is its test.
+- `core/tests/pack_manifest.rs` and `host/tests/layout.rs`: the counts of pack directories and manifests go from five
+  to six, with the names (`six`, `the_six_manifests_*`, `there_are_six_pack_directories`), because the fixture folder
+  gained a pack. The new pack's manifest passes the same checks as the others.
+- Red at runtime, seen before the code went green:
+  - `there_are_six_pack_directories` and `the_six_manifests_*` (and `the_reference_manifest_holds_every_key_of_the_
+    plans_example`, which uses the same list) failed with 5 against 6 before the pack existed.
+  - Scenario 1: with the Add click left out, it failed at "the empty board is gone".
+  - Scenario 2: with the perf chip left out, it failed waiting for "5 tasks".
+  - Wrong filter: with Ready and perf added, it failed on "13 tasks" (the view held the five).
+  - The three browser tests could not fail on the code before the change, as the item adds no app code; the runs above
+    change the test's own steps, and no guard was touched.
+
+### Decisions for the owner
+
+- **"Slow spots" cannot be a view's name in the app.** `host/src/views.rs` `save_view` takes the name as the file name
+  (letters, digits, `.`, `_`, `-`, 1 to 64, not starting with `-` or `.`), so the card's own words are refused with
+  "the view name ... cannot be a file name". A person following S6's card meets this on the first try. The test types
+  "Slow spots", checks the refusal and that nothing was saved, then saves "Slow-spots"; the detector reads a hyphen
+  for the space. Alternatives: (a) as built, which records the finding and changes nothing; (b) let a view have a
+  display name apart from its file name (a `name` with spaces, and a slug for the file); (c) keep the rule and say it
+  beside the field before the person types. Recommend (b) or (c), as a plan change for a later item; a person's first
+  view name often has a space. This item does not touch the rule.
+- "Stage E-07" is the epic's funnel on its card in the strip (one click). The Epic box is the other control for the
+  same choice; the wrong-filter test uses it, so both are driven. Alternative: use the box in both. Recommend as built.
+- The fixture pack is named `s6-board` with the source `s6`, so keys read `s6:T-07-001`; it is a provider of fixed
+  data and not the corpus provider of the host's tests, which has no epics and reads task files from the checkout.
+  Alternative: a `labels:` field in the plan pack's frontmatter reading. Recommend as built; no 6a criterion asks for
+  the pack change.
+- A fourth fixture pack means every list of "the five packs" says six. Alternative: keep the pack outside
+  `fixtures/packs/`, for example under `app/browser/support/`. Recommend as built, as the item names `fixtures/packs/`.
+- The S1 end state also reads the daemon (one `scratch` task with the card's title), not only the page. Alternative:
+  the page alone. Recommend as built: S6's detectors read state, not the screen.
+
+### Not done, by design
+
+- Launching the scratch task's run and reviewing it, the rest of S6 scenario 1: Stage 9a.
+- The bundled window and the owner's walkthrough with its times: `ts-0197-uj`.
+- Allowing a view name with a space: needs a plan decision (see Decisions); no item yet.
