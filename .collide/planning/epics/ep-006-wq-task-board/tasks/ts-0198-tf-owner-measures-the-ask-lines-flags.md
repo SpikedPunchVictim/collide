@@ -1,7 +1,7 @@
 ---
 id: ts-0198-tf
 kind: task
-status: ready
+status: done
 title: "Owner measures: the ask line's flags and opencode's listener"
 owners: []
 links:
@@ -91,3 +91,52 @@ Written at the split. Check each flag against `claude --help` and `opencode --he
    Note whether `x.txt` appears.
 8. Record: each result, the versions, the spend from each stream's final `result`, the time, what was awkward, and
    the date. Remove `<S>` and the temp opencode folders by their exact paths.
+
+### Results, 2026-11-27
+
+Run by Claude on the owner's instruction (owner, 2026-11-27: "You run it, within the cap"), not by a build agent.
+Versions: `claude` 2.1.332 (`--model haiku` answered as `claude-haiku-5-5`), opencode 1.1.56, ollama 0.40.16 with the
+local model `qwen2.5:7b`. `<S>` is a `mktemp -d` folder; every line ran in `<S>/a`.
+
+| Line | Flags beyond the base line | File | Answer | Tool result |
+| --- | --- | --- | --- | --- |
+| control | none | `<S>/a/a.txt` | `MARK-A` | read |
+| 3, without | none | `<S>/b/b.txt` | `MARK-B` | read |
+| 3, with | `--add-dir <S>/b` | `<S>/b/b.txt` | `MARK-B` | read |
+| 4 | `--add-dir <S>/b` | `<S>/out/out.txt` | `MARK-OUT` | read |
+| 5, without | `--restricted` | `<S>/b/b.txt` | `CANNOT` | refused, in `permission_denials` |
+| 5, with | `--restricted --add-dir <S>/b` | `<S>/b/b.txt` | `MARK-B` | read |
+| 5, outside | `--restricted --add-dir <S>/b` | `<S>/out/out.txt` | `CANNOT` | refused, in `permission_denials` |
+
+- **`--add-dir`:** without `--restricted` it changes nothing: the second folder is readable with and without it.
+- **The outside read:** not refused. No prompt, no denial, and `MARK-OUT` reached the answer. `--allowedTools Read`
+  allows Read on any path, and `--permission-prompts none` denies only what would prompt.
+- **`--restricted`: adopt.** The outside read is refused with no prompt, the tool result says "`<S>/out/out.txt` is
+  outside `<S>/a`, `<S>/b`; --restricted confines the file tools to the working directory.", the refusal is listed in
+  the result's `permission_denials`, and the answer has no marker. The `--add-dir` folder stays readable.
+- **opencode's listener:** `opencode acp` listens on TCP `127.0.0.1:4096` from its start, before any ACP message, and
+  still after `initialize` and `session/new`. One process, no children. Whether a second one takes another port when
+  4096 is in use: not measured.
+- **opencode's permission configuration:** with no `permission` block, the model wrote `x.txt` and ran `true`. With
+  `{"edit":"deny","bash":"deny"}` it had no write or shell tool: no `x.txt`, and no bash call. It then used the
+  `task` tool to start a sub-agent ("general"), and that sub-agent called `webfetch` on `https://opencode.ai/docs`,
+  which went through. The block denies what it names and nothing else: `webfetch` and `task` stay allowed.
+- **Spend and time:** the seven claude lines cost $0.0031 together (from each stream's final `result`), 48 s in all.
+  opencode ran the local model at $0: the listener 13 s, the two runs 56 s and 84 s.
+- **Not as the checklist had it:** a control line read `<S>/a/a.txt` first (seven claude lines in all, under the
+  eight allowed). The listener step also sent `initialize` and `session/new`, which start no model. opencode used a
+  copy of the S7 spike's own opencode cache and config folders, so it fetched no package, with
+  `OPENCODE_DISABLE_AUTOUPDATE`, `OPENCODE_DISABLE_LSP_DOWNLOAD` and `OPENCODE_DISABLE_MODELS_FETCH` set and no API
+  key in its environment. The `webfetch` above was the model's own call.
+- **Awkward:** the deny run's answer reads as if the task was done ("... run the shell command `true`. DONE."). Only
+  the tool log shows that nothing was written or run.
+- `<S>` and the temp opencode folders were removed by their exact paths.
+
+What each result changes:
+- `ts-0200-gs`: the ask line carries `--restricted`. Without it, reads are not confined and `--add-dir` does nothing.
+- `ts-0208-dx`: Collide supplies a permission configuration, since opencode's default lets a write and a shell command
+  through. It must deny `webfetch` and `task` as well as `edit` and `bash`, or check every tool opencode lists, since
+  a block covers only what it names. The listener is real: `127.0.0.1:4096` from the start.
+- `ts-0210-mz`: the Agents page says "can read only" these folders for Claude under the ask line. For opencode it
+  says what the supplied configuration denies.
+
