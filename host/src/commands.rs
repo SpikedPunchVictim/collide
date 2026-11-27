@@ -18,6 +18,7 @@
 //! | `cli: pack` | `collide pack` | built: `add`, `link`, `enable`, `disable`, `list`, `update` ([`crate::pack_cli`]) |
 //! | `cli: init` | `collide init` | built: [`crate::board_cli`], the board file of Share with team (0.11) |
 //! | `cli: trust` | `collide trust` | built: [`crate::board_cli`], the review and the trust of a line (0.9) |
+//! | `cli: board` | `collide board` | built: `remove` ([`crate::board_cli`], ts-0222-gx), a board hidden, not deleted |
 
 use crate::task_cli::exit;
 use std::any::Any;
@@ -55,7 +56,7 @@ pub struct Command {
 }
 
 /// The tree, in the order `collide --help` lists it.
-pub const COMMANDS: [Command; 12] = [
+pub const COMMANDS: [Command; 13] = [
     Command {
         name: "run",
         summary: "start one agent phase on a task, in a new worktree, and record it",
@@ -108,6 +109,11 @@ pub const COMMANDS: [Command; 12] = [
     Command {
         name: "trust",
         summary: "review what a line's packs run, and trust it (asks, unless --yes)",
+        build: Build::Built,
+    },
+    Command {
+        name: "board",
+        summary: "take a board out of Collide (`remove`): it is hidden and nothing is deleted",
         build: Build::Built,
     },
     Command {
@@ -267,7 +273,7 @@ mod tests {
             names,
             [
                 "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "init",
-                "trust", "sections", "guide"
+                "trust", "board", "sections", "guide"
             ]
         );
     }
@@ -276,7 +282,7 @@ mod tests {
     fn the_built_commands_are_not_run_as_stubs() {
         for name in [
             "run", "stop", "tasks", "task", "schema", "sections", "config", "pack", "init",
-            "trust", "guide", "nonsense",
+            "trust", "board", "guide", "nonsense",
         ] {
             assert_eq!(execute_stub(name, &[]), None, "{name}");
         }

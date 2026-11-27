@@ -70,7 +70,7 @@ pub struct Migration {
 /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
 /// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
 /// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
-pub const MIGRATIONS: [Migration; 14] = [
+pub const MIGRATIONS: [Migration; 15] = [
     Migration {
         version: 1,
         name: "events",
@@ -171,7 +171,17 @@ pub const MIGRATIONS: [Migration; 14] = [
         name: "board_last_opened",
         sql: BOARD_LAST_OPENED_SQL,
     },
+    Migration {
+        version: 15,
+        name: "board_removed",
+        sql: BOARD_REMOVED_SQL,
+    },
 ];
+
+/// When a board was removed from Collide (ts-0222-gx), in milliseconds of the wall clock. NULL for a board that is
+/// listed. Removing hides a board and keeps its row, its scratch tasks and everything keyed by its name, so opening
+/// its folder again clears the time and brings it back as the same board.
+const BOARD_REMOVED_SQL: &str = "ALTER TABLE boards ADD COLUMN removed_ms INTEGER";
 
 /// When a board was last opened or picked (ts-0218-sc), in milliseconds of the wall clock. NULL for a board that has
 /// not been since this column was added. The daemon gives each mark a time later than every other board's, so the
@@ -1119,6 +1129,7 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch_store::Removal;
     use collide_core::change::{Actor, ActorKind};
     use collide_core::events::{BudgetScope, EventBody, StepKind};
     use collide_core::hook::HookExperiment;
@@ -1685,6 +1696,90 @@ mod tests {
             boards[0].last_opened_ms, None,
             "a board from before has no time"
         );
+    }
+
+    #[test]
+    fn a_store_at_version_fourteen_gains_the_removed_time_and_its_boards_are_all_listed() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 14);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        conn.execute(
+            "INSERT INTO boards (root, name) VALUES ('/old/one', 'board-aaaaaa')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = Store::open(dir.path()).unwrap();
+
+        assert_eq!(user_version(&raw(&store)), known_version());
+        assert_eq!(
+            MIGRATIONS.get(14).map(|migration| migration.name),
+            Some("board_removed")
+        );
+        assert_eq!(store.boards().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_removed_board_leaves_boards_and_opening_its_root_brings_back_the_same_name() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let one = store.open_board("/one", &|_| false).unwrap();
+        let two = store.open_board("/two", &|_| false).unwrap();
+        store
+            .add_scratch_task(&one, "Keep", "Keep", "ready")
+            .unwrap();
+
+        assert_eq!(store.remove_board(&one, 5_000).unwrap(), Removal::Removed);
+
+        let listed: Vec<String> = store.boards().unwrap().into_iter().map(|b| b.id).collect();
+        assert_eq!(listed, std::slice::from_ref(&two));
+        assert_eq!(
+            store.board_root(&one).unwrap(),
+            None,
+            "unknown while removed"
+        );
+        assert_eq!(store.removed_board_at("/one").unwrap(), Some(one.clone()));
+        assert_eq!(
+            store.scratch_tasks(&one).unwrap().len(),
+            1,
+            "its tasks are kept"
+        );
+        assert_eq!(store.open_board("/one", &|_| false).unwrap(), one);
+        assert_eq!(store.boards().unwrap().len(), 2);
+        assert_eq!(store.removed_board_at("/one").unwrap(), None);
+    }
+
+    #[test]
+    fn removing_says_whether_the_board_was_unknown_or_already_removed() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let one = store.open_board("/one", &|_| false).unwrap();
+
+        assert_eq!(
+            store.remove_board("board-nope", 1).unwrap(),
+            Removal::Unknown
+        );
+        assert_eq!(store.remove_board(&one, 1).unwrap(), Removal::Removed);
+        assert_eq!(
+            store.remove_board(&one, 2).unwrap(),
+            Removal::AlreadyRemoved
+        );
+    }
+
+    #[test]
+    fn a_removed_boards_name_is_never_given_to_a_new_board() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let one = store.open_board("/one", &|_| false).unwrap();
+        store.remove_board(&one, 1).unwrap();
+        let letters = one.trim_start_matches("board-").to_string();
+        let mut next = vec!["bbbbbb".to_string(), letters];
+        let two = store
+            .open_board_with("/two", &|_| false, &mut || next.pop().unwrap())
+            .unwrap();
+
+        assert_eq!(two, "board-bbbbbb", "the removed board's name was skipped");
     }
 
     #[test]

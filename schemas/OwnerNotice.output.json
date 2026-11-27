@@ -431,6 +431,23 @@
       ],
       "type": "object"
     },
+    "BoardChanged": {
+      "additionalProperties": false,
+      "description": "The params of the `board.changed` notification (ts-0222-gx): the boards that left `board.list` since the last one.\nA window reads `board.list` again for the rest, and one whose board is among them moves to another.",
+      "properties": {
+        "removed": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "removed"
+      ],
+      "type": "object"
+    },
     "BudgetScope": {
       "description": "The budget that stopped a run: the run's total, a phase's, or a role's (0.7, Budgets).",
       "enum": [
@@ -2600,6 +2617,24 @@
         },
         "params": {
           "$ref": "#/$defs/QueueChanged"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "The list of boards changed: a board was removed (ts-0222-gx).",
+      "properties": {
+        "method": {
+          "const": "board.changed",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/BoardChanged"
         }
       },
       "required": [

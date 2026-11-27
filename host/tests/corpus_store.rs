@@ -489,3 +489,34 @@ fn a_declaration_that_does_not_read_is_dropped_and_named_and_the_others_are_kept
     assert!(cache.dropped[0].contains("gh"), "{:?}", cache.dropped);
     assert!(store.corpus_cache("board-1").unwrap().dropped.is_empty());
 }
+
+#[test]
+fn dropping_a_board_forgets_its_tasks_invalid_items_and_declarations_and_keeps_the_other_boards() {
+    let root = TempRoot::new();
+    let store = store(&root);
+    for board in ["board-1", "board-2"] {
+        store
+            .corpus_put_task(
+                board,
+                "plan",
+                None,
+                &task("plan:1", "todo", None, Some("a.md")),
+            )
+            .unwrap();
+        store
+            .corpus_put_invalid(board, "plan", &invalid("b.md", None, "no title"))
+            .unwrap();
+        store
+            .corpus_put_source(board, "plan", &declared(Scope::Ref))
+            .unwrap();
+    }
+
+    store.corpus_drop_board("board-1").unwrap();
+
+    let gone = store.corpus_cache("board-1").unwrap();
+    assert!(gone.tasks.is_empty() && gone.invalid.is_empty() && gone.sources.is_empty());
+    let kept = store.corpus_cache("board-2").unwrap();
+    assert_eq!(kept.tasks.len(), 1);
+    assert_eq!(kept.invalid.len(), 1);
+    assert_eq!(kept.sources.len(), 1);
+}

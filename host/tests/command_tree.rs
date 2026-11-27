@@ -9,8 +9,8 @@ use std::process::{Command, Output};
 mod common;
 use common::{TempRoot, repo_root};
 
-const TREE: [&str; 12] = [
-    "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "init", "trust",
+const TREE: [&str; 13] = [
+    "run", "stop", "tasks", "task", "schema", "report", "config", "pack", "init", "trust", "board",
     "sections", "guide",
 ];
 

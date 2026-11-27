@@ -5014,12 +5014,17 @@ Planning: planning-view counts against the CLI; the branch-only chip.
 - **The Start with defaults key** works in the built app as its menu item does (`ts-0219-qf`).
 - **Saved views:** the save box replaces a view of the person's own ("Replace <name>"), and the page shows when
   filters sit on top of a saved view ("Slow spots + 2 filters") (`ts-0220-oc`).
-- **A folder that is no longer a checkout** gets the missing page with Locate, as a gone folder does (`ts-0221-pp`).
+- **A folder that is no longer a checkout** gets the missing page with Locate, as a gone folder does (`ts-0221-pp`). A
+  board is missing when its folder is gone, when git says the folder is in no checkout or it sits inside another one, or
+  when its checkout's root commits are none of the board's recorded ones. `board.list` says which with `missing_reason`
+  beside `missing`, and the page says so. A git read that fails for another reason marks nothing.
 - **Remove from Collide:** a board leaves Collide, its folder untouched, from its missing page, the board menu and the
-  CLI (`ts-0222-gx`).
+  CLI (`ts-0222-gx`). Removing hides it: every window is told (`board.changed`), its corpus cache is dropped, and its
+  scratch tasks, runs, the person's files and trust are kept. Opening its folder again brings it back as the same board.
+  A run in progress and a defaults connection refuse it.
 
 **Status**: Judged done by the owner on 2026-11-27 (`ts-0197-uj`); the follow-ups `ts-0219-qf` to `ts-0222-gx` are
-built next, before Stage 6b. `ts-0179-ke` to `ts-0197-uj`, `ts-0215-gt` to `ts-0218-sc` are done. Split into
+done (2026-11-27). `ts-0179-ke` to `ts-0197-uj`, `ts-0215-gt` to `ts-0218-sc` are done. Split into
 `ts-0179-ke` to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`, built one at a time in id order (part L),
 with `ts-0216-ve` (revision 30) between `ts-0190-tz` and `ts-0191-nv`, `ts-0215-gt` (revision 29) after `ts-0196-uw`,
 and `ts-0217-dy` (revision 31) after `ts-0215-gt`, and `ts-0218-sc` (revision 32) after `ts-0217-dy`; `ts-0197-uj` is

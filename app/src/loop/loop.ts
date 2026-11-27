@@ -77,6 +77,12 @@ export interface Loop {
    * held. A refusal is the daemon's own words in `problem`, and the board stays as it was.
    */
   locateBoard(board: string, path: string): Promise<LocateOutcome>
+  /**
+   * Takes a board out of Collide (`board.remove`; ts-0222-gx): it is hidden, and nothing is deleted. Opening its folder
+   * again brings it back. The window moves off it to the board picked last that is still listed, or to the first-run
+   * page. A refusal is the daemon's own words, as the problem, and the board stays; `null` when it was removed.
+   */
+  removeBoard(board: string): Promise<string | null>
   /** Makes the task and starts the run. True when the run started. */
   startRun(prompt: string): Promise<boolean>
   allowOnce(item: string): Promise<void>
@@ -139,6 +145,7 @@ class LoopController implements Loop {
     this.openChecked = this.openChecked.bind(this)
     this.refreshBoards = this.refreshBoards.bind(this)
     this.locateBoard = this.locateBoard.bind(this)
+    this.removeBoard = this.removeBoard.bind(this)
     this.startRun = this.startRun.bind(this)
     this.allowOnce = this.allowOnce.bind(this)
     this.deny = this.deny.bind(this)
@@ -197,6 +204,9 @@ class LoopController implements Loop {
       if (event.params.state === 'back') void this.reload(true)
     } else if (event.method === 'queue.changed') {
       void this.reload(false)
+    } else if (event.method === 'board.changed') {
+      // A board left the list, here or in another window: the list is read again, and a window on it moves off.
+      void this.reload(true)
     } else if (event.method === 'daemon.event' && RELOAD_EVENTS.has(event.params.body.event)) {
       void this.reload(false)
     }
@@ -381,6 +391,16 @@ class LoopController implements Loop {
     } catch (failure) {
       return { problem: toOwnerError(failure).message, note: null }
     }
+  }
+
+  async removeBoard(board: string): Promise<string | null> {
+    try {
+      await this.owner.rpc('board.remove', { board })
+    } catch (failure) {
+      return toOwnerError(failure).message
+    }
+    await this.reload(true)
+    return null
   }
 
   async startRun(prompt: string): Promise<boolean> {

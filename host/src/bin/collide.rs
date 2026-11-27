@@ -47,6 +47,28 @@ fn main() -> ExitCode {
             collide_host::board_cli::run_trust(rest, &cwd, &mut std::io::stdin().lock(), out, err)
         });
     }
+    if args.first().map(String::as_str) == Some("board") {
+        let (out, err) = (&mut std::io::stdout().lock(), &mut std::io::stderr().lock());
+        return match (rest.first().map(String::as_str), std::env::current_dir()) {
+            (Some("remove"), Ok(cwd)) => ExitCode::from(collide_host::board_cli::run_remove(
+                &rest[1..],
+                &cwd,
+                out,
+                err,
+            )),
+            (Some("remove"), Err(_)) => {
+                eprintln!("collide board remove: cannot read the working directory");
+                ExitCode::from(exit::FAILED)
+            }
+            (other, _) => {
+                let what = other.map_or("needs a subcommand".to_string(), |word| {
+                    format!("has no subcommand `{word}`")
+                });
+                eprintln!("collide board {what}\n{}", collide_host::board_cli::USAGE);
+                ExitCode::from(exit::USAGE)
+            }
+        };
+    }
     if let Some(code) = args
         .first()
         .and_then(|name| commands::execute_stub(name, rest))

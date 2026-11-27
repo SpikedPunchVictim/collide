@@ -69,6 +69,13 @@ export function hostileText(): World {
   return world
 }
 
+/** Two boards, and the daemon refuses to remove the first: a run is in progress on it (ts-0222-gx). */
+export function removeRefusedWorld(): World {
+  const world = twoBoards()
+  world.removeRefusals.set('b-alpha', 'run r-7 is in progress on the board b-alpha, so it was not removed.')
+  return world
+}
+
 /** A daemon that knows no board yet. */
 export function noBoards(): World {
   return new World()
@@ -77,6 +84,7 @@ export function noBoards(): World {
 export const WORLDS: Readonly<Record<string, () => World>> = {
   'two-boards': twoBoards,
   'no-boards': noBoards,
+  'remove-refused': removeRefusedWorld,
   'first-run': firstRunWorld,
   'empty-board': emptyBoardWorld,
   'shared-board': sharedBoardWorld,

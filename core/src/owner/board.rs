@@ -93,6 +93,24 @@ pub struct BoardPickParams {
     pub board: String,
 }
 
+/// `board.remove` params: the board to take out of Collide (ts-0222-gx). Removing hides the board: it leaves
+/// `board.list` and its corpus cache is dropped, and everything else of it is kept (its scratch tasks, its runs, the
+/// person's files for it and what was trusted for it). `board.open` of its folder brings it back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardRemoveParams {
+    pub board: String,
+}
+
+/// The params of the `board.changed` notification (ts-0222-gx): the boards that left `board.list` since the last one.
+/// A window reads `board.list` again for the rest, and one whose board is among them moves to another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardChanged {
+    #[serde(default)]
+    pub removed: Vec<String>,
+}
+
 /// What a first-run check looks at (0.11, First run works with no pack and no tasks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

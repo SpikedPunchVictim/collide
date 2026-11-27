@@ -26,7 +26,8 @@ use crate::owner_client::{ClientError, OwnerClient};
 use crate::pack_cli::{ask, render_review};
 use crate::task_cli::exit;
 use collide_core::owner::{
-    BoardInitParams, BoardInitResult, BoardTrustParams, BoardTrustResult, BoardTrustReviewParams,
+    Ack, BoardInitParams, BoardInitResult, BoardListParams, BoardListResult, BoardRemoveParams,
+    BoardSummary, BoardTrustParams, BoardTrustResult, BoardTrustReviewParams,
     BoardTrustReviewResult, PackFileChangeKind, TrustChange, TrustChangeKind, TrustState, code,
 };
 use std::io::{IsTerminal, Read, Write};
@@ -35,7 +36,8 @@ use std::time::Duration;
 
 pub const USAGE: &str = "\
 usage: collide init [--dry-run]
-usage: collide trust [--line <ref>] [--yes] [--allow-host <host>] [--allow-dev <folder>]";
+usage: collide trust [--line <ref>] [--yes] [--allow-host <host>] [--allow-dev <folder>]
+usage: collide board remove <board>";
 
 /// A fetch may take 120 s, and the call waits a little longer than that.
 const WAIT: Duration = Duration::from_secs(150);
@@ -178,13 +180,12 @@ impl Session<'_> {
     }
 }
 
-/// Starts the daemon if need be and connects; the board of `cwd` with its lines. The error is the exit code.
-fn open<'a>(
+/// Starts the daemon if need be and connects. The error is the exit code.
+fn connect<'a>(
     paths: &DaemonPaths,
     word: &'static str,
-    cwd: &Path,
     err: &'a mut dyn Write,
-) -> Result<(Session<'a>, collide_core::owner::BoardSummary), u8> {
+) -> Result<Session<'a>, u8> {
     if let Err(message) = ensure_running_from_cli(paths) {
         let _ = writeln!(
             err,
@@ -192,25 +193,34 @@ fn open<'a>(
         );
         return Err(exit::FAILED);
     }
-    let mut client = match OwnerClient::connect(paths, &format!("collide {word}")) {
-        Ok(client) => client,
+    match OwnerClient::connect(paths, &format!("collide {word}")) {
+        Ok(client) => Ok(Session { client, word, err }),
         Err(error) => {
             let _ = writeln!(err, "collide {word}: {error}");
-            return Err(exit::FAILED);
+            Err(exit::FAILED)
         }
-    };
-    match open_board_summary(&mut client, cwd) {
-        Ok(Some(board)) => Ok((Session { client, word, err }, board)),
+    }
+}
+
+/// Starts the daemon if need be and connects; the board of `cwd` with its lines. The error is the exit code.
+fn open<'a>(
+    paths: &DaemonPaths,
+    word: &'static str,
+    cwd: &Path,
+    err: &'a mut dyn Write,
+) -> Result<(Session<'a>, collide_core::owner::BoardSummary), u8> {
+    let mut session = connect(paths, word, err)?;
+    match open_board_summary(&mut session.client, cwd) {
+        Ok(Some(board)) => Ok((session, board)),
         Ok(None) => {
-            let _ = writeln!(
-                err,
-                "collide {word}: {} is not in a git checkout, and a board is a checkout",
+            session.say(&format!(
+                "{} is not in a git checkout, and a board is a checkout",
                 cwd.display()
-            );
+            ));
             Err(exit::FAILED)
         }
         Err(error) => {
-            let _ = writeln!(err, "collide {word}: {error}");
+            session.say(&error.to_string());
             Err(exit::FAILED)
         }
     }
@@ -478,4 +488,97 @@ pub fn trust_with(
             exit::FAILED
         }
     }
+}
+
+/// Reads the arguments after `board remove`: the board, as its name or its folder. The error is the message to print
+/// with the usage.
+pub fn parse_remove(args: &[String]) -> Result<String, String> {
+    match args {
+        [] => Err("`board remove` needs the board to remove, as its name or its folder".into()),
+        [other, ..] if other.starts_with('-') => Err(format!("unknown option `{other}`")),
+        [board] if board.is_empty() => Err("the board is empty".into()),
+        [board] => Ok(board.clone()),
+        [_, extra, ..] => Err(format!(
+            "`board remove` takes one board, and got `{extra}` too"
+        )),
+    }
+}
+
+/// `collide board remove` with this process's own environment. `args` are the arguments after `board remove`.
+pub fn run_remove(args: &[String], cwd: &Path, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    match daemon_paths("board remove", err) {
+        Some(paths) => remove_with(&paths, args, cwd, out, err),
+        None => exit::FAILED,
+    }
+}
+
+/// The board of `wanted` among `boards`: the one named so, or the one whose folder `wanted` is, as given or from
+/// `cwd`. A folder that is gone can only be given in full, as `board.list` has it.
+fn board_wanted<'a>(
+    boards: &'a [BoardSummary],
+    wanted: &str,
+    cwd: &Path,
+) -> Option<&'a BoardSummary> {
+    if let Some(named) = boards.iter().find(|board| board.id == wanted) {
+        return Some(named);
+    }
+    let given = cwd.join(wanted);
+    let folder = std::fs::canonicalize(&given).unwrap_or(given);
+    boards
+        .iter()
+        .find(|board| Path::new(&board.root) == folder || board.root == wanted)
+}
+
+/// Runs `collide board remove <board>` against the daemon at `paths` (ts-0222-gx). Removing hides the board: it leaves
+/// the list, and its folder, its scratch tasks, its runs and what was trusted are kept. Opening the folder again
+/// brings it back.
+pub fn remove_with(
+    paths: &DaemonPaths,
+    args: &[String],
+    cwd: &Path,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
+    let wanted = match parse_remove(args) {
+        Ok(wanted) => wanted,
+        Err(message) => {
+            let _ = writeln!(err, "collide board remove: {message}\n{USAGE}");
+            return exit::USAGE;
+        }
+    };
+    let mut session = match connect(paths, "board remove", err) {
+        Ok(session) => session,
+        Err(code) => return code,
+    };
+    let listed: BoardListResult = match session.call("board.list", &BoardListParams {}) {
+        Ok(listed) => listed,
+        Err(code) => return code,
+    };
+    let Some(board) = board_wanted(&listed.boards, &wanted, cwd) else {
+        let known: Vec<String> = listed
+            .boards
+            .iter()
+            .map(|board| format!("{} ({})", board.id, board.root))
+            .collect();
+        let known = if known.is_empty() {
+            "Collide has no board".to_string()
+        } else {
+            format!("the boards are {}", known.join(", "))
+        };
+        session.say(&format!("no board is named or kept in `{wanted}`; {known}"));
+        return exit::ID;
+    };
+    let params = BoardRemoveParams {
+        board: board.id.clone(),
+    };
+    if let Err(code) = session.call::<_, Ack>("board.remove", &params) {
+        return code;
+    }
+    let _ = writeln!(
+        out,
+        "Removed board {} from Collide. The folder {} is not touched. Opening the folder again brings the board \
+         back, with its scratch tasks, its runs and what you trusted.",
+        board.id, board.root
+    );
+    exit::OK
 }

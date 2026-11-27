@@ -25,6 +25,7 @@ export const OWNER_METHODS = {
   'board.list': call<G.BoardListParamsInput, G.BoardListResultOutput>(),
   'board.open': call<G.BoardOpenParamsInput, G.BoardOpenResultOutput>(),
   'board.pick': call<G.BoardPickParamsInput, G.AckOutput>(),
+  'board.remove': call<G.BoardRemoveParamsInput, G.AckOutput>(),
   'board.checks': call<G.BoardChecksParamsInput, G.BoardChecksResultOutput>(),
   'board.locate': call<G.BoardLocateParamsInput, G.BoardLocateResultOutput>(),
   'board.init': call<G.BoardInitParamsInput, G.BoardInitResultOutput>(),

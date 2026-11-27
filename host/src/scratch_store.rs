@@ -11,6 +11,8 @@
 //! - A board keeps the time it was last opened or picked (`last_opened_ms`, migration 14; ts-0218-sc): a window opens
 //!   on the board with the greatest. No two boards share a time, so the latest is never in doubt. A board never
 //!   opened since the column was added has none.
+//! - A board is removed by a time beside it (`removed_ms`, migration 15; ts-0222-gx), which hides it and keeps its
+//!   row. [`Store::open_board`] on its root clears the time. Its name stays taken, so no new board gets it.
 //! - A scratch task is numbered inside its board, from 1. The number and the insert are one transaction, so two writers
 //!   never take the same number.
 
@@ -40,6 +42,17 @@ pub struct StoredBoard {
     pub root: String,
     pub root_commits: Option<Vec<String>>,
     pub last_opened_ms: Option<u64>,
+}
+
+/// What removing a board found (ts-0222-gx).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Removal {
+    /// The board was listed and is now removed.
+    Removed,
+    /// The board was removed before.
+    AlreadyRemoved,
+    /// The store has no board of that name.
+    Unknown,
 }
 
 /// One scratch task as the store holds it. `status` is the text of its category.
@@ -144,6 +157,13 @@ impl Store {
             .optional()
             .map_err(|e| sql_error(context, e))?;
         if let Some((number, own)) = known {
+            // A removed board comes back by its root, as the same board (ts-0222-gx).
+            tx.execute(
+                "UPDATE boards SET removed_ms = NULL WHERE id = ?1",
+                [number],
+            )
+            .map_err(|e| sql_error(context, e))?;
+            tx.commit().map_err(|e| sql_error(context, e))?;
             return Ok(name_of(number, own));
         }
         for _ in 0..NAME_TRIES {
@@ -170,12 +190,14 @@ impl Store {
         })
     }
 
-    /// Every board, in the order they were first opened.
+    /// Every listed board, in the order they were first opened. A removed board (ts-0222-gx) is not one.
     pub fn boards(&self) -> Result<Vec<StoredBoard>, StoreError> {
         let context = "reading the boards";
         let conn = self.connect()?;
         let mut statement = conn
-            .prepare("SELECT id, name, root, root_commits, last_opened_ms FROM boards ORDER BY id")
+            .prepare(
+                "SELECT id, name, root, root_commits, last_opened_ms FROM boards WHERE removed_ms IS NULL ORDER BY id",
+            )
             .map_err(|e| sql_error(context, e))?;
         let rows = statement
             .query_map([], |row| {
@@ -191,9 +213,62 @@ impl Store {
             .map_err(|e| sql_error(context, e))
     }
 
+    /// Removes `board` from the list (ts-0222-gx): the row stays, with the time it was removed, and so do its scratch
+    /// tasks and everything keyed by its name. Opening its root again brings it back.
+    pub fn remove_board(&self, board: &str, now_ms: u64) -> Result<Removal, StoreError> {
+        let context = "removing a board";
+        let mut conn = self.connect()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| sql_error(context, e))?;
+        let Some(row) = row_of(&tx, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(Removal::Unknown);
+        };
+        let now = i64::try_from(now_ms).unwrap_or(i64::MAX);
+        let changed = tx
+            .execute(
+                "UPDATE boards SET removed_ms = ?2 WHERE id = ?1 AND removed_ms IS NULL",
+                params![row, now],
+            )
+            .map_err(|e| sql_error(context, e))?;
+        tx.commit().map_err(|e| sql_error(context, e))?;
+        Ok(if changed == 0 {
+            Removal::AlreadyRemoved
+        } else {
+            Removal::Removed
+        })
+    }
+
+    /// Whether `board` is a board the store has and has removed.
+    pub fn is_board_removed(&self, board: &str) -> Result<bool, StoreError> {
+        let conn = self.connect()?;
+        let context = "reading a board";
+        let Some(row) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(false);
+        };
+        conn.query_row(
+            "SELECT removed_ms IS NOT NULL FROM boards WHERE id = ?1",
+            [row],
+            |row| row.get(0),
+        )
+        .map_err(|e| sql_error(context, e))
+    }
+
+    /// The name of the removed board whose checkout is at `root`, or `None` when no removed board has that root.
+    pub fn removed_board_at(&self, root: &str) -> Result<Option<String>, StoreError> {
+        let conn = self.connect()?;
+        conn.query_row(
+            "SELECT id, name FROM boards WHERE root = ?1 AND removed_ms IS NOT NULL",
+            [root],
+            |row| Ok(name_of(row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| sql_error("reading the removed boards", e))
+    }
+
     /// Marks `board` as the one opened or picked last, at `now_ms`. The mark is later than every other board's, even
     /// when the clock stands still or went back, so the board marked last is always the one with the latest time.
-    /// Returns the time it was marked with, or `None` when the store has no such board.
+    /// Returns the time it was marked with, or `None` when the store has no such listed board.
     pub fn mark_board_opened(&self, board: &str, now_ms: u64) -> Result<Option<u64>, StoreError> {
         let context = "marking a board as opened";
         let mut conn = self.connect()?;
@@ -203,6 +278,16 @@ impl Store {
         let Some(row) = row_of(&tx, board).map_err(|e| sql_error(context, e))? else {
             return Ok(None);
         };
+        let removed: bool = tx
+            .query_row(
+                "SELECT removed_ms IS NOT NULL FROM boards WHERE id = ?1",
+                [row],
+                |row| row.get(0),
+            )
+            .map_err(|e| sql_error(context, e))?;
+        if removed {
+            return Ok(None);
+        }
         let others: Option<i64> = tx
             .query_row(
                 "SELECT MAX(last_opened_ms) FROM boards WHERE id != ?1",
@@ -221,16 +306,19 @@ impl Store {
         Ok(Some(u64::try_from(at).unwrap_or(0)))
     }
 
-    /// The root of the board named `board`, or `None` when the store has no such board.
+    /// The root of the board named `board`, or `None` when the store has no such listed board: a removed board is
+    /// unknown here, so every method that names a board refuses it.
     pub fn board_root(&self, board: &str) -> Result<Option<String>, StoreError> {
         let conn = self.connect()?;
         let context = "reading a board";
         let Some(row) = row_of(&conn, board).map_err(|e| sql_error(context, e))? else {
             return Ok(None);
         };
-        conn.query_row("SELECT root FROM boards WHERE id = ?1", [row], |row| {
-            row.get(0)
-        })
+        conn.query_row(
+            "SELECT root FROM boards WHERE id = ?1 AND removed_ms IS NULL",
+            [row],
+            |row| row.get(0),
+        )
         .optional()
         .map_err(|e| sql_error(context, e))
     }

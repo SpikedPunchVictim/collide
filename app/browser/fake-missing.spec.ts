@@ -48,9 +48,7 @@ test('choosing it shows where Collide looked, that nothing was deleted, and Loca
   await expect(missing.locator('code')).toHaveText('/work/gone')
   await expect(missing).toContainText('Nothing has been deleted.')
   await expect(missing.getByRole('button', { name: 'Locate the folder…' })).toBeEnabled()
-  const remove = missing.getByRole('button', { name: 'Remove from Collide' })
-  await expect(remove).toBeDisabled()
-  await expect(remove).toHaveAttribute('title', 'Arrives with board removal')
+  await expect(missing.getByRole('button', { name: 'Remove from Collide' })).toBeEnabled()
   // Nothing of the board is read, and the view picker has nothing to show.
   await expect(page.getByRole('button', { name: /All tasks/ })).toHaveCount(0)
 })

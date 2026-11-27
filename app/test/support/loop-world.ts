@@ -175,6 +175,8 @@ export class World {
   refuseStart: string | null = null
   /** Set to make `board.pick` refuse, with these words. */
   refusePick: string | null = null
+  /** What `board.remove` refuses a board with, by the board's id (ts-0222-gx). */
+  removeRefusals = new Map<string, string>()
   /** While set, `board.list` does not answer until it resolves: the first read of the boards is still on its way. */
   listGate: Promise<void> | null = null
   /** The time of the last `board.open` or `board.pick`: each gives its board a later one, as the daemon does. */
@@ -192,6 +194,13 @@ export class World {
       if (this.refusePick !== null) throw new OwnerError(CONFLICT, this.refusePick)
       if (!this.boards.some((b) => b.id === id)) throw new OwnerError(NOT_FOUND, `the daemon has no board "${id}"`)
       this.mark(id)
+      return {}
+    })
+    owner.handle('board.remove', ({ board: id }) => {
+      const refusal = this.removeRefusals.get(id)
+      if (refusal !== undefined) throw new OwnerError(CONFLICT, refusal)
+      if (!this.boards.some((b) => b.id === id)) throw new OwnerError(NOT_FOUND, `the daemon has no board "${id}"`)
+      this.removedElsewhere(id)
       return {}
     })
     owner.handle('board.open', ({ root }) => {
@@ -277,6 +286,18 @@ export class World {
       if (result.outcome !== 'refused') this.onAnswer(params)
       return result
     })
+  }
+
+  /**
+   * The board leaves the list and every window is told, as the daemon does for a removal (ts-0222-gx). Its folder stays
+   * known, so opening it again lists the board once more.
+   */
+  removedElsewhere(id: string): void {
+    const gone = this.boards.find((b) => b.id === id)
+    if (gone === undefined) throw new Error(`no board ${id} to remove`)
+    this.boards = this.boards.filter((b) => b.id !== id)
+    this.folders.set(gone.root, gone)
+    this.owner.push({ method: 'board.changed', params: { removed: [id] } })
   }
 
   /** Gives the board the time of now, which is later than every board's before. */

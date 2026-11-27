@@ -26,6 +26,7 @@ import { boardName, defaultLine, isMissing, missingReason } from './frame/boards
 import { Frame } from './frame/Frame.tsx'
 import { LocateWindow } from './frame/LocateWindow.tsx'
 import { MissingBoard } from './frame/MissingBoard.tsx'
+import { RemoveBoardWindow } from './frame/RemoveBoardWindow.tsx'
 import { TABS, type TabId } from './frame/tabs.ts'
 import { LoopPage } from './loop/LoopPage.tsx'
 import { ExternalLinks } from './markdown/ExternalLinks.tsx'
@@ -145,6 +146,7 @@ function Window({
   const [tab, setTab] = useState<TabId>('field')
   const [onLoopPage, setOnLoopPage] = useState(false)
   const [locating, setLocating] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const pickFolder = shell ? async () => (await owner.rpc('shell.pick_folder')).path : null
   const [first, setFirst] = useState<FirstRun | null>(null)
   const [makingRepo, setMakingRepo] = useState(false)
@@ -280,6 +282,7 @@ function Window({
         onOpenFolder={look}
         pickFolder={pickFolder}
         onMenuOpen={loop.refreshBoards}
+        onRemoveBoard={board === undefined ? undefined : () => setRemoving(true)}
         onOpenLoop={() => setOnLoopPage(true)}
         viewPicker={
           board === undefined || missing ? null : (
@@ -335,6 +338,7 @@ function Window({
               folder={board.root}
               reason={missingReason(board)}
               onLocate={() => setLocating(true)}
+              onRemove={() => setRemoving(true)}
             />
           ) : (
             <FieldPage
@@ -405,6 +409,14 @@ function Window({
           brought={trust.prompt.brought}
           onTrust={trust.trust}
           onWithout={trust.without}
+        />
+      ) : null}
+      {removing && board !== undefined ? (
+        <RemoveBoardWindow
+          boardName={boardName(board)}
+          folder={board.root}
+          onRemove={() => loop.removeBoard(board.id)}
+          onClosed={() => setRemoving(false)}
         />
       ) : null}
       {locating && board !== undefined ? (

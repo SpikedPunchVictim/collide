@@ -27,6 +27,8 @@ export interface FrameProps {
   readonly pickFolder?: (() => Promise<string | null>) | null
   /** The board menu was opened (`ts-0191-nv`): the boards are read again. */
   readonly onMenuOpen?: () => void
+  /** Asks to remove the board in use from Collide (`ts-0222-gx`): the board menu offers it. */
+  readonly onRemoveBoard?: () => void
   readonly onOpenLoop: () => void
   /** The view picker, in its place in the trail after the board menu (`ts-0181-ft`). Nothing shows until given. */
   readonly viewPicker?: ReactNode
@@ -70,6 +72,7 @@ export function Frame(props: FrameProps) {
             onOpenFolder={props.onOpenFolder}
             pickFolder={props.pickFolder}
             onMenuOpen={props.onMenuOpen}
+            onRemove={props.onRemoveBoard}
           />
           {props.viewPicker == null ? null : (
             <>

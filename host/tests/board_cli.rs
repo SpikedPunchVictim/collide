@@ -5,7 +5,7 @@
 mod common;
 
 use collide_core::owner::{BoardListParams, BoardListResult, BoardSummary, TrustState};
-use collide_host::board_cli::{USAGE, init_with, trust_with};
+use collide_host::board_cli::{USAGE, init_with, remove_with, trust_with};
 use collide_host::task_cli::exit;
 use common::config_fixture::Fixture;
 use std::fs;
@@ -53,6 +53,17 @@ fn trust_at(fixture: &Fixture, cwd: &Path, list: &[&str], tty: bool, input: &str
 
 fn trust(fixture: &Fixture, list: &[&str], tty: bool, input: &str) -> Run {
     trust_at(fixture, fixture.repo.work(), list, tty, input)
+}
+
+/// `collide board remove <list>` from `cwd`.
+fn remove(fixture: &Fixture, cwd: &Path, list: &[&str]) -> Run {
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = remove_with(fixture.daemon.paths(), &args(list), cwd, &mut out, &mut err);
+    Run {
+        code,
+        out: String::from_utf8(out).unwrap(),
+        err: String::from_utf8(err).unwrap(),
+    }
 }
 
 fn boards(fixture: &Fixture) -> Vec<BoardSummary> {
@@ -514,4 +525,125 @@ fn with_no_terminal_a_dev_folder_needs_allow_dev_and_names_it() {
     );
     assert_eq!(again.code, exit::OK, "{}", again.err);
     assert!(is_trusted(&fixture));
+}
+
+// ---- collide board remove (ts-0222-gx) ----
+
+#[test]
+fn board_remove_by_name_hides_the_board_and_says_the_folder_is_not_touched() {
+    let fixture = Fixture::new();
+    let id = fixture.board();
+    let outside = common::TempRoot::new();
+
+    let run = remove(&fixture, outside.path(), &[&id]);
+
+    assert_eq!(run.code, exit::OK, "{}", run.err);
+    assert!(run.out.contains(&id), "{}", run.out);
+    assert!(run.out.contains("not touched"), "{}", run.out);
+    assert!(run.out.contains("brings the board back"), "{}", run.out);
+    assert!(boards(&fixture).is_empty());
+    assert!(fixture.repo.work().exists(), "the folder is not touched");
+}
+
+#[test]
+fn board_remove_by_folder_finds_the_board_that_has_it() {
+    let fixture = Fixture::new();
+    let id = fixture.board();
+    let folder = fixture.repo.work().to_str().unwrap().to_string();
+    let outside = common::TempRoot::new();
+
+    let run = remove(&fixture, outside.path(), &[&folder]);
+
+    assert_eq!(run.code, exit::OK, "{}", run.err);
+    assert!(run.out.contains(&id), "{}", run.out);
+    assert!(boards(&fixture).is_empty());
+}
+
+#[test]
+fn board_remove_of_an_unknown_board_exits_with_the_id_code_and_lists_the_boards() {
+    let fixture = Fixture::new();
+    let id = fixture.board();
+
+    let run = remove(&fixture, fixture.repo.work(), &["board-nope"]);
+
+    assert_eq!(run.code, exit::ID, "{}", run.err);
+    assert!(run.err.contains("board-nope"), "{}", run.err);
+    assert!(
+        run.err.contains(&id),
+        "the known boards are named: {}",
+        run.err
+    );
+    assert_eq!(boards(&fixture).len(), 1);
+}
+
+#[test]
+fn board_remove_of_a_board_already_removed_exits_with_the_id_code() {
+    let fixture = Fixture::new();
+    let id = fixture.board();
+    assert_eq!(remove(&fixture, fixture.repo.work(), &[&id]).code, exit::OK);
+
+    let run = remove(&fixture, fixture.repo.work(), &[&id]);
+
+    assert_eq!(run.code, exit::ID, "{}", run.err);
+    assert!(run.err.contains(&id), "{}", run.err);
+}
+
+#[test]
+fn board_remove_with_a_run_in_progress_fails_naming_the_run() {
+    use collide_core::change::{Actor, ActorKind};
+    use collide_core::events::EventBody;
+    use collide_core::state::RunState;
+    use collide_host::run_store::RunLaunch;
+    let fixture = Fixture::new();
+    let id = fixture.board();
+    fixture
+        .daemon
+        .phases()
+        .append_event(
+            Actor {
+                kind: ActorKind::Workflow,
+                run: Some("r-live".to_string()),
+                phase: None,
+            },
+            EventBody::RunTransition {
+                run: "r-live".to_string(),
+                from: None,
+                to: RunState::Running {},
+            },
+        )
+        .unwrap();
+    let launch = RunLaunch {
+        board: Some(id.clone()),
+        tasks: Vec::new(),
+        line: "main".to_string(),
+        workflow: "collide/quick".to_string(),
+    };
+    assert!(
+        fixture
+            .daemon
+            .store()
+            .set_run_launch("r-live", &launch)
+            .unwrap()
+    );
+
+    let run = remove(&fixture, fixture.repo.work(), &[&id]);
+
+    assert_eq!(run.code, exit::FAILED, "{}", run.out);
+    assert!(run.err.contains("r-live"), "{}", run.err);
+    assert_eq!(boards(&fixture).len(), 1);
+}
+
+#[test]
+fn a_bad_board_remove_command_line_exits_2_with_the_usage() {
+    let fixture = Fixture::new();
+    for bad in [&[][..], &["--nope"][..], &["one", "two"][..], &[""][..]] {
+        let run = remove(&fixture, fixture.repo.work(), bad);
+        assert_eq!(run.code, exit::USAGE, "{bad:?}");
+        assert!(
+            run.err.contains("usage: collide board remove"),
+            "{}",
+            run.err
+        );
+    }
+    assert!(USAGE.contains("collide board remove <board>"));
 }

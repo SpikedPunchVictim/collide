@@ -23,6 +23,8 @@ export interface BoardMenuProps {
   readonly pickFolder?: (() => Promise<string | null>) | null
   /** The menu was opened: the boards are read again, so a folder that moved since shows as missing. */
   readonly onMenuOpen?: () => void
+  /** Asks to remove the board in use from Collide (ts-0222-gx). The entry shows only when it is given. */
+  readonly onRemove?: () => void
 }
 
 export function BoardMenu(props: BoardMenuProps) {
@@ -53,6 +55,14 @@ export function BoardMenu(props: BoardMenuProps) {
             props.onChoose(id)
             setOpen(false)
           }}
+          onRemove={
+            props.onRemove === undefined
+              ? undefined
+              : () => {
+                  setOpen(false)
+                  props.onRemove?.()
+                }
+          }
           // A folder is looked at on the first-run page (`ts-0194-qp`), which is not in the menu, so the menu is done.
           onOpenFolder={async (path) => {
             await props.onOpenFolder(path)
@@ -65,7 +75,15 @@ export function BoardMenu(props: BoardMenuProps) {
 }
 
 /** What the menu holds, apart from the popover that shows it, so a test renders it for any boards. */
-export function BoardMenuBody({ boards, boardId, problems, onChoose, onOpenFolder, pickFolder }: BoardMenuProps) {
+export function BoardMenuBody({
+  boards,
+  boardId,
+  problems,
+  onChoose,
+  onOpenFolder,
+  pickFolder,
+  onRemove,
+}: BoardMenuProps) {
   const [path, setPath] = useState('')
   const [pickProblem, setPickProblem] = useState<string | null>(null)
   // The folder the person chose is opened at once, as a typed one is by its button.
@@ -114,6 +132,15 @@ export function BoardMenuBody({ boards, boardId, problems, onChoose, onOpenFolde
           </button>
         )
       })}
+      {onRemove === undefined || !boards.some((board) => board.id === boardId) ? null : (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="mt-1 w-full rounded-md px-2 py-1.5 text-left hover:bg-muted"
+        >
+          Remove from Collide…
+        </button>
+      )}
       <hr className="my-1.5 border-t" />
       <form onSubmit={submit} className="flex flex-col gap-1.5 px-2 py-1">
         <p className="font-medium">Open a folder…</p>

@@ -148,6 +148,16 @@ describe('the board menu lists', () => {
     expect(html).toMatch(/line <b>develop<\/b>/)
   })
 
+  test('Remove from Collide… for the board in use, when the page can remove it', async () => {
+    const html = await body({ onRemove: noop })
+    expect(html).toContain('Remove from Collide…')
+  })
+
+  test('no Remove from Collide… without a board in use', async () => {
+    expect(await body({ onRemove: noop, boardId: null })).not.toContain('Remove from Collide…')
+    expect(await body()).not.toContain('Remove from Collide…')
+  })
+
   test('the board in use as current', async () => {
     const html = await body()
     expect(html.match(/aria-current="true"/g)).toHaveLength(1)

@@ -1,6 +1,6 @@
 // The page of a board whose folder is gone, or is no longer its checkout (ts-0191-nv, ts-0221-pp; note 15; the mock's
 // `missingHtml`). It says which, where Collide looked, that nothing was deleted and that the tasks are kept, and offers
-// to locate the folder. Removing a board arrives later, so that button is there and off.
+// to locate the folder, or to remove the board from Collide (ts-0222-gx), which asks first in a window of its own.
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import type { MissingReason } from '../loop/types.ts'
@@ -11,6 +11,8 @@ export interface MissingBoardProps {
   readonly folder: string
   readonly reason: MissingReason
   readonly onLocate: () => void
+  /** Opens the window that asks before the board is removed. */
+  readonly onRemove: () => void
 }
 
 /** What the page says for each reason: its heading, and what Collide found at the folder. */
@@ -26,7 +28,7 @@ const WHAT: Record<MissingReason, { readonly title: string; readonly found: stri
   },
 }
 
-export function MissingBoard({ name, folder, reason, onLocate }: MissingBoardProps) {
+export function MissingBoard({ name, folder, reason, onLocate, onRemove }: MissingBoardProps) {
   return (
     <Card aria-label="Board folder not found" className="mx-auto w-full max-w-xl items-center px-6 text-center">
       <h1 className="text-xl font-semibold">{`${name}: ${WHAT[reason].title}`}</h1>
@@ -41,7 +43,7 @@ export function MissingBoard({ name, folder, reason, onLocate }: MissingBoardPro
       </p>
       <div className="flex gap-2">
         <Button onClick={onLocate}>Locate the folder…</Button>
-        <Button variant="outline" disabled title="Arrives with board removal">
+        <Button variant="outline" onClick={onRemove}>
           Remove from Collide
         </Button>
       </div>

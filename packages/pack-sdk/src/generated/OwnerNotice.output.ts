@@ -21,6 +21,10 @@ export type OwnerNotice =
       method: 'queue.changed'
       params: QueueChanged
     }
+  | {
+      method: 'board.changed'
+      params: BoardChanged
+    }
 export type ActorKind = 'person' | 'workflow' | 'agent'
 /**
  * What happened. Each variant is one event name, and `event` is the tag. Unknown keys are refused.
@@ -722,5 +726,12 @@ export interface RunTerminalOutput {
 export interface QueueChanged {
   added: string[]
   count: number
+  removed: string[]
+}
+/**
+ * The params of the `board.changed` notification (ts-0222-gx): the boards that left `board.list` since the last one.
+ * A window reads `board.list` again for the rest, and one whose board is among them moves to another.
+ */
+export interface BoardChanged {
   removed: string[]
 }

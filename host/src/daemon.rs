@@ -145,7 +145,7 @@ use crate::run_store::{RunFilter, RunRow};
 use crate::run_summary::summarize;
 use crate::sampler::{Sampler, TICK};
 use crate::scratch;
-use crate::scratch_store::StoredBoard;
+use crate::scratch_store::{Removal, StoredBoard};
 use crate::secret_store::{MemorySecretStore, SecretStore};
 use crate::set_aside;
 use crate::settings_files::user_config_dir;
@@ -171,23 +171,24 @@ use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
 use collide_core::item::Category;
 use collide_core::owner::{
-    Ack, BoardChecksParams, BoardChecksResult, BoardInitParams, BoardListResult, BoardLocateParams,
-    BoardLocateResult, BoardOpenParams, BoardOpenResult, BoardPickParams, BoardSummary,
-    BoardTrustParams, BoardTrustReviewParams, ChangeWords, ChangesPlace, CommitChanges,
-    ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams, ConfigPackLinkParams,
-    ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams, ConfigResetParams,
-    ConfigResetResult, ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult,
-    DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, FirstRunCheck,
-    MAX_MESSAGE_BYTES, Method, MissingReason, Notice, OWNER_PROTOCOL, OwnerInitializeResult,
-    QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueItem, QueueListParams, QueueListResult,
-    Request, Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
-    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
-    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
-    TaskApplyParams, TaskApplyResult, TaskChangesParams, TaskChangesResult, TaskCreateParams,
-    TaskDiffParams, TaskDiffResult, TaskGetParams, TaskGetResult, TaskListParams,
-    TaskPreviewParams, TaskReidParams, TaskReidResult, TaskSaveViewParams, TaskSaveViewResult,
-    TaskSectionsParams, TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport,
-    ViewTarget, WriteQueued, code, encode_line, parse_request, route,
+    Ack, BoardChanged, BoardChecksParams, BoardChecksResult, BoardInitParams, BoardListResult,
+    BoardLocateParams, BoardLocateResult, BoardOpenParams, BoardOpenResult, BoardPickParams,
+    BoardRemoveParams, BoardSummary, BoardTrustParams, BoardTrustReviewParams, ChangeWords,
+    ChangesPlace, CommitChanges, ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams,
+    ConfigPackLinkParams, ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams,
+    ConfigResetParams, ConfigResetResult, ConfigSetParams, ConfigWriteLayer,
+    DaemonRecaptureEnvironmentResult, DaemonStatusResult, DaemonSubscribeParams,
+    DaemonSubscribeResult, EnvCapture, FirstRunCheck, MAX_MESSAGE_BYTES, Method, MissingReason,
+    Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams,
+    QueueAnswerResult, QueueItem, QueueListParams, QueueListResult, Request, Response, Routed,
+    RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult,
+    RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult,
+    RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams,
+    TaskApplyResult, TaskChangesParams, TaskChangesResult, TaskCreateParams, TaskDiffParams,
+    TaskDiffResult, TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams,
+    TaskReidParams, TaskReidResult, TaskSaveViewParams, TaskSaveViewResult, TaskSectionsParams,
+    TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued,
+    code, encode_line, parse_request, route,
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::section::{ProposalFeatures, section_uses};
@@ -2255,6 +2256,7 @@ fn call(
         Method::BoardChecks => board_checks(shared, params),
         Method::BoardLocate => board_locate(shared, session, params),
         Method::BoardPick => board_pick(shared, params),
+        Method::BoardRemove => board_remove(shared, session, params),
         Method::BoardList => board_list(shared, session),
         Method::BoardInit => board_init(shared, session, params),
         Method::BoardTrust => board_trust(shared, session, params),
@@ -3129,6 +3131,85 @@ fn board_pick(shared: &Shared, params: &serde_json::Value) -> Result<serde_json:
     Ok(serde_json::to_value(Ack {}).expect("a result is JSON"))
 }
 
+/// `board.remove` (ts-0222-gx; 0.2, Boards and lines): takes a board out of Collide. It hides the board: the board
+/// leaves `board.list`, its providers and corpus stop and its corpus cache is dropped, and everything else of it is
+/// kept (its scratch tasks, its runs, the person's files for it and what was trusted). `board.open` of its folder
+/// brings it back as the same board. A run in progress on the board refuses it, and the run is not stopped. Every
+/// subscribed window is told with `board.changed`. The method is not one a defaults connection is served
+/// ([`defaults_serves`]).
+fn board_remove(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: BoardRemoveParams = read_params("board.remove", params)?;
+    refuse_run_agent(session, "remove a board")?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let board = &params.board;
+    if shared
+        .store
+        .board_root(board)
+        .map_err(store_failed)?
+        .is_none()
+    {
+        return Err(
+            if shared.store.is_board_removed(board).map_err(store_failed)? {
+                RpcError::new(
+                    code::NOT_FOUND,
+                    format!(
+                        "the board {board} was already removed; open its folder with board.open to bring it back"
+                    ),
+                )
+            } else {
+                no_such_board(board)
+            },
+        );
+    }
+    let live = shared
+        .store
+        .runs(&RunFilter {
+            board: Some(board),
+            task: None,
+            scope: RunScope::Live,
+            before: None,
+            limit: 1,
+        })
+        .map_err(store_failed)?;
+    if let Some(run) = live.first() {
+        return Err(RpcError::new(
+            code::CONFLICT,
+            format!(
+                "run {} is in progress on the board {board}, so it was not removed. Stop the run or wait for it to \
+                 end, then remove the board",
+                run.run
+            ),
+        ));
+    }
+    let now_ms = shared.clocks.read(Clock::Wall).nanos / 1_000_000;
+    match shared
+        .store
+        .remove_board(board, now_ms)
+        .map_err(store_failed)?
+    {
+        Removal::Removed => {}
+        Removal::AlreadyRemoved | Removal::Unknown => return Err(no_such_board(board)),
+    }
+    // The providers and the corpus stop as on a move; the cache is a copy, so it is dropped.
+    shared.sources.stop_board(board);
+    if let Some(corpora) = shared.corpora.get() {
+        corpora.remove(board).map_err(store_failed)?;
+    }
+    shared.hub.publish_board(BoardChanged {
+        removed: vec![board.clone()],
+    });
+    Ok(serde_json::to_value(Ack {}).expect("a result is JSON"))
+}
+
 /// Marks `board` as opened or picked now, and gives the time it was marked with. `None` when the store has no such
 /// board.
 fn mark_board_opened(shared: &Shared, board: &str) -> Result<Option<u64>, RpcError> {
@@ -3266,6 +3347,15 @@ fn board_locate(
                 "`{root}` is already the board {}: only one board has a folder. Open that board, or choose \
                  another folder",
                 other.id
+            ),
+        ));
+    }
+    if let Some(removed) = shared.store.removed_board_at(&root).map_err(store_failed)? {
+        return Err(RpcError::new(
+            code::CONFLICT,
+            format!(
+                "`{root}` belongs to the board {removed}, which was removed from Collide. Open that folder to bring \
+                 {removed} back, or choose another folder"
             ),
         ));
     }

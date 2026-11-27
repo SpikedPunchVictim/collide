@@ -238,6 +238,7 @@ fn samples() -> Vec<(Method, Value, Value)> {
             json!({ "board": "bd-1", "path": "/work/moved" }),
             json!({ "board": board(), "note": "the old repository was never recorded" }),
         ),
+        (Method::BoardRemove, json!({ "board": "bd-1" }), json!({})),
         (
             Method::BoardInit,
             json!({ "board": "bd-1", "dry_run": true }),
@@ -1274,6 +1275,7 @@ fn every_notice_round_trips_through_its_envelope() {
             "queue.changed",
             json!({ "count": 2, "added": ["q-2"], "removed": [] }),
         ),
+        ("board.changed", json!({ "removed": ["bd-1"] })),
     ];
     for (name, params) in notices {
         let wire = json!({ "jsonrpc": "2.0", "method": name, "params": params });

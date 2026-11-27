@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.remove` params: the board to take out of Collide (ts-0222-gx). Removing hides the board: it leaves\n`board.list` and its corpus cache is dropped, and everything else of it is kept (its scratch tasks, its runs, the\nperson's files for it and what was trusted for it). `board.open` of its folder brings it back.",
+  "properties": {
+    "board": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board"
+  ],
+  "title": "BoardRemoveParams",
+  "type": "object"
+}

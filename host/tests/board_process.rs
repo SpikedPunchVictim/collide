@@ -138,6 +138,10 @@ fn a_bad_command_line_exits_2_with_the_usage_and_starts_no_daemon() {
         &["init", "x"][..],
         &["trust", "--nope"][..],
         &["trust", "--line"][..],
+        &["board"][..],
+        &["board", "other"][..],
+        &["board", "remove"][..],
+        &["board", "remove", "one", "two"][..],
     ] {
         let output = {
             let mut command = Command::new(COLLIDE);
@@ -158,6 +162,24 @@ fn a_bad_command_line_exits_2_with_the_usage_and_starts_no_daemon() {
 }
 
 #[test]
+fn board_remove_hides_the_board_of_the_checkout_and_leaves_the_checkout_alone() {
+    let (repo, _guard) = repo();
+    assert_eq!(collide(&repo, &["init"]).status.code(), Some(0));
+
+    let removed = collide(&repo, &["board", "remove", "."]);
+
+    assert_eq!(removed.status.code(), Some(0), "{}", text(&removed.stderr));
+    assert!(
+        text(&removed.stdout).contains("not touched"),
+        "{}",
+        text(&removed.stdout)
+    );
+    assert!(repo.work().join(".collide/board.yaml").exists());
+    let again = collide(&repo, &["board", "remove", "."]);
+    assert_eq!(again.status.code(), Some(3), "{}", text(&again.stderr));
+}
+
+#[test]
 fn help_lists_init_and_trust_with_their_usage() {
     let root = TempRoot::new();
     let mut command = Command::new(COLLIDE);
@@ -171,6 +193,10 @@ fn help_lists_init_and_trust_with_their_usage() {
     assert!(help.contains("usage: collide init [--dry-run]"), "{help}");
     assert!(
         help.contains("usage: collide trust [--line <ref>] [--yes]"),
+        "{help}"
+    );
+    assert!(
+        help.contains("usage: collide board remove <board>"),
         "{help}"
     );
 }
@@ -220,6 +246,7 @@ fn a_runs_agent_may_not_trust_add_switch_or_set_anything_for_the_person() {
         &["pack", "disable", "mine"][..],
         &["pack", "update", "mine", "--yes"][..],
         &["config", "set", "disk.floor_gib", "1"][..],
+        &["board", "remove", "."][..],
     ] {
         let output = collide_in_a_run(&repo, args);
         let stderr = text(&output.stderr);

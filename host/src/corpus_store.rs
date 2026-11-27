@@ -292,6 +292,21 @@ impl Store {
         Ok(())
     }
 
+    /// Forgets everything the cache holds for `board`: its tasks, its invalid items and what its sources declared.
+    /// The cache is a copy, so nothing is lost (ts-0222-gx).
+    pub fn corpus_drop_board(&self, board: &str) -> Result<(), StoreError> {
+        let mut conn = self.connect()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| sql_error("dropping the corpus cache", e))?;
+        for table in ["corpus_tasks", "corpus_invalid", "corpus_sources"] {
+            tx.execute(&format!("DELETE FROM {table} WHERE board = ?1"), [board])
+                .map_err(|e| sql_error("dropping the corpus cache", e))?;
+        }
+        tx.commit()
+            .map_err(|e| sql_error("dropping the corpus cache", e))
+    }
+
     /// Keeps an invalid item, and forgets the task that was at its path.
     pub fn corpus_put_invalid(
         &self,

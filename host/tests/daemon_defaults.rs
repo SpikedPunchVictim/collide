@@ -339,6 +339,7 @@ fn every_write_is_refused_in_defaults_mode_with_words_that_name_it_and_changes_n
         ),
         ("board.init", json!({ "board": board })),
         ("board.pick", json!({ "board": board })),
+        ("board.remove", json!({ "board": board })),
         (
             "board.trust",
             json!({ "board": board, "line": "main", "hash": "abc" }),

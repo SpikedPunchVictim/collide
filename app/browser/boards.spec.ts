@@ -3,8 +3,9 @@
 // tasks. A folder of another repository is refused with the daemon's reason. The page is the bridge's, so it has the
 // typed path and no folder picker. Nothing is deleted: the moved folder is still there at each step. A folder made
 // again in its place, empty or holding another repository, gives the page its own words and Locate (ts-0221-pp). The
-// last tests are the board a window opens on (ts-0218-sc): the one picked last, which a reload keeps.
-import { mkdirSync, renameSync } from 'node:fs'
+// next tests are the board a window opens on (ts-0218-sc): the one picked last, which a reload keeps. The last two
+// remove a board (ts-0222-gx), from the missing page and from the board menu.
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from './support/fixtures.ts'
 import { firstPhase } from './support/recordings.ts'
@@ -190,4 +191,67 @@ test('a board.open with no pick, as the command line does, leaves the board a wi
 
   const page = await openPage(world)
   await expect(page.getByTitle('Board and code line')).toContainText('other')
+})
+
+// ---- removing a board (ts-0222-gx) ----------------------------------------------------------------------------------
+
+test('a missing board is removed from its page, the folder is not touched, and opening it brings it back', async ({
+  startWorld,
+  openPage,
+}) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  const board = await boardWithATask(world)
+  const other = (await world.rpc<{ board: { id: string } }>('board.open', { root: otherRepository(world) })).board.id
+  const moved = join(world.root, 'moved')
+  renameSync(world.repo, moved)
+  await world.rpc('board.pick', { board })
+  const page = await openPage(world)
+  const missing = page.getByLabel('Board folder not found')
+  await expect(missing).toBeVisible()
+
+  await missing.getByRole('button', { name: 'Remove from Collide' }).click()
+  const window = page.getByRole('dialog', { name: /^Remove .* from Collide\?$/ })
+  await expect(window).toContainText('is not touched')
+  await window.getByRole('button', { name: 'Remove from Collide' }).click()
+
+  // The window moves to the board still listed, and the daemon no longer lists the removed one.
+  await expect(missing).toBeHidden()
+  await expect(page.getByTitle('Board and code line')).toContainText('other')
+  const listed = await world.rpc<{ boards: { id: string }[] }>('board.list')
+  expect(listed.boards.map((b) => b.id)).toEqual([other])
+  expect(existsSync(moved)).toBe(true)
+
+  // Opening its folder again lists the same board, with its task.
+  renameSync(moved, world.repo)
+  const again = await world.rpc<{ board: { id: string } }>('board.open', { root: world.repo })
+  expect(again.board.id).toBe(board)
+  const task = await world.rpc<{ task: { title: string } }>('task.get', { board, id: 'scratch:1' })
+  expect(task.task.title).toContain('Outlives the move')
+})
+
+test('the board menu removes the board in use, and the last one removed leaves the first-run page', async ({
+  startWorld,
+  openPage,
+}) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  const board = (await world.rpc<{ board: { id: string } }>('board.open', { root: world.repo })).board.id
+  await world.rpc('board.pick', { board })
+  const page = await openPage(world)
+  const button = page.getByTitle('Board and code line')
+  await expect(button).toContainText('repo')
+
+  await button.click()
+  await page
+    .getByRole('dialog', { name: 'Open boards' })
+    .getByRole('button', { name: 'Remove from Collide…' })
+    .click()
+  await page
+    .getByRole('dialog', { name: /^Remove .* from Collide\?$/ })
+    .getByRole('button', { name: 'Remove from Collide' })
+    .click()
+
+  await expect(page.getByLabel('Folder to look at')).toBeVisible()
+  const listed = await world.rpc<{ boards: unknown[] }>('board.list')
+  expect(listed.boards).toEqual([])
+  expect(existsSync(world.repo)).toBe(true)
 })

@@ -14,7 +14,7 @@
 //!   at once and sends nothing more.
 
 use collide_core::events::Event;
-use collide_core::owner::{Notice, QueueChanged};
+use collide_core::owner::{BoardChanged, Notice, QueueChanged};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
@@ -94,6 +94,11 @@ impl Hub {
     /// Sends the change to every subscriber, as a `queue.changed` notice.
     pub fn publish_queue(&self, changed: QueueChanged) {
         self.publish(&Notice::QueueChanged(changed));
+    }
+
+    /// Sends the change to every subscriber, as a `board.changed` notice (ts-0222-gx).
+    pub fn publish_board(&self, changed: BoardChanged) {
+        self.publish(&Notice::BoardChanged(changed));
     }
 
     /// How many connections have a subscription that is still being sent to.

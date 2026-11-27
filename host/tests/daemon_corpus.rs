@@ -3084,6 +3084,24 @@ fn a_run_agent_may_not_locate_a_board_and_the_board_stays_where_it_is() {
 }
 
 #[test]
+fn a_run_agent_may_not_remove_a_board_and_the_board_stays_listed() {
+    use collide_core::owner::code::NOT_PERMITTED;
+    let rig = rig();
+    let board = rig.board_with(&[&FILES], "");
+    rig.settled(&board);
+
+    let replies = as_a_run_agent(
+        &rig,
+        "run-1",
+        &[("board.remove", json!({ "board": board }))],
+    );
+
+    assert_eq!(replies, [json!(NOT_PERMITTED)], "{replies:?}");
+    let boards: BoardListResult = rpc(&rig, "board.list", &BoardListParams {}).unwrap();
+    assert_eq!(boards.boards.len(), 1);
+}
+
+#[test]
 fn a_run_agent_may_not_make_a_folder_a_repository_and_nothing_is_made() {
     use collide_core::owner::code::NOT_PERMITTED;
     let rig = rig();

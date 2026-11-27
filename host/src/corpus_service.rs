@@ -145,6 +145,17 @@ impl Corpora {
         self.ensure(board, root)
     }
 
+    /// Ends the service of `board` and forgets its cache, for a board that was removed (ts-0222-gx). The caller has
+    /// stopped the board's providers. The service is closed first, so it cannot write rows after they are dropped.
+    /// Opening the folder again starts a service that reads the board afresh.
+    pub fn remove(&self, board: &str) -> Result<(), crate::store::StoreError> {
+        let old = locked(&self.boards).remove(board);
+        if let Some(old) = old {
+            old.close();
+        }
+        self.config.store.corpus_drop_board(board)
+    }
+
     /// The service of `board` if one has started.
     pub fn get(&self, board: &str) -> Option<Arc<BoardCorpus>> {
         locked(&self.boards).get(board).cloned()

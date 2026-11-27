@@ -25,8 +25,8 @@
 //!
 //! The daemon's events come as `daemon.event` notifications whose params are an [`crate::events::Event`]: they carry
 //! `seq` and the `actor` the daemon recorded. `daemon.subscribe` starts them, from a sequence number the client
-//! names. Three other notices carry what is not an event of the store: `run.output`, `run.terminal_output` and
-//! `queue.changed`.
+//! names. Four other notices carry what is not an event of the store: `run.output`, `run.terminal_output`,
+//! `queue.changed` and `board.changed`.
 //!
 //! ## Error codes
 //!
@@ -42,7 +42,7 @@
 //! | family | module | methods |
 //! |---|---|---|
 //! | daemon | [`daemon`] | `daemon.status`, `daemon.recapture_environment`, `daemon.agent_versions`, `daemon.subscribe` |
-//! | board | [`board`] | `board.list`, `board.open`, `board.pick`, `board.checks`, `board.locate`, `board.init`, `board.trust` |
+//! | board | [`board`] | `board.list`, `board.open`, `board.pick`, `board.checks`, `board.locate`, `board.remove`, `board.init`, `board.trust` |
 //! | task | [`task`] | `task.list`, `task.get`, `task.apply`, `task.create`, `task.reid`, `task.preview`, `task.views`, `task.save_view`, `task.sections`, `task.changes`, `task.diff` |
 //! | run | [`run`] | `run.start`, `run.start_file`, `run.preview`, `run.list`, `run.get`, `run.record`, `run.stop`, `run.diff`, `run.output`, `run.intervene`, and the take-over's six |
 //! | queue | [`queue`] | `queue.list`, `queue.context`, `queue.answer` |
@@ -559,6 +559,9 @@ methods! {
     BoardLocate, "board.locate", Board,
         "0.2, After a restart, Boards and lines: pointing a board whose folder moved at the folder it is in now",
         BoardLocateParams, BoardLocateResult;
+    BoardRemove, "board.remove", Board,
+        "collide board, 0.2 Boards and lines: taking a board out of Collide, which hides it and keeps its data",
+        BoardRemoveParams, Ack;
     BoardInit, "board.init", Board,
         "collide init, 0.11 Share with team: writing a board's starter files, or listing them with a dry run",
         BoardInitParams, BoardInitResult;
@@ -806,6 +809,9 @@ pub enum Notice {
     /// The Queue changed.
     #[serde(rename = "queue.changed")]
     QueueChanged(QueueChanged),
+    /// The list of boards changed: a board was removed (ts-0222-gx).
+    #[serde(rename = "board.changed")]
+    BoardChanged(BoardChanged),
 }
 
 impl Notice {
@@ -815,6 +821,7 @@ impl Notice {
             Notice::RunOutput(_) => "run.output",
             Notice::RunTerminalOutput(_) => "run.terminal_output",
             Notice::QueueChanged(_) => "queue.changed",
+            Notice::BoardChanged(_) => "board.changed",
         }
     }
 

@@ -193,6 +193,7 @@ pub fn registry() -> Registry {
     registry.add::<owner::BoardOpenParams>();
     registry.add::<owner::BoardOpenResult>();
     registry.add::<owner::BoardPickParams>();
+    registry.add::<owner::BoardRemoveParams>();
     registry.add::<owner::BoardTrustParams>();
     registry.add::<owner::BoardTrustResult>();
     registry.add::<owner::BoardTrustReviewParams>();
