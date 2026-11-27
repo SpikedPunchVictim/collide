@@ -7,7 +7,13 @@ takes an ACP agent or an external MCP client.
 
 Claims are labelled **measured** (observed, with the observation named), **inferred** or **unmeasured**.
 
-**Status: revision 32.** Revision 32 opens a window on the board the person last opened or picked, not the first
+**Status: revision 33.** Revision 33 adds what the owner's check of Stage 6a found (`ts-0197-uj`, 2026-11-27).
+The owner judged Stage 6a done, and four items follow it before Stage 6b: the Start with defaults key in the built app
+(`ts-0219-qf`), replacing a saved view from the page and showing filters on top of one (`ts-0220-oc`), a board
+whose folder is no longer its checkout (`ts-0221-pp`) and removing a board (`ts-0222-gx`). The owner's dogfood start
+follows Stage 6b (`ts-0223-mx`); it carries the keychain check the check skipped. Stale Status lines of Stages 3b to
+4c are set to what their items say (owner, 2026-11-27).
+Revision 32 opens a window on the board the person last opened or picked, not the first
 board in the list, at start, on a reload and in and out of Start with defaults, so Reset… acts on the board the person
 was on (Stage 6a, Line selector; `ts-0218-sc` after `ts-0217-dy`; owner, 2026-11-26). The agent's run of `ts-0197-uj`
 found the first board opening.
@@ -4391,7 +4397,8 @@ compaction; per-turn differences of running totals; missing values stored as nul
 calls; settling on exit and end of output in either order; the hook-blocked prompt; refusal classification and hook
 outcomes; context-option validation; span-tree tests against fake-Claude streams; fake-Claude end-to-end; the version
 range and the canary; `TurnEnd` reasons; `Usage.quality`; real-claude contract test (opt-in in CI).
-**Status**: Not Started. Items from revision 18 (with revisions 15 and 16), split on 2026-11-15: `ts-0060-mm` to
+**Status**: Complete: every item is done (Status line set in revision 33). Items from revision 18 (with revisions 15 and
+16), split on 2026-11-15: `ts-0060-mm` to
 `ts-0071-fd` in epic `ep-003-da`, built one at a time in id order (agent events and aliases, Claude launch, fake Claude
 and session, error and hook parsing, usage parsing, file-task run, permissions and limits, metrics, version checks,
 `collide run`, real-`claude` steps, owner checks). Each Stage 3b criterion is named in one item, and the parts carried
@@ -4442,7 +4449,8 @@ the 3c tests are rewritten against the engine. The cost is accepted for an earli
 against a fixture repo; window close and reopen; scratch-task create and status. The browser tests drive the page
 against a real daemon through a test-only bridge, a binary behind the cargo feature `test-bridge` that the app never
 builds; the page's own tests stay over `FakeOwner` (ts-0082-fp).
-**Status**: In Progress. Items from revision 22, split on 2026-11-15: `ts-0075-hj` to `ts-0083-uf`, in epic
+**Status**: Complete: every item is done (revision 33). Items from revision 22, split on 2026-11-15: `ts-0075-hj` to
+`ts-0083-uf`, in epic
 `ep-003-da`, built one at a time in id order (part L). It runs after 3b. The ACP engine (3d) follows it; the thin
 loop needs only Claude.
 
@@ -4585,7 +4593,8 @@ This sub-stage checks agent entries at load only. Launching an agent, and the se
 - Pack sources: resolution for each kind; a `dev:` folder's tree id equals `git write-tree` over the same files;
   the name clash; trust per source; the fetch rules, against a fixture remote that prompts, a hanging remote and a
   URL that starts with `-`.
-**Status**: Not Started. Split on 2026-11-16 into `ts-0093-am` to `ts-0105-jv` (revision 23 scope), in epic
+**Status**: Complete: every item is done (revision 33). Split on 2026-11-16 into `ts-0093-am` to `ts-0105-jv`
+(revision 23 scope), in epic
 `ep-004-qd`, built one at a time in id order (part L). It runs after 3d. The keychain uses `security-framework`
 (owner, 2026-11-16). `ts-0103-sa`'s one real `claude` run is approved ($0.50 in all); the real keychain and the
 trust prompt over a real repository are the owner's (`ts-0105-jv`). `ts-0106-nr` (skills through a snapshot plugin,
@@ -4692,7 +4701,8 @@ combined into a corpus, and filtered by views.
   - the static estimate on a view that cannot finish within the budget;
   - a view that names a corpus variable is refused.
 - Root busy, against a fixture repo stopped mid-rebase.
-**Status**: Not Started. Split into `ts-0108-dq` to `ts-0121-xp` (revision 23 scope, 2026-11-17), in epic `ep-004-qd`,
+**Status**: Complete except `ts-0121-xp`, the owner's Orchard criteria, which is active (revision 33). Split into
+`ts-0108-dq` to `ts-0121-xp` (revision 23 scope, 2026-11-17), in epic `ep-004-qd`,
 built one at a time in id order (part L). The build does not wait for 4a's owner checks. Nothing in it runs a real
 `claude`. The "On the Orchard repo" criteria are the owner's, in `ts-0121-xp`.
 
@@ -4784,7 +4794,8 @@ items too (owner, 2026-11-13). This adds the `spike` kind, so the slice reads `s
   markdown and plan fixtures; id generation; view counts; layout checks. Quality parts (revision 18): parser
   fixtures for each part and the Pre-registration part, and coverage cases. Follow-ups (revision 24): the create
   rule for each actor; `move` for each kind; the view. The guide's drift test.
-**Status**: Not Started. Split into `ts-0124-xm` to `ts-0138-pn` (revision 23 scope, 2026-11-18), in epic `ep-004-qd`,
+**Status**: Complete: every item is done (revision 33). Split into `ts-0124-xm` to `ts-0138-pn` (revision 23 scope,
+2026-11-18), in epic `ep-004-qd`,
 built one at a time in id order (part L). It runs after 4b. Nothing in it runs a real `claude`. The criteria over the
 Orchard repo, and the checks on a real clone, are the owner's, in `ts-0138-pn`. Revision 24 adds `ts-0139-wq` and
 `ts-0140-gk`, built after `ts-0137-pg`; `ts-0138-pn` waits for both and gains a step: start a run from the owner's
@@ -4918,9 +4929,9 @@ note; the look (colour, shading, spacing) is taken from the mock, not from this 
   (note 1). Switching swaps views and workflows in place and stops nothing. A missing board's row says "folder not
   found" (note 15).
   - **The board a window opens on** (revision 32; owner, 2026-11-26): the one last opened or picked, in any window.
-    The daemon records each pick; a pick in Start with defaults is not recorded, since the mode saves nothing. A
-    window opens on it at start, on a reload and in and out of Start with defaults, so Reset… acts on that board
-    (`ts-0218-sc`).
+    The daemon records each pick a window makes; a CLI's `board.open` marks nothing. A pick in Start with defaults
+    is not recorded, since the mode saves nothing. A window opens on it at start, on a reload and in and out of Start
+    with defaults, so Reset… acts on that board (`ts-0218-sc`).
 - **Settings** (note 12): one table. Each key shows its effective value and its layer as a badge: Default, You or
   This repo (0.7); a value the repo overrides shows beside it, struck out. Secrets show Set or Not set, never the
   value, and are set into the keychain from here. The Agents page is part of it (6b).
@@ -4997,7 +5008,16 @@ from phase heads and from commits; the filter fold and the id peek in a browser;
 fixture, per connection, and Reset's move. The epics strip in a browser over a board of 50 epics: its order, find, a
 pick and a funnel (revision 30).
 Planning: planning-view counts against the CLI; the branch-only chip.
-**Status**: In Progress; `ts-0179-ke` to `ts-0196-uw`, `ts-0215-gt`, `ts-0216-ve` and `ts-0217-dy` are done. Split into
+**Follow-ups from the owner's check** (revision 33; owner, 2026-11-27), built after `ts-0197-uj` and before Stage 6b:
+- **The Start with defaults key** works in the built app as its menu item does (`ts-0219-qf`).
+- **Saved views:** the save box replaces a view of the person's own ("Replace <name>"), and the page shows when
+  filters sit on top of a saved view ("Slow spots + 2 filters") (`ts-0220-oc`).
+- **A folder that is no longer a checkout** gets the missing page with Locate, as a gone folder does (`ts-0221-pp`).
+- **Remove from Collide:** a board leaves Collide, its folder untouched, from its missing page, the board menu and the
+  CLI (`ts-0222-gx`).
+
+**Status**: Judged done by the owner on 2026-11-27 (`ts-0197-uj`); the follow-ups `ts-0219-qf` to `ts-0222-gx` are
+built next, before Stage 6b. `ts-0179-ke` to `ts-0197-uj`, `ts-0215-gt` to `ts-0218-sc` are done. Split into
 `ts-0179-ke` to `ts-0197-uj` (revision 27, 2026-11-24), in epic `ep-006-wq`, built one at a time in id order (part L),
 with `ts-0216-ve` (revision 30) between `ts-0190-tz` and `ts-0191-nv`, `ts-0215-gt` (revision 29) after `ts-0196-uw`,
 and `ts-0217-dy` (revision 31) after `ts-0215-gt`, and `ts-0218-sc` (revision 32) after `ts-0217-dy`; `ts-0197-uj` is
@@ -5115,11 +5135,14 @@ over the fake ACP child, including the realpath case; the flag over fake streams
 over a fake agent, with the probe; the secrets launch test; the real-agent contract test (opt-in), with a file
 planted outside every readable folder.
 **Status**: Not Started. Split into `ts-0198-tf` to `ts-0214-rz` (revision 28, 2026-11-24), in epic `ep-006-wq`,
-built one at a time in id order after `ts-0197-uj` (part L). Four are the owner's, each with its own spend cap: the
-measurements first (`ts-0198-tf`, $0.50), a look at the chip and the lens midway (`ts-0205-qh`, $0.25), the opt-in
-real-agent checks (`ts-0213-as`, $1.00) and the walkthrough (`ts-0214-rz`, $0.50). No builder starts a model: the
-opt-in checks are written and gated in `ts-0212-km`. If `ts-0198-tf` finds that `--restricted` confines reads, 0.3's
-pinned line and the launch-spec criterion add it, and the Agents page says "can read only these folders".
+built one at a time in id order after `ts-0222-gx` (part L; revision 33). Four are the owner's, each with its own
+spend cap: the measurements first (`ts-0198-tf`, $0.50), a look at the chip and the lens midway (`ts-0205-qh`, $0.25),
+the opt-in real-agent checks (`ts-0213-as`, $1.00) and the walkthrough (`ts-0214-rz`, $0.50). No builder starts a
+model: the opt-in checks are written and gated in `ts-0212-km`. If `ts-0198-tf` finds that `--restricted` confines
+reads, 0.3's pinned line and the launch-spec criterion add it, and the Agents page says "can read only these folders".
+Revision 33 adds the owner's dogfood start, `ts-0223-mx`, after `ts-0214-rz`: the keychain check `ts-0197-uj`
+carried, with the real `HOME`, then small Collide items run and reviewed through the app, friction filed as items.
+Its Claude runs are on the owner's account, with a cap the owner sets when it starts (owner, 2026-11-27).
 
 ### Stage 6c: GitHub Projects v2
 

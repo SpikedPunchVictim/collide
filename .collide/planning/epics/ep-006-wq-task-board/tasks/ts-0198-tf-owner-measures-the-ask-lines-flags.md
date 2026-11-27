@@ -5,7 +5,7 @@ status: ready
 title: "Owner measures: the ask line's flags and opencode's listener"
 owners: []
 links:
-  - { type: blocked-by, to: ts-0197-uj }
+  - { type: blocked-by, to: ts-0222-gx }
 ---
 
 ## Goal

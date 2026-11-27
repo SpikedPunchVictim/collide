@@ -1,7 +1,7 @@
 ---
 id: ts-0197-uj
 kind: task
-status: ready
+status: done
 title: "Owner check: the board and S6's walkthrough"
 owners: []
 links:
@@ -267,7 +267,9 @@ cd "$S1" && "$BIN/collide" tasks
     count reads "5 tasks". Click "Save as a view…", replace "My view" with `Slow spots` (capital S, one space), click
     "Save view". Stop the clock when the heading "Slow spots" shows over a board of exactly five cards: Speed up index
     scan, Trim allocation churn, Speed up startup path, Rework batch size, Fix lock contention. Write the time
-    down: scenario 2. With only the epic chosen the view holds 13 tasks and is not the end state.
+    down: scenario 2. With only the epic chosen the view holds 13 tasks and is not the end state. Save only after all
+    three choices: chips added after a save show over the view under its heading, five cards and all, while the file
+    holds one term (step 13 shows it). If that happens, the run does not count: delete the file and run it again.
 
 13. In terminal 3, check the saved view by the CLI and by its file (`host/src/task_cli.rs`, `parse_tasks`;
     `host/src/views.rs`, `view_file_stem`). The CLI must list the five keys `s6:T-07-001`, `s6:T-07-004`,
@@ -499,13 +501,9 @@ git -C "$R" commit -q -m first
 "$BIN/collide-app"
 ```
 
-    Not confirmed from the code: whether the keychain follows an overridden `HOME`. The expected result is that it
-    does not, and the item goes to your real login keychain. If macOS shows a dialog that a keychain cannot be found,
-    press Cancel; never "Reset To Defaults". If the app cannot reach a keychain, stop and record it. The fallback is
-    to run steps 32 to 41 with your real `HOME` and no environment file. That touches your real Collide state:
-    `~/Library/Application Support/Collide`, `~/.config/collide` (trust, this board's folder), a launchd job and the
-    board's row in the real store. There is no board removal yet ("Remove from Collide" is off), so that row stays.
-    Do it only if you accept that, and remove only what `lib-before.txt` and a fresh `ls` show was added.
+    Found in the owner's run (2026-11-27): the keychain follows an overridden `HOME` (macOS reads
+    `$HOME/Library/Keychains`), so step 36 shows "Keychain Not Found". Press Cancel; never "Reset To Defaults". Steps
+    36, 37, 39 and 41's delete were carried to `ts-0223-mx`, which runs them with the real `HOME`.
 
 33. Click "Choose a folder…" and pick `<check root>/secret-repo` (Command-Shift-G; `echo "$R"` prints it). The
     "Checks" show git ok and Claude Code installed. The login row reads that Claude Code is not logged in: this
@@ -539,7 +537,7 @@ security find-generic-password -s collide -a pack.chk.token
 38. Check the value is in no file of the check.
 
 ```sh
-grep -rl 'collide-check-not-a-secret' "$CHECK" || echo none
+grep -rl 'collide-check-not-a-secret' "$CHECK" 2>/dev/null || echo none
 ```
 
 39. Quit the app (Command-Q) and start it again as in step 32. Pick the board, open Settings, "Secrets": the row still
@@ -672,3 +670,43 @@ checks of steps 6, 10 and 23 are yours. `pnpm install` was skipped (network).
   (`boot_out_recorded_job`) agree with the steps. The one wrong line was step 40's log path (fixed).
 - Clean-up: step 42's two diffs were empty; step 43's `rm` ran as written; step 44 showed only the agent's own
   folder `app/.agent-run-0197/`, which was then deleted.
+
+### The owner's run, 2026-11-26 to 2026-11-27
+
+```text
+Check on 2026-11-26 to 2026-11-27, over two sittings with a recovery (below). Build time not taken.
+Scenario 1 (limit 150 s): 28 s. Scenario 2 (limit 60 s): 12 s, on the third run. Run 1 (45 s) saved the view
+before the chips; run 2 (8 s) missed the funnel. Errors: none in the app's terminal. Awkward: the save box cannot
+replace a view of the same name; chips over a saved view look like the view.
+Console (steps 14 to 17): page address tauri://localhost; img-src probe refused; other commands refused
+("dialog.open not allowed", "open_external not allowed. Command not found"); no other error.
+Hostile task (19): pass.  External link (20, 21): pass.
+Open a folder… (10): pass.  Locate the folder… (23): pass, on the redo.  Unblocks chip colour (24): skipped.
+Start with defaults (26, 28): key: did nothing; menu: pass, opened on the board last picked.  Reset… (29): pass.
+Copy (34): pass.  Secret (36 to 41): Set shown no ("Keychain Not Found" under Part B's HOME); item seen no;
+deleted: none made (step 41: not found). Carried to ts-0223-mx (owner, option A).
+ts-0185-ge differences:
+1. Epics on the Field: closed.
+2. Header words: closed.
+3. The policy under the bundled app: closed.
+4. The page fills the window width: closed.
+5. The `claude` status command: closed.
+Stage 6a judged done on 2026-11-27. Follow-ups ts-0219-qf to ts-0222-gx are built before Stage 6b (revision 33).
+```
+
+- Step 13 on the third run: the five `s6:` keys, and `slow-spots.yaml` holding `name: "Slow spots"` with the epic,
+  `ready` and `perf` joined by `&&`. Step 25's `config get` failed naming `config.yaml:1:7`; Settings showed the same
+  line. Step 29 set aside `config.yaml` and both views. Steps 42 to 44: no launchd or `~/Library` difference, the
+  check root removed, the checkout clean.
+- Incident: terminal 3 ran with the wrong environment (`HOME` was `<s1 repo>`, no daemon root). Its `collide`
+  commands started three daemons as launchd jobs: one on the owner's real root, which added a board for
+  `<check root>/s1-repo` to the real store, and two with `HOME` inside `<s1 repo>`. One of those made the moved folder
+  again (holding `Library/`), so step 22 first showed a refusal, not "its folder is gone". The owner stopped all
+  three by pid, booted out the one job left loaded, and redid steps 9, 13, 22 and 23.
+- Filed (revision 33): the key (`ts-0219-qf`); replace a view and filters on top (`ts-0220-oc`); a folder there but
+  not a checkout (`ts-0221-pp`); board removal (`ts-0222-gx`), since the real store keeps five check boards; the
+  keychain check and dogfooding (`ts-0223-mx`).
+- For the next checklist: every block run in a check terminal starts with a guard that stops unless `HOME` and
+  `COLLIDE_DAEMON_ROOT` are the check's (a function defined in `env.sh`, chained with `&&`). A recovery that removes
+  a folder the daemon used runs `chmod -R u+w` first (the pack cache is read-only). A part that needs the keychain
+  runs with the real `HOME`.
