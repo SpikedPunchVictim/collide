@@ -184,12 +184,15 @@ launchctl list | grep dev.collide.daemon | sort > "$CHECK/launchd-before.txt"; t
    is Part B (no root). The agent's run printed 86. The `find` over `~/Library` is slow: 100 s the first time, 10 s
    the next.
 
-3. Open terminal 3. Load `env.sh`. Make `<s1 repo>` and `<s2 repo>` as git repositories, with a repo-local identity
+3. Open terminal 3. Load `env.sh`: a new terminal has no `$CHECK`, so type the path step 2 printed in its place.
+   Then `HOME` is `<check root>/home` and `COLLIDE_DAEMON_ROOT` is `<check root>/d`. Make `<s1 repo>` and `<s2 repo>`
+   as git repositories, with a repo-local identity
    (no global git config is touched). `<s2 repo>` gets the fixture board, as `app/browser/s6.spec.ts` does
    (`openSlowSpotsBoard`): the pack copied into `.collide/packs/`, named in `.collide/board.yaml`, committed.
 
 ```sh
-. "$CHECK/env.sh"
+. <check root>/env.sh
+echo "$HOME $COLLIDE_DAEMON_ROOT"
 for repo in "$S1" "$S2"; do
   git init -q -b main "$repo"
   git -C "$repo" config user.name check
@@ -209,13 +212,14 @@ echo "$S1"; echo "$S2"
    Keep terminal 3 for `collide`, `git` and `ls` in Part A. Its `HOME` and root are the check's, so `collide` reaches
    the check's daemon and never yours.
 
-4. Open terminal 2. Load `env.sh` and start the app. Keep the terminal in view: the app's errors print there. When
-   all is well it prints nothing. The window may open behind other windows: click the Dock icon. It opens at 800 x
+4. Open terminal 2. Load `env.sh` (the path step 2 printed, as in step 3) and start the app. Keep the terminal in
+   view: the app's errors print there. When all is well it prints nothing. The window may open behind other
+   windows: click the Dock icon. It opens at 800 x
    600; widen it past 900 px, or the drawer lies over the board. The daemon starts at once under `<check root>/d`
    (`d/data/daemon.log`, `d/run/d.sock`), as the app's child, and outlives it (step 30).
 
 ```sh
-. "$CHECK/env.sh"
+. <check root>/env.sh
 "$BIN/collide-app"
 ```
 
