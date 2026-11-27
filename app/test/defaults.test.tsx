@@ -164,7 +164,7 @@ describe('clearing the stored state', () => {
 })
 
 describe('the banner', () => {
-  const html = renderToString(<DefaultsBanner onNormal={noop} onReset={noop} />)
+  const html = renderToString(<DefaultsBanner onNormal={noop} onReset={noop} canReset />)
 
   test('says what the item says, and offers Start normally and Reset…', () => {
     expect(text(html)).toContain(DEFAULTS_WORDS)
@@ -173,6 +173,16 @@ describe('the banner', () => {
     )
     expect(html).toMatch(/<button[^>]*>Start normally<\/button>/)
     expect(html).toMatch(/<button[^>]*>Reset…<\/button>/)
+  })
+
+  test('has Reset… on while the boards are read, so the window it opens can name the board', () => {
+    expect(html).not.toMatch(/<button[^>]*\sdisabled=""[^>]*>Reset…<\/button>/)
+  })
+
+  test('has Reset… off until the boards have been read, and Start normally still on', () => {
+    const waiting = renderToString(<DefaultsBanner onNormal={noop} onReset={noop} canReset={false} />)
+    expect(waiting).toMatch(/<button[^>]*\sdisabled=""[^>]*>Reset…<\/button>/)
+    expect(waiting).not.toMatch(/<button[^>]*\sdisabled=""[^>]*>Start normally<\/button>/)
   })
 })
 

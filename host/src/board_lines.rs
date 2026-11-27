@@ -195,6 +195,7 @@ impl Lines {
             lines,
             sources_unread: None,
             missing: false,
+            last_opened_ms: None,
         }
     }
 
@@ -219,6 +220,7 @@ impl Lines {
             lines,
             sources_unread: None,
             missing: false,
+            last_opened_ms: None,
         }
     }
 

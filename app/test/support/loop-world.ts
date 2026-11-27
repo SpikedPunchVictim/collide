@@ -24,13 +24,15 @@ export type Item = QueueListResultOutput['items'][number]
 export type Run = RunGetResultOutput['summary']
 export type Diff = RunDiffResultOutput
 
-export function board(id: string, root: string, line = 'main'): Board {
-  return { id, root, lines: [{ ref_name: line, root, trust: { state: 'trusted', hash: 'h' } }] }
+export function board(id: string, root: string, line = 'main', lastOpenedMs?: number): Board {
+  const lines = [{ ref_name: line, root, trust: { state: 'trusted' as const, hash: 'h' } }]
+  return lastOpenedMs === undefined ? { id, root, lines } : { id, root, lines, last_opened_ms: lastOpenedMs }
 }
 
 /** A board whose folder is gone: the daemon lists it `missing`, with no line. */
-export function missingBoard(id: string, root: string): Board {
-  return { id, root, lines: [], missing: true }
+export function missingBoard(id: string, root: string, lastOpenedMs?: number): Board {
+  const gone: Board = { id, root, lines: [], missing: true }
+  return lastOpenedMs === undefined ? gone : { ...gone, last_opened_ms: lastOpenedMs }
 }
 
 export function claude(over: Partial<Agent> = {}): Agent {
@@ -171,16 +173,32 @@ export class World {
   /** Set to make `task.apply` or `run.start` refuse. */
   refuseCreate: string | null = null
   refuseStart: string | null = null
+  /** Set to make `board.pick` refuse, with these words. */
+  refusePick: string | null = null
+  /** While set, `board.list` does not answer until it resolves: the first read of the boards is still on its way. */
+  listGate: Promise<void> | null = null
+  /** The time of the last `board.open` or `board.pick`: each gives its board a later one, as the daemon does. */
+  private openedAt = 10_000
   private nextTask = 1
   private nextRun = 1
 
   constructor() {
     const owner = this.owner
-    owner.handle('board.list', () => ({ boards: this.boards }))
+    owner.handle('board.list', async () => {
+      await this.listGate
+      return { boards: this.boards }
+    })
+    owner.handle('board.pick', ({ board: id }) => {
+      if (this.refusePick !== null) throw new OwnerError(CONFLICT, this.refusePick)
+      if (!this.boards.some((b) => b.id === id)) throw new OwnerError(NOT_FOUND, `the daemon has no board "${id}"`)
+      this.mark(id)
+      return {}
+    })
     owner.handle('board.open', ({ root }) => {
       const known = this.folders.get(root)
       if (known === undefined) return { checks: [failed('This folder is not a git repository.')] }
       if ('id' in known) {
+        // As the daemon: opening marks nothing, and a board it did not list has no time until it is picked.
         if (!this.boards.some((b) => b.id === known.id)) this.boards.push(known)
         return { board: known, checks: [{ id: 'git_repo', ok: true, required: true, message: 'ok' }] }
       }
@@ -259,6 +277,12 @@ export class World {
       if (result.outcome !== 'refused') this.onAnswer(params)
       return result
     })
+  }
+
+  /** Gives the board the time of now, which is later than every board's before. */
+  private mark(id: string): void {
+    this.openedAt += 1
+    this.boards = this.boards.map((b) => (b.id === id ? { ...b, last_opened_ms: this.openedAt } : b))
   }
 
   tasksOf(boardId: string): Map<string, StoredTask> {

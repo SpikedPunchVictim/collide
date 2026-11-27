@@ -4,6 +4,10 @@
 //! daemon runs in the test's own process over fixture repositories in a temp root, which is also the home. Every git
 //! command clears its environment and reads no configuration of the user's. Nothing here touches the user's home, a
 //! real daemon or `launchd`.
+//!
+//! The last tests are the time a board was last picked (ts-0218-sc), which `board.list` carries so that a window
+//! opens on the board the person was on. A window sends `board.pick` for what it opens or picks; `board.open` itself
+//! marks nothing, so the command line's opens do not move the window.
 
 mod common;
 
@@ -738,5 +742,178 @@ fn a_repository_with_no_commit_records_nothing_and_is_not_taken_as_the_same_repo
         .map(|b| b.root_commits.is_some())
         .collect();
     assert_eq!(records, [true, false]);
+    daemon.stop();
+}
+
+// ---- the board last opened or picked (ts-0218-sc) -----------------------------------------------------------------
+
+fn pick(client: &mut OwnerClient, board: &str) {
+    let _: Value = call(client, "board.pick", &json!({ "board": board }));
+}
+
+/// The listed boards' times, in the order `board.list` gives them.
+fn times(client: &mut OwnerClient) -> Vec<(String, Option<u64>)> {
+    list(client)
+        .into_iter()
+        .map(|b| (b.id, b.last_opened_ms))
+        .collect()
+}
+
+/// The id of the board with the greatest time, or `None` when no listed board has one.
+fn last_opened(client: &mut OwnerClient) -> Option<String> {
+    times(client)
+        .into_iter()
+        .filter(|(_, ms)| ms.is_some())
+        .max_by_key(|(_, ms)| *ms)
+        .map(|(id, _)| id)
+}
+
+#[test]
+fn opening_a_board_marks_nothing_and_a_pick_marks_it_and_the_list_keeps_its_order() {
+    let root = TempRoot::new();
+    let first = checkout(&root, "first", "one\n");
+    let second = checkout(&root, "second", "two\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+
+    let one = board_of(&mut client, &first).id;
+    let two = board_of(&mut client, &second).id;
+    let after_opens = times(&mut client);
+    let ids: Vec<&str> = after_opens.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(ids, [one.as_str(), two.as_str()], "listed as first opened");
+    assert!(
+        after_opens.iter().all(|(_, ms)| ms.is_none()),
+        "an open marks nothing: {after_opens:?}"
+    );
+
+    pick(&mut client, &two);
+    assert_eq!(last_opened(&mut client), Some(two.clone()));
+    pick(&mut client, &one);
+    assert_eq!(last_opened(&mut client), Some(one.clone()), "picked again");
+    let ids: Vec<String> = times(&mut client).into_iter().map(|(id, _)| id).collect();
+    assert_eq!(ids, [one, two], "the order is unchanged");
+    daemon.stop();
+}
+
+#[test]
+fn a_board_open_with_no_pick_leaves_the_latest_board_as_it_was() {
+    let root = TempRoot::new();
+    let first = checkout(&root, "first", "one\n");
+    let second = checkout(&root, "second", "two\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let one = board_of(&mut client, &first).id;
+    pick(&mut client, &one);
+    let before = times(&mut client);
+
+    // What the command line does in a repository: a plain `board.open`, never a pick.
+    let two = board_of(&mut client, &second);
+    let again = board_of(&mut client, &first);
+    daemon_has_no_new_time(&mut client, &before);
+
+    assert_eq!(last_opened(&mut client), Some(one.clone()));
+    assert_eq!(
+        two.last_opened_ms, None,
+        "a board opened only here has none"
+    );
+    assert_eq!(
+        again.last_opened_ms,
+        listed(&mut client, &one).last_opened_ms,
+        "an open result carries the time the list does"
+    );
+    daemon.stop();
+}
+
+/// The listed times are those of `before`, plus no time on the boards opened since.
+fn daemon_has_no_new_time(client: &mut OwnerClient, before: &[(String, Option<u64>)]) {
+    let now = times(client);
+    for (id, ms) in before {
+        assert!(
+            now.contains(&(id.clone(), *ms)),
+            "{id} kept {ms:?}: {now:?}"
+        );
+    }
+    let known: Vec<&String> = before.iter().map(|(id, _)| id).collect();
+    for (id, ms) in &now {
+        assert!(known.contains(&id) || ms.is_none(), "{id} got {ms:?}");
+    }
+}
+
+#[test]
+fn a_pick_marks_the_board_and_a_restarted_daemon_still_has_it() {
+    let root = TempRoot::new();
+    let first = checkout(&root, "first", "one\n");
+    let second = checkout(&root, "second", "two\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let one = board_of(&mut client, &first).id;
+    let two = board_of(&mut client, &second).id;
+    pick(&mut client, &two);
+    assert_eq!(last_opened(&mut client), Some(two.clone()));
+
+    pick(&mut client, &one);
+
+    assert_eq!(last_opened(&mut client), Some(one.clone()));
+    daemon.stop();
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    assert_eq!(last_opened(&mut client), Some(one), "after a restart");
+    daemon.stop();
+}
+
+#[test]
+fn a_pick_of_a_board_the_daemon_does_not_have_is_refused_and_marks_nothing() {
+    let root = TempRoot::new();
+    let first = checkout(&root, "first", "one\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let one = board_of(&mut client, &first).id;
+    let before = times(&mut client);
+
+    let (error, message) = refused(&mut client, "board.pick", &json!({ "board": "board-nope" }));
+
+    assert_eq!(error, code::NOT_FOUND);
+    assert!(message.contains("board-nope"), "{message}");
+    assert_eq!(times(&mut client), before, "{one} is as it was");
+    daemon.stop();
+}
+
+#[test]
+fn a_store_from_before_lists_no_times_and_the_first_pick_marks_one() {
+    let root = TempRoot::new();
+    let first = checkout(&root, "first", "one\n");
+    let second = checkout(&root, "second", "two\n");
+    let one = old_board(&root, &first);
+    let two = old_board(&root, &second);
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+
+    assert_eq!(
+        times(&mut client),
+        [(one.clone(), None), (two.clone(), None)]
+    );
+    assert_eq!(last_opened(&mut client), None);
+    board_of(&mut client, &first);
+    assert_eq!(last_opened(&mut client), None, "an open marks none");
+    pick(&mut client, &two);
+    assert_eq!(last_opened(&mut client), Some(two), "a pick marks one");
+    daemon.stop();
+}
+
+#[test]
+fn a_board_whose_folder_is_gone_keeps_its_time_in_the_list() {
+    let root = TempRoot::new();
+    let first = checkout(&root, "first", "one\n");
+    let second = checkout(&root, "second", "two\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let one = board_of(&mut client, &first).id;
+    board_of(&mut client, &second);
+    fs::rename(&first, root.join("moved")).unwrap();
+
+    pick(&mut client, &one);
+
+    assert!(listed(&mut client, &one).missing);
+    assert_eq!(last_opened(&mut client), Some(one));
     daemon.stop();
 }

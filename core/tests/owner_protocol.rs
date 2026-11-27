@@ -66,7 +66,8 @@ fn board() -> Value {
             "snapshot": "abc123",
             "trust": { "state": "untrusted", "hash": "h1" },
             "problems": [".collide/board.yaml: packs must be a list"]
-        }]
+        }],
+        "last_opened_ms": 1_700_000_000_000u64
     })
 }
 
@@ -215,6 +216,7 @@ fn samples() -> Vec<(Method, Value, Value)> {
                 "checks": [{ "id": "git_repo", "ok": true, "required": true, "message": "a git repo" }]
             }),
         ),
+        (Method::BoardPick, json!({ "board": "bd-1" }), json!({})),
         (
             Method::BoardChecks,
             json!({ "root": "/work/repo" }),

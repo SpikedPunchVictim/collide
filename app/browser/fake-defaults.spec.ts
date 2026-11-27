@@ -150,3 +150,18 @@ test('a confirmed Reset moves the files, clears the stored state, starts normall
   await expect(notice).toHaveCount(0)
   expect(page.url()).not.toContain('reset=')
 })
+
+test('Reset is off until the boards have been read, and then names the board that shows', async ({ openFake }) => {
+  const page = await openFake(`${WORLD}&defaults&hold-boards`)
+  const reset = banner(page).getByRole('button', { name: 'Reset…' })
+  await expect(banner(page)).toBeVisible()
+  await expect(reset).toBeDisabled()
+  await expect(banner(page).getByRole('button', { name: 'Start normally' })).toBeEnabled()
+
+  await page.evaluate(() => window.collideFake.releaseBoards())
+  await expect(reset).toBeEnabled()
+  await reset.click()
+  const moves = page.getByRole('dialog', { name: /^Reset/ }).getByRole('list', { name: 'Reset moves' })
+  await expect(moves).toContainText('The folder of this board')
+  await expect(moves).not.toContainText('No board is open')
+})

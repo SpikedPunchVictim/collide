@@ -5,8 +5,8 @@ import type { OwnerClient } from '../owner/client.ts'
 import { type Loop, createLoop } from './loop.ts'
 import type { LoopState } from './state.ts'
 
-export function useLoop(owner: OwnerClient): { state: LoopState; loop: Loop } {
-  const loop = useMemo(() => createLoop(owner), [owner])
+export function useLoop(owner: OwnerClient, defaults = false): { state: LoopState; loop: Loop } {
+  const loop = useMemo(() => createLoop(owner, { defaults }), [owner, defaults])
   const state = useSyncExternalStore(loop.subscribe.bind(loop), loop.getState.bind(loop), loop.getState.bind(loop))
   useEffect(() => {
     void loop.open()

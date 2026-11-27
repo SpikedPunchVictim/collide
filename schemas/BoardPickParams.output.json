@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`board.pick` params: the board the person picked in the board menu.",
+  "properties": {
+    "board": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "board"
+  ],
+  "title": "BoardPickParams",
+  "type": "object"
+}

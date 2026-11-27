@@ -173,13 +173,27 @@ function afterRunChange(state: LoopState): LoopState {
   }
 }
 
+/**
+ * The board a window opens on (ts-0218-sc): the one the daemon says was opened or picked last, and the first listed
+ * when none has a time, as in a store from before the daemon kept it. A board whose folder is gone counts like any
+ * other.
+ */
+function openingBoard(boards: readonly BoardSummary[]): string | null {
+  let latest: BoardSummary | undefined
+  for (const each of boards) {
+    if (each.last_opened_ms == null) continue
+    if (latest === undefined || each.last_opened_ms > (latest.last_opened_ms ?? 0)) latest = each
+  }
+  return (latest ?? boards[0])?.id ?? null
+}
+
 function synced(state: LoopState, action: Extract<LoopAction, { type: 'synced' }>): LoopState {
   const boards = action.boards ?? state.boards
   const changed = action.followed?.run !== state.followed?.run
   const base = changed ? afterRunChange(state) : state
   const stillThere = base.boardId !== null && boards.some((b) => b.id === base.boardId)
   const followedBoard = changed ? (action.followed?.board ?? null) : null
-  const boardId = followedBoard ?? (stillThere ? base.boardId : (boards[0]?.id ?? null))
+  const boardId = followedBoard ?? (stillThere ? base.boardId : openingBoard(boards))
   const picked = action.diff?.files.some((f) => f.path === base.picked) ? base.picked : null
   const sentBackDone = reachedPerson(base.sentBack, action.items, action.run)
   return {

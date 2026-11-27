@@ -7,6 +7,15 @@
         "id": {
           "type": "string"
         },
+        "last_opened_ms": {
+          "description": "When the board was last opened or picked, in ms. The greatest is the one a window opens on.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "lines": {
           "items": {
             "$ref": "#/$defs/LineSummary"

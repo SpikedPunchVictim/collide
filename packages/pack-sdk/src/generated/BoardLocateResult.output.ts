@@ -30,6 +30,10 @@ export interface BoardLocateResult {
  */
 export interface BoardSummary {
   id: string
+  /**
+   * When the board was last opened or picked, in ms. The greatest is the one a window opens on.
+   */
+  last_opened_ms?: number | null
   lines: LineSummary[]
   /**
    * The board's folder is gone (moved or deleted). Nothing of the board is deleted: `board.locate` points it at

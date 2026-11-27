@@ -36,6 +36,8 @@ declare global {
       callsTo(method: string): unknown[]
       /** The files a Share wrote were committed: the board's line now holds them (a first-run world, ts-0194-qp). */
       commit(): void
+      /** Lets the first `board.list` answer, when the address holds `hold-boards` (ts-0218-sc). */
+      releaseBoards(): void
     }
   }
 }
@@ -65,6 +67,13 @@ world.owner.handle('config.reset', () => ({
   folder: '/fake/.config/collide/set-aside/2026-11-26-101507',
   moved: ['config.yaml', 'packs.yaml', 'packs.lock'],
 }))
+// `hold-boards` on the fragment keeps the first read of the boards waiting, so a test sees the window first.
+let releaseBoards = () => {}
+if (new URLSearchParams(window.location.hash.slice(1)).has('hold-boards')) {
+  world.listGate = new Promise<void>((resolve) => {
+    releaseBoards = resolve
+  })
+}
 window.collideFake = {
   calls: () => world.owner.calls.map((call) => call.method),
   views: () =>
@@ -85,6 +94,7 @@ window.collideFake = {
     if (!(world instanceof FirstRunWorld)) throw new Error(`the world "${name}" is not a first-run world`)
     world.commit()
   },
+  releaseBoards: () => releaseBoards(),
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -70,7 +70,7 @@ pub struct Migration {
 /// written with, and `line` is its JSON. `run_warnings` holds what a run did that the person should look at
 /// (ts-0104-gx): one JSON row for each warning, in the order they were written. `queue_items.payload` holds what a
 /// queued write needs to be applied later (ts-0114-hr), so the item and its write are one row.
-pub const MIGRATIONS: [Migration; 13] = [
+pub const MIGRATIONS: [Migration; 14] = [
     Migration {
         version: 1,
         name: "events",
@@ -166,7 +166,17 @@ pub const MIGRATIONS: [Migration; 13] = [
         name: "board_names_and_root_commits",
         sql: BOARD_IDENTITY_SQL,
     },
+    Migration {
+        version: 14,
+        name: "board_last_opened",
+        sql: BOARD_LAST_OPENED_SQL,
+    },
 ];
+
+/// When a board was last opened or picked (ts-0218-sc), in milliseconds of the wall clock. NULL for a board that has
+/// not been since this column was added. The daemon gives each mark a time later than every other board's, so the
+/// board with the greatest time is the one a window opens on.
+const BOARD_LAST_OPENED_SQL: &str = "ALTER TABLE boards ADD COLUMN last_opened_ms INTEGER";
 
 /// A board's own name, and the root commits of its repository (ts-0191-nv). A board made before this has no name of
 /// its own: it is `board-<id>`. A board made after has `board-` and random letters, and the name is what everything
@@ -1648,6 +1658,92 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
+    }
+
+    #[test]
+    fn a_store_at_version_thirteen_gains_the_last_opened_time_and_its_boards_have_none() {
+        let dir = TempDir::new();
+        store_at_version(dir.path(), 13);
+        let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+        conn.execute(
+            "INSERT INTO boards (root, name) VALUES ('/old/one', 'board-aaaaaa')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = Store::open(dir.path()).unwrap();
+
+        assert_eq!(user_version(&raw(&store)), known_version());
+        assert_eq!(
+            MIGRATIONS.get(13).map(|migration| migration.name),
+            Some("board_last_opened")
+        );
+        let boards = store.boards().unwrap();
+        assert_eq!(boards.len(), 1);
+        assert_eq!(
+            boards[0].last_opened_ms, None,
+            "a board from before has no time"
+        );
+    }
+
+    #[test]
+    fn a_marked_board_has_the_time_and_an_unmarked_one_has_none() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let one = store.open_board("/one", &|_| false).unwrap();
+        let two = store.open_board("/two", &|_| false).unwrap();
+
+        assert_eq!(store.mark_board_opened(&two, 5_000).unwrap(), Some(5_000));
+
+        let times: Vec<Option<u64>> = store
+            .boards()
+            .unwrap()
+            .iter()
+            .map(|b| b.last_opened_ms)
+            .collect();
+        assert_eq!(times, [None, Some(5_000)], "{one} is unmarked");
+    }
+
+    #[test]
+    fn the_board_marked_last_has_the_latest_time_when_the_clock_stands_still_or_goes_back() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let one = store.open_board("/one", &|_| false).unwrap();
+        let two = store.open_board("/two", &|_| false).unwrap();
+        let latest = |store: &Store| {
+            store
+                .boards()
+                .unwrap()
+                .into_iter()
+                .max_by_key(|b| b.last_opened_ms)
+                .unwrap()
+                .id
+        };
+
+        store.mark_board_opened(&one, 7_000).unwrap();
+        store.mark_board_opened(&two, 7_000).unwrap();
+        assert_eq!(latest(&store), two, "the same millisecond");
+        store.mark_board_opened(&one, 6_000).unwrap();
+        assert_eq!(latest(&store), one, "a clock that went back");
+        let times: Vec<u64> = store
+            .boards()
+            .unwrap()
+            .iter()
+            .map(|b| b.last_opened_ms.unwrap())
+            .collect();
+        assert_ne!(times[0], times[1], "no two boards share a time");
+    }
+
+    #[test]
+    fn marking_a_board_the_store_does_not_have_changes_nothing() {
+        let dir = TempDir::new();
+        let store = Store::open(dir.path()).unwrap();
+        let one = store.open_board("/one", &|_| false).unwrap();
+
+        assert_eq!(store.mark_board_opened("board-nope", 9_000).unwrap(), None);
+
+        assert_eq!(store.boards().unwrap()[0].last_opened_ms, None, "{one}");
     }
 
     #[test]

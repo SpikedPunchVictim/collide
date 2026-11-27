@@ -370,11 +370,10 @@ EOF
     your browser; `shell.open_external` runs `/usr/bin/open`, and accepts only http, https and mailto). Close the tab.
 
 22. Locate. In terminal 3, move `<s1 repo>`. Quit the app (Command-Q in its window), and start it again in terminal
-    2 as in step 4. A restart opens the first board in the list, which is `<s1 repo>` (opened first), so it shows
-    at once; if not, open the board menu and pick it. The page is headed "s1-repo: its folder is gone" and says
-    "Nothing has been deleted", with "Locate the folder…" and "Remove from Collide" (off). The daemon knows within
-    seconds that the folder moved, but a board already on the screen keeps drawing until the page reloads: that is
-    why the app is restarted.
+    2 as in step 4. A restart opens the board last opened or picked, which is `<s1 repo>` (picked in step 19), so it
+    shows at once. The page is headed "s1-repo: its folder is gone" and says "Nothing has been deleted", with
+    "Locate the folder…" and "Remove from Collide" (off). The daemon knows within seconds that the folder moved, but a
+    board already on the screen keeps drawing until the page reloads: that is why the app is restarted.
 
 ```sh
 mv "$S1" "$S1-moved"
@@ -414,23 +413,26 @@ cd "$S2" && "$BIN/collide" config get; echo "exit=$?"
     Control-Option-Shift-Escape (`app/src-tauri/src/menu.rs`, `START_WITH_DEFAULTS_KEY`). The window reloads. If
     macOS takes the key, record it and use step 28 for the check. The banner reads "Started with defaults. Your
     settings, views and packs are set aside for this window." with "Start normally" and "Reset…". The board shows its
-    tasks: the window opens on the first board in the list, which is `s1-repo-moved`, not the board of "Slow spots".
-    Pick the `<s2 repo>` board in the board menu. The view picker (the "All tasks" button) lists "All tasks", "ready",
-    "bottlenecks" and the three `collide/plan/` views, and not "Slow spots" or "broken". Settings shows every key at
-    Default and lists no problem.
+    tasks: the window opens on the board last opened or picked in a window, which is `s1-repo-moved` (the clone, if you
+    did step 24), not the board of "Slow spots" (a command in a terminal never moves it). Pick the `<s2 repo>` board
+    in the board menu; a pick in this window saves nothing. The view picker (the "All tasks" button) lists
+    "All tasks", "ready", "bottlenecks" and the three `collide/plan/` views, and not "Slow spots" or "broken".
+    Settings shows every key at Default and lists no problem.
 
-27. Click "Start normally": the window starts normally (on the first board again; pick `<s2 repo>`), and Settings
-    now reports the broken `config.yaml` where the table was.
+27. Click "Start normally": the window starts normally, on the board last opened or picked in a window
+    (`s1-repo-moved` or the clone again, since the pick in step 26 was not kept), and Settings now reports the broken
+    `config.yaml` where the table was. Pick the `<s2 repo>` board: a normal window keeps the pick.
 
 28. Blank the page again (step 26's console line). This time use the menu: the first menu, next to the Apple menu
     (it carries the app's name, which for a bare binary is its file name), then "Start with Defaults…". The same
-    banner shows. Pick the `<s2 repo>` board again, and wait a second for the page to load before the next step.
+    banner shows. The window opens on `<s2 repo>`, the board you picked in step 27. Wait a second for the page to load
+    before the next step.
 
-29. With the `<s2 repo>` board picked, click "Reset…". The window "Reset your settings, views and packs?" lists what
-    it moves (settings file, packs and their lock, "The folder of this board, s2-repo: your views", the window's
-    stored state) and what it leaves (other boards, the repo's `.collide` folder, the keychain). If it names another
-    board, or says "No board is open, so no board folder", cancel and pick the board: Reset moves only the folder of
-    the board it names, and `<s2 repo>`'s views would stay. Click "Move them aside". The window starts normally with
+29. With the window on `<s2 repo>`, click "Reset…" (it stays off until the boards have been read). The window
+    "Reset your settings, views and packs?" lists what it moves (settings file, packs and their lock, "The folder of
+    this board, s2-repo: your views", the window's stored state) and what it leaves (other boards, the repo's
+    `.collide` folder, the keychain). If it names another board, cancel: Reset moves only the folder of the board it
+    names, and `<s2 repo>`'s views would stay. Click "Move them aside". The window starts normally with
     "Reset done. Your settings, views and packs were moved to <folder>. Nothing was deleted." and a "Dismiss"
     button. In terminal 3 check what moved (`host/src/set_aside.rs`, `reset`): into
     `set-aside/<YYYY-MM-DD-HHMMSS>/` under `.config/collide`, with paths kept, by rename; nothing deleted. It must

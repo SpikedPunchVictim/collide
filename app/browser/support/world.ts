@@ -78,6 +78,26 @@ export function git(dir: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd: dir, env: GIT_ENV, encoding: 'utf8' }).trim()
 }
 
+/** A repository named `name` with a commit of its own, in the world's root. Its content makes its first commit. */
+export function repository(world: World, name: string, content: string): string {
+  const dir = join(world.root, name)
+  mkdirSync(dir)
+  git(dir, 'init', '-q', '-b', 'main')
+  git(dir, 'config', 'user.name', 'test')
+  git(dir, 'config', 'user.email', 'test@example.invalid')
+  writeFileSync(join(dir, 'file.txt'), content)
+  git(dir, 'add', '.')
+  git(dir, 'commit', '-q', '-m', 'start')
+  return dir
+}
+
+/** The id of the board the daemon lists with the latest time, the one a new window opens on, or undefined if none. */
+export async function latestBoard(world: World): Promise<string | undefined> {
+  const listed = await world.rpc<{ boards: { id: string; last_opened_ms?: number }[] }>('board.list')
+  const marked = listed.boards.filter((b) => b.last_opened_ms !== undefined)
+  return marked.sort((a, b) => b.last_opened_ms! - a.last_opened_ms!)[0]?.id
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }

@@ -1,12 +1,13 @@
 // A board whose folder moved, over a real daemon (ts-0191-nv): the page lists it as missing, shows the missing page
 // with the folder Collide looked in, and locating the moved folder brings the board back with the same id and its
 // tasks. A folder of another repository is refused with the daemon's reason. The page is the bridge's, so it has the
-// typed path and no folder picker. Nothing is deleted: the moved folder is still there at each step.
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+// typed path and no folder picker. Nothing is deleted: the moved folder is still there at each step. The last test is
+// the board a window opens on (ts-0218-sc): the one picked last, which a reload keeps.
+import { renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from './support/fixtures.ts'
 import { firstPhase } from './support/recordings.ts'
-import { type World, git } from './support/world.ts'
+import { type World, git, latestBoard, repository } from './support/world.ts'
 
 /** The id of the board the world's repository opens as, with a scratch task on it. */
 async function boardWithATask(world: World): Promise<string> {
@@ -23,15 +24,7 @@ async function boardWithATask(world: World): Promise<string> {
 
 /** Another repository, with a commit of its own, in the world's root. */
 function otherRepository(world: World): string {
-  const dir = join(world.root, 'other')
-  mkdirSync(dir)
-  git(dir, 'init', '-q', '-b', 'main')
-  git(dir, 'config', 'user.name', 'test')
-  git(dir, 'config', 'user.email', 'test@example.invalid')
-  writeFileSync(join(dir, 'file.txt'), 'something else entirely\n')
-  git(dir, 'add', '.')
-  git(dir, 'commit', '-q', '-m', 'start')
-  return dir
+  return repository(world, 'other', 'something else entirely\n')
 }
 
 test('a moved folder shows as missing and locating it brings the board back, with its id and its tasks', async ({
@@ -71,4 +64,68 @@ test('a moved folder shows as missing and locating it brings the board back, wit
   expect(listed.boards[0]!.missing).not.toBe(true)
   const task = await world.rpc<{ task: { title: string } }>('task.get', { board, id: 'scratch:1' })
   expect(task.task.title).toBe('Outlives the move')
+})
+
+// ---- the board a window opens on (ts-0218-sc) -----------------------------------------------------------------------
+
+test('a board picked in the menu is the one a reload opens on, not the first or the last opened', async ({
+  startWorld,
+  openPage,
+}) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  await world.rpc('board.open', { root: world.repo })
+  const second = (await world.rpc<{ board: { id: string } }>('board.open', { root: otherRepository(world) })).board.id
+  // A third folder, picked last: it is the board a window opens on until another pick. Opening marks nothing.
+  const third = repository(world, 'third', 'a third thing entirely\n')
+  const thirdId = (await world.rpc<{ board: { id: string } }>('board.open', { root: third })).board.id
+  expect(await latestBoard(world)).toBeUndefined()
+  await world.rpc('board.pick', { board: thirdId })
+  const page = await openPage(world)
+  const button = page.getByTitle('Board and code line')
+  await expect(button).toContainText('third')
+
+  await button.click()
+  await page.getByRole('dialog', { name: 'Open boards' }).getByRole('button', { name: /^other/ }).click()
+  await expect(button).toContainText('other')
+  await expect.poll(() => latestBoard(world)).toBe(second)
+
+  await page.reload()
+  await expect(button).toContainText('other')
+})
+
+test('a folder opened in the window is picked, so a reload opens on it', async ({ startWorld, openPage }) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  const first = (await world.rpc<{ board: { id: string } }>('board.open', { root: world.repo })).board.id
+  await world.rpc('board.pick', { board: first })
+  const folder = otherRepository(world)
+  const page = await openPage(world)
+  const button = page.getByTitle('Board and code line')
+  await expect(button).toContainText('repo')
+
+  await button.click()
+  const menu = page.getByRole('dialog', { name: 'Open boards' })
+  await menu.getByLabel('Folder path').fill(folder)
+  await menu.getByRole('button', { name: 'Open folder' }).click()
+  await page.getByRole('button', { name: 'Open the board' }).click()
+  await expect(button).toContainText('other')
+  await expect.poll(() => latestBoard(world)).not.toBe(first)
+
+  await page.reload()
+  await expect(button).toContainText('other')
+})
+
+test('a board.open with no pick, as the command line does, leaves the board a window opens on alone', async ({
+  startWorld,
+  openPage,
+}) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  await world.rpc('board.open', { root: world.repo })
+  const other = (await world.rpc<{ board: { id: string } }>('board.open', { root: otherRepository(world) })).board.id
+  await world.rpc('board.pick', { board: other })
+  // Opening the first board again would, if it marked, make it the latest and the first listed too.
+  await world.rpc('board.open', { root: world.repo })
+  expect(await latestBoard(world)).toBe(other)
+
+  const page = await openPage(world)
+  await expect(page.getByTitle('Board and code line')).toContainText('other')
 })

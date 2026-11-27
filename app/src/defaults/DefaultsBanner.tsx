@@ -15,9 +15,14 @@ export interface DefaultsBannerProps {
   /** Leave defaults mode: the window starts normally. */
   readonly onNormal: () => void
   readonly onReset: () => void
+  /**
+   * Whether Reset… may be pressed. It is off until the first read of the boards has answered, so the window it opens
+   * names the board that is about to show and not "No board is open" (ts-0218-sc).
+   */
+  readonly canReset: boolean
 }
 
-export function DefaultsBanner({ onNormal, onReset }: DefaultsBannerProps) {
+export function DefaultsBanner({ onNormal, onReset, canReset }: DefaultsBannerProps) {
   return (
     <div
       role="status"
@@ -28,7 +33,7 @@ export function DefaultsBanner({ onNormal, onReset }: DefaultsBannerProps) {
       <Button variant="outline" size="sm" onClick={onNormal}>
         Start normally
       </Button>
-      <Button variant="outline" size="sm" onClick={onReset}>
+      <Button variant="outline" size="sm" onClick={onReset} disabled={!canReset}>
         Reset…
       </Button>
     </div>

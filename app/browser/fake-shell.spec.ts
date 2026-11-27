@@ -126,11 +126,11 @@ test('the board menu lists every board with its default line, and switching stop
   await expect(boardMenu(page)).toHaveCount(0)
   await expect(boardButton(page, /beta/)).toContainText('develop')
   await expect(page.getByRole('region', { name: 'Field' })).toBeVisible()
-  // Switching is the window's own: the Field reads the other board, nothing else is sent, and in particular no stop
-  // or cancel.
+  // Switching is the window's own: the pick is told to the daemon (ts-0218-sc) and the Field reads the other board,
+  // nothing else is sent, and in particular no stop or cancel.
   const after = await calls(page)
   expect(after.slice(0, before.length)).toEqual(before)
-  expect(after.slice(before.length)).toEqual(['task.views', 'task.list'])
+  expect(after.slice(before.length).sort()).toEqual(['board.pick', 'task.list', 'task.views'])
   expect(after.filter((method) => /stop|cancel/.test(method))).toEqual([])
 })
 

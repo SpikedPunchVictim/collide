@@ -170,23 +170,23 @@ use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
 use collide_core::item::Category;
 use collide_core::owner::{
-    BoardChecksParams, BoardChecksResult, BoardInitParams, BoardListResult, BoardLocateParams,
-    BoardLocateResult, BoardOpenParams, BoardOpenResult, BoardSummary, BoardTrustParams,
-    BoardTrustReviewParams, ChangeWords, ChangesPlace, CommitChanges, ConfigGetParams,
-    ConfigPackAddParams, ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackListParams,
-    ConfigPackListResult, ConfigPackUpdateParams, ConfigResetParams, ConfigResetResult,
-    ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult, DaemonStatusResult,
-    DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, FirstRunCheck, MAX_MESSAGE_BYTES,
-    Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer, QueueAnswerParams,
-    QueueAnswerResult, QueueItem, QueueListParams, QueueListResult, Request, Response, Routed,
-    RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams, RunListResult,
-    RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams, RunStartResult,
-    RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor, TaskApplyParams,
-    TaskApplyResult, TaskChangesParams, TaskChangesResult, TaskCreateParams, TaskDiffParams,
-    TaskDiffResult, TaskGetParams, TaskGetResult, TaskListParams, TaskPreviewParams,
-    TaskReidParams, TaskReidResult, TaskSaveViewParams, TaskSaveViewResult, TaskSectionsParams,
-    TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport, ViewTarget, WriteQueued,
-    code, encode_line, parse_request, route,
+    Ack, BoardChecksParams, BoardChecksResult, BoardInitParams, BoardListResult, BoardLocateParams,
+    BoardLocateResult, BoardOpenParams, BoardOpenResult, BoardPickParams, BoardSummary,
+    BoardTrustParams, BoardTrustReviewParams, ChangeWords, ChangesPlace, CommitChanges,
+    ConfigGetParams, ConfigPackAddParams, ConfigPackEnableParams, ConfigPackLinkParams,
+    ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams, ConfigResetParams,
+    ConfigResetResult, ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult,
+    DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, FirstRunCheck,
+    MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer,
+    QueueAnswerParams, QueueAnswerResult, QueueItem, QueueListParams, QueueListResult, Request,
+    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
+    RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
+    RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
+    TaskApplyParams, TaskApplyResult, TaskChangesParams, TaskChangesResult, TaskCreateParams,
+    TaskDiffParams, TaskDiffResult, TaskGetParams, TaskGetResult, TaskListParams,
+    TaskPreviewParams, TaskReidParams, TaskReidResult, TaskSaveViewParams, TaskSaveViewResult,
+    TaskSectionsParams, TaskViewsParams, TaskViewsResult, ViewEntry, ViewRef, ViewReport,
+    ViewTarget, WriteQueued, code, encode_line, parse_request, route,
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::section::{ProposalFeatures, section_uses};
@@ -2127,7 +2127,8 @@ fn run_pump(log: &DaemonLog, conn: &Conn, pump: Pump) {
 
 /// The methods a defaults connection is served (ts-0215-gt): the reads of what it may see, and `config.reset`, which
 /// is how a window gets out of a mode it cannot write in. Every other method is refused, so a method added later is
-/// refused in defaults mode until it is named here: a write cannot get through by being new.
+/// refused in defaults mode until it is named here: a write cannot get through by being new. `board.pick` is such a
+/// write (ts-0218-sc): a window that started with defaults saves nothing, so it does not say which board is next.
 fn defaults_serves(method: Method) -> bool {
     matches!(
         method,
@@ -2252,6 +2253,7 @@ fn call(
         Method::BoardOpen => board_open(shared, session, params),
         Method::BoardChecks => board_checks(shared, params),
         Method::BoardLocate => board_locate(shared, session, params),
+        Method::BoardPick => board_pick(shared, params),
         Method::BoardList => board_list(shared, session),
         Method::BoardInit => board_init(shared, session, params),
         Method::BoardTrust => board_trust(shared, session, params),
@@ -2731,12 +2733,15 @@ fn board_root(shared: &Shared, board: &str) -> Result<String, RpcError> {
         .store
         .board_root(board)
         .map_err(store_failed)?
-        .ok_or_else(|| {
-            RpcError::new(
-                code::NOT_FOUND,
-                format!("the daemon has no board {board:?}; open its folder with board.open first"),
-            )
-        })
+        .ok_or_else(|| no_such_board(board))
+}
+
+/// The error of a request that names a board the store does not have.
+fn no_such_board(board: &str) -> RpcError {
+    RpcError::new(
+        code::NOT_FOUND,
+        format!("the daemon has no board {board:?}; open its folder with board.open first"),
+    )
 }
 
 /// `config.get` (ts-0098-nx): the settings of a board (the user's layers alone with no board), each with the layer it
@@ -3072,6 +3077,15 @@ fn board_open(
                 .store
                 .open_board(&root, &|name| shared.board_name_taken(name))
                 .map_err(store_failed)?;
+            // Opening marks nothing: the command line opens boards too, and must not move the board a window opens
+            // on. A window says what it opened or picked with `board.pick`.
+            let opened_at = shared
+                .store
+                .boards()
+                .map_err(store_failed)?
+                .into_iter()
+                .find(|board| board.id == id)
+                .and_then(|board| board.last_opened_ms);
             shared.note_root_commits(&id, &checkout.root);
             let checkouts: Vec<boards::Checkout> =
                 std::iter::once(checkout.clone()).chain(line).collect();
@@ -3085,12 +3099,43 @@ fn board_open(
                 )
             };
             BoardOpenResult {
-                board: Some(summary),
+                board: Some(BoardSummary {
+                    last_opened_ms: opened_at,
+                    ..summary
+                }),
                 checks: first_run_checks(boards::git_repo_ok(&checkout), claude),
             }
         }
     };
     Ok(serde_json::to_value(result).expect("a result is JSON"))
+}
+
+/// `board.pick` (ts-0218-sc; 0.11, Line selector): the person picked `board` in the board menu, so it is the board the
+/// next window opens on. A window sends it for a board it picks or opens; `board.open` itself marks nothing, so the
+/// command line's opens do not move the window. The method is not one a defaults connection is
+/// served ([`defaults_serves`]): that mode saves nothing, so a pick there is refused and not recorded.
+fn board_pick(shared: &Shared, params: &serde_json::Value) -> Result<serde_json::Value, RpcError> {
+    let params: BoardPickParams = read_params("board.pick", params)?;
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    if mark_board_opened(shared, &params.board)?.is_none() {
+        return Err(no_such_board(&params.board));
+    }
+    Ok(serde_json::to_value(Ack {}).expect("a result is JSON"))
+}
+
+/// Marks `board` as opened or picked now, and gives the time it was marked with. `None` when the store has no such
+/// board.
+fn mark_board_opened(shared: &Shared, board: &str) -> Result<Option<u64>, RpcError> {
+    let now_ms = shared.clocks.read(Clock::Wall).nanos / 1_000_000;
+    shared
+        .store
+        .mark_board_opened(board, now_ms)
+        .map_err(store_failed)
 }
 
 /// `board.checks` (ts-0192-es): the checks `board.open` answers for a folder, and nothing else, for the page's Check
@@ -3449,6 +3494,7 @@ fn board_list(shared: &Shared, session: &Session) -> Result<serde_json::Value, R
             };
             BoardSummary {
                 missing: !Path::new(&board.root).is_dir(),
+                last_opened_ms: board.last_opened_ms,
                 // The sources the person's files could not give are not a defaults connection's to see.
                 sources_unread: shared
                     .corpora

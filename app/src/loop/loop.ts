@@ -61,6 +61,7 @@ export interface Loop {
   close(): void
   /** Finishes when no reload is waiting or running. */
   idle(): Promise<void>
+  /** Switches the window to the board at once, and tells the daemon so the next window opens on it (`board.pick`). */
   chooseBoard(id: string): void
   openFolder(path: string): Promise<void>
   /**
@@ -102,8 +103,14 @@ export interface FolderOutcome {
   readonly problems: readonly string[]
 }
 
-export function createLoop(owner: OwnerClient): Loop {
-  return new LoopController(owner)
+/** What a window tells its loop about itself. */
+export interface LoopOptions {
+  /** The window started with defaults: it saves nothing, so a board picked in it is not sent to the daemon. */
+  readonly defaults?: boolean
+}
+
+export function createLoop(owner: OwnerClient, options: LoopOptions = {}): Loop {
+  return new LoopController(owner, options.defaults === true)
 }
 
 class LoopController implements Loop {
@@ -122,7 +129,10 @@ class LoopController implements Loop {
   /** The run the person chose, by "Open" or by starting it. Only its own waiting item holds the card. */
   private chosen: string | null = null
 
-  constructor(private readonly owner: OwnerClient) {
+  constructor(
+    private readonly owner: OwnerClient,
+    private readonly defaults: boolean,
+  ) {
     // The page hands these to components as callbacks (`LoopActions`), so each keeps its `this`.
     this.chooseBoard = this.chooseBoard.bind(this)
     this.openFolder = this.openFolder.bind(this)
@@ -316,6 +326,20 @@ class LoopController implements Loop {
 
   chooseBoard(id: string): void {
     this.dispatch({ type: 'board_chosen', id })
+    if (!this.defaults) void this.recordPick(id)
+  }
+
+  /**
+   * Tells the daemon which board was picked or opened here, so the next window opens on it. The pick stands in this
+   * window whatever the daemon answers: a daemon that could not record it leaves the window on the board and keeps the
+   * earlier one, and the next pick or open records again.
+   */
+  private async recordPick(board: string): Promise<void> {
+    try {
+      await this.owner.rpc('board.pick', { board })
+    } catch {
+      // Nothing to show: the board is already chosen, and the record is only for the next window.
+    }
   }
 
   async openFolder(path: string): Promise<void> {
@@ -330,6 +354,8 @@ class LoopController implements Loop {
       const { board, checks } = await this.owner.rpc('board.open', initGit ? { root, init_git: true } : { root })
       if (board != null) {
         this.dispatch({ type: 'board_opened', board })
+        // The daemon marks only what a window picks: the command line opens boards too, and must not move the window.
+        if (!this.defaults) void this.recordPick(board.id)
         return { opened: true, problems: [] }
       }
       const failed = checks.filter((c) => !c.ok).map((c) => c.message)

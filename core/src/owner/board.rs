@@ -51,6 +51,11 @@ pub struct BoardSummary {
     /// the folder again (0.2, Boards and lines). Absent when the folder is there. Only `board.list` fills it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub missing: bool,
+    // The daemon gives each mark a time later than every other board's, so no two boards share one. A board has none
+    // until a window opens or picks it (`board.pick`). `board.list` and `board.open` give the stored time.
+    /// When the board was last opened or picked, in ms. The greatest is the one a window opens on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_opened_ms: Option<u64>,
 }
 
 /// `board.list` params: none.
@@ -63,6 +68,13 @@ pub struct BoardListParams {}
 #[serde(deny_unknown_fields)]
 pub struct BoardListResult {
     pub boards: Vec<BoardSummary>,
+}
+
+/// `board.pick` params: the board the person picked in the board menu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardPickParams {
+    pub board: String,
 }
 
 /// What a first-run check looks at (0.11, First run works with no pack and no tasks).

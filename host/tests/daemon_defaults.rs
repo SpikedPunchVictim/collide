@@ -338,6 +338,7 @@ fn every_write_is_refused_in_defaults_mode_with_words_that_name_it_and_changes_n
             json!({ "board": board, "name": "gone" }),
         ),
         ("board.init", json!({ "board": board })),
+        ("board.pick", json!({ "board": board })),
         (
             "board.trust",
             json!({ "board": board, "line": "main", "hash": "abc" }),
@@ -375,6 +376,36 @@ fn every_write_is_refused_in_defaults_mode_with_words_that_name_it_and_changes_n
     }
     assert_eq!(world.files(), before, "no file changed");
     world.wait_for_tasks(2);
+}
+
+#[test]
+fn defaults_mode_refuses_a_pick_and_its_open_changes_no_time() {
+    let world = World::new();
+    let mut normal = world.normal();
+    let marked = |client: &mut OwnerClient| -> Option<u64> {
+        let boards: BoardListResult = call(client, "board.list", json!({})).unwrap();
+        boards.boards[0].last_opened_ms
+    };
+    let _: Value = call(&mut normal, "board.pick", json!({ "board": world.board })).unwrap();
+    let before = marked(&mut normal);
+    assert!(before.is_some(), "a pick in a normal connection marks");
+    let mut defaults = world.defaults();
+
+    let _: Value = call(
+        &mut defaults,
+        "board.open",
+        json!({ "root": world.fixture.repo.work().to_str().unwrap() }),
+    )
+    .unwrap();
+    let error = refusal(call(
+        &mut defaults,
+        "board.pick",
+        json!({ "board": world.board }),
+    ));
+
+    assert_eq!(marked(&mut normal), before, "defaults mode saves nothing");
+    assert_eq!(error.code, code::NOT_PERMITTED);
+    assert!(error.message.contains("defaults"), "{}", error.message);
 }
 
 // ---- trust ----

@@ -49,6 +49,8 @@ export type { BoardOpenParams as BoardOpenParamsInput } from './BoardOpenParams.
 export type { BoardOpenParams as BoardOpenParamsOutput } from './BoardOpenParams.output.ts'
 export type { BoardOpenResult as BoardOpenResultInput } from './BoardOpenResult.input.ts'
 export type { BoardOpenResult as BoardOpenResultOutput } from './BoardOpenResult.output.ts'
+export type { BoardPickParams as BoardPickParamsInput } from './BoardPickParams.input.ts'
+export type { BoardPickParams as BoardPickParamsOutput } from './BoardPickParams.output.ts'
 export type { BoardTrustParams as BoardTrustParamsInput } from './BoardTrustParams.input.ts'
 export type { BoardTrustParams as BoardTrustParamsOutput } from './BoardTrustParams.output.ts'
 export type { BoardTrustResult as BoardTrustResultInput } from './BoardTrustResult.input.ts'

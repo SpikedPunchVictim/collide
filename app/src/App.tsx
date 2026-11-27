@@ -137,7 +137,7 @@ function Window({
   readonly shell: boolean
   readonly defaults: boolean
 }) {
-  const { state, loop } = useLoop(owner)
+  const { state, loop } = useLoop(owner, defaults)
   const board = state.boards.find((each) => each.id === state.boardId)
   const missing = board !== undefined && isMissing(board)
   // A board whose folder is gone has nothing to read: its page is the missing page, and no view or task is asked for.
@@ -223,6 +223,7 @@ function Window({
       <DefaultsBanner
         onNormal={() => void startNormally(null).then(setLeaveProblem)}
         onReset={() => setResetting(true)}
+        canReset={!state.loading}
       />
       {leaveProblem === null ? null : (
         <p role="alert" className="whitespace-pre-wrap text-destructive">

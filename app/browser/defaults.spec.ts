@@ -3,15 +3,16 @@
 // folder is gone, in a world of its own (`support/world.ts`). The window opens by the entry the shell's menu uses, the
 // `defaults` key on the fragment, and the page tells the shell, whose connection to the daemon is made with the flag.
 // The command, a client of its own on the same daemon, still sees the files and their problems. Reset moves the files
-// into the set-aside folder, and the window starts normally. Every path is below the root of the world, which is the
-// HOME of its daemon: nothing here reads or writes the person's folders or keychain.
+// into the set-aside folder, and the window starts normally. The window opens on the board last picked, in and out of
+// the mode (ts-0218-sc), so Reset acts on the board the person was on. Every path is below the root of the world,
+// which is the HOME of its daemon: nothing here reads or writes the person's folders or keychain.
 import { type Page } from '@playwright/test'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { expect, test } from './support/fixtures.ts'
 import { WITHIN, fill, openBoard, start } from './support/octo-board.ts'
-import { COLLIDE_EXE, type World, git } from './support/world.ts'
+import { COLLIDE_EXE, type World, git, latestBoard, repository } from './support/world.ts'
 
 const BROKEN_SETTINGS = 'disk: [unclosed\n'
 const BROKEN_VIEW = 'name: broken\nwhere: "status =="\n'
@@ -161,4 +162,80 @@ test('Reset moves the files into the set-aside folder, and the window starts nor
   // The window starts normally: the shell's connection is a normal one again, and the files that broke it are gone.
   await expect(card(page, 'Write the parser')).toBeVisible()
   expect(configGet(world).status).toBe(0)
+})
+
+/**
+ * The fixture board and a second board opened after it, then the fixture board picked: a window opens on the fixture
+ * board, which is also the first listed (an open marks nothing, so the pick is what makes it the one). Each board has
+ * a personal view of its own, so a Reset of one moves something.
+ */
+async function twoBoardWorld(startWorld: Parameters<typeof start>[0]) {
+  const world = await start(startWorld)
+  fill(world)
+  const board = await openBoard(world)
+  const opened = await world.rpc<{ board: { id: string } }>('board.open', {
+    root: repository(world, 'other', 'else\n'),
+  })
+  const other = opened.board.id
+  writeUser(world, `boards/${board}/views/first.yaml`, 'name: first\n')
+  writeUser(world, `boards/${other}/views/mine.yaml`, 'name: mine\n')
+  await world.rpc('board.pick', { board })
+  return { world, board, other }
+}
+
+/** The board menu's button, which names the board the window is on. */
+const boardButton = (page: Page) => page.getByTitle('Board and code line')
+
+/** Picks the board named `name` in the board menu. */
+async function pick(page: Page, name: RegExp) {
+  await boardButton(page).click()
+  await page.getByRole('dialog', { name: 'Open boards' }).getByRole('button', { name }).click()
+}
+
+test('Start with defaults opens on the board last picked, and Reset moves that board’s files', async ({
+  startWorld,
+  openPage,
+}) => {
+  const { world, board, other } = await twoBoardWorld(startWorld)
+  const page = await openPage(world)
+  await expect(boardButton(page)).toContainText('repo')
+  await pick(page, /^other/)
+  await expect(boardButton(page)).toContainText('other')
+  await expect.poll(() => latestBoard(world)).toBe(other)
+
+  const defaults = await openWithDefaults(world, async () => page)
+  await expect(banner(defaults)).toBeVisible()
+  await expect(boardButton(defaults)).toContainText('other')
+  await banner(defaults).getByRole('button', { name: 'Reset…' }).click()
+  const dialog = defaults.getByRole('dialog', { name: /^Reset/ })
+  await expect(dialog.getByRole('list', { name: 'Reset moves' })).toContainText('The folder of this board, other')
+  const reloaded = defaults.waitForEvent('load')
+  await dialog.getByRole('button', { name: 'Move them aside' }).click()
+  await reloaded
+
+  const aside = join(userDir(world), 'set-aside', readdirSync(join(userDir(world), 'set-aside'))[0]!)
+  expect(readFileSync(join(aside, 'boards', other, 'views', 'mine.yaml'), 'utf8')).toBe('name: mine\n')
+  expect(existsSync(join(userDir(world), 'boards', other))).toBe(false)
+  expect(existsSync(join(aside, 'boards', board))).toBe(false)
+  expect(readFileSync(join(userDir(world), 'boards', board, 'views', 'first.yaml'), 'utf8')).toBe('name: first\n')
+})
+
+test('a board picked in defaults mode is not the board Start normally opens on', async ({ startWorld, openPage }) => {
+  const { world, other } = await twoBoardWorld(startWorld)
+  const page = await openPage(world)
+  await expect(boardButton(page)).toContainText('repo')
+  await pick(page, /^other/)
+  await expect(boardButton(page)).toContainText('other')
+  await expect.poll(() => latestBoard(world)).toBe(other)
+
+  const defaults = await openWithDefaults(world, async () => page)
+  await expect(boardButton(defaults)).toContainText('other')
+  await pick(defaults, /^repo/)
+  await expect(boardButton(defaults)).toContainText('repo')
+  const reloaded = defaults.waitForEvent('load')
+  await banner(defaults).getByRole('button', { name: 'Start normally' }).click()
+  await reloaded
+
+  await expect(banner(defaults)).toHaveCount(0)
+  await expect(boardButton(defaults)).toContainText('other')
 })

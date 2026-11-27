@@ -8,6 +8,9 @@
 //!   its pack data) already has: the daemon says which names are taken on disk, and the store checks its own.
 //! - A board records the root commits of its repository the first time one is seen (`root_commits`): `board.locate`
 //!   accepts a folder only when it shares one.
+//! - A board keeps the time it was last opened or picked (`last_opened_ms`, migration 14; ts-0218-sc): a window opens
+//!   on the board with the greatest. No two boards share a time, so the latest is never in doubt. A board never
+//!   opened since the column was added has none.
 //! - A scratch task is numbered inside its board, from 1. The number and the insert are one transaction, so two writers
 //!   never take the same number.
 
@@ -28,13 +31,15 @@ const SUFFIX_LEN: usize = 6;
 /// How many names a new board tries before the store gives up. Each is taken with a chance of about 1 in 300 million.
 const NAME_TRIES: usize = 64;
 
-/// One board as the store holds it: its name, the top level of its checkout, and the root commits of its repository
-/// when they were recorded (`None` when they were not).
+/// One board as the store holds it: its name, the top level of its checkout, the root commits of its repository when
+/// they were recorded (`None` when they were not), and when it was last opened or picked in milliseconds of the wall
+/// clock (`None` for a board that has not been since ts-0218-sc). No two boards have the same time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredBoard {
     pub id: String,
     pub root: String,
     pub root_commits: Option<Vec<String>>,
+    pub last_opened_ms: Option<u64>,
 }
 
 /// One scratch task as the store holds it. `status` is the text of its category.
@@ -170,7 +175,7 @@ impl Store {
         let context = "reading the boards";
         let conn = self.connect()?;
         let mut statement = conn
-            .prepare("SELECT id, name, root, root_commits FROM boards ORDER BY id")
+            .prepare("SELECT id, name, root, root_commits, last_opened_ms FROM boards ORDER BY id")
             .map_err(|e| sql_error(context, e))?;
         let rows = statement
             .query_map([], |row| {
@@ -178,11 +183,42 @@ impl Store {
                     id: name_of(row.get(0)?, row.get(1)?),
                     root: row.get(2)?,
                     root_commits: commits_of(row.get(3)?),
+                    last_opened_ms: row.get::<_, Option<i64>>(4)?.map(|ms| ms as u64),
                 })
             })
             .map_err(|e| sql_error(context, e))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| sql_error(context, e))
+    }
+
+    /// Marks `board` as the one opened or picked last, at `now_ms`. The mark is later than every other board's, even
+    /// when the clock stands still or went back, so the board marked last is always the one with the latest time.
+    /// Returns the time it was marked with, or `None` when the store has no such board.
+    pub fn mark_board_opened(&self, board: &str, now_ms: u64) -> Result<Option<u64>, StoreError> {
+        let context = "marking a board as opened";
+        let mut conn = self.connect()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| sql_error(context, e))?;
+        let Some(row) = row_of(&tx, board).map_err(|e| sql_error(context, e))? else {
+            return Ok(None);
+        };
+        let others: Option<i64> = tx
+            .query_row(
+                "SELECT MAX(last_opened_ms) FROM boards WHERE id != ?1",
+                [row],
+                |row| row.get(0),
+            )
+            .map_err(|e| sql_error(context, e))?;
+        let now = i64::try_from(now_ms).unwrap_or(i64::MAX);
+        let at = now.max(others.map_or(0, |latest| latest.saturating_add(1)));
+        tx.execute(
+            "UPDATE boards SET last_opened_ms = ?2 WHERE id = ?1",
+            params![row, at],
+        )
+        .map_err(|e| sql_error(context, e))?;
+        tx.commit().map_err(|e| sql_error(context, e))?;
+        Ok(Some(u64::try_from(at).unwrap_or(0)))
     }
 
     /// The root of the board named `board`, or `None` when the store has no such board.
