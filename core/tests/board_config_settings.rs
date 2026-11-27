@@ -890,13 +890,49 @@ fn the_disk_and_claude_sections_are_in_the_generated_schema_and_closed() {
         .collect();
     assert_eq!(
         keys,
-        BTreeSet::from(["agents", "ask", "claude", "config", "disk"])
+        BTreeSet::from(["agents", "ask", "claude", "config", "disk", "ui_tools"])
     );
     assert_eq!(
         schema["$defs"]["DiskSettings"]["properties"]["floor_gib"]["minimum"],
         json!(1)
     );
     assert!(schema["$defs"]["ClaudeSettings"]["properties"]["check_published"].is_object());
+}
+
+// The ui_tools section.
+
+#[test]
+fn a_file_with_a_ui_tools_port_loads_and_sets_that_key() {
+    let file: ConfigFile = load("ui_tools: { port: 40123 }\n");
+    assert_eq!(check_config_file(&file), Ok(()));
+    assert_eq!(file.ui_tools.port, Some(40123));
+    assert_eq!(file.collide_keys_set(), ["ui_tools.port"]);
+}
+
+#[test]
+fn a_port_under_1024_fails_naming_the_key_and_the_minimum() {
+    let file: ConfigFile = load("ui_tools: { port: 80 }\n");
+    let errors = check_config_file(&file).expect_err("a privileged port is refused");
+    assert_eq!(
+        errors,
+        [SettingsError::BelowMinimum {
+            key: "ui_tools.port",
+            value: 80,
+            min: 1024
+        }]
+    );
+}
+
+#[test]
+fn a_port_that_is_not_a_port_number_fails_to_load() {
+    for text in [
+        "ui_tools: { port: 70000 }\n",
+        "ui_tools: { port: -1 }\n",
+        "ui_tools: { port: \"x\" }\n",
+        "ui_tools: { other: 1 }\n",
+    ] {
+        parse_error::<ConfigFile>(text);
+    }
 }
 
 // Schemas.
@@ -921,7 +957,7 @@ fn the_board_config_and_pointer_schemas_are_registered_with_agents_and_ask() {
         .collect();
     assert_eq!(
         keys,
-        BTreeSet::from(["agents", "ask", "claude", "config", "disk"])
+        BTreeSet::from(["agents", "ask", "claude", "config", "disk", "ui_tools"])
     );
     let agent_keys: BTreeSet<&str> = config["$defs"]["AgentEntry"]["properties"]
         .as_object()

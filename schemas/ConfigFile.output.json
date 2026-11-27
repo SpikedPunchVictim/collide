@@ -190,6 +190,22 @@
         "search"
       ],
       "type": "string"
+    },
+    "UiToolsSettings": {
+      "additionalProperties": false,
+      "description": "`ui_tools:`. `port` is the loopback port of the UI-tools endpoint (0.2). The app picks it on its first start and\nkeeps it here, so a client's snippet stays right. A per-user key.",
+      "properties": {
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1024,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -219,6 +235,9 @@
     },
     "disk": {
       "$ref": "#/$defs/DiskSettings"
+    },
+    "ui_tools": {
+      "$ref": "#/$defs/UiToolsSettings"
     }
   },
   "title": "ConfigFile",

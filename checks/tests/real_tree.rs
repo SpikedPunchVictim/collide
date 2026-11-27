@@ -95,7 +95,7 @@ fn every_host_outline_tag_names_its_stage_and_counts_at_least_one_stub() {
 /// The tags whose item has replaced every stub, with the stage they belong to and the item that filled them. Each
 /// stays in `stub-tags.json` and counts zero: that is how CI shows a stage complete (0.15), and a stub that comes back
 /// under a filled tag fails here.
-const FILLED_TAGS: [(&str, &str, &str); 47] = [
+const FILLED_TAGS: [(&str, &str, &str); 48] = [
     ("clock: system readings", "3a", "ts-0051-wh"),
     ("clock: timer", "3a", "ts-0051-wh"),
     ("clock: sleep gap", "3a", "ts-0051-wh"),
@@ -143,6 +143,7 @@ const FILLED_TAGS: [(&str, &str, &str); 47] = [
     ("supervisor: provider calls", "4b", "ts-0108-dq"),
     ("sdk: ctx", "4b", "ts-0109-qj"),
     ("sdk: defineHook", "4b", "ts-0109-qj"),
+    ("ui_tools: endpoint token store", "6b", "ts-0199-xz"),
 ];
 
 #[test]
@@ -181,26 +182,6 @@ fn every_adapter_executor_supervisor_sampler_and_cli_tag_names_its_stage_and_cou
  {
     let report = stubs::check(&repo()).unwrap();
     for (tag, stage) in HOST_ADAPTER_EXECUTOR_TAGS {
-        assert_eq!(
-            report.stages.get(tag).map(String::as_str),
-            Some(stage),
-            "tag \"{tag}\" is not registered under stage {stage}"
-        );
-        assert!(
-            report.counts.get(tag).copied().unwrap_or(0) >= 1,
-            "tag \"{tag}\" is registered but no stub carries it"
-        );
-    }
-}
-
-/// The tag of the `ui_tools` request handler (ts-0035-re) and the stage that fills it: the endpoint token's place in the
-/// OS keychain is Stage 6b, with the listener. It must count at least one stub today.
-const UI_TOOLS_TAGS: [(&str, &str); 1] = [("ui_tools: endpoint token store", "6b")];
-
-#[test]
-fn every_ui_tools_tag_names_its_stage_and_counts_at_least_one_stub() {
-    let report = stubs::check(&repo()).unwrap();
-    for (tag, stage) in UI_TOOLS_TAGS {
         assert_eq!(
             report.stages.get(tag).map(String::as_str),
             Some(stage),

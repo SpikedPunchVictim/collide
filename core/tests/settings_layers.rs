@@ -225,6 +225,7 @@ fn the_entries_list_collides_keys_first_in_registry_order_then_each_pack_by_key(
             "ask.budget_usd",
             "disk.floor_gib",
             "claude.check_published",
+            "ui_tools.port",
             "ferry.depth",
             "ferry.greeting",
             "ferry.lanePool",

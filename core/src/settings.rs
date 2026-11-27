@@ -1,16 +1,16 @@
 //! Collide's settings files and the agent entries (0.7, Settings and Agent entries; 0.9; Stage 2, Contracts).
 //!
 //! [`ConfigFile`] is `.collide/config.yaml` (committed, in the trust hash) and, the same shape, the user's
-//! `~/.config/collide/config.yaml`. It holds Collide's own settings, `agents`, `ask`, `disk` and `claude`, and the
-//! pack settings (`config:`, pack name, then key, then value, as a profile writes them). The keys of `ask`, `disk`
-//! and `claude` are listed, with their ranges, defaults and flags, in [`crate::settings_registry`].
+//! `~/.config/collide/config.yaml`. It holds Collide's own settings, `agents`, `ask`, `disk`, `claude` and `ui_tools`,
+//! and the pack settings (`config:`, pack name, then key, then value, as a profile writes them). The keys of `ask`,
+//! `disk`, `claude` and `ui_tools` are listed, with their ranges, defaults and flags, in [`crate::settings_registry`].
 //!
 //! The checks are pure functions over a parsed file. Reading the layers (the schema defaults, the user's file, the
 //! repo's file, the run's profile), merging them, checking a pack's values against its schema, and the keychain
 //! are Stage 4a's. What lives here is each rule that needs only one file:
-//! - [`check_config_file`]: the range of `timeout_s` and the minimum of `disk.floor_gib`, which agent kinds need a
-//!   `command`, a budget on a kind that cannot enforce one, a literal secret in `env`, and an ACP agent's refused
-//!   flags;
+//! - [`check_config_file`]: the range of `timeout_s` and the minimum of `disk.floor_gib` and `ui_tools.port`, which
+//!   agent kinds need a `command`, a budget on a kind that cannot enforce one, a literal secret in `env`, and an ACP
+//!   agent's refused flags;
 //! - [`repo_file_refusals`]: which keys a repo `config.yaml` may not set (0.7, Layers and sources), as data
 //!   ([`crate::settings_registry::repo_file_keys`]) and as a function over a parsed file;
 //! - [`secrets_in_file`]: a `secret: true` pack key written in either file.
@@ -223,6 +223,25 @@ impl ClaudeSettings {
     }
 }
 
+/// The smallest `ui_tools.port`: the ports under it are privileged.
+pub const MIN_UI_TOOLS_PORT: u16 = 1024;
+
+/// `ui_tools:`. `port` is the loopback port of the UI-tools endpoint (0.2). The app picks it on its first start and
+/// keeps it here, so a client's snippet stays right. A per-user key.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UiToolsSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1024, max = 65535))]
+    pub port: Option<u16>,
+}
+
+impl UiToolsSettings {
+    fn is_empty(&self) -> bool {
+        *self == UiToolsSettings::default()
+    }
+}
+
 /// `.collide/config.yaml` and `~/.config/collide/config.yaml`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -236,6 +255,8 @@ pub struct ConfigFile {
     pub disk: DiskSettings,
     #[serde(default, skip_serializing_if = "ClaudeSettings::is_empty")]
     pub claude: ClaudeSettings,
+    #[serde(default, skip_serializing_if = "UiToolsSettings::is_empty")]
+    pub ui_tools: UiToolsSettings,
     /// Pack settings: pack name, then key, then value. A pack's schema checks each value (Stage 4a), and a key
     /// the pack marks `secret: true` is refused here ([`secrets_in_file`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -264,8 +285,8 @@ impl ConfigFile {
         serde_json::from_value(root).map_err(|error| format!("`{}`: {error}", path.join(".")))
     }
 
-    /// The keys of Collide's own settings this file sets (`ask`, `disk` and `claude`; not `agents` or `config`), as
-    /// `section.key`.
+    /// The keys of Collide's own settings this file sets (`ask`, `disk`, `claude` and `ui_tools`; not `agents` or
+    /// `config`), as `section.key`.
     pub fn collide_keys_set(&self) -> Vec<&'static str> {
         let mut keys = self.ask.keys_set();
         if self.disk.floor_gib.is_some() {
@@ -273,6 +294,9 @@ impl ConfigFile {
         }
         if self.claude.check_published.is_some() {
             keys.push("claude.check_published");
+        }
+        if self.ui_tools.port.is_some() {
+            keys.push("ui_tools.port");
         }
         keys
     }
@@ -288,6 +312,7 @@ impl ConfigFile {
             "ask.budget_usd" => self.ask.budget_usd.map(|value| json!(value)),
             "disk.floor_gib" => self.disk.floor_gib.map(|value| json!(value)),
             "claude.check_published" => self.claude.check_published.map(|value| json!(value)),
+            "ui_tools.port" => self.ui_tools.port.map(|value| json!(value)),
             _ => None,
         }
     }
@@ -506,6 +531,15 @@ pub fn check_config_file(file: &ConfigFile) -> Result<(), Vec<SettingsError>> {
             key: "disk.floor_gib",
             value,
             min: MIN_FLOOR_GIB,
+        });
+    }
+    if let Some(port) = file.ui_tools.port
+        && port < MIN_UI_TOOLS_PORT
+    {
+        errors.push(SettingsError::BelowMinimum {
+            key: "ui_tools.port",
+            value: u64::from(port),
+            min: u64::from(MIN_UI_TOOLS_PORT),
         });
     }
     if file.config.keys().any(|pack| pack.trim().is_empty()) {

@@ -44,6 +44,14 @@ pub const REQUEST_DEADLINE_SECS: u64 = 10;
 /// count.
 pub const MAX_SCREEN_CHANGING_CALLS: u32 = 20;
 
+/// How many screen-changing calls the clients of the endpoint token may make together in
+/// [`EXTERNAL_CALL_WINDOW_SECS`] (0.7, Interactive launches get the same MCP rule). There is one token, so the clients
+/// cannot be told apart and the limit is shared.
+pub const MAX_EXTERNAL_CALLS: u32 = 20;
+
+/// The rolling window of [`MAX_EXTERNAL_CALLS`], in seconds.
+pub const EXTERNAL_CALL_WINDOW_SECS: u64 = 60;
+
 /// What a `tools/call` fails with when no window is open (0.2, A closed or silent window).
 pub const NO_WINDOW_TEXT: &str = "Collide has no window open; open Collide and ask again";
 

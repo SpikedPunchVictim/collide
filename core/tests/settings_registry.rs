@@ -23,7 +23,7 @@ fn schema_file(name: &str) -> Value {
 }
 
 #[test]
-fn the_registry_holds_the_five_keys_in_order() {
+fn the_registry_holds_the_six_keys_in_order() {
     let keys: Vec<&str> = COLLIDE_SETTINGS.iter().map(|s| s.key).collect();
     assert_eq!(
         keys,
@@ -32,7 +32,8 @@ fn the_registry_holds_the_five_keys_in_order() {
             "ask.timeout_s",
             "ask.budget_usd",
             "disk.floor_gib",
-            "claude.check_published"
+            "claude.check_published",
+            "ui_tools.port"
         ]
     );
 }
@@ -69,6 +70,13 @@ fn each_key_has_its_type_range_and_default() {
                 None,
                 Some(SettingDefault::Boolean(true))
             ),
+            (
+                "ui_tools.port",
+                ValueType::Integer,
+                Some(1024),
+                Some(65535),
+                None
+            ),
         ]
     );
 }
@@ -95,7 +103,12 @@ fn a_value_type_is_named_as_json_schema_names_it() {
         .iter()
         .map(|s| s.value_type.as_str())
         .collect();
-    assert_eq!(names, ["string", "integer", "number", "integer", "boolean"]);
+    assert_eq!(
+        names,
+        [
+            "string", "integer", "number", "integer", "boolean", "integer"
+        ]
+    );
 }
 
 #[test]
@@ -106,7 +119,7 @@ fn the_keys_of_each_flag_are_listed_so_a_change_is_deliberate() {
     );
     assert_eq!(
         keys_where(|s| s.per_user),
-        ["ask.agent", "claude.check_published"]
+        ["ask.agent", "claude.check_published", "ui_tools.port"]
     );
     assert_eq!(keys_where(|s| s.repo_only), Vec::<&str>::new());
 }
@@ -172,8 +185,8 @@ fn the_timeout_range_is_the_one_the_file_check_uses() {
 }
 
 /// The `section.key` paths of `ConfigFile` that Collide owns, read from its generated schema: every property that
-/// is a section (`ask`, `disk`, `claude`) and not `agents` or `config`, which are other contracts' (`agents.<id>.*`
-/// is `ts-0099-bw`, and `config` holds pack keys).
+/// is a section (`ask`, `disk`, `claude`, `ui_tools`) and not `agents` or `config`, which are other contracts'
+/// (`agents.<id>.*` is `ts-0099-bw`, and `config` holds pack keys).
 fn config_file_keys() -> BTreeSet<String> {
     let schema = schema_file("ConfigFile.input.json");
     let mut keys = BTreeSet::new();
@@ -207,7 +220,8 @@ fn a_file_that_sets_every_key_reports_exactly_the_registry_keys() {
     let file: ConfigFile = collide_core::yaml::load_yaml(
         b"ask: { agent: a, timeout_s: 60, budget_usd: 1.5 }\n\
           disk: { floor_gib: 8 }\n\
-          claude: { check_published: false }\n",
+          claude: { check_published: false }\n\
+          ui_tools: { port: 40123 }\n",
         "test.yaml",
     )
     .unwrap();
@@ -251,10 +265,10 @@ fn the_registry_ranges_are_in_the_generated_schema() {
 // The layers read the registry (ts-0098-nx).
 
 #[test]
-fn the_roots_of_collides_own_keys_are_agents_ask_disk_and_claude() {
+fn the_roots_of_collides_own_keys_are_agents_ask_disk_claude_and_ui_tools() {
     let mut roots = collide_roots();
     roots.sort_unstable();
-    assert_eq!(roots, ["agents", "ask", "claude", "disk"]);
+    assert_eq!(roots, ["agents", "ask", "claude", "disk", "ui_tools"]);
 }
 
 #[test]
@@ -270,7 +284,7 @@ fn every_root_that_a_registry_key_starts_with_is_a_root() {
 fn a_file_that_sets_a_key_gives_its_value_and_one_that_does_not_gives_none() {
     let all: ConfigFile = collide_core::yaml::load_yaml(
         b"ask: { agent: mine, timeout_s: 60, budget_usd: 1.5 }\ndisk: { floor_gib: 3 }\n\
-          claude: { check_published: false }\n",
+          claude: { check_published: false }\nui_tools: { port: 40123 }\n",
         "t.yaml",
     )
     .unwrap();
@@ -280,6 +294,7 @@ fn a_file_that_sets_a_key_gives_its_value_and_one_that_does_not_gives_none() {
         ("ask.budget_usd", json!(1.5)),
         ("disk.floor_gib", json!(3)),
         ("claude.check_published", json!(false)),
+        ("ui_tools.port", json!(40123)),
     ];
     for (key, value) in expected {
         assert_eq!(all.collide_value(key), Some(value), "{key}");
@@ -311,5 +326,9 @@ fn the_schema_of_a_key_holds_its_type_and_range() {
     assert_eq!(
         collide_setting("claude.check_published").unwrap().schema(),
         json!({ "type": "boolean" })
+    );
+    assert_eq!(
+        collide_setting("ui_tools.port").unwrap().schema(),
+        json!({ "type": "integer", "minimum": 1024, "maximum": 65535 })
     );
 }

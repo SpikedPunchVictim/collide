@@ -10,11 +10,11 @@
 //! A key is never `repo_only` together with another flag, and a `per_user` key is never `overridable`, as a pack's
 //! setting may not be (`repoOnly` with `overridable` or `secret` is refused at load). The tests hold the list.
 //!
-//! The keys are the ones [`crate::settings::ConfigFile`] can hold in `ask`, `disk` and `claude`. The settings of
-//! later stages (the concurrency cap, the metrics level, retention, default aliases) are added by the stage that
-//! builds them. `agents.<id>.<field>` has rules of its own and is not here.
+//! The keys are the ones [`crate::settings::ConfigFile`] can hold in `ask`, `disk`, `claude` and `ui_tools`. The
+//! settings of later stages (the concurrency cap, the metrics level, retention, default aliases) are added by the
+//! stage that builds them. `agents.<id>.<field>` has rules of its own and is not here.
 
-use crate::settings::{MAX_TIMEOUT_S, MIN_TIMEOUT_S};
+use crate::settings::{MAX_TIMEOUT_S, MIN_TIMEOUT_S, MIN_UI_TOOLS_PORT};
 use serde_json::{Value, json};
 
 /// The smallest `disk.floor_gib`, in GiB.
@@ -130,6 +130,18 @@ pub const COLLIDE_SETTINGS: &[CollideSetting] = &[
         repo_only: false,
         per_user: true,
     },
+    // The loopback port of the UI-tools endpoint: the app picks it at its first start and keeps it, so a client's
+    // snippet stays right. A fact about one machine, never in a repo file.
+    CollideSetting {
+        key: "ui_tools.port",
+        value_type: ValueType::Integer,
+        min: Some(MIN_UI_TOOLS_PORT as i64),
+        max: Some(u16::MAX as i64),
+        default: None,
+        overridable: false,
+        repo_only: false,
+        per_user: true,
+    },
 ];
 
 impl CollideSetting {
@@ -146,8 +158,8 @@ impl CollideSetting {
     }
 }
 
-/// The first part of every key Collide owns: `agents`, `ask`, `disk` and `claude`. A pack may not take one as its
-/// name, because `<pack>.<key>` would then name two things.
+/// The first part of every key Collide owns: `agents`, `ask`, `disk`, `claude` and `ui_tools`. A pack may not take one
+/// as its name, because `<pack>.<key>` would then name two things.
 pub fn collide_roots() -> Vec<&'static str> {
     let mut roots = vec![AGENTS_ROOT];
     for setting in COLLIDE_SETTINGS {

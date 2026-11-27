@@ -12,7 +12,7 @@ use collide_app::shell::{
 use collide_core::owner::{Request, RequestId, Response, RpcError, code};
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::{Clock, Clocks, Reading};
-use collide_host::ui_tools::{EndpointTokens, Handled, HttpRequest, UiToolsEndpoint};
+use collide_host::ui_tools::{EndpointTokens, Handled, HttpRequest, TokenFailure, UiToolsEndpoint};
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::path::Path;
@@ -107,12 +107,12 @@ impl Clocks for FakeClocks {
 struct FakeTokens;
 
 impl EndpointTokens for FakeTokens {
-    fn current(&self) -> String {
-        ENDPOINT_TOKEN.to_string()
+    fn current(&self) -> Result<String, TokenFailure> {
+        Ok(ENDPOINT_TOKEN.to_string())
     }
 
-    fn rotate(&mut self) -> String {
-        "rotated-token-0001".to_string()
+    fn rotate(&mut self) -> Result<String, TokenFailure> {
+        Ok("rotated-token-0001".to_string())
     }
 }
 

@@ -35,6 +35,7 @@ export interface ConfigFile {
     }
   }
   disk?: DiskSettings
+  ui_tools?: UiToolsSettings
 }
 /**
  * One entry of `agents:`. Every key is optional, because a layer may change the built-in entry field by field
@@ -105,4 +106,11 @@ export interface ClaudeSettings {
  */
 export interface DiskSettings {
   floor_gib?: number | null
+}
+/**
+ * `ui_tools:`. `port` is the loopback port of the UI-tools endpoint (0.2). The app picks it on its first start and
+ * keeps it here, so a client's snippet stays right. A per-user key.
+ */
+export interface UiToolsSettings {
+  port?: number | null
 }

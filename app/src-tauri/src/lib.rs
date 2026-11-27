@@ -1,4 +1,6 @@
 pub mod csp;
+pub mod endpoint;
+pub mod http;
 pub mod menu;
 pub mod shell;
 
@@ -6,7 +8,9 @@ use collide_core::owner::{RpcError, code};
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::SystemClocks;
 use collide_host::daemon::{DaemonPaths, ROOT_ENV};
+use collide_host::secret_store::{SecretStore, secret_store_for_root};
 use collide_host::ui_tools::{SecretStoreTokens, UiToolsEndpoint};
+use endpoint::{DaemonPortStore, EndpointServer, Log, stderr_log};
 use menu::{
     Reloader, START_WITH_DEFAULTS, START_WITH_DEFAULTS_KEY, START_WITH_DEFAULTS_LABEL,
     on_menu_event, reload_script,
@@ -36,8 +40,9 @@ pub const EVENT_CHANNEL: &str = "collide:event";
 /// The label of the window, which Tauri gives the first window when the configuration names none.
 const MAIN_WINDOW: &str = "main";
 
-/// The port the UI-tools endpoint is told it has. Its listener, and the port kept in the user's settings, are Stage 6b's,
-/// and no HTTP request reaches the endpoint until then.
+/// The port the UI-tools endpoint has until its listener is bound and tells it the real one
+/// ([`EndpointServer::start`]).
+/// No `Host` names port 0, so no request is accepted before then.
 const UNBOUND_PORT: u16 = 0;
 
 /// The event channel of the webview.
@@ -161,12 +166,14 @@ fn build_shell(
     channel: Arc<dyn EventChannel>,
     access: Arc<DaemonAccess>,
     picker: Box<dyn FolderPicker>,
+    secrets: Arc<dyn SecretStore>,
+    log: Log,
 ) -> Shell {
     // The manifest is empty until the generator of Stage 6 writes the real one from the tools' TypeScript.
     let endpoint = UiToolsEndpoint::new(
         UNBOUND_PORT,
         ToolManifest(Vec::new()),
-        Box::new(SecretStoreTokens),
+        Box::new(SecretStoreTokens::new(secrets, log)),
         Box::new(ChannelWindow::new(channel)),
         Box::new(SystemClocks),
     )
@@ -199,6 +206,13 @@ fn daemon_access() -> Result<Arc<DaemonAccess>, String> {
     ))
 }
 
+/// Tells the shell that the main window's page is gone ([`ShellHandle::window_gone`]).
+fn window_gone<R: tauri::Runtime>(from: &impl Manager<R>) {
+    if let Some(shell) = from.try_state::<Arc<ShellHandle>>() {
+        shell.window_gone();
+    }
+}
+
 /// How long the event pump waits before it connects again when the stream ends.
 const EVENT_RETRY: Duration = Duration::from_secs(1);
 
@@ -215,9 +229,28 @@ pub fn run() {
             let shell_access = Arc::clone(&access);
             let shell_channel = Arc::clone(&channel);
             let picker = DialogPicker(app.handle().clone());
-            app.manage(Arc::new(ShellHandle::spawn(move || {
-                build_shell(shell_channel, shell_access, Box::new(picker))
-            })));
+            // The only place the keychain is chosen: a daemon root that is overridden gets a store in memory.
+            let secrets = secret_store_for_root(std::env::var(ROOT_ENV).ok().as_deref());
+            let shell = Arc::new(ShellHandle::spawn(move || {
+                build_shell(
+                    shell_channel,
+                    shell_access,
+                    Box::new(picker),
+                    secrets,
+                    stderr_log(),
+                )
+            }));
+            app.manage(Arc::clone(&shell));
+            // The listener starts on a thread of its own: it asks the daemon for the port, which may start the daemon.
+            let ports = DaemonPortStore::new(Arc::clone(&access));
+            thread::Builder::new()
+                .name("collide-endpoint-start".into())
+                .spawn(
+                    move || match EndpointServer::start(&ports, shell, stderr_log()) {
+                        Ok(server) => server.wait(),
+                        Err(message) => eprintln!("collide: {message}"),
+                    },
+                )?;
             // The pump lives as long as the app does, so its stop flag is never set.
             thread::Builder::new()
                 .name("collide-events".into())
@@ -226,6 +259,18 @@ pub fn run() {
                     pump_daemon_events(&access, channel.as_ref(), &stop, EVENT_RETRY);
                 })?;
             Ok(())
+        })
+        // The page that was going to answer the endpoint's calls is gone when the window closes or reloads.
+        .on_window_event(|window, event| {
+            if window.label() == MAIN_WINDOW && matches!(event, tauri::WindowEvent::Destroyed) {
+                window_gone(window);
+            }
+        })
+        .on_page_load(|webview, payload| {
+            let started = payload.event() == tauri::webview::PageLoadEvent::Started;
+            if webview.label() == MAIN_WINDOW && started {
+                window_gone(webview);
+            }
         })
         .invoke_handler(tauri::generate_handler![rpc])
         .run(tauri::generate_context!())

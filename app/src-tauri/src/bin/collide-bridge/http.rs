@@ -1,34 +1,16 @@
-//! Just enough HTTP/1.1 for the bridge: one request a connection, `Connection: close`, no chunked bodies, no
-//! keep-alive. Nothing but `std` is used, so the bridge adds no dependency.
+//! The bridge's policy over the HTTP of `collide_app::http` (the reader and writer the UI-tools endpoint shares).
 //!
 //! The policy is the S6 record's endpoint checks, and a token: a foreign `Host` is refused (DNS rebinding), a foreign
 //! `Origin` is refused, a call has to carry the run's token as a bearer, and a body has to say it is JSON, so a browser
 //! has to preflight and a preflight is never answered.
 
-use std::io::{self, Read, Write};
+use collide_app::http::{self as shared, ReadError};
+pub use collide_app::http::{Request, write_response};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// The most a request's head may hold, and the most its body may.
-const MAX_HEAD: usize = 16 * 1024;
+/// The most a request's body may hold.
 const MAX_BODY: usize = 1024 * 1024;
-
-pub struct Request {
-    pub method: String,
-    /// The target without its query.
-    pub path: String,
-    headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
-}
-
-impl Request {
-    /// The value of a header, by its lower-case name.
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.as_str())
-    }
-}
 
 /// Why a request was not answered by the route it asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,66 +36,11 @@ impl Refusal {
     }
 }
 
-/// Reads one request. The head is read up to its blank line, and the body up to its `Content-Length`.
+/// Reads one request (`collide_app::http`). A request that cannot be read, or is too big, is a bad request.
 pub fn read_request(stream: &mut impl Read) -> Result<Request, Refusal> {
-    let mut bytes = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let head_end = loop {
-        if let Some(at) = find(&bytes, b"\r\n\r\n") {
-            break at;
-        }
-        if bytes.len() > MAX_HEAD {
-            return Err(Refusal::BadRequest);
-        }
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return Err(Refusal::BadRequest),
-            Ok(n) => bytes.extend_from_slice(&chunk[..n]),
-        }
-    };
-    let head = std::str::from_utf8(&bytes[..head_end]).map_err(|_| Refusal::BadRequest)?;
-    let mut lines = head.split("\r\n");
-    let mut first = lines.next().unwrap_or_default().split(' ');
-    let (Some(method), Some(target), Some(version), None) =
-        (first.next(), first.next(), first.next(), first.next())
-    else {
-        return Err(Refusal::BadRequest);
-    };
-    if !version.starts_with("HTTP/1.") {
-        return Err(Refusal::BadRequest);
-    }
-    let headers: Vec<(String, String)> = lines
-        .map(|line| {
-            let (name, value) = line.split_once(':').ok_or(Refusal::BadRequest)?;
-            Ok((name.trim().to_ascii_lowercase(), value.trim().to_string()))
-        })
-        .collect::<Result<_, Refusal>>()?;
-    let length = match headers.iter().find(|(name, _)| name == "content-length") {
-        None => 0,
-        Some((_, value)) => value.parse::<usize>().map_err(|_| Refusal::BadRequest)?,
-    };
-    if length > MAX_BODY {
-        return Err(Refusal::BadRequest);
-    }
-    let mut body = bytes[head_end + 4..].to_vec();
-    while body.len() < length {
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return Err(Refusal::BadRequest),
-            Ok(n) => body.extend_from_slice(&chunk[..n]),
-        }
-    }
-    body.truncate(length);
-    Ok(Request {
-        method: method.to_string(),
-        path: target.split('?').next().unwrap_or_default().to_string(),
-        headers,
-        body,
+    shared::read_request(stream, MAX_BODY).map_err(|error| match error {
+        ReadError::Malformed | ReadError::TooLarge => Refusal::BadRequest,
     })
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }
 
 /// Who may call: the `Host` names the bridge's own loopback address, and the token is the one made for this run.
@@ -174,31 +101,6 @@ fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
-/// Writes one response. `extra` are headers added to the ones every response has (a name and a value, with no line
-/// break in either).
-pub fn write_response(
-    stream: &mut impl Write,
-    status: (u16, &str),
-    content_type: &str,
-    extra: &[(&str, &str)],
-    body: &[u8],
-) -> io::Result<()> {
-    write!(
-        stream,
-        "HTTP/1.1 {} {}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\
-         Connection: close\r\n",
-        status.0,
-        status.1,
-        body.len()
-    )?;
-    for (name, value) in extra {
-        write!(stream, "{name}: {value}\r\n")?;
-    }
-    stream.write_all(b"\r\n")?;
-    stream.write_all(body)?;
-    stream.flush()
-}
-
 /// The file of the page that `path` names, below `dir`. `/` is the page itself. A path with a dot-dot, a percent escape
 /// or a backslash names nothing.
 pub fn file_for(dir: &Path, path: &str) -> Option<PathBuf> {
@@ -248,21 +150,8 @@ mod tests {
     }
 
     #[test]
-    fn a_request_is_read_with_its_headers_and_body_and_no_query() {
-        let request = call("127.0.0.1:9", "Content-Type: application/json\r\n");
-        assert_eq!(request.method, "POST");
-        assert_eq!(request.path, "/rpc");
-        assert_eq!(request.header("content-type"), Some("application/json"));
-        assert_eq!(request.body, b"{}");
-    }
-
-    #[test]
-    fn a_request_that_is_not_http_or_is_too_big_is_refused() {
+    fn a_request_that_is_not_http_or_is_too_big_is_a_bad_request() {
         assert_eq!(parse("nonsense\r\n\r\n").err(), Some(Refusal::BadRequest));
-        assert_eq!(
-            parse("GET / HTTP/1.1\r\nHost").err(),
-            Some(Refusal::BadRequest)
-        );
         let big = format!(
             "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
             MAX_BODY + 1
@@ -340,19 +229,6 @@ mod tests {
             check_json(&call("127.0.0.1:9", "")),
             Err(Refusal::UnsupportedMediaType)
         );
-    }
-
-    #[test]
-    fn a_response_carries_the_extra_headers_it_is_given() {
-        let mut bytes = Vec::new();
-        let extra = [("Content-Security-Policy", "default-src 'none'")];
-        write_response(&mut bytes, (200, "OK"), "text/html", &extra, b"page").unwrap();
-        let text = String::from_utf8(bytes).unwrap();
-        assert!(
-            text.contains("\r\nContent-Security-Policy: default-src 'none'\r\n"),
-            "{text}"
-        );
-        assert!(text.ends_with("\r\n\r\npage"), "{text}");
     }
 
     #[test]

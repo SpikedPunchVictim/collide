@@ -16,9 +16,10 @@
 //! records the link: the bridge never opens one, and a test reads what was asked with `GET /opened`.
 //!
 //! It listens on the loopback only, on a port the system picks. It refuses a foreign `Host` or `Origin`, a call
-//! without the token it made for this run, and a body that is not JSON (`http.rs`). It prints one line when it listens,
-//! `listening <port> <token>`, and ends on `POST /shutdown` or when its `--parent` process is gone: it stops the runs
-//! that are live, then the daemon, so no process of the test is left behind.
+//! without the token it made for this run, and a body that is not JSON (`http.rs`). It prints a line when it listens,
+//! `listening <port> <token>`, and a second, `ui-tools <port>`, for the UI-tools endpoint it hosts as the app does
+//! (`collide_app::endpoint`), on a port of its own. It ends on `POST /shutdown` or when its `--parent` process is gone:
+//! it stops the runs that are live, then the daemon, so no process of the test is left behind.
 //!
 //! ```text
 //! collide-bridge --root <dir> --shell <login shell> --static <built page> [--parent <pid>]
@@ -27,6 +28,7 @@
 mod daemon;
 mod http;
 
+use collide_app::endpoint::{EndpointServer, MemoryPortStore, stderr_log};
 use collide_app::shell::{
     ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, RecordingOpener, Shell, ShellHandle,
     SocketLink, pump_daemon_events,
@@ -34,7 +36,8 @@ use collide_app::shell::{
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::SystemClocks;
 use collide_host::daemon::DaemonPaths;
-use collide_host::ui_tools::{EndpointTokens, UiToolsEndpoint};
+use collide_host::secret_store::{MemorySecretStore, SecretStore};
+use collide_host::ui_tools::{SecretStoreTokens, UiToolsEndpoint};
 use daemon::ChildDaemon;
 use http::{Policy, Refusal, Request};
 use serde::Deserialize;
@@ -113,19 +116,6 @@ fn make_token() -> Result<String, String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// The endpoint token of the UI-tools endpoint, kept in memory. The bridge never touches the keychain.
-struct MemoryToken(String);
-
-impl EndpointTokens for MemoryToken {
-    fn current(&self) -> String {
-        self.0.clone()
-    }
-
-    fn rotate(&mut self) -> String {
-        self.0.clone()
-    }
-}
-
 /// The event channel of the bridge: what the shell and the pump emit goes to each page that listens, as a line of JSON.
 #[derive(Default)]
 struct Hub {
@@ -156,7 +146,7 @@ impl EventChannel for Hub {
 }
 
 struct Bridge {
-    shell: ShellHandle,
+    shell: Arc<ShellHandle>,
     hub: Arc<Hub>,
     opener: RecordingOpener,
     csp: String,
@@ -358,15 +348,16 @@ fn main() -> ExitCode {
 
     let shell_access = Arc::clone(&access);
     let shell_hub = Arc::clone(&hub);
-    let shell_token = token.clone();
+    // The UI-tools endpoint's token is kept in memory, as the keychain is never touched.
+    let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::default());
     let opener = RecordingOpener::default();
     let shell_opener = opener.clone();
-    let shell = ShellHandle::spawn(move || {
+    let shell = Arc::new(ShellHandle::spawn(move || {
         // The manifest is empty, as the app's is until Stage 6 writes the real one.
         let endpoint = UiToolsEndpoint::new(
             0,
             ToolManifest(Vec::new()),
-            Box::new(MemoryToken(shell_token)),
+            Box::new(SecretStoreTokens::new(secrets, stderr_log())),
             Box::new(ChannelWindow::new(shell_hub)),
             Box::new(SystemClocks),
         )
@@ -376,7 +367,16 @@ fn main() -> ExitCode {
             Box::new(SocketLink::new(shell_access)),
             Box::new(shell_opener),
         )
-    });
+    }));
+    // The same listener as the app's, on a port the system picks, kept in memory for this run.
+    let endpoint = match EndpointServer::start(
+        &MemoryPortStore::default(),
+        Arc::clone(&shell),
+        stderr_log(),
+    ) {
+        Ok(server) => server,
+        Err(message) => return fail(&message),
+    };
 
     let pump_hub = Arc::clone(&hub);
     let pump_stop = Arc::clone(&stop_pump);
@@ -408,6 +408,7 @@ fn main() -> ExitCode {
     }
 
     println!("listening {port} {token}");
+    println!("ui-tools {}", endpoint.port());
     let _ = std::io::stdout().flush();
     for stream in listener.incoming().flatten() {
         let bridge = Arc::clone(&bridge);

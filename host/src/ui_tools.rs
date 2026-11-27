@@ -1,7 +1,8 @@
 //! The UI-tools request handler (0.2, The UI-tools endpoint; 0.9, an agent's tool inputs are untrusted; ts-0035-re),
 //! as pure code over small traits, so a test uses a fake clock and a fake window and no real HTTP listener. The
-//! listener, and the endpoint token's place in the OS keychain, are Stage 6b's: the shell reads a request into an
-//! [`HttpRequest`], calls [`UiToolsEndpoint::handle`], and writes the [`HttpResponse`] that comes back.
+//! listener is the shell's (`app/src-tauri/src/endpoint.rs`, ts-0199-xz): it reads a request into an
+//! [`HttpRequest`], calls [`UiToolsEndpoint::handle`], and writes the [`HttpResponse`] that comes back. The endpoint
+//! token lives in the OS keychain ([`SecretStoreTokens`]).
 //!
 //! ## What the handler decides
 //!
@@ -10,7 +11,8 @@
 //! 1. refuses a repeated `Host`, `Origin`, `Content-Type` or `Authorization` header (400), a `Host` that is not
 //!    `127.0.0.1:<port>` or `localhost:<port>` (403) and an `Origin`, when there is one, that is not
 //!    `http://127.0.0.1:<port>` or `http://localhost:<port>` (403);
-//! 2. refuses a path other than `/mcp` and `/mcp/<token>` (404), and a token that is missing or wrong (401). The
+//! 2. refuses a path other than `/mcp` and `/mcp/<token>` (404), a token that is missing or wrong (401), and every
+//!    call when the endpoint token cannot be read or made (503, with the reason in the log). The
 //!    token is `Authorization: Bearer <token>`, or the last path segment when there is no header; a header that is
 //!    wrong is not rescued by a good path. A token is the endpoint token (a client of 0.7, the caller `external`) or
 //!    an ask's ([`UiToolsEndpoint::register_ask`], the caller is the ask). Every candidate is compared with
@@ -40,7 +42,12 @@
 //! An ask makes at most [`MAX_SCREEN_CHANGING_CALLS`] screen-changing calls (0.9). A call is screen-changing unless
 //! the manifest marks its tool read-only ([`ToolManifest::is_read_only`]), so a tool the manifest does not hold counts.
 //! The count lives here, not in the window, so a reload does not reset it, and a call that does not reach a window
-//! is not counted. A client of the endpoint token has no ask and no cap.
+//! is not counted.
+//!
+//! A client of the endpoint token has no ask and no per-ask cap. Its limit is shared by every such client (0.7): at
+//! most [`MAX_EXTERNAL_CALLS`] screen-changing calls in a rolling [`EXTERNAL_CALL_WINDOW_SECS`], counted here on the
+//! uptime clock. The call over the limit fails with a text that says how long to wait, and is not counted. An ask's
+//! calls are never counted against it.
 //!
 //! ## Asks and the window
 //!
@@ -56,23 +63,26 @@
 //! ([`collide_core::ui_tools::UiToolsMethod`], and an unknown one is `METHOD_NOT_FOUND`) and none is forwarded to the
 //! daemon; anything else is [`Rpc::Forward`].
 //!
-//! | tag | function | what it does |
-//! |---|---|---|
-//! | `ui_tools: endpoint token store` | [`SecretStoreTokens`] | the endpoint token in the OS keychain: made at first use, read, and rotated |
+//! The tag `ui_tools: endpoint token store` is filled by [`SecretStoreTokens`] (ts-0199-xz): the endpoint token in the
+//! keychain, made at first use, read, and rotated.
 
 use crate::clock::{Clock, Clocks, Reading};
+use crate::secret_store::{Secret, SecretStore, SecretStoreError};
 use collide_core::ask::AskCancelParams;
 use collide_core::non_empty::NonEmpty;
 use collide_core::owner::{Request, RequestId, Response, RpcError, code, tokens_match};
 use collide_core::ui_tools::{
-    EXTERNAL_CALLER, MAX_SCREEN_CHANGING_CALLS, ManifestProblem, NO_WINDOW_TEXT,
-    REQUEST_DEADLINE_SECS, TIMEOUT_TEXT, ToolManifest, UiToolsMethod, UiToolsReplyParams,
-    UiToolsRequest, UiToolsRotateParams, UiToolsRotateResult, UiToolsTokenParams,
-    UiToolsTokenResult,
+    EXTERNAL_CALL_WINDOW_SECS, EXTERNAL_CALLER, MAX_EXTERNAL_CALLS, MAX_SCREEN_CHANGING_CALLS,
+    ManifestProblem, NO_WINDOW_TEXT, REQUEST_DEADLINE_SECS, TIMEOUT_TEXT, ToolManifest,
+    UiToolsMethod, UiToolsReplyParams, UiToolsRequest, UiToolsRotateParams, UiToolsRotateResult,
+    UiToolsTokenParams, UiToolsTokenResult,
 };
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
+use std::io::{self, Read};
+use std::sync::Arc;
 
 /// The largest body the handler reads, in bytes: 1 MB (0.2).
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -174,6 +184,8 @@ pub enum AskRegistration {
     DuplicateId(String),
     EmptyToken,
     TokenInUse,
+    /// The endpoint token cannot be read, so it cannot be told apart from the ask's.
+    TokenStoreFailed,
 }
 
 impl fmt::Display for AskRegistration {
@@ -194,6 +206,12 @@ impl fmt::Display for AskRegistration {
                     "the ask's token is already the endpoint's or another ask's"
                 )
             }
+            AskRegistration::TokenStoreFailed => {
+                write!(
+                    f,
+                    "the endpoint token cannot be read, so no ask is registered"
+                )
+            }
         }
     }
 }
@@ -210,24 +228,100 @@ pub trait Window {
     fn send(&mut self, event: UiToolsRequest);
 }
 
-/// The endpoint token (0.2): 32 random bytes in the OS keychain, made at first use. The handler asks for it on every
-/// request, so a rotation ends the old token at once; the real store may cache it.
-pub trait EndpointTokens {
-    fn current(&self) -> String;
-    /// Makes a new token, keeps it in place of the old and returns it.
-    fn rotate(&mut self) -> String;
+/// Why the endpoint token cannot be read or made. The words say what failed and never hold a token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenFailure(pub String);
+
+impl fmt::Display for TokenFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
-/// The real [`EndpointTokens`], in the keychain. Stage 6b builds it on [`crate::secret_store::SecretStore`].
-pub struct SecretStoreTokens;
+impl std::error::Error for TokenFailure {}
 
-impl EndpointTokens for SecretStoreTokens {
-    fn current(&self) -> String {
-        todo!("ui_tools: endpoint token store")
+/// The endpoint token (0.2): 32 random bytes in the OS keychain, made at first use. The handler asks for it on every
+/// request, so a rotation ends the old token at once; the real store caches it. A store that fails is an error, and
+/// the handler then refuses every call.
+pub trait EndpointTokens {
+    fn current(&self) -> Result<String, TokenFailure>;
+    /// Makes a new token, keeps it in place of the old and returns it. A failure keeps the old one.
+    fn rotate(&mut self) -> Result<String, TokenFailure>;
+}
+
+/// The keychain item the endpoint token is kept under.
+pub const ENDPOINT_TOKEN_ITEM: &str = "ui_tools.endpoint_token";
+
+/// How many random bytes the endpoint token has (0.2).
+const TOKEN_BYTES: usize = 32;
+
+/// A token of [`TOKEN_BYTES`] random bytes from the system, as lower-case hex.
+pub fn random_token() -> io::Result<String> {
+    let mut bytes = [0u8; TOKEN_BYTES];
+    std::fs::File::open("/dev/urandom").and_then(|mut random| random.read_exact(&mut bytes))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// The real [`EndpointTokens`], over a [`SecretStore`] (the keychain in the app, memory in a test). The token is made
+/// the first time it is asked for and kept under [`ENDPOINT_TOKEN_ITEM`], so the next start reads the same one. A
+/// failure of the store is told once to `log`, as a plain line that holds no token.
+pub struct SecretStoreTokens {
+    store: Arc<dyn SecretStore>,
+    log: Arc<dyn Fn(&str) + Send + Sync>,
+    cached: RefCell<Option<String>>,
+}
+
+impl SecretStoreTokens {
+    pub fn new(store: Arc<dyn SecretStore>, log: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
+        SecretStoreTokens {
+            store,
+            log,
+            cached: RefCell::new(None),
+        }
     }
 
-    fn rotate(&mut self) -> String {
-        todo!("ui_tools: endpoint token store")
+    /// The token in the store, or a new one that is kept there when the store has none.
+    fn read_or_make(&self) -> Result<String, TokenFailure> {
+        match self.store.get(ENDPOINT_TOKEN_ITEM) {
+            Ok(secret) if !secret.expose().is_empty() => Ok(secret.expose().to_string()),
+            Ok(_) | Err(SecretStoreError::NotFound { .. }) => self.make_and_keep(),
+            Err(error) => Err(TokenFailure(error.to_string())),
+        }
+    }
+
+    fn make_and_keep(&self) -> Result<String, TokenFailure> {
+        let token = random_token()
+            .map_err(|error| TokenFailure(format!("could not read random bytes: {error}")))?;
+        self.store
+            .set(ENDPOINT_TOKEN_ITEM, &Secret::new(token.clone()))
+            .map_err(|error| TokenFailure(error.to_string()))?;
+        Ok(token)
+    }
+
+    fn told(&self, result: Result<String, TokenFailure>) -> Result<String, TokenFailure> {
+        if let Err(failure) = &result {
+            (self.log)(&format!(
+                "collide: the UI-tools endpoint token is unavailable, so the endpoint refuses every call: {failure}"
+            ));
+        }
+        result
+    }
+}
+
+impl EndpointTokens for SecretStoreTokens {
+    fn current(&self) -> Result<String, TokenFailure> {
+        if let Some(token) = self.cached.borrow().as_ref() {
+            return Ok(token.clone());
+        }
+        let token = self.told(self.read_or_make())?;
+        *self.cached.borrow_mut() = Some(token.clone());
+        Ok(token)
+    }
+
+    fn rotate(&mut self) -> Result<String, TokenFailure> {
+        let token = self.told(self.make_and_keep())?;
+        *self.cached.borrow_mut() = Some(token.clone());
+        Ok(token)
     }
 }
 
@@ -261,6 +355,9 @@ pub struct UiToolsEndpoint {
     asks: BTreeMap<String, AskState>,
     pending: Vec<PendingCall>,
     next_request: u64,
+    /// The uptime, in nanoseconds, of each screen-changing call of the endpoint token in the last
+    /// [`EXTERNAL_CALL_WINDOW_SECS`], oldest first.
+    external_calls: VecDeque<u64>,
 }
 
 impl UiToolsEndpoint {
@@ -283,7 +380,14 @@ impl UiToolsEndpoint {
             asks: BTreeMap::new(),
             pending: Vec::new(),
             next_request: 0,
+            external_calls: VecDeque::new(),
         })
+    }
+
+    /// The port the listener got, which `Host` and `Origin` must name. The shell tells it once the listener is bound,
+    /// because a first start lets the system pick the port.
+    pub fn set_port(&mut self, port: u16) {
+        self.port = port;
     }
 
     /// Registers an ask and its token, which the shell made when it forwarded `ask.start`.
@@ -300,7 +404,11 @@ impl UiToolsEndpoint {
         if token.is_empty() {
             return Err(AskRegistration::EmptyToken);
         }
-        let in_use = tokens_match(token, &self.tokens.current())
+        let endpoint_token = self
+            .tokens
+            .current()
+            .map_err(|_| AskRegistration::TokenStoreFailed)?;
+        let in_use = tokens_match(token, &endpoint_token)
             || self
                 .asks
                 .values()
@@ -417,21 +525,29 @@ impl UiToolsEndpoint {
             },
             UiToolsMethod::Token => match serde_json::from_value::<UiToolsTokenParams>(params) {
                 Err(error) => invalid(error),
-                Ok(UiToolsTokenParams {}) => {
-                    let result = UiToolsTokenResult {
-                        token: self.tokens.current(),
-                    };
-                    RpcHandled::answered(id, serde_json::to_value(result).expect(RESULT_IS_JSON))
-                }
+                Ok(UiToolsTokenParams {}) => match self.tokens.current() {
+                    Err(failure) => token_unavailable(id, &failure),
+                    Ok(token) => {
+                        let result = UiToolsTokenResult { token };
+                        RpcHandled::answered(
+                            id,
+                            serde_json::to_value(result).expect(RESULT_IS_JSON),
+                        )
+                    }
+                },
             },
             UiToolsMethod::Rotate => match serde_json::from_value::<UiToolsRotateParams>(params) {
                 Err(error) => invalid(error),
-                Ok(UiToolsRotateParams {}) => {
-                    let result = UiToolsRotateResult {
-                        token: self.tokens.rotate(),
-                    };
-                    RpcHandled::answered(id, serde_json::to_value(result).expect(RESULT_IS_JSON))
-                }
+                Ok(UiToolsRotateParams {}) => match self.tokens.rotate() {
+                    Err(failure) => token_unavailable(id, &failure),
+                    Ok(token) => {
+                        let result = UiToolsRotateResult { token };
+                        RpcHandled::answered(
+                            id,
+                            serde_json::to_value(result).expect(RESULT_IS_JSON),
+                        )
+                    }
+                },
             },
         }
     }
@@ -537,7 +653,15 @@ impl UiToolsEndpoint {
         if given.is_empty() {
             return Err(refused());
         }
-        let mut client = tokens_match(given, &self.tokens.current()).then_some(Client::External);
+        let endpoint_token = self.tokens.current().map_err(|_| {
+            Refusal::new(
+                503,
+                code::UNAVAILABLE,
+                "the endpoint token store is not working, so the endpoint refuses every call; \
+                 the reason is in Collide's log",
+            )
+        })?;
+        let mut client = tokens_match(given, &endpoint_token).then_some(Client::External);
         for (ask, state) in &self.asks {
             if tokens_match(given, &state.token) {
                 client = Some(Client::Ask(ask.clone()));
@@ -619,6 +743,17 @@ impl UiToolsEndpoint {
             }
             state.calls += 1;
         }
+        if matches!(client, Client::External)
+            && !self.manifest.is_read_only(tool)
+            && let Some(wait) = self.external_wait()
+        {
+            return fail_with_text(
+                id,
+                &format!(
+                    "external clients may change the screen {MAX_EXTERNAL_CALLS} times a minute; try again in {wait} s"
+                ),
+            );
+        }
         self.next_request += 1;
         let request_id = format!("ui-{}", self.next_request);
         let uptime = self.uptime();
@@ -643,6 +778,28 @@ impl UiToolsEndpoint {
         Handled::Pending { request_id }
     }
 
+    /// Counts one screen-changing call of the endpoint token. `None` when it is within the limit, and counted;
+    /// otherwise the whole seconds, at least 1, until the oldest counted call leaves the window. A refused call is not
+    /// counted.
+    fn external_wait(&mut self) -> Option<u64> {
+        let now = self.uptime().nanos;
+        let window = EXTERNAL_CALL_WINDOW_SECS * NANOS_PER_SEC;
+        while self
+            .external_calls
+            .front()
+            .is_some_and(|at| now.saturating_sub(*at) >= window)
+        {
+            self.external_calls.pop_front();
+        }
+        if self.external_calls.len() >= MAX_EXTERNAL_CALLS as usize {
+            let oldest = self.external_calls.front().copied().unwrap_or(now);
+            let left = (oldest + window).saturating_sub(now);
+            return Some(left.div_ceil(NANOS_PER_SEC).max(1));
+        }
+        self.external_calls.push_back(now);
+        None
+    }
+
     fn uptime(&self) -> Reading {
         self.clocks.read(Clock::Uptime)
     }
@@ -662,6 +819,17 @@ impl RpcHandled {
             completed: Vec::new(),
         }
     }
+}
+
+/// The window asked for the token and the store failed: it is told why.
+fn token_unavailable(id: RequestId, failure: &TokenFailure) -> RpcHandled {
+    RpcHandled::failed(
+        id,
+        RpcError::new(
+            code::INTERNAL_ERROR,
+            format!("the endpoint token is unavailable: {failure}"),
+        ),
+    )
 }
 
 /// A request's params, with null read as `{}`, the way the owner's methods do.

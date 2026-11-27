@@ -271,7 +271,7 @@ fn schema_lists_the_board_config_agents_ask_and_pointer_keys() {
     assert_eq!(keys(&types, "CollidePointer"), ["dir"]);
     assert_eq!(
         keys(&types, "ConfigFile"),
-        ["agents", "ask", "claude", "config", "disk"]
+        ["agents", "ask", "claude", "config", "disk", "ui_tools"]
     );
     assert_eq!(
         keys(&types, "AgentEntry"),

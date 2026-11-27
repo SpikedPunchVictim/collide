@@ -29,6 +29,11 @@
 //! The endpoint holds boxed traits that are not `Send`, so [`ShellHandle`] runs the [`Shell`] on a thread of its own and
 //! takes calls over a channel. A call from the webview waits for its answer.
 //!
+//! The listener of the UI-tools endpoint ([`crate::endpoint`]) reaches the endpoint the same way: [`ShellHandle::http`]
+//! hands the thread one request and waits. A `tools/call` waits there for the window's reply, and the thread looks at
+//! the clock between jobs ([`EXPIRE_TICK`]), so a window that stays silent for 10 s is answered ([`Shell::tick`]).
+//! The window closing or reloading is [`ShellHandle::window_gone`].
+//!
 //! ## The way to the daemon
 //!
 //! [`DaemonAccess`] holds the paths, the start on demand and the rule that ends it. It makes each connection: it tells
@@ -51,9 +56,12 @@ use collide_host::clock::{Clock, Clocks};
 use collide_host::daemon::{DaemonPaths, check_home};
 use collide_host::launch;
 use collide_host::owner_client::{ClientError, Incoming, OwnerClient};
-use collide_host::ui_tools::{Completed, Rpc, UiToolsEndpoint, Window};
+use collide_host::ui_tools::{
+    Completed, Handled, HttpRequest, HttpResponse, Rpc, UiToolsEndpoint, Window,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -796,6 +804,8 @@ pub struct Shell {
     picker: Box<dyn FolderPicker>,
     next_id: i64,
     completed: Vec<Completed>,
+    /// The HTTP clients whose `tools/call` is waiting on the window, by `requestId`.
+    waiting: BTreeMap<String, mpsc::Sender<HttpResponse>>,
 }
 
 impl Shell {
@@ -811,6 +821,7 @@ impl Shell {
             picker: Box::new(NoPicker),
             next_id: 0,
             completed: Vec::new(),
+            waiting: BTreeMap::new(),
         }
     }
 
@@ -820,14 +831,74 @@ impl Shell {
         self
     }
 
-    /// The UI-tools endpoint, for the listener of Stage 6b to feed with HTTP requests.
+    /// The UI-tools endpoint, for `ask.start` to register an ask and its token (ts-0201-us).
     pub fn endpoint_mut(&mut self) -> &mut UiToolsEndpoint {
         &mut self.endpoint
     }
 
-    /// The agent calls the window's `ui_tools.reply` finished since the last call, for the listener to answer.
+    /// The agent calls the window's `ui_tools.reply` finished since the last call, for the shell to hand to the
+    /// clients that wait for them.
     pub fn take_completed(&mut self) -> Vec<Completed> {
         std::mem::take(&mut self.completed)
+    }
+
+    /// Tells the endpoint the port its listener has, which is the one `Host` may name.
+    pub fn set_endpoint_port(&mut self, port: u16) {
+        self.endpoint.set_port(port);
+    }
+
+    /// One HTTP request of the UI-tools endpoint. The answer goes to `reply`: now, or, for a `tools/call` that went to
+    /// the window, when the window replies ([`Shell::rpc`]), when its deadline comes ([`Shell::tick`]) or when the
+    /// window goes ([`Shell::window_gone`]).
+    pub fn http(&mut self, request: &HttpRequest, reply: mpsc::Sender<HttpResponse>) {
+        match self.endpoint.handle(request) {
+            Handled::Response(response) => {
+                let _ = reply.send(response);
+            }
+            Handled::Pending { request_id } => {
+                self.waiting.insert(request_id, reply);
+            }
+        }
+    }
+
+    /// Answers the calls whose deadline has come, and every call that finished since the last look.
+    pub fn tick(&mut self) {
+        let expired = self.endpoint.expire();
+        self.completed.extend(expired);
+        self.deliver();
+    }
+
+    /// The window closed or reloaded: the calls waiting on it are answered, and each live ask is cancelled at the
+    /// daemon (0.2, Asks are cancelled when the window closes or reloads).
+    pub fn window_gone(&mut self) {
+        let gone = self.endpoint.window_gone();
+        self.completed.extend(gone.completed);
+        for cancel in gone.cancel {
+            self.next_id += 1;
+            let request = Request {
+                jsonrpc: JsonRpc2,
+                id: RequestId::Number(self.next_id),
+                method: AskMethod::Cancel.name().to_string(),
+                params: serde_json::to_value(&cancel).expect("an ask.cancel is JSON"),
+            };
+            if let Response::Failure { error, .. } = self.link.call(&request) {
+                eprintln!(
+                    "collide: could not cancel the ask `{}`: {}",
+                    cancel.ask.as_str(),
+                    error.message
+                );
+            }
+        }
+        self.deliver();
+    }
+
+    /// Sends each finished call to the client that waits for it. A call with no client (it hung up) is dropped.
+    fn deliver(&mut self) {
+        for done in std::mem::take(&mut self.completed) {
+            if let Some(reply) = self.waiting.remove(&done.request_id) {
+                let _ = reply.send(done.response);
+            }
+        }
     }
 
     /// One call of the webview's `rpc` command.
@@ -908,11 +979,25 @@ fn answer(response: Response) -> Result<Value, RpcError> {
     }
 }
 
-struct Job {
-    method: String,
-    params: Option<Value>,
-    reply: mpsc::Sender<Result<Value, RpcError>>,
+/// What the shell's thread is asked to do.
+enum Job {
+    /// One call of the webview's `rpc` command, answered on `reply`.
+    Rpc {
+        method: String,
+        params: Option<Value>,
+        reply: mpsc::Sender<Result<Value, RpcError>>,
+    },
+    /// Something to run on the shell.
+    Run(Box<dyn FnOnce(&mut Shell) + Send>),
 }
+
+/// How often the shell's thread looks at the clock when it has no job: a `tools/call` whose window is silent is
+/// answered within this much of its 10 s.
+pub const EXPIRE_TICK: Duration = Duration::from_millis(250);
+
+/// How long [`ShellHandle::http`] waits for the shell's thread, which is longer than any `tools/call` waits for the
+/// window (10 s), so only a shell that is stuck or gone fails a request.
+const HTTP_WAIT: Duration = Duration::from_secs(30);
 
 /// A [`Shell`] on a thread of its own, callable from any thread.
 pub struct ShellHandle {
@@ -921,16 +1006,27 @@ pub struct ShellHandle {
 
 impl ShellHandle {
     /// Starts the thread, which builds the shell with `make` (so the shell never crosses threads) and answers calls
-    /// until the handle is dropped.
+    /// until the handle is dropped. Between jobs it runs [`Shell::tick`] every [`EXPIRE_TICK`].
     pub fn spawn(make: impl FnOnce() -> Shell + Send + 'static) -> ShellHandle {
         let (jobs, inbox) = mpsc::channel::<Job>();
         thread::Builder::new()
             .name("collide-shell".into())
             .spawn(move || {
                 let mut shell = make();
-                for job in inbox {
-                    let answer = shell.rpc(&job.method, job.params);
-                    let _ = job.reply.send(answer);
+                loop {
+                    match inbox.recv_timeout(EXPIRE_TICK) {
+                        Ok(Job::Rpc {
+                            method,
+                            params,
+                            reply,
+                        }) => {
+                            let _ = reply.send(shell.rpc(&method, params));
+                        }
+                        Ok(Job::Run(job)) => job(&mut shell),
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                    shell.tick();
                 }
             })
             .expect("start the shell's thread");
@@ -939,21 +1035,67 @@ impl ShellHandle {
         }
     }
 
-    /// Makes one call and waits for its answer. A shell thread that has stopped (a panic in its link) fails the call.
-    pub fn rpc(&self, method: String, params: Option<Value>) -> Result<Value, RpcError> {
-        let (reply, answer) = mpsc::channel();
+    fn send(&self, job: Job) -> Result<(), RpcError> {
         let sent = self
             .jobs
             .lock()
             .expect("the shell's job queue lock")
-            .send(Job {
-                method,
-                params,
-                reply,
-            });
-        let stopped = || RpcError::new(code::INTERNAL_ERROR, "the shell's rpc thread has stopped");
-        sent.map_err(|_| stopped())?;
-        answer.recv().map_err(|_| stopped())?
+            .send(job);
+        sent.map_err(|_| RpcError::new(code::INTERNAL_ERROR, "the shell's rpc thread has stopped"))
+    }
+
+    /// Makes one call and waits for its answer. A shell thread that has stopped (a panic in its link) fails the call.
+    pub fn rpc(&self, method: String, params: Option<Value>) -> Result<Value, RpcError> {
+        let (reply, answer) = mpsc::channel();
+        self.send(Job::Rpc {
+            method,
+            params,
+            reply,
+        })?;
+        answer.recv().map_err(|_| {
+            RpcError::new(code::INTERNAL_ERROR, "the shell's rpc thread has stopped")
+        })?
+    }
+
+    /// Hands the UI-tools endpoint one HTTP request and waits for its answer ([`Shell::http`]). A `tools/call` waits
+    /// for the window. A shell that is gone or stuck gives a 503.
+    pub fn http(&self, request: HttpRequest) -> HttpResponse {
+        let (reply, answer) = mpsc::channel();
+        let sent = self.send(Job::Run(Box::new(move |shell| shell.http(&request, reply))));
+        match sent.map(|()| answer.recv_timeout(HTTP_WAIT)) {
+            Ok(Ok(response)) => response,
+            _ => unavailable_response(),
+        }
+    }
+
+    /// Tells the shell the window closed or reloaded ([`Shell::window_gone`]). It does not wait: the cancel of an ask
+    /// is a call to the daemon.
+    pub fn window_gone(&self) {
+        let _ = self.send(Job::Run(Box::new(Shell::window_gone)));
+    }
+
+    /// Tells the endpoint the port its listener has, and waits until it knows ([`Shell::set_endpoint_port`]).
+    pub fn set_endpoint_port(&self, port: u16) -> Result<(), RpcError> {
+        let (done, told) = mpsc::channel();
+        self.send(Job::Run(Box::new(move |shell| {
+            shell.set_endpoint_port(port);
+            let _ = done.send(());
+        })))?;
+        told.recv()
+            .map_err(|_| RpcError::new(code::INTERNAL_ERROR, "the shell's rpc thread has stopped"))
+    }
+}
+
+/// What a client gets when the shell's thread does not answer.
+fn unavailable_response() -> HttpResponse {
+    let error = RpcError::new(
+        code::UNAVAILABLE,
+        "Collide did not answer; try again in a moment",
+    );
+    HttpResponse {
+        status: 503,
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: serde_json::to_vec(&Response::failure(None, error)).expect("an error is JSON"),
     }
 }
 

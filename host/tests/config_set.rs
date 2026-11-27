@@ -791,3 +791,54 @@ fn a_board_id_that_is_not_a_safe_name_is_refused() {
     );
     assert!(!rig.fixture.home().join(".config/escape").exists());
 }
+
+// ---- ui_tools.port (ts-0199-xz): the port of the UI-tools endpoint, kept in the user's file ----
+
+#[test]
+fn the_ui_tools_port_is_written_to_the_users_file_and_read_back_as_a_number() {
+    let rig = rig();
+    let result = rig.user(None, "ui_tools.port", json!(51234)).unwrap();
+    assert_eq!(result.entry.value, Some(json!(51234)));
+    assert_eq!(result.entry.layer, SettingLayer::User);
+    assert_eq!(rig.user_file("config.yaml"), "ui_tools:\n  port: 51234\n");
+    let got = rig.get(None, "ui_tools.port").entries.remove(0);
+    assert_eq!(
+        (got.value, got.layer),
+        (Some(json!(51234)), SettingLayer::User)
+    );
+}
+
+#[test]
+fn a_ui_tools_port_that_is_not_a_port_above_1023_is_refused_naming_the_key() {
+    let rig = rig();
+    for value in [
+        json!(80),
+        json!(1023),
+        json!(65536),
+        json!("seven"),
+        json!(-1),
+    ] {
+        let (code, message) = rig.user(None, "ui_tools.port", value.clone()).unwrap_err();
+        assert_eq!(code, code::INVALID_PARAMS, "{value}");
+        assert!(message.contains("ui_tools.port"), "{message}");
+    }
+    assert_eq!(rig.user_file("config.yaml"), "");
+}
+
+#[test]
+fn the_ui_tools_port_is_the_users_alone_a_repo_write_is_refused() {
+    let rig = rig();
+    let board = rig.board_with_ferry();
+    let (code, message) = rig
+        .set(&params(
+            Some(&board),
+            "ui_tools.port",
+            json!(51234),
+            ConfigWriteLayer::Repo,
+            false,
+        ))
+        .unwrap_err();
+    assert_eq!(code, code::CONFLICT);
+    assert!(message.contains("ui_tools.port"), "{message}");
+    assert_eq!(rig.user_file("config.yaml"), "");
+}

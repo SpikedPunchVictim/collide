@@ -92,7 +92,8 @@ fn with_no_key_every_setting_of_collides_own_is_listed_with_its_layer() {
          ask.timeout_s = <not set>  (default)\n\
          ask.budget_usd = <not set>  (default)\n\
          disk.floor_gib = 5  (default)\n\
-         claude.check_published = true  (default)\n"
+         claude.check_published = true  (default)\n\
+         ui_tools.port = <not set>  (default)\n"
     );
 }
 

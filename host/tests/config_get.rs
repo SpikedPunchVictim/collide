@@ -60,12 +60,13 @@ fn value_and_layer(result: &ConfigGetResult, key: &str) -> (Option<Value>, Setti
     (found.value, found.layer)
 }
 
-const COLLIDE_KEYS: [&str; 5] = [
+const COLLIDE_KEYS: [&str; 6] = [
     "ask.agent",
     "ask.timeout_s",
     "ask.budget_usd",
     "disk.floor_gib",
     "claude.check_published",
+    "ui_tools.port",
 ];
 
 // ---- no board: the user's layers ----
@@ -293,7 +294,7 @@ fn a_packs_keys_show_as_pack_dot_key_and_its_defaults_say_default() {
     let result = get(&fixture, &params(Some(&board), None, None));
     let keys: Vec<&str> = result.entries.iter().map(|e| e.key.as_str()).collect();
     assert_eq!(
-        &keys[5..],
+        &keys[6..],
         [
             "collide/plan.layout",
             "collide/plan.roles",

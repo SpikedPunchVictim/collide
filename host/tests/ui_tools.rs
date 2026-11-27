@@ -4,16 +4,20 @@
 
 use collide_core::owner::{Request, RequestId, Response, code};
 use collide_core::ui_tools::{
-    MAX_SCREEN_CHANGING_CALLS, NO_WINDOW_TEXT, TIMEOUT_TEXT, ToolManifest, UiToolsRequest,
+    MAX_EXTERNAL_CALLS, MAX_SCREEN_CHANGING_CALLS, NO_WINDOW_TEXT, TIMEOUT_TEXT, ToolManifest,
+    UiToolsRequest,
 };
 use collide_host::clock::{Clock, Clocks, Reading};
+use collide_host::secret_store::{MemorySecretStore, Secret, SecretStore, SecretStoreError};
 use collide_host::ui_tools::{
-    EndpointTokens, Handled, HttpRequest, HttpResponse, MAX_BODY_BYTES, Rpc, SecretStoreTokens,
-    UiToolsEndpoint, Window,
+    AskRegistration, ENDPOINT_TOKEN_ITEM, EndpointTokens, Handled, HttpRequest, HttpResponse,
+    MAX_BODY_BYTES, Rpc, SecretStoreTokens, TokenFailure, UiToolsEndpoint, Window,
 };
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 mod common;
 
@@ -86,14 +90,14 @@ impl FakeTokens {
 }
 
 impl EndpointTokens for FakeTokens {
-    fn current(&self) -> String {
-        self.0.borrow().0.clone()
+    fn current(&self) -> Result<String, TokenFailure> {
+        Ok(self.0.borrow().0.clone())
     }
-    fn rotate(&mut self) -> String {
+    fn rotate(&mut self) -> Result<String, TokenFailure> {
         let mut state = self.0.borrow_mut();
         state.1 += 1;
         state.0 = format!("rotated-token-{:04}", state.1);
-        state.0.clone()
+        Ok(state.0.clone())
     }
 }
 
@@ -605,12 +609,131 @@ fn a_call_that_never_reached_a_window_is_not_counted() {
 }
 
 #[test]
-fn a_call_from_an_endpoint_token_client_has_no_cap_and_is_external() {
+fn a_call_from_an_endpoint_token_client_is_external_and_has_no_ask_to_count_against() {
     let mut rig = rig();
-    for n in 0..25 {
+    for n in 0..i64::from(MAX_EXTERNAL_CALLS) {
         pending(rig.endpoint.handle(&post(&call("open", n))));
     }
     assert!(rig.window.sent().iter().all(|e| e.caller == "external"));
+}
+
+// ---- the limit of the endpoint token's clients (0.7) ------------------------------------------------------------
+
+fn external_call(rig: &mut Rig, tool: &str, id: i64) -> Handled {
+    rig.endpoint.handle(&post(&call(tool, id)))
+}
+
+fn fill_the_external_limit(rig: &mut Rig) {
+    for n in 0..i64::from(MAX_EXTERNAL_CALLS) {
+        pending(external_call(rig, "open", n));
+    }
+}
+
+#[test]
+fn the_21st_screen_changing_call_of_the_endpoint_token_in_a_minute_is_refused_with_the_wait() {
+    let mut rig = rig();
+    fill_the_external_limit(&mut rig);
+    let refused = response(external_call(&mut rig, "open", 100));
+    assert_eq!(
+        tool_failure_text(&refused),
+        "external clients may change the screen 20 times a minute; try again in 60 s"
+    );
+    assert_eq!(
+        rig.window.sent().len(),
+        20,
+        "the refused call reached the window"
+    );
+}
+
+#[test]
+fn the_wait_is_what_is_left_of_the_minute_rounded_up() {
+    let mut rig = rig();
+    fill_the_external_limit(&mut rig);
+    rig.clocks.advance_ms(42_500);
+    let refused = response(external_call(&mut rig, "open", 100));
+    assert!(
+        tool_failure_text(&refused).ends_with("try again in 18 s"),
+        "{}",
+        tool_failure_text(&refused)
+    );
+}
+
+#[test]
+fn the_limit_is_rolling_a_call_is_allowed_again_when_the_oldest_leaves_the_minute() {
+    let mut rig = rig();
+    pending(external_call(&mut rig, "open", 0));
+    rig.clocks.advance_ms(30_000);
+    for n in 1..i64::from(MAX_EXTERNAL_CALLS) {
+        pending(external_call(&mut rig, "open", n));
+    }
+    response(external_call(&mut rig, "open", 100));
+    rig.clocks.advance_ms(29_999);
+    response(external_call(&mut rig, "open", 101));
+    rig.clocks.advance_ms(1);
+    pending(external_call(&mut rig, "open", 102));
+    let again = response(external_call(&mut rig, "open", 103));
+    assert!(tool_failure_text(&again).contains("try again in"));
+}
+
+#[test]
+fn a_refused_call_is_not_counted_so_it_does_not_extend_the_wait() {
+    let mut rig = rig();
+    fill_the_external_limit(&mut rig);
+    for n in 0..5 {
+        response(external_call(&mut rig, "open", 100 + n));
+    }
+    rig.clocks.advance_ms(60_000);
+    pending(external_call(&mut rig, "open", 200));
+}
+
+#[test]
+fn a_query_does_not_count_against_the_external_limit() {
+    let mut rig = rig();
+    fill_the_external_limit(&mut rig);
+    pending(external_call(&mut rig, "query", 100));
+    assert_eq!(rig.window.sent().len(), 21);
+}
+
+#[test]
+fn a_call_that_never_reached_a_window_is_not_counted_against_the_external_limit() {
+    let mut rig = rig_with(FakeWindow::default());
+    for n in 0..i64::from(MAX_EXTERNAL_CALLS) + 5 {
+        let refused = response(external_call(&mut rig, "open", n));
+        assert_eq!(tool_failure_text(&refused), NO_WINDOW_TEXT);
+    }
+    rig.window.set_open(true);
+    pending(external_call(&mut rig, "open", 100));
+}
+
+#[test]
+fn an_asks_calls_are_not_counted_against_the_external_limit_and_the_other_way_round() {
+    let mut rig = rig();
+    start_ask(&mut rig, "ask-1", "ask-token-1");
+    for n in 0..i64::from(MAX_SCREEN_CHANGING_CALLS) {
+        pending(rig.endpoint.handle(&ask_call("ask-token-1", "open", n)));
+    }
+    fill_the_external_limit(&mut rig);
+    assert_eq!(rig.window.sent().len(), 40);
+    let over = response(external_call(&mut rig, "open", 100));
+    assert!(tool_failure_text(&over).starts_with("external clients may change the screen"));
+    let ask_over = response(rig.endpoint.handle(&ask_call("ask-token-1", "open", 101)));
+    assert!(tool_failure_text(&ask_over).starts_with("this ask has made 20"));
+}
+
+#[test]
+fn the_limit_is_shared_by_every_client_of_the_endpoint_token() {
+    let mut rig = rig();
+    for n in 0..i64::from(MAX_EXTERNAL_CALLS) {
+        // Each call comes as another client would send it: its own `User-Agent`, the one token.
+        let request = with_header(
+            post(&call("open", n)),
+            "User-Agent",
+            &format!("client-{}", n % 3),
+        );
+        pending(rig.endpoint.handle(&request));
+    }
+    let over = with_header(post(&call("open", 100)), "User-Agent", "client-9");
+    assert!(tool_failure_text(&response(rig.endpoint.handle(&over))).contains("20 times a minute"));
 }
 
 // ---- the guards -----------------------------------------------------------------------------------------------
@@ -1064,8 +1187,339 @@ fn a_manifest_that_fails_its_check_is_refused_at_construction() {
     assert!(result.is_err());
 }
 
+// ---- the endpoint token in the keychain ---------------------------------------------------------------------------
+
+/// A log the tests read: every line `SecretStoreTokens` wrote.
+#[derive(Clone, Default)]
+struct Lines(Arc<Mutex<Vec<String>>>);
+
+impl Lines {
+    fn sink(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
+        let lines = Arc::clone(&self.0);
+        Arc::new(move |line| lines.lock().unwrap().push(line.to_string()))
+    }
+    fn all(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+fn tokens_over(store: &Arc<MemorySecretStore>, log: &Lines) -> SecretStoreTokens {
+    let store: Arc<dyn SecretStore> = store.clone();
+    SecretStoreTokens::new(store, log.sink())
+}
+
+/// A store that fails what it is told to. It holds nothing.
+#[derive(Default)]
+struct BrokenStore {
+    fail_get: bool,
+    fail_set: bool,
+}
+
+impl SecretStore for BrokenStore {
+    fn set(&self, item: &str, _: &Secret) -> Result<(), SecretStoreError> {
+        if self.fail_set {
+            return Err(SecretStoreError::Failed {
+                item: item.into(),
+                what: "store",
+                reason: "the keychain is locked".into(),
+            });
+        }
+        Ok(())
+    }
+    fn contains(&self, _: &str) -> Result<bool, SecretStoreError> {
+        Ok(false)
+    }
+    fn get(&self, item: &str) -> Result<Secret, SecretStoreError> {
+        if self.fail_get {
+            return Err(SecretStoreError::Failed {
+                item: item.into(),
+                what: "read",
+                reason: "the keychain is locked".into(),
+            });
+        }
+        Err(SecretStoreError::NotFound { item: item.into() })
+    }
+    fn delete(&self, _: &str) -> Result<(), SecretStoreError> {
+        Ok(())
+    }
+}
+
+fn endpoint_over(tokens: SecretStoreTokens) -> (UiToolsEndpoint, FakeWindow) {
+    let window = FakeWindow::open();
+    let endpoint = UiToolsEndpoint::new(
+        PORT,
+        manifest(),
+        Box::new(tokens),
+        Box::new(window.clone()),
+        Box::new(FakeClocks::default()),
+    )
+    .expect("the fixture manifest is valid");
+    (endpoint, window)
+}
+
+fn bearer(token: &str) -> HttpRequest {
+    with_header(
+        post(&rpc("ping", 1, json!({}))),
+        "Authorization",
+        &format!("Bearer {token}"),
+    )
+}
+
 #[test]
-#[should_panic(expected = "ui_tools: endpoint token store")]
-fn the_keychain_token_store_is_a_stub_tagged_for_stage_6b() {
-    let _ = SecretStoreTokens.current();
+fn the_token_is_made_at_first_use_from_32_random_bytes_and_kept_in_the_store() {
+    let store = Arc::new(MemorySecretStore::new());
+    assert_eq!(store.contains(ENDPOINT_TOKEN_ITEM), Ok(false));
+    let tokens = tokens_over(&store, &Lines::default());
+    let token = tokens.current().expect("made");
+    assert_eq!(token.len(), 64, "{token}");
+    assert!(
+        token
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    );
+    assert_eq!(store.get(ENDPOINT_TOKEN_ITEM).unwrap().expose(), token);
+}
+
+#[test]
+fn the_token_is_not_made_before_it_is_asked_for() {
+    let store = Arc::new(MemorySecretStore::new());
+    let _tokens = tokens_over(&store, &Lines::default());
+    assert_eq!(store.contains(ENDPOINT_TOKEN_ITEM), Ok(false));
+}
+
+#[test]
+fn the_token_is_the_same_each_time_and_at_the_next_start() {
+    let store = Arc::new(MemorySecretStore::new());
+    let first = tokens_over(&store, &Lines::default());
+    let token = first.current().unwrap();
+    assert_eq!(first.current().unwrap(), token);
+    let next_start = tokens_over(&store, &Lines::default());
+    assert_eq!(next_start.current().unwrap(), token);
+}
+
+#[test]
+fn two_stores_make_two_different_tokens() {
+    let one = tokens_over(&Arc::new(MemorySecretStore::new()), &Lines::default());
+    let other = tokens_over(&Arc::new(MemorySecretStore::new()), &Lines::default());
+    assert_ne!(one.current().unwrap(), other.current().unwrap());
+}
+
+#[test]
+fn rotate_keeps_a_new_token_in_the_store_and_the_next_start_reads_it() {
+    let store = Arc::new(MemorySecretStore::new());
+    let mut tokens = tokens_over(&store, &Lines::default());
+    let old = tokens.current().unwrap();
+    let new = tokens.rotate().unwrap();
+    assert_ne!(new, old);
+    assert_eq!(tokens.current().unwrap(), new);
+    assert_eq!(store.get(ENDPOINT_TOKEN_ITEM).unwrap().expose(), new);
+    assert_eq!(
+        tokens_over(&store, &Lines::default()).current().unwrap(),
+        new
+    );
+}
+
+#[test]
+fn after_rotate_the_old_token_is_refused_at_once_by_the_endpoint() {
+    let store = Arc::new(MemorySecretStore::new());
+    let (mut endpoint, _) = endpoint_over(tokens_over(&store, &Lines::default()));
+    let old = store_token(&mut endpoint);
+    assert_eq!(response(endpoint.handle(&bearer(&old))).status, 200);
+    let Rpc::Handled(rotated) = endpoint.rpc(&owner_request("ui_tools.rotate", json!({}))) else {
+        panic!("ui_tools.rotate was forwarded");
+    };
+    let Response::Success { result, .. } = rotated.response else {
+        panic!("rotate failed");
+    };
+    let new = result["token"].as_str().unwrap().to_string();
+    assert_ne!(new, old);
+    assert_eq!(response(endpoint.handle(&bearer(&old))).status, 401);
+    assert_eq!(response(endpoint.handle(&bearer(&new))).status, 200);
+}
+
+/// The token the window is told, over `ui_tools.token`.
+fn store_token(endpoint: &mut UiToolsEndpoint) -> String {
+    let Rpc::Handled(handled) = endpoint.rpc(&owner_request("ui_tools.token", json!({}))) else {
+        panic!("ui_tools.token was forwarded");
+    };
+    let Response::Success { result, .. } = handled.response else {
+        panic!("token failed: {:?}", handled.response);
+    };
+    result["token"].as_str().unwrap().to_string()
+}
+
+/// A store in memory that fails a read or a write while a test says so.
+#[derive(Default)]
+struct SwitchStore {
+    inner: MemorySecretStore,
+    down_get: AtomicBool,
+    down_set: AtomicBool,
+}
+
+impl SecretStore for SwitchStore {
+    fn set(&self, item: &str, secret: &Secret) -> Result<(), SecretStoreError> {
+        if self.down_set.load(Ordering::SeqCst) {
+            return Err(SecretStoreError::Failed {
+                item: item.into(),
+                what: "store",
+                reason: "the keychain is locked".into(),
+            });
+        }
+        self.inner.set(item, secret)
+    }
+    fn contains(&self, item: &str) -> Result<bool, SecretStoreError> {
+        self.inner.contains(item)
+    }
+    fn get(&self, item: &str) -> Result<Secret, SecretStoreError> {
+        if self.down_get.load(Ordering::SeqCst) {
+            return Err(SecretStoreError::Unavailable {
+                reason: "the keychain is down".into(),
+            });
+        }
+        self.inner.get(item)
+    }
+    fn delete(&self, item: &str) -> Result<(), SecretStoreError> {
+        self.inner.delete(item)
+    }
+}
+
+#[test]
+fn a_failing_rotate_keeps_the_old_token_and_says_so_in_the_log() {
+    let switch = Arc::new(SwitchStore::default());
+    let log = Lines::default();
+    let store: Arc<dyn SecretStore> = switch.clone();
+    let mut tokens = SecretStoreTokens::new(store, log.sink());
+    let old = tokens.current().unwrap();
+    switch.down_set.store(true, Ordering::SeqCst);
+    assert!(tokens.rotate().is_err());
+    assert_eq!(tokens.current().unwrap(), old);
+    assert_eq!(switch.inner.get(ENDPOINT_TOKEN_ITEM).unwrap().expose(), old);
+    assert!(
+        log.all()
+            .iter()
+            .any(|line| line.contains("the keychain is locked"))
+    );
+}
+
+fn broken_endpoint(store: BrokenStore) -> (UiToolsEndpoint, FakeWindow, Lines) {
+    let log = Lines::default();
+    let store: Arc<dyn SecretStore> = Arc::new(store);
+    let (endpoint, window) = endpoint_over(SecretStoreTokens::new(store, log.sink()));
+    (endpoint, window, log)
+}
+
+#[test]
+fn a_store_that_cannot_read_leaves_the_endpoint_refusing_every_call_and_logs_why() {
+    let (mut endpoint, window, log) = broken_endpoint(BrokenStore {
+        fail_get: true,
+        ..BrokenStore::default()
+    });
+    for token in ["", "anything", "0123456789abcdef"] {
+        let answer = response(endpoint.handle(&bearer(token)));
+        assert!(
+            answer.status == 401 || answer.status == 503,
+            "{}",
+            answer.status
+        );
+        let call = with_header(
+            post(&call("open", 1)),
+            "Authorization",
+            &format!("Bearer {token}"),
+        );
+        let refused = response(endpoint.handle(&call));
+        assert!(
+            refused.status == 401 || refused.status == 503,
+            "{}",
+            refused.status
+        );
+    }
+    assert!(window.sent().is_empty());
+    let lines = log.all();
+    assert!(!lines.is_empty());
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.contains("the keychain is locked")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.contains(ENDPOINT_TOKEN_ITEM)),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_store_that_cannot_keep_a_new_token_refuses_every_call_with_503() {
+    let (mut endpoint, window, log) = broken_endpoint(BrokenStore {
+        fail_set: true,
+        ..BrokenStore::default()
+    });
+    let answer = response(endpoint.handle(&bearer("a-token-the-client-guessed")));
+    assert_eq!(answer.status, 503, "{}", text(&answer));
+    assert_eq!(
+        body(&answer)["error"]["code"],
+        json!(collide_core::owner::code::UNAVAILABLE)
+    );
+    assert!(window.sent().is_empty());
+    assert!(!log.all().is_empty());
+}
+
+#[test]
+fn a_store_that_fails_also_refuses_an_ask_token_and_the_registration_of_an_ask() {
+    let (mut endpoint, window, _) = broken_endpoint(BrokenStore {
+        fail_get: true,
+        ..BrokenStore::default()
+    });
+    assert_eq!(
+        endpoint.register_ask("ask-1", "ask-token-1"),
+        Err(AskRegistration::TokenStoreFailed)
+    );
+    let answer = response(endpoint.handle(&bearer("ask-token-1")));
+    assert_eq!(answer.status, 503);
+    assert!(window.sent().is_empty());
+}
+
+#[test]
+fn the_window_is_told_why_when_the_store_fails_and_the_message_holds_no_token() {
+    // A token is read when it is asked for, and written when it rotates.
+    let reading = BrokenStore {
+        fail_get: true,
+        ..BrokenStore::default()
+    };
+    let writing = BrokenStore {
+        fail_set: true,
+        ..BrokenStore::default()
+    };
+    for (method, store) in [("ui_tools.token", reading), ("ui_tools.rotate", writing)] {
+        let (mut endpoint, _, _) = broken_endpoint(store);
+        let Rpc::Handled(handled) = endpoint.rpc(&owner_request(method, json!({}))) else {
+            panic!("{method} was forwarded");
+        };
+        let Response::Failure { error, .. } = handled.response else {
+            panic!("{method} answered while the store was failing");
+        };
+        assert!(
+            error.message.contains("the keychain is locked"),
+            "{}: {}",
+            method,
+            error.message
+        );
+    }
+}
+
+#[test]
+fn a_store_that_works_again_is_used_at_the_next_call() {
+    let switch = Arc::new(SwitchStore::default());
+    switch.down_get.store(true, Ordering::SeqCst);
+    let store: Arc<dyn SecretStore> = switch.clone();
+    let tokens = SecretStoreTokens::new(store, Lines::default().sink());
+    assert!(tokens.current().is_err());
+    switch.down_get.store(false, Ordering::SeqCst);
+    assert_eq!(tokens.current().unwrap().len(), 64);
+}
+
+#[test]
+fn a_failure_is_a_plain_error_that_holds_no_token() {
+    let failure = TokenFailure("the keychain is locked".into());
+    assert_eq!(failure.to_string(), "the keychain is locked");
 }
