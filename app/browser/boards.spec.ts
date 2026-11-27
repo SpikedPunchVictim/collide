@@ -1,9 +1,10 @@
 // A board whose folder moved, over a real daemon (ts-0191-nv): the page lists it as missing, shows the missing page
 // with the folder Collide looked in, and locating the moved folder brings the board back with the same id and its
 // tasks. A folder of another repository is refused with the daemon's reason. The page is the bridge's, so it has the
-// typed path and no folder picker. Nothing is deleted: the moved folder is still there at each step. The last test is
-// the board a window opens on (ts-0218-sc): the one picked last, which a reload keeps.
-import { renameSync } from 'node:fs'
+// typed path and no folder picker. Nothing is deleted: the moved folder is still there at each step. A folder made
+// again in its place, empty or holding another repository, gives the page its own words and Locate (ts-0221-pp). The
+// last tests are the board a window opens on (ts-0218-sc): the one picked last, which a reload keeps.
+import { mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from './support/fixtures.ts'
 import { firstPhase } from './support/recordings.ts'
@@ -64,6 +65,67 @@ test('a moved folder shows as missing and locating it brings the board back, wit
   expect(listed.boards[0]!.missing).not.toBe(true)
   const task = await world.rpc<{ task: { title: string } }>('task.get', { board, id: 'scratch:1' })
   expect(task.task.title).toBe('Outlives the move')
+})
+
+// ---- a folder that is no longer the board's checkout (ts-0221-pp) -------------------------------------------------
+
+interface Listed {
+  readonly boards: { id: string; root: string; missing?: boolean; missing_reason?: string }[]
+}
+
+test('an empty folder made again in its place shows the page that says so, and locating opens the board there', async ({
+  startWorld,
+  openPage,
+}) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  const board = await boardWithATask(world)
+  const moved = join(world.root, 'moved')
+  renameSync(world.repo, moved)
+  mkdirSync(join(world.repo, 'Library'), { recursive: true })
+  const page = await openPage(world)
+
+  const missing = page.getByLabel('Board folder not found')
+  await expect(missing).toBeVisible()
+  await expect(missing).toContainText('its folder is no longer a git checkout')
+  await expect(missing).not.toContainText('its folder is gone')
+  await expect(missing.locator('code')).toHaveText(world.repo)
+  expect((await world.rpc<Listed>('board.list')).boards[0]!.missing_reason).toBe('not-a-checkout')
+
+  await missing.getByRole('button', { name: 'Locate the folder…' }).click()
+  const window = page.getByRole('dialog', { name: /^Locate/ })
+  await window.getByLabel('Where is the folder now?').fill(moved)
+  await window.getByRole('button', { name: 'Use this folder' }).click()
+  await expect(window).toBeHidden()
+  await expect(missing).toBeHidden()
+  const listed = await world.rpc<Listed>('board.list')
+  expect(listed.boards).toEqual([expect.objectContaining({ id: board, root: moved })])
+  expect(listed.boards[0]!.missing).not.toBe(true)
+  const task = await world.rpc<{ task: { title: string } }>('task.get', { board, id: 'scratch:1' })
+  expect(task.task.title).toBe('Outlives the move')
+})
+
+test('another repository in the folder shows the page that says so, with Locate', async ({ startWorld, openPage }) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  await boardWithATask(world)
+  renameSync(world.repo, join(world.root, 'moved'))
+  renameSync(otherRepository(world), world.repo)
+  const page = await openPage(world)
+
+  const missing = page.getByLabel('Board folder not found')
+  await expect(missing).toBeVisible()
+  await expect(missing).toContainText('its folder now holds another repository')
+  await expect(missing.getByRole('button', { name: 'Locate the folder…' })).toBeEnabled()
+  expect((await world.rpc<Listed>('board.list')).boards[0]!.missing_reason).toBe('other-repository')
+})
+
+test('a folder that is gone still says it is gone', async ({ startWorld, openPage }) => {
+  const world = await startWorld({ first: firstPhase([]) })
+  await boardWithATask(world)
+  renameSync(world.repo, join(world.root, 'moved'))
+  const page = await openPage(world)
+
+  await expect(page.getByLabel('Board folder not found')).toContainText('its folder is gone')
+  expect((await world.rpc<Listed>('board.list')).boards[0]!.missing_reason).toBe('gone')
 })
 
 // ---- the board a window opens on (ts-0218-sc) -----------------------------------------------------------------------

@@ -173,38 +173,73 @@ pub fn init_repository(folder: &Path, env: &[(String, String)]) -> Result<(), St
     ))
 }
 
+/// Why a folder is not a checkout Collide can open (ts-0221-pp): each carries Collide's message. `board.list` marks a
+/// board missing for the first two and for no other, so a passing fault (`git` not found, a folder that cannot be
+/// entered) never offers Locate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotACheckout {
+    /// The folder is not a folder: it is gone or was moved.
+    Gone(String),
+    /// The folder is there, and `git` says it is not inside a checkout.
+    NotInOne(String),
+    /// `git` could not say: it did not run, or the checkout cannot be read.
+    Unknown(String),
+}
+
+impl NotACheckout {
+    /// Collide's message, which names the fix.
+    pub fn into_message(self) -> String {
+        match self {
+            NotACheckout::Gone(message)
+            | NotACheckout::NotInOne(message)
+            | NotACheckout::Unknown(message) => message,
+        }
+    }
+}
+
 /// The checkout that `folder` is in, or Collide's message for why it is not in one. The message names the fix.
 pub fn checkout_of(folder: &Path, env: &[(String, String)]) -> Result<Checkout, String> {
+    checkout_or_why(folder, env).map_err(NotACheckout::into_message)
+}
+
+/// [`checkout_of`], with the reason typed: whether the folder is gone, is not in a checkout, or could not be told.
+pub fn checkout_or_why(folder: &Path, env: &[(String, String)]) -> Result<Checkout, NotACheckout> {
     if !folder.is_dir() {
-        return Err(format!(
+        return Err(NotACheckout::Gone(format!(
             "`{}` is not a folder, so there is nothing to open. Choose a folder inside a git checkout.",
             folder.display()
-        ));
+        )));
     }
-    let not_a_checkout = || {
-        format!(
+    let Some(top) =
+        git(folder, env, &["rev-parse", "--show-toplevel"]).map_err(NotACheckout::Unknown)?
+    else {
+        return Err(NotACheckout::NotInOne(format!(
             "`{}` is not inside a git checkout, so Collide cannot open it as a board. \
              Run `git init` in it, or open a folder that is inside a checkout.",
             folder.display()
-        )
-    };
-    let Some(top) = git(folder, env, &["rev-parse", "--show-toplevel"])? else {
-        return Err(not_a_checkout());
+        )));
     };
     let root = std::fs::canonicalize(&top).map_err(|error| {
-        format!(
+        NotACheckout::Unknown(format!(
             "the checkout at `{top}` cannot be read ({error}); check that the folder is still there"
-        )
+        ))
     })?;
-    let branch = git(&root, env, &["symbolic-ref", "--quiet", "--short", "HEAD"])?
+    let branch = git(&root, env, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .map_err(NotACheckout::Unknown)?
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "HEAD".to_string());
     let held = if branch == "HEAD" {
-        held_branch(&root, env)?
+        held_branch(&root, env).map_err(NotACheckout::Unknown)?
     } else {
         None
     };
     Ok(Checkout { root, branch, held })
+}
+
+/// Whether the commits `found` in a folder are another repository's than the ones `recorded` for a board: there are
+/// some, and none is a recorded one. A folder with no commit cannot be told, so it is not another repository.
+pub fn is_other_repository(recorded: &[String], found: &[String]) -> bool {
+    !found.is_empty() && !found.iter().any(|commit| recorded.contains(commit))
 }
 
 /// The branch git holds while `HEAD` is detached for a rebase (its `head-name`) or a bisect (its `BISECT_START`), found

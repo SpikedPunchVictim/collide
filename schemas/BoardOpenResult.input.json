@@ -23,8 +23,19 @@
           "type": "array"
         },
         "missing": {
-          "description": "The board's folder is gone (moved or deleted). Nothing of the board is deleted: `board.locate` points it at\nthe folder again (0.2, Boards and lines). Absent when the folder is there. Only `board.list` fills it.",
+          "description": "The board's folder is gone, or is no longer its checkout (`missing_reason` says which). Nothing of the board is\ndeleted: `board.locate` points it at the folder again (0.2, Boards and lines). Absent when the folder is\nthere. Only `board.list` fills it.",
           "type": "boolean"
+        },
+        "missing_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MissingReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the board is `missing`; absent when it is not."
         },
         "root": {
           "type": "string"
@@ -129,6 +140,26 @@
         "trust"
       ],
       "type": "object"
+    },
+    "MissingReason": {
+      "description": "Why a board is `missing` (ts-0221-pp): what the daemon found where the board's folder was.",
+      "oneOf": [
+        {
+          "const": "gone",
+          "description": "There is no folder: it was moved or deleted.",
+          "type": "string"
+        },
+        {
+          "const": "not-a-checkout",
+          "description": "There is a folder, but `git` says it is not inside a checkout.",
+          "type": "string"
+        },
+        {
+          "const": "other-repository",
+          "description": "There is a checkout, but its root commits are not the ones the board recorded.",
+          "type": "string"
+        }
+      ]
     },
     "TrustState": {
       "description": "Whether a line's packs and gate code are trusted (0.9, Trust). `hash` is what trust covers now: the packs, the\nlock, the pointer file, `board.yaml`, `config.yaml`, the views and the tree hashes of `protectedPaths`. It is the\nhash an `Untrusted` line would be trusted at, so the person is shown what they trust. (The domain record is plain\nRust, so the wire form is this type.)",

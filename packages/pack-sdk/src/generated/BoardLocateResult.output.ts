@@ -15,6 +15,10 @@ export type TrustState =
       hash: string
       state: 'trusted'
     }
+/**
+ * Why a board is `missing` (ts-0221-pp): what the daemon found where the board's folder was.
+ */
+export type MissingReason = 'gone' | 'not-a-checkout' | 'other-repository'
 
 /**
  * `board.locate` result: the board, now rooted at the folder, with its id, scratch tasks, trust entry, views and
@@ -36,10 +40,15 @@ export interface BoardSummary {
   last_opened_ms?: number | null
   lines: LineSummary[]
   /**
-   * The board's folder is gone (moved or deleted). Nothing of the board is deleted: `board.locate` points it at
-   * the folder again (0.2, Boards and lines). Absent when the folder is there. Only `board.list` fills it.
+   * The board's folder is gone, or is no longer its checkout (`missing_reason` says which). Nothing of the board is
+   * deleted: `board.locate` points it at the folder again (0.2, Boards and lines). Absent when the folder is
+   * there. Only `board.list` fills it.
    */
   missing?: boolean
+  /**
+   * Why the board is `missing`; absent when it is not.
+   */
+  missing_reason?: MissingReason | null
   root: string
   /**
    * Why the daemon's last look at the board could not read its line or its checkouts (a folder that is gone, a

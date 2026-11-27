@@ -1,5 +1,6 @@
 import { renderToString } from 'react-dom/server'
 import { describe, expect, test } from 'vitest'
+import { missingReason } from '../src/frame/boards.ts'
 import { LocateWindow } from '../src/frame/LocateWindow.tsx'
 import { MissingBoard } from '../src/frame/MissingBoard.tsx'
 
@@ -10,7 +11,7 @@ import { MissingBoard } from '../src/frame/MissingBoard.tsx'
 const noop = () => {}
 
 describe('the missing page', () => {
-  const html = renderToString(<MissingBoard name="alpha" folder="/work/old/alpha" onLocate={noop} />)
+  const html = renderToString(<MissingBoard name="alpha" folder="/work/old/alpha" reason="gone" onLocate={noop} />)
 
   test('says the folder is gone and where Collide looked', () => {
     expect(html).toContain('alpha: its folder is gone')
@@ -26,6 +27,54 @@ describe('the missing page', () => {
   test('offers to locate the folder, and shows removing the board as off, saying when it arrives', () => {
     expect(html).toContain('Locate the folder…')
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="Arrives with board removal"[^>]*>Remove from Collide/)
+  })
+})
+
+describe('the missing page, by why the board is missing', () => {
+  const page = (reason: 'gone' | 'not-a-checkout' | 'other-repository') =>
+    renderToString(<MissingBoard name="alpha" folder="/work/old/alpha" reason={reason} onLocate={noop} />)
+
+  test('a folder that is no longer a checkout says so, and where Collide looked', () => {
+    const html = page('not-a-checkout')
+    expect(html).toContain('alpha: its folder is no longer a git checkout')
+    expect(html).toContain('/work/old/alpha</code>')
+    expect(html).toContain('found a folder that is not a git checkout now')
+    expect(html).not.toContain('its folder is gone')
+  })
+
+  test('a folder that holds another repository says so', () => {
+    const html = page('other-repository')
+    expect(html).toContain('alpha: its folder now holds another repository')
+    expect(html).toContain('/work/old/alpha</code>')
+    expect(html).not.toContain('its folder is gone')
+  })
+
+  test('a folder that is gone says so, and where Collide found nothing', () => {
+    const html = page('gone')
+    expect(html).toContain('alpha: its folder is gone')
+    expect(html).toContain('found nothing there. It was moved or deleted.')
+  })
+
+  for (const reason of ['gone', 'not-a-checkout', 'other-repository'] as const) {
+    test(`offers Locate and keeps the tasks, when the reason is ${reason}`, () => {
+      const html = page(reason)
+      expect(html).toContain('Locate the folder…')
+      expect(html).toContain('Nothing has been deleted.')
+      expect(html).toContain('Its tasks are kept')
+    })
+  }
+})
+
+describe('the reason a board is missing', () => {
+  const board = { id: 'board-aaaaaa', root: '/work/alpha', lines: [] }
+
+  test('is the one the daemon gave', () => {
+    expect(missingReason({ ...board, missing: true, missing_reason: 'not-a-checkout' })).toBe('not-a-checkout')
+    expect(missingReason({ ...board, missing: true, missing_reason: 'other-repository' })).toBe('other-repository')
+  })
+
+  test('is gone when the daemon gave none, as an earlier daemon does not', () => {
+    expect(missingReason({ ...board, missing: true })).toBe('gone')
   })
 })
 

@@ -22,7 +22,7 @@ import { TrustBanner, TrustWindow } from './firstrun/TrustWindow.tsx'
 import { useTrust } from './firstrun/useTrust.ts'
 import { useField } from './field/useField.ts'
 import { ViewPicker } from './field/ViewPicker.tsx'
-import { boardName, defaultLine, isMissing } from './frame/boards.ts'
+import { boardName, defaultLine, isMissing, missingReason } from './frame/boards.ts'
 import { Frame } from './frame/Frame.tsx'
 import { LocateWindow } from './frame/LocateWindow.tsx'
 import { MissingBoard } from './frame/MissingBoard.tsx'
@@ -140,7 +140,7 @@ function Window({
   const { state, loop } = useLoop(owner, defaults)
   const board = state.boards.find((each) => each.id === state.boardId)
   const missing = board !== undefined && isMissing(board)
-  // A board whose folder is gone has nothing to read: its page is the missing page, and no view or task is asked for.
+  // A missing board has nothing to read: its page is the missing page, and no view or task is asked for.
   const field = useField(owner, missing ? null : state.boardId)
   const [tab, setTab] = useState<TabId>('field')
   const [onLoopPage, setOnLoopPage] = useState(false)
@@ -330,7 +330,12 @@ function Window({
               Reading the boards…
             </p>
           ) : board !== undefined && missing ? (
-            <MissingBoard name={boardName(board)} folder={board.root} onLocate={() => setLocating(true)} />
+            <MissingBoard
+              name={boardName(board)}
+              folder={board.root}
+              reason={missingReason(board)}
+              onLocate={() => setLocating(true)}
+            />
           ) : (
             <FieldPage
               owner={owner}

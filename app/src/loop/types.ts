@@ -10,6 +10,8 @@ import type {
 
 export type { QueueItem, RunSummary }
 export type BoardSummary = BoardListResultOutput['boards'][number]
+/** Why a board is missing: its folder is gone, is no longer a checkout, or now holds another repository. */
+export type MissingReason = NonNullable<BoardSummary['missing_reason']>
 export type AgentVersions = DaemonAgentVersionsResultOutput['agents'][number]
 export type DiffResult = RunDiffResultOutput
 export type DiffFile = DiffResult['files'][number]

@@ -115,7 +115,7 @@ use crate::auth::{
 };
 use crate::base_env::{BaseEnvironment, CaptureOptions, CaptureSessions, EnvSource};
 use crate::board_lines::LineError;
-use crate::boards;
+use crate::boards::{self, NotACheckout};
 use crate::builtin_packs::BuiltinPacks;
 use crate::checkout::root_busy;
 use crate::claude_versions::{ClaudeVersions, PublishedChoice, REFRESH_EVERY, VersionsOptions};
@@ -145,6 +145,7 @@ use crate::run_store::{RunFilter, RunRow};
 use crate::run_summary::summarize;
 use crate::sampler::{Sampler, TICK};
 use crate::scratch;
+use crate::scratch_store::StoredBoard;
 use crate::secret_store::{MemorySecretStore, SecretStore};
 use crate::set_aside;
 use crate::settings_files::user_config_dir;
@@ -177,9 +178,9 @@ use collide_core::owner::{
     ConfigPackListParams, ConfigPackListResult, ConfigPackUpdateParams, ConfigResetParams,
     ConfigResetResult, ConfigSetParams, ConfigWriteLayer, DaemonRecaptureEnvironmentResult,
     DaemonStatusResult, DaemonSubscribeParams, DaemonSubscribeResult, EnvCapture, FirstRunCheck,
-    MAX_MESSAGE_BYTES, Method, Notice, OWNER_PROTOCOL, OwnerInitializeResult, QueueAnswer,
-    QueueAnswerParams, QueueAnswerResult, QueueItem, QueueListParams, QueueListResult, Request,
-    Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
+    MAX_MESSAGE_BYTES, Method, MissingReason, Notice, OWNER_PROTOCOL, OwnerInitializeResult,
+    QueueAnswer, QueueAnswerParams, QueueAnswerResult, QueueItem, QueueListParams, QueueListResult,
+    Request, Response, Routed, RpcError, RunDiffParams, RunGetParams, RunGetResult, RunListParams,
     RunListResult, RunRecordParams, RunRecordResult, RunScope, RunStartFileParams, RunStartParams,
     RunStartResult, RunStopParams, RunStopResult, RunSummary, StoreHealth, Survivor,
     TaskApplyParams, TaskApplyResult, TaskChangesParams, TaskChangesResult, TaskCreateParams,
@@ -3463,6 +3464,41 @@ fn with_role_problems(shared: &Shared, mut summary: BoardSummary) -> BoardSummar
     summary
 }
 
+/// What `board.list` finds at a board's folder (ts-0221-pp): its checkout, and why the board is missing when it is.
+/// A folder that is gone, or that `git` says is in no checkout, or whose checkout has root commits none of which the
+/// board recorded, makes the board missing, and a missing board has no checkout, so no line. Any other failure (`git`
+/// not found, a checkout that cannot be read) keeps the board as it was: no checkout and not missing. A board with no
+/// record of its commits is never another repository, and a checkout with no commit cannot be told.
+fn board_folder(
+    shared: &Shared,
+    board: &StoredBoard,
+) -> (Option<boards::Checkout>, Option<MissingReason>) {
+    let checkout = match boards::checkout_or_why(Path::new(&board.root), &shared.git_env) {
+        Ok(checkout) => checkout,
+        Err(NotACheckout::Gone(_)) => return (None, Some(MissingReason::Gone)),
+        Err(NotACheckout::NotInOne(_)) => return (None, Some(MissingReason::NotACheckout)),
+        Err(NotACheckout::Unknown(_)) => return (None, None),
+    };
+    // A board's root is the top of its checkout (`board.open` and `board.locate` keep that). A folder whose top is
+    // elsewhere is inside another checkout: it is no longer the board's, and that checkout's commits are not the
+    // board's to record.
+    if checkout.root != Path::new(&board.root) {
+        return (None, Some(MissingReason::NotACheckout));
+    }
+    // A board with its folder is read for its root commits once, so a board from before they were recorded gets them
+    // at its next list (ts-0191-nv).
+    let Some(recorded) = &board.root_commits else {
+        shared.note_root_commits(&board.id, &checkout.root);
+        return (Some(checkout), None);
+    };
+    match boards::root_commits(&checkout.root, &shared.git_env) {
+        Ok(found) if boards::is_other_repository(recorded, &found) => {
+            (None, Some(MissingReason::OtherRepository))
+        }
+        _ => (Some(checkout), None),
+    }
+}
+
 /// `board.list`: the boards opened before, from the store. A board's line is the branch its checkout is on now, read
 /// from git; a board whose folder is gone or is no longer a checkout is listed with no line, and with the reason the
 /// corpus gives for not reading its sources.
@@ -3475,14 +3511,7 @@ fn board_list(shared: &Shared, session: &Session) -> Result<serde_json::Value, R
         .map_err(store_failed)?
         .into_iter()
         .map(|board| {
-            let checkout = boards::checkout_of(Path::new(&board.root), &shared.git_env).ok();
-            // A board with its folder is read for its root commits once, so a board from before they were recorded
-            // gets them at its next list (ts-0191-nv).
-            if board.root_commits.is_none()
-                && let Some(checkout) = &checkout
-            {
-                shared.note_root_commits(&board.id, &checkout.root);
-            }
+            let (checkout, missing_reason) = board_folder(shared, &board);
             let defaults = session.defaults();
             let summary = if defaults {
                 lines.summary_defaults(&board.id, &board.root, checkout.as_slice())
@@ -3493,7 +3522,8 @@ fn board_list(shared: &Shared, session: &Session) -> Result<serde_json::Value, R
                 )
             };
             BoardSummary {
-                missing: !Path::new(&board.root).is_dir(),
+                missing: missing_reason.is_some(),
+                missing_reason,
                 last_opened_ms: board.last_opened_ms,
                 // The sources the person's files could not give are not a defaults connection's to see.
                 sources_unread: shared

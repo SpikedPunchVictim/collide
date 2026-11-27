@@ -13,7 +13,7 @@ mod common;
 
 use collide_core::owner::{
     BoardListParams, BoardListResult, BoardLocateParams, BoardLocateResult, BoardOpenParams,
-    BoardOpenResult, BoardSummary, TrustState, code,
+    BoardOpenResult, BoardSummary, MissingReason, TrustState, code,
 };
 use collide_host::base_env::CaptureOptions;
 use collide_host::board_lines::Lines;
@@ -54,6 +54,10 @@ fn git_env(root: &TempRoot) -> Vec<(String, String)> {
 }
 
 fn start(root: &TempRoot) -> Daemon {
+    start_with_git_env(root, git_env(root))
+}
+
+fn start_with_git_env(root: &TempRoot, git_env: Vec<(String, String)>) -> Daemon {
     let mut options = DaemonOptions::new(
         DaemonPaths::under(root.path()),
         fake_shell(root),
@@ -66,7 +70,7 @@ fn start(root: &TempRoot) -> Daemon {
         fallback: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
     };
     options.home = Some(root.path().to_str().unwrap().to_string());
-    options.git_env = git_env(root);
+    options.git_env = git_env;
     options.load_context = Some(common::config_fixture::plain_factory(root.path()));
     Daemon::start(options).expect("the daemon starts")
 }
@@ -439,6 +443,248 @@ fn a_board_with_its_folder_is_not_missing() {
     let board = board_of(&mut client, &repo);
 
     assert!(!listed(&mut client, &board.id).missing);
+    daemon.stop();
+}
+
+// ---- a folder that is no longer the board's checkout (ts-0221-pp) -------------------------------------------------
+
+/// The folder of a board moved away and made again with only a `Library` folder in it, as the owner's check found it.
+fn moved_and_made_again(root: &TempRoot, repo: &Path) -> PathBuf {
+    let moved = root.join("moved");
+    fs::rename(repo, &moved).unwrap();
+    fs::create_dir_all(repo.join("Library")).unwrap();
+    fs::canonicalize(moved).unwrap()
+}
+
+#[test]
+fn a_board_whose_folder_is_gone_says_so_with_the_reason_gone() {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let board = board_of(&mut client, &repo);
+    fs::rename(&repo, root.join("moved")).unwrap();
+
+    let found = listed(&mut client, &board.id);
+
+    assert!(found.missing);
+    assert_eq!(found.missing_reason, Some(MissingReason::Gone));
+    daemon.stop();
+}
+
+#[test]
+fn a_board_whose_folder_is_there_and_is_its_checkout_has_no_reason() {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let board = board_of(&mut client, &repo);
+
+    let found = listed(&mut client, &board.id);
+
+    assert!(!found.missing);
+    assert_eq!(found.missing_reason, None);
+    assert!(!found.lines.is_empty());
+    daemon.stop();
+}
+
+#[test]
+fn a_folder_made_again_with_no_checkout_in_it_is_missing_because_it_is_not_a_checkout_and_locate_finds_the_board()
+ {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let board = board_of(&mut client, &repo);
+    create_task(&mut client, &board.id, "Outlives the move");
+    let moved = moved_and_made_again(&root, &repo);
+
+    let found = listed(&mut client, &board.id);
+
+    assert!(found.missing);
+    assert_eq!(found.missing_reason, Some(MissingReason::NotACheckout));
+    assert!(found.lines.is_empty());
+    assert_eq!(found.root, repo.to_str().unwrap());
+    let located = locate(&mut client, &board.id, &moved);
+    assert_eq!(located.board.id, board.id);
+    let again = listed(&mut client, &board.id);
+    assert!(!again.missing);
+    assert_eq!(again.missing_reason, None);
+    assert_eq!(
+        first_task(&mut client, &board.id).as_deref(),
+        Some("Outlives the move")
+    );
+    daemon.stop();
+}
+
+#[test]
+fn another_repository_in_the_folder_is_missing_because_it_is_another_repository_and_has_no_line() {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let board = board_of(&mut client, &repo);
+    let moved = root.join("moved");
+    fs::rename(&repo, &moved).unwrap();
+    let moved = fs::canonicalize(moved).unwrap();
+    checkout(&root, "repo", "something else entirely\n");
+
+    let found = listed(&mut client, &board.id);
+
+    assert!(found.missing);
+    assert_eq!(found.missing_reason, Some(MissingReason::OtherRepository));
+    assert!(found.lines.is_empty());
+    // Nothing was deleted or replaced: the board still has its record, and locate points it at its own repository.
+    let located = locate(&mut client, &board.id, &moved);
+    assert_eq!(located.board.id, board.id);
+    assert!(!listed(&mut client, &board.id).missing);
+    daemon.stop();
+}
+
+#[test]
+fn a_folder_made_again_inside_another_checkout_is_not_a_checkout_and_its_commits_are_not_recorded()
+{
+    let root = TempRoot::new();
+    let outer = checkout(&root, "outer", "the outer repository\n");
+    let inner = checkout(&root, "outer/inner", "the board's repository\n");
+    let unrecorded_folder = checkout(&root, "outer/old", "an older board\n");
+    let unrecorded = old_board(&root, &unrecorded_folder);
+    let first = start(&root);
+    let recorded = board_of(&mut connect(&first), &inner).id;
+    first.stop();
+    fs::rename(&inner, root.join("moved-inner")).unwrap();
+    fs::rename(&unrecorded_folder, root.join("moved-old")).unwrap();
+    fs::create_dir_all(&inner).unwrap();
+    fs::create_dir_all(&unrecorded_folder).unwrap();
+    assert!(outer.join("inner").is_dir());
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+
+    let recorded_found = listed(&mut client, &recorded);
+    let unrecorded_found = listed(&mut client, &unrecorded);
+    daemon.stop();
+
+    assert_eq!(
+        recorded_found.missing_reason,
+        Some(MissingReason::NotACheckout)
+    );
+    assert_eq!(
+        unrecorded_found.missing_reason,
+        Some(MissingReason::NotACheckout)
+    );
+    let store = Store::open(&DaemonPaths::under(root.path()).store_dir).unwrap();
+    assert_eq!(store.root_commits(&unrecorded).unwrap(), None);
+}
+
+#[test]
+fn a_board_with_no_record_of_its_repository_is_never_another_repository() {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let id = old_board(&root, &repo);
+    fs::rename(&repo, root.join("moved")).unwrap();
+    checkout(&root, "repo", "something else entirely\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+
+    let found = listed(&mut client, &id);
+
+    assert!(!found.missing);
+    assert_eq!(found.missing_reason, None);
+    daemon.stop();
+}
+
+#[test]
+fn a_board_with_no_record_is_still_missing_when_its_folder_is_gone_or_is_not_a_checkout() {
+    let root = TempRoot::new();
+    let gone = checkout(&root, "gone", "one\n");
+    let plain = checkout(&root, "plain", "two\n");
+    let gone_id = old_board(&root, &gone);
+    let plain_id = old_board(&root, &plain);
+    fs::remove_dir_all(&gone).unwrap();
+    moved_and_made_again(&root, &plain);
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+
+    let gone_found = listed(&mut client, &gone_id);
+    let plain_found = listed(&mut client, &plain_id);
+
+    assert_eq!(gone_found.missing_reason, Some(MissingReason::Gone));
+    assert_eq!(
+        plain_found.missing_reason,
+        Some(MissingReason::NotACheckout)
+    );
+    daemon.stop();
+}
+
+#[test]
+fn a_repository_with_no_commit_yet_in_the_folder_is_not_marked_another_repository() {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let daemon = start(&root);
+    let mut client = connect(&daemon);
+    let board = board_of(&mut client, &repo);
+    fs::rename(&repo, root.join("moved")).unwrap();
+    fs::create_dir_all(&repo).unwrap();
+    git(&root, &repo, &["init", "-q", "-b", "main"]);
+
+    let found = listed(&mut client, &board.id);
+
+    assert!(!found.missing);
+    assert_eq!(found.missing_reason, None);
+    daemon.stop();
+}
+
+#[test]
+fn with_no_git_on_the_path_a_folder_that_is_there_is_not_marked_missing() {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let id = {
+        let daemon = start(&root);
+        let mut client = connect(&daemon);
+        let id = board_of(&mut client, &repo).id;
+        drop(client);
+        daemon.stop();
+        id
+    };
+    moved_and_made_again(&root, &repo);
+    let empty_path = root.join("no-tools");
+    fs::create_dir_all(&empty_path).unwrap();
+    let mut env = git_env(&root);
+    env.push(("PATH".to_string(), empty_path.to_str().unwrap().to_string()));
+    let daemon = start_with_git_env(&root, env);
+    let mut client = connect(&daemon);
+
+    let found = listed(&mut client, &id);
+
+    assert!(!found.missing, "a passing fault offers no Locate");
+    assert_eq!(found.missing_reason, None);
+    daemon.stop();
+}
+
+#[test]
+fn with_no_git_on_the_path_a_folder_that_is_gone_is_still_gone() {
+    let root = TempRoot::new();
+    let repo = checkout(&root, "repo", "one\n");
+    let id = {
+        let daemon = start(&root);
+        let mut client = connect(&daemon);
+        let id = board_of(&mut client, &repo).id;
+        drop(client);
+        daemon.stop();
+        id
+    };
+    fs::rename(&repo, root.join("moved")).unwrap();
+    let empty_path = root.join("no-tools");
+    fs::create_dir_all(&empty_path).unwrap();
+    let mut env = git_env(&root);
+    env.push(("PATH".to_string(), empty_path.to_str().unwrap().to_string()));
+    let daemon = start_with_git_env(&root, env);
+    let mut client = connect(&daemon);
+
+    assert_eq!(
+        listed(&mut client, &id).missing_reason,
+        Some(MissingReason::Gone)
+    );
     daemon.stop();
 }
 

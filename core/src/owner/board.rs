@@ -36,6 +36,18 @@ pub struct LineSummary {
     pub problems: Vec<String>,
 }
 
+/// Why a board is `missing` (ts-0221-pp): what the daemon found where the board's folder was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum MissingReason {
+    /// There is no folder: it was moved or deleted.
+    Gone,
+    /// There is a folder, but `git` says it is not inside a checkout.
+    NotACheckout,
+    /// There is a checkout, but its root commits are not the ones the board recorded.
+    OtherRepository,
+}
+
 /// A board: the repo root and its lines, the default line first. Until lines are built (Stage 14) there is one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -47,10 +59,14 @@ pub struct BoardSummary {
     /// line that does not load). Absent when the last look read them. Only `board.list` fills it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources_unread: Option<String>,
-    /// The board's folder is gone (moved or deleted). Nothing of the board is deleted: `board.locate` points it at
-    /// the folder again (0.2, Boards and lines). Absent when the folder is there. Only `board.list` fills it.
+    /// The board's folder is gone, or is no longer its checkout (`missing_reason` says which). Nothing of the board is
+    /// deleted: `board.locate` points it at the folder again (0.2, Boards and lines). Absent when the folder is
+    /// there. Only `board.list` fills it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub missing: bool,
+    /// Why the board is `missing`; absent when it is not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub missing_reason: Option<MissingReason>,
     // The daemon gives each mark a time later than every other board's, so no two boards share one. A board has none
     // until a window opens or picks it (`board.pick`). `board.list` and `board.open` give the stored time.
     /// When the board was last opened or picked, in ms. The greatest is the one a window opens on.
