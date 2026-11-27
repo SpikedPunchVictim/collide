@@ -56,9 +56,23 @@ fn a_reload_that_fails_is_still_a_taken_event() {
 }
 
 #[test]
-fn the_accelerator_is_control_option_shift_escape() {
+fn the_accelerator_is_command_option_shift_s() {
     let parts: Vec<&str> = START_WITH_DEFAULTS_KEY.split('+').collect();
-    assert_eq!(parts, ["Ctrl", "Alt", "Shift", "Escape"]);
+    assert_eq!(parts, ["CmdOrCtrl", "Alt", "Shift", "S"]);
+}
+
+#[test]
+fn the_accelerator_holds_command_so_appkit_offers_it_to_the_menu_before_the_web_view() {
+    let parts: Vec<&str> = START_WITH_DEFAULTS_KEY.split('+').collect();
+    assert!(parts.contains(&"CmdOrCtrl"), "{START_WITH_DEFAULTS_KEY}");
+}
+
+#[test]
+fn the_accelerator_is_not_a_key_macos_keeps_for_force_quit_log_out_or_the_dock() {
+    let key = START_WITH_DEFAULTS_KEY.rsplit('+').next().unwrap();
+    for reserved in ["Escape", "Q", "D"] {
+        assert_ne!(key, reserved, "{START_WITH_DEFAULTS_KEY}");
+    }
 }
 
 #[test]

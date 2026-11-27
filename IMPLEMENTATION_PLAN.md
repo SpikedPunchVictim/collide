@@ -4937,9 +4937,11 @@ note; the look (colour, shading, spacing) is taken from the mock, not from this 
   value, and are set into the keychain from here. The Agents page is part of it (6b).
 - **Start with defaults** (revision 29; `docs/research/woolshed.md`): an item in the app menu, with its key, reloads the
   window with the built-in packs, views and settings, and none of the person's stored UI state. It works when the page
-  is blank, since the shell owns it. The mode is the window's: other clients are unchanged, and the window saves nothing
-  while in it. A banner offers Start normally and Reset…, which lists the person's Collide files and moves them into a
-  dated folder beside them. Reset deletes nothing and touches no repo file and no secret.
+  is blank, since the shell owns it. The key is Command-Option-Shift-S: it holds Command, since AppKit offers a key to
+  the menu before the web view only when Command is down (`ts-0219-qf`). The mode is the window's: other clients are
+  unchanged, and the window saves nothing while in it. A banner offers Start normally and Reset…, which lists the
+  person's Collide files and moves them into a dated folder beside them. Reset deletes nothing and touches no repo file
+  and no secret.
 - **No-setup open** (0.11): any git repo opens with the built-in packs and the default aliases. Board settings stay
   per user until Share with team writes `.collide/`. Share with team writes `board.yaml` and the person's saved
   views of the board; settings follow when per-board settings exist. On a shared board, each personal view has its

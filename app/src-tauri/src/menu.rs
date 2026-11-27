@@ -12,9 +12,14 @@ pub const START_WITH_DEFAULTS: &str = "start-with-defaults";
 /// The text of the menu item.
 pub const START_WITH_DEFAULTS_LABEL: &str = "Start with Defaults\u{2026}";
 
-/// The item's accelerator: Control, Option, Shift and Escape. The app binds no chord of its own with these keys, and
-/// macOS reserves Option-Command-Escape (Force Quit), which this is not.
-pub const START_WITH_DEFAULTS_KEY: &str = "Ctrl+Alt+Shift+Escape";
+/// The item's accelerator: Command, Option, Shift and S. It holds Command on purpose. AppKit offers a key-down to the
+/// menu's key equivalents before the first responder only when Command is down. A chord without Command reaches the
+/// menu only if the web view leaves the key unhandled, and WebKit takes Escape itself, so the earlier chord
+/// (Control-Option-Shift-Escape) did nothing in the built app (ts-0219-qf). macOS reserves Option-Command-Escape
+/// (Force Quit, and held with Shift, force quit of the front app), Option-Command-D (the Dock), Option-Command-H
+/// (Hide Others) and Option-Command-Shift-Q (log out); this chord is none of those, and the page binds no chord that
+/// holds Command or Option.
+pub const START_WITH_DEFAULTS_KEY: &str = "CmdOrCtrl+Alt+Shift+S";
 
 /// Reloads the window. The app's wiring gives the webview's; a test gives one that records.
 pub trait Reloader {
