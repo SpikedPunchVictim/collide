@@ -34,8 +34,11 @@ export interface FieldState {
   readonly reload: () => void
   /** Reads the board's views again, as when the picker is opened. */
   readonly reloadViews: () => void
-  /** Writes a view of the person's own, lists it and selects it. A refusal is thrown with the daemon's words. */
-  readonly saveView: (view: ViewInput) => Promise<void>
+  /**
+   * Writes a view of the person's own, lists it and selects it, and forgets the filters it has taken in. A name a view
+   * of the person's own has is refused with the daemon's words, unless `overwrite` says to replace it.
+   */
+  readonly saveView: (view: ViewInput, overwrite?: boolean) => Promise<void>
   /** Writes a view to the repo's Collide folder, for the person to commit, and gives the file. */
   readonly shareView: (view: ViewInput) => Promise<string>
   /** What the last read gave, for the board and view shown, or null while the first read is on its way. */
@@ -135,11 +138,18 @@ export function useField(owner: OwnerClient, boardId: string | null): FieldState
     setFed((count) => count + 1)
   }, [])
   const saveView = useCallback(
-    async (input: ViewInput) => {
+    async (input: ViewInput, overwrite = false) => {
       if (boardId === null) return
-      await owner.rpc('task.save_view', { board: boardId, target: 'personal', view: input })
+      await owner.rpc('task.save_view', {
+        board: boardId,
+        target: 'personal',
+        view: input,
+        ...(overwrite ? { overwrite } : {}),
+      })
       setListed((count) => count + 1)
       setPick({ boardId, view: input.name })
+      // The view holds the choices now. Left on, they would sit on top of a view that already says them.
+      setChosenFilters({ boardId, view: input.name, filters: NO_FILTERS })
     },
     [owner, boardId],
   )

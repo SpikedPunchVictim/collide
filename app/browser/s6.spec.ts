@@ -200,3 +200,53 @@ test('S6 scenario 2, the wrong filter: saving with only the epic does not detect
   expect(found.every((key) => key.startsWith('s6:T-07-'))).toBe(true)
   expect(await slowSpotsDetected(world, board)).toBe(false)
 })
+
+test('S6 scenario 2, replaced: the chips added over Slow spots are folded into it by Replace, and it detects', async ({
+  startWorld,
+  openPage,
+}) => {
+  const world = await startWorld(plan)
+  const board = await openSlowSpotsBoard(world)
+  const page = await openPage(world)
+  await expect(page.locator('[data-card]').first()).toBeVisible()
+
+  // Slow spots is saved with the epic only, as the owner's run did at step 12.
+  await bar(page).getByRole('button', { name: 'Epic: Any' }).click()
+  await page.getByRole('dialog', { name: 'Epics to show' }).getByRole('checkbox', { name: /Performance/ }).click()
+  await page.keyboard.press('Escape')
+  await bar(page).getByRole('button', { name: 'Save as a view…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Save as a view' })
+  await dialog.getByRole('textbox', { name: 'Name' }).fill(SLOW_SPOTS)
+  await dialog.getByRole('button', { name: 'Save view' }).click()
+  await expect(page.getByRole('heading', { name: SLOW_SPOTS, exact: true })).toBeVisible()
+  expect(await slowSpotsDetected(world, board)).toBe(false)
+
+  // Two chips over the view: the heading says so, and the board is the five tasks.
+  await bar(page).getByRole('button', { name: /^Ready, \d+ tasks?$/ }).click()
+  await bar(page).getByRole('button', { name: /^perf, \d+ tasks?$/ }).click()
+  await expect(page.getByRole('heading', { name: `${SLOW_SPOTS} + 2 filters`, exact: true })).toBeVisible()
+  await expect(page.getByText('5 tasks', { exact: true })).toBeVisible()
+
+  // A built-in's name is still the daemon's to refuse. The name of the view is a replace.
+  await bar(page).getByRole('button', { name: 'Save as a view…' }).click()
+  const name = dialog.getByRole('textbox', { name: 'Name' })
+  await name.fill('ready')
+  await dialog.getByRole('button', { name: 'Save view' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('built-in view')
+  await name.fill(SLOW_SPOTS)
+  await dialog.getByRole('button', { name: `Replace ${SLOW_SPOTS}` }).click()
+
+  // The chips are in the view now: the heading is its name, and the daemon's view holds the three terms.
+  await expect(page.getByRole('heading', { name: SLOW_SPOTS, exact: true })).toBeVisible()
+  await until('the view Slow spots holds the three terms and detects', async () => {
+    return (await slowSpotsDetected(world, board)) ? true : undefined
+  })
+  expect(await members(world, board, SLOW_SPOTS)).toEqual([...S2_TARGET].sort())
+  const listed = await world.rpc<{ views: { view: { name: string; where?: string } }[] }>('task.views', { board })
+  const saved = listed.views.filter((each) => each.view.name === SLOW_SPOTS)
+  expect(saved).toHaveLength(1)
+  expect(saved[0]!.view.where).toContain('in collections')
+  expect(saved[0]!.view.where).toContain('category in ["ready"]')
+  expect(saved[0]!.view.where).toContain('"perf" in labels')
+  await expect(page.getByText('5 tasks', { exact: true })).toBeVisible()
+})

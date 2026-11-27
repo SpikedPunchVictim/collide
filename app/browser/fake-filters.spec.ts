@@ -161,6 +161,59 @@ test('Save as a view keeps the choices as a view the person can pick, and the bo
   )
 })
 
+test('over a view of the person\'s own the heading counts the chips on it, and Clear filters brings it back', async ({
+  openFake,
+}) => {
+  const page = await openFake('field-filters')
+  await page.getByRole('button', { name: 'All tasks' }).click()
+  await page.getByRole('button', { name: /^mine/ }).click()
+  await expect(page.getByRole('heading', { name: 'mine', exact: true })).toBeVisible()
+  await chip(page, 'perf, 2 tasks').click()
+  await expect(page.getByRole('heading', { name: 'mine + 1 filter', exact: true })).toBeVisible()
+  await chip(page, 'Ready, 3 tasks').click()
+  await expect(page.getByRole('heading', { name: 'mine + 2 filters', exact: true })).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Clear filters' }).click()
+  await expect(page.getByRole('heading', { name: 'mine', exact: true })).toBeVisible()
+})
+
+test('a name the person\'s own view has is a replace: the view takes the chips, and the heading is its name', async ({
+  openFake,
+}) => {
+  const page = await openFake('field-filters')
+  await page.getByRole('button', { name: 'All tasks' }).click()
+  await page.getByRole('button', { name: /^mine/ }).click()
+  await chip(page, 'perf, 2 tasks').click()
+  await bar(page).getByRole('button', { name: 'Save as a view…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Save as a view' })
+  await expect(dialog.getByRole('button', { name: 'Save view' })).toBeVisible()
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('mine')
+  await expect(dialog).toContainText('mine is already your view')
+  await expect(dialog.getByRole('button', { name: 'Save view' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Replace mine' }).click()
+  await expect(dialog).toHaveCount(0)
+  // The chips are in the view now, so none is on it: the heading is the name, and the board is what it was.
+  await expect(page.getByRole('heading', { name: 'mine', exact: true })).toBeVisible()
+  await expect(chip(page, 'perf, 2 tasks')).toHaveAttribute('aria-pressed', 'false')
+  await expect(bar(page).getByRole('button', { name: 'Save as a view…' })).toBeDisabled()
+  await expect(page.getByText('2 tasks', { exact: true })).toBeVisible()
+  await expect(card(page, 'Write the parser')).toBeVisible()
+  await expect(card(page, 'Build the Field')).toHaveCount(0)
+})
+
+test('a name that differs from the person\'s own view only in case is refused, with the words why', async ({
+  openFake,
+}) => {
+  const page = await openFake('field-filters')
+  await chip(page, 'Ready, 3 tasks').click()
+  await bar(page).getByRole('button', { name: 'Save as a view…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Save as a view' })
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('MINE')
+  await expect(dialog).toContainText('differs from your view "mine" only in case')
+  await expect(dialog.getByRole('button', { name: 'Save view' })).toBeDisabled()
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('Mine too')
+  await expect(dialog.getByRole('button', { name: 'Save view' })).toBeEnabled()
+})
+
 test('Save is off over a built-in view, and over a view that names tasks, with the words why', async ({ openFake }) => {
   const page = await openFake('field-filters')
   await page.getByRole('button', { name: 'All tasks' }).click()

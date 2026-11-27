@@ -4,8 +4,11 @@ import {
   NO_FILTERS,
   celOf,
   epicWords,
+  filterCount,
   groupsOf,
+  headingOf,
   isFiltering,
+  saveBoxOf,
   saveOf,
   summaryOf,
   toggle,
@@ -243,6 +246,56 @@ describe('Save as a view', () => {
 
   test('is refused with no name', () => {
     expect(saveOf(undefined, chips, '  ')).toHaveProperty('why')
+  })
+})
+
+describe('the save box', () => {
+  const views = [
+    view('ready', { type: 'builtin' }),
+    view('Slow spots', { type: 'personal' }, { where: 'true' }),
+    view('team', { type: 'repo' }),
+    view('collide/plan/spikes', { type: 'pack', pack: 'collide/plan' }),
+  ]
+
+  test('is free for a name no view has, and Save view is what it does', () => {
+    expect(saveBoxOf(views, 'Fresh one')).toEqual({ kind: 'free' })
+  })
+
+  test('is a replace for the name of a view of the person\'s own, whatever white space is round it', () => {
+    expect(saveBoxOf(views, 'Slow spots')).toEqual({ kind: 'replace', name: 'Slow spots' })
+    expect(saveBoxOf(views, '  Slow spots ')).toEqual({ kind: 'replace', name: 'Slow spots' })
+  })
+
+  test('is refused, with the words, for a name that differs from a view of the person\'s own only in case', () => {
+    const box = saveBoxOf(views, 'slow SPOTS')
+    expect(box).toHaveProperty('kind', 'refused')
+    const why = (box as { why: string }).why
+    expect(why).toContain('only in case')
+    expect(why).toContain('Slow spots')
+  })
+
+  test('leaves a built-in\'s name, a pack\'s and a repo view\'s to the daemon, which refuses or takes them', () => {
+    for (const name of ['ready', 'collide/plan/spikes', 'team']) {
+      expect(saveBoxOf(views, name)).toEqual({ kind: 'free' })
+    }
+  })
+})
+
+describe('the filters on top of a view', () => {
+  test('are counted by the chips on, and a search is one more', () => {
+    expect(filterCount(NO_FILTERS)).toBe(0)
+    expect(filterCount(on({ categories: ['ready', 'active'], labels: ['perf'] }))).toBe(3)
+    expect(filterCount(on({ epics: ['plan:ep-001-aa'], sources: ['plan'], text: ' parse ' }))).toBe(3)
+    expect(filterCount(on({ text: '   ' }))).toBe(0)
+  })
+
+  test('are said beside the name of a saved view, "1 filter" for one', () => {
+    expect(headingOf('Slow spots', on({ categories: ['ready'] }))).toBe('Slow spots + 1 filter')
+    expect(headingOf('Slow spots', on({ categories: ['ready'], labels: ['perf'] }))).toBe('Slow spots + 2 filters')
+  })
+
+  test('are not said with no chips: the name alone', () => {
+    expect(headingOf('Slow spots', NO_FILTERS)).toBe('Slow spots')
   })
 })
 

@@ -128,6 +128,24 @@ describe('the filter bar', () => {
   })
 })
 
+describe('the heading', () => {
+  const heading = (html: string) => /<h1[^>]*>([^<]*)<\/h1>/.exec(html)?.[1]
+
+  test('is the name of the view with the count of the chips on top of it', async () => {
+    const two = { ...NO_FILTERS, categories: ['active' as const], labels: ['perf'] }
+    expect(heading(await page(filtersWorld(), { view: 'open-work', filters: two }))).toBe('open-work + 2 filters')
+    const one = { ...NO_FILTERS, categories: ['active' as const] }
+    expect(heading(await page(filtersWorld(), { view: 'open-work', filters: one }))).toBe('open-work + 1 filter')
+  })
+
+  test('is the name alone with no chips on the view, and All tasks over the whole board, chips or none', async () => {
+    expect(heading(await page(filtersWorld(), { view: 'open-work' }))).toBe('open-work')
+    expect(heading(await page(filtersWorld()))).toBe('All tasks')
+    const chips = { ...NO_FILTERS, categories: ['active' as const] }
+    expect(heading(await page(filtersWorld(), { filters: chips }))).toBe('All tasks')
+  })
+})
+
 describe('the folded bar', () => {
   test('is the header and a line of words, with no chips', async () => {
     const store = memoryStore()

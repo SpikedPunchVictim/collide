@@ -12,6 +12,7 @@ import { EpicStrip } from '../epics/EpicStrip.tsx'
 import { LitLine } from '../epics/LitLine.tsx'
 import { boardLit, boardWords, epicsOf, litIds, outsideView, walkWords } from '../epics/model.ts'
 import { FilterBar } from '../filters/FilterBar.tsx'
+import { headingOf } from '../filters/model.ts'
 import { actionForKey } from '../frame/actions.ts'
 import type { OwnerClient } from '../owner/client.ts'
 import { CardButton } from './CardButton.tsx'
@@ -93,6 +94,7 @@ export function FieldPage({ owner, boardId, board = null, field, store, notices,
       board={board}
       view={field.view}
       entry={field.views.find((each) => each.view.name === field.view)}
+      views={field.views}
       goal={field.goal}
       onGoal={field.chooseGoal}
       filters={field.filters}
@@ -120,6 +122,8 @@ interface BoardProps {
   readonly view: string | null
   /** The selected view as the board lists it, which says its layout and its goal. Undefined for the whole board. */
   readonly entry: ViewEntry | undefined
+  /** The board's views, which the save box looks a name up in. */
+  readonly views: readonly ViewEntry[]
   /** The goal picked for the run order and graph of a view with none of its own. */
   readonly goal: string | null
   readonly onGoal: (goal: string | null) => void
@@ -136,7 +140,7 @@ interface BoardProps {
 
 function Board(props: BoardProps) {
   const { owner, boardId, board, view, entry, goal, onGoal, data, groupBy, flashed, updatedAt, store, notices } = props
-  const { filters, onFilters, onSave } = props
+  const { views, filters, onFilters, onSave } = props
   const kept = useKeptStore(store)
   // The folds are read each time, so a change to them is seen with no state of their own to keep in step.
   const [, remember] = useState(0)
@@ -254,6 +258,7 @@ function Board(props: BoardProps) {
         boardId={boardId}
         data={data}
         entry={entry}
+        views={views}
         filters={filters}
         onFilters={onFilters}
         onSave={onSave}
@@ -274,7 +279,7 @@ function Board(props: BoardProps) {
         />
       )}
       <div className="flex flex-wrap items-baseline gap-3">
-        <h1 className="text-xl font-semibold">{view ?? ALL_TASKS}</h1>
+        <h1 className="text-xl font-semibold">{view === null ? ALL_TASKS : headingOf(view, filters)}</h1>
         <span className="text-muted-foreground">{`${count} task${count === 1 ? '' : 's'}`}</span>
         {updatedAt === null ? null : <LiveStamp updatedAt={updatedAt} />}
         <LayoutSwitch layout={layout} onChoose={choose} />

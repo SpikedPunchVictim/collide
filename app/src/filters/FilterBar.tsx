@@ -22,6 +22,7 @@ import {
   celOf,
   groupsOf,
   isFiltering,
+  saveBoxOf,
   saveOf,
   summaryOf,
   toggle,
@@ -32,17 +33,19 @@ export interface FilterBarProps {
   readonly data: FieldData
   /** The selected view as the board lists it, which Save as a view starts from. Undefined for the whole board. */
   readonly entry: ViewEntry | undefined
+  /** The board's views, which a name typed in the save box is looked up in. */
+  readonly views: readonly ViewEntry[]
   readonly filters: Filters
   readonly onFilters: (next: Filters) => void
-  /** Writes a view of the person's own, and finishes when it has. A refusal is the words it throws. */
-  readonly onSave: (view: ViewInput) => Promise<void>
+  /** Writes a view of the person's own, replacing one of that name if `overwrite`. A refusal is the words it throws. */
+  readonly onSave: (view: ViewInput, overwrite?: boolean) => Promise<void>
   readonly store: FoldStore | null
 }
 
 const taskCount = (n: number) => `${n} task${n === 1 ? '' : 's'}`
 
 export function FilterBar(props: FilterBarProps) {
-  const { boardId, data, entry, filters, onFilters, onSave, store } = props
+  const { boardId, data, entry, views, filters, onFilters, onSave, store } = props
   const [folded, setFolded] = useState(() => readBarFolded(store, boardId))
   const search = useRef<HTMLInputElement>(null)
   const wantsFocus = useRef(false)
@@ -172,7 +175,7 @@ export function FilterBar(props: FilterBarProps) {
             <Button variant="outline" size="sm" disabled={!filtering} onClick={() => onFilters(NO_FILTERS)}>
               Clear filters
             </Button>
-            <SaveView entry={entry} filters={filters} onSave={onSave} />
+            <SaveView entry={entry} views={views} filters={filters} onSave={onSave} />
           </div>
           {data.filterProblem === null ? null : (
             <p role="alert" className="text-sm text-destructive">
@@ -234,13 +237,16 @@ function Chip({ label, count, on, dot, onClick }: ChipProps) {
 /** Save as a view (0.11): a name, and a view of the person's own with the choices in it. */
 function SaveView({
   entry,
+  views,
   filters,
   onSave,
-}: Pick<FilterBarProps, 'entry' | 'filters' | 'onSave'>): ReactNode {
+}: Pick<FilterBarProps, 'entry' | 'views' | 'filters' | 'onSave'>): ReactNode {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('My view')
   const [problem, setProblem] = useState<string | null>(null)
   const blocked = cannotSave(entry)
+  const box = saveBoxOf(views, name)
+  const replacing = box.kind === 'replace'
   const save = async () => {
     const made = saveOf(entry, filters, name)
     if ('why' in made) {
@@ -248,7 +254,7 @@ function SaveView({
       return
     }
     try {
-      await onSave(made.view)
+      await onSave(made.view, replacing)
       setOpen(false)
     } catch (failure) {
       setProblem(failure instanceof Error ? failure.message : String(failure))
@@ -276,15 +282,20 @@ function SaveView({
             Name
           </label>
           <Input id="view-name" value={name} autoComplete="off" onChange={(event) => setName(event.target.value)} />
-          <p className="text-xs text-muted-foreground">The view is kept for you.</p>
+          <p className="text-xs text-muted-foreground">
+            {replacing
+              ? `${box.name} is already your view. Replace it with what the board shows now.`
+              : 'The view is kept for you.'}
+          </p>
+          {box.kind === 'refused' ? <p className="text-sm text-destructive">{box.why}</p> : null}
           {problem === null ? null : (
             <p role="alert" className="text-sm text-destructive">
               {problem}
             </p>
           )}
           <div className="flex justify-end">
-            <Button size="sm" onClick={() => void save()}>
-              Save view
+            <Button size="sm" disabled={box.kind === 'refused'} onClick={() => void save()}>
+              {replacing ? `Replace ${box.name}` : 'Save view'}
             </Button>
           </div>
         </PopoverContent>

@@ -24,6 +24,18 @@ const AND = '\n  && '
 
 export const isFiltering = (filters: Filters) => celOf(filters) !== null
 
+/** How many choices are made: each value of a group is one, and a search with some text in it is one. */
+export function filterCount(filters: Filters): number {
+  const chips = filters.epics.length + filters.categories.length + filters.sources.length + filters.labels.length
+  return chips + (filters.text.trim() === '' ? 0 : 1)
+}
+
+/** What the heading says of a saved view: its name, and how many filters are on top of it, if any. */
+export function headingOf(view: string, filters: Filters): string {
+  const count = filterCount(filters)
+  return count === 0 ? view : `${view} + ${count} filter${count === 1 ? '' : 's'}`
+}
+
 /** A value in or out of a group, the others keeping their order. */
 export function toggle<T>(chosen: readonly T[], value: T): T[] {
   return chosen.includes(value) ? chosen.filter((each) => each !== value) : [...chosen, value]
@@ -140,6 +152,31 @@ export function cannotSave(base: ViewEntry | undefined): string | null {
     return 'This view names tasks or walks to a goal, which a filter in a file would not reach.'
   }
   return null
+}
+
+/** What the save box does with the name typed: save a new view, replace one of the person's own, or refuse. */
+export type SaveBox =
+  | { readonly kind: 'free' }
+  | { readonly kind: 'replace'; readonly name: string }
+  | { readonly kind: 'refused'; readonly why: string }
+
+/**
+ * What saving under `typed` does. A name that a view of the person's own has, exactly, is a replace. A name that
+ * differs from one only in case is refused, as the daemon refuses it: the two would be one file. Any other name is
+ * free here: a built-in's, a pack's and the rest are for the daemon to refuse or take.
+ */
+export function saveBoxOf(views: readonly ViewEntry[], typed: string): SaveBox {
+  const name = typed.trim()
+  const own = views.filter((each) => each.source.type === 'personal').map((each) => each.view.name)
+  if (own.includes(name)) return { kind: 'replace', name }
+  const near = own.find((each) => each.toLowerCase() === name.toLowerCase())
+  if (near === undefined) return { kind: 'free' }
+  return {
+    kind: 'refused',
+    why:
+      `"${name}" differs from your view "${near}" only in case, so the two would be one file. ` +
+      `Type "${near}" to replace it, or use another name.`,
+  }
 }
 
 /**
