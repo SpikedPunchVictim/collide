@@ -319,6 +319,11 @@ export class World {
         process.kill(this.bridgePid, 'SIGKILL')
       })
     }
+    // The launcher's subshell writes the bridge's exit code after the bridge ends, and its command names the root
+    // while it does. It is waited for; anything else still running is reported at once.
+    await waitFor('the launcher to finish', 5_000, () => !processesNaming(this.root).some(this.isLauncher)).catch(
+      () => undefined,
+    )
     const left = processesNaming(this.root)
     const report = left.map((p) => `${p.pid} ${p.command}`)
     for (const p of left) {
@@ -332,6 +337,10 @@ export class World {
     removeRoot(this.root)
     return report
   }
+
+  /** Whether `p` is the launcher's subshell, or a file move it makes, rather than something the bridge started. */
+  private readonly isLauncher = (p: { command: string }): boolean =>
+    p.command.startsWith('/bin/sh -c dir=$1') || p.command.startsWith(`mv ${this.detachedDir}/`)
 
   private shutdown(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
