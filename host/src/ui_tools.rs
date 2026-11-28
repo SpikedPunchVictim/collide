@@ -390,6 +390,11 @@ impl UiToolsEndpoint {
         self.port = port;
     }
 
+    /// The port the endpoint answers on, for the URL an ask's child is given.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
     /// Registers an ask and its token, which the shell made when it forwarded `ask.start`.
     pub fn register_ask(&mut self, ask: &str, token: &str) -> Result<(), AskRegistration> {
         if ask.is_empty() {

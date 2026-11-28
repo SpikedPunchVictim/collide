@@ -170,17 +170,22 @@ fn every_recording_is_valid_json_per_line_and_says_something() {
     for entry in fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
         let text = fs::read_to_string(&path).unwrap();
+        let mut speaks = false;
         for line in text
             .lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
         {
-            serde_json::from_str::<serde_json::Value>(line)
+            let step = serde_json::from_str::<serde_json::Value>(line)
                 .unwrap_or_else(|e| panic!("{}: {e}: {line}", path.display()));
+            // The steps that write a stream-json line of their own, as `say` does (ts-0201-us).
+            speaks |= ["say", "say_text", "init", "assistant", "result"]
+                .iter()
+                .any(|name| step.get(name).is_some());
         }
-        assert!(!said(&path).is_empty(), "{}", path.display());
+        assert!(speaks, "{}", path.display());
         seen += 1;
     }
-    assert_eq!(seen, 22, "the recordings: add a test for a new one");
+    assert_eq!(seen, 30, "the recordings: add a test for a new one");
 }
 
 #[test]

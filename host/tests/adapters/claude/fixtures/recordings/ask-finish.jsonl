@@ -1,0 +1,8 @@
+# Built for the tests: an ask reads its request and finishes (ts-0201-us).
+{"write_stdin":"request.txt"}
+{"write_pid":"fake.pid"}
+{"dump_launch":"launch.json"}
+{"init":true}
+{"assistant":"Done."}
+{"result":{"text":"Done."}}
+{"wait_eof":true}

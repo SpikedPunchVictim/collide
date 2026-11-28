@@ -18,7 +18,7 @@ pub const BOARD_ROOT: &str = "<board root>";
 
 /// The folder a `read` entry names: `<board root>` and `<board root>/...` replaced by `board_root`. `None` for an entry
 /// that starts at the board's root when there is no board.
-fn read_folder(entry: &str, board_root: Option<&Path>) -> Option<PathBuf> {
+pub fn read_folder(entry: &str, board_root: Option<&Path>) -> Option<PathBuf> {
     match entry.strip_prefix(BOARD_ROOT) {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => {
             Some(board_root?.join(rest.trim_start_matches('/')))

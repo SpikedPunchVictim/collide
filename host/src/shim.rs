@@ -245,6 +245,11 @@ pub struct ShimSpec {
     pub daemon: Option<DaemonStart>,
 }
 
+/// The optional key of `spec.json` that lists environment names the shim takes from its own environment into the
+/// child's ([`ShimSpec::from_json`]). [`ShimSpec::to_json`] never writes it: the daemon adds it for a phase that has
+/// secrets, and puts the values in the shim's environment, so they are in no file.
+pub const ENV_FROM_SHIM: &str = "env_from_shim";
+
 impl ShimSpec {
     /// The JSON of `spec.json`.
     pub fn to_json(&self) -> Value {
@@ -302,6 +307,27 @@ impl ShimSpec {
                     .ok_or_else(|| spec_error(format!("`env` value of {name} is not a string")))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let mut env = env;
+        // Names the daemon put in the shim's own environment instead of the file, for a value that must not be on disk
+        // (an ask's secrets). They join the child's environment here.
+        for name in value
+            .get(ENV_FROM_SHIM)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let name = name.as_str().ok_or_else(|| {
+                spec_error(format!(
+                    "`{ENV_FROM_SHIM}` holds something that is not a string"
+                ))
+            })?;
+            let held = std::env::var(name).map_err(|_| {
+                spec_error(format!(
+                    "`{ENV_FROM_SHIM}` names {name}, which the shim's environment does not hold"
+                ))
+            })?;
+            env.insert(name.to_string(), held);
+        }
         let stdio = value
             .get("stdio")
             .ok_or_else(|| spec_error("`stdio` is missing".into()))?;
@@ -2118,6 +2144,30 @@ mod tests {
             env: BTreeMap::from([("COLLIDE_DAEMON_ROOT".to_string(), "/r".to_string())]),
         });
         assert_eq!(ShimSpec::from_json(&with.to_json()).unwrap(), with);
+    }
+
+    #[test]
+    fn a_spec_takes_the_names_it_lists_from_the_shims_own_environment() {
+        let mut value = spec(ChildStdio::Pipes).to_json();
+        value[ENV_FROM_SHIM] = json!(["PATH"]);
+        let read = ShimSpec::from_json(&value).unwrap();
+        assert_eq!(read.env["PATH"], std::env::var("PATH").unwrap());
+        assert_eq!(read.env["A"], "b", "what the file holds stays");
+        assert!(
+            !value.to_string().contains(&std::env::var("PATH").unwrap()),
+            "the file holds names only"
+        );
+    }
+
+    #[test]
+    fn a_spec_that_names_a_variable_the_shim_lacks_says_which() {
+        let mut value = spec(ChildStdio::Pipes).to_json();
+        value[ENV_FROM_SHIM] = json!(["COLLIDE_NO_SUCH_NAME_IN_ANY_ENVIRONMENT"]);
+        let message = ShimSpec::from_json(&value).unwrap_err().to_string();
+        assert!(
+            message.contains("COLLIDE_NO_SUCH_NAME_IN_ANY_ENVIRONMENT"),
+            "{message}"
+        );
     }
 
     #[test]

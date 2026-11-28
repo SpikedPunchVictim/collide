@@ -1,0 +1,6 @@
+# Built for the tests: an agent that echoes the token and the URL it was given (ts-0201-us).
+{"wait_eof":true}
+{"init":true}
+{"assistant":"the token is {{mcp_token}} at {{mcp_url}}"}
+{"result":{"text":"Done."}}
+{"wait_eof":true}

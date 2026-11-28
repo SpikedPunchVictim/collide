@@ -8,7 +8,7 @@ use collide_core::agent::Support;
 use collide_core::profile::RoleConfig;
 use collide_host::adapters::claude::ask::{
     ASK_PROMPT, AskProfile, ask_launch_spec, check_before_launch, remove_ask_folder,
-    write_ask_folder,
+    remove_mcp_file, write_ask_folder,
 };
 use collide_host::adapters::claude::{capabilities, env_strip};
 use collide_host::base_env::{BaseEnvironment, EnvSource};
@@ -543,4 +543,28 @@ fn a_symlink_is_not_followed_by_the_remove() {
         real.join("mcp.json").exists(),
         "what the link points at is untouched"
     );
+}
+
+#[test]
+fn removing_the_mcp_file_leaves_the_rest_of_the_folder() {
+    let root = TempRoot::new();
+    let dir = root.join("ask");
+    write_ask_folder(&dir, ENDPOINT, TOKEN).unwrap();
+    fs::write(dir.join("record.json"), "kept").unwrap();
+
+    remove_mcp_file(&dir).unwrap();
+
+    assert!(!dir.join("mcp.json").exists(), "the token's file is gone");
+    assert!(dir.join("settings.json").exists());
+    assert_eq!(fs::read_to_string(dir.join("record.json")).unwrap(), "kept");
+}
+
+#[test]
+fn removing_the_mcp_file_twice_or_from_a_missing_folder_is_not_an_error() {
+    let root = TempRoot::new();
+    let dir = root.join("ask");
+    write_ask_folder(&dir, ENDPOINT, TOKEN).unwrap();
+    remove_mcp_file(&dir).unwrap();
+    remove_mcp_file(&dir).unwrap();
+    remove_mcp_file(&root.join("never-made")).unwrap();
 }

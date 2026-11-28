@@ -210,8 +210,8 @@ pub enum AskCost {
 }
 
 /// How an ask ended (0.11, The ask box). The ask box writes the plain text of each from these: `timed out after N
-/// s`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`. A refusal before launch is `failed` with its
-/// text.
+/// s`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`, `the ask was lost; ask again`. A refusal
+/// before launch is `failed` with its text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AskEnd {
@@ -225,6 +225,9 @@ pub enum AskEnd {
     StoppedAtBudget { budget: Money },
     /// The ask did not run or did not finish. `text` is plain text for the ask box.
     Failed { text: String },
+    /// The ask's shim died with no word of how the child ended, or the daemon restarted under it. The ask box says
+    /// `the ask was lost; ask again` (0.3, The ask agent is a separate role).
+    Lost {},
 }
 
 /// The outcome of an ask: how it ended, what it cost, and how far the figures of the usage can be trusted
@@ -269,10 +272,15 @@ pub enum AskNotice {
 }
 
 impl AskNotice {
+    /// The method of an [`AskNotice::Event`].
+    pub const EVENT_METHOD: &'static str = "ask.event";
+    /// The method of an [`AskNotice::Outcome`].
+    pub const OUTCOME_METHOD: &'static str = "ask.outcome";
+
     pub fn method(&self) -> &'static str {
         match self {
-            AskNotice::Event(_) => "ask.event",
-            AskNotice::Outcome(_) => "ask.outcome",
+            AskNotice::Event(_) => AskNotice::EVENT_METHOD,
+            AskNotice::Outcome(_) => AskNotice::OUTCOME_METHOD,
         }
     }
 

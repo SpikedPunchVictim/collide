@@ -263,6 +263,16 @@ pub fn remove_ask_folder(dir: &Path) -> io::Result<()> {
     }
 }
 
+/// Removes `mcp.json`, the one file of the ask folder that holds the token, and leaves the rest of the folder: the
+/// ask's record lives there (0.3, The ask agent is a separate role). A file that is already gone is not an error. A
+/// link is removed as a link and not followed.
+pub fn remove_mcp_file(dir: &Path) -> io::Result<()> {
+    match fs::remove_file(dir.join(MCP_FILE)) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 /// `""` or `user` (0.3, Claude Code's launch line).
 fn setting_sources(config: RoleConfig) -> &'static str {
     match config {

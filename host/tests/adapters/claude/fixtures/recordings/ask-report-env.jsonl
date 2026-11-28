@@ -1,0 +1,6 @@
+# Built for the tests: an agent that says whether it got a variable, never its value (ts-0201-us).
+{"wait_eof":true}
+{"init":true}
+{"report_env":"SEEDED_KEY"}
+{"result":{"text":"Done."}}
+{"wait_eof":true}

@@ -116,7 +116,12 @@ pub(super) fn git(dir: &Path, args: &[&str]) {
 }
 
 /// The options of a daemon under `root`: fake Claude's shell, the temp `home`, and git that reads no configuration.
-fn daemon_options(root: &TempRoot, shell: &Path, home: &Path, setup: Setup) -> DaemonOptions {
+pub(super) fn daemon_options(
+    root: &TempRoot,
+    shell: &Path,
+    home: &Path,
+    setup: Setup,
+) -> DaemonOptions {
     let paths = DaemonPaths::under(root.path());
     let mut options = DaemonOptions::new(
         paths.clone(),

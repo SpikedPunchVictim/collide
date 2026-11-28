@@ -32,7 +32,25 @@ JSON Lines file. A blank line, and a line that starts with `#`, are skipped. Eve
     {"git": ["merge", "--no-commit", "main"]}
                             run git in the working folder, as `git_commit` does, and go on whatever it answers: a merge
                             that stops on a conflict is the point of it (ts-0080-tq)
+    {"init": true}          write the `system` `init` line `claude` writes first (ts-0201-us)
+    {"assistant": "text"}   write an assistant message with this text, with a little usage (ts-0201-us)
+    {"result": {"subtype": "success", "is_error": false, "api_error_status": null, "cost": 0.0041, "text": "..."}}
+                            write the `result` line that ends a turn; every key is optional (ts-0201-us)
+    {"write_pid": "name"}   write this process's pid to the file `name`, below the working folder (ts-0201-us)
+    {"write_stdin": "name"} read stdin until it closes and write what came to the file `name`, below the working
+                            folder: the request an ask sends once as text (ts-0201-us)
+    {"dump_launch": "name"} write the words this process got and its environment, as JSON, to the file `name`, below
+                            the working folder (ts-0201-us)
+    {"report_env": "NAME"}  say, as an assistant message, whether the variable is set, with its length and a sum of its
+                            bytes, and never its value (ts-0201-us)
+    {"tools_call": {"name": "query", "arguments": {...}}}
+                            call a tool of the endpoint the `--mcp-config` file names: post `tools/call` to its `url`
+                            with its headers, wait for the answer, and write the call and its result into the stream,
+                            as `claude` writes a `tool_use` and its `tool_result` (ts-0201-us)
     {"exit": N}             exit with code N now
+
+In the text of a `say`, `say_text` or `assistant`, `{{mcp_token}}` is the bearer token of the `--mcp-config` file's
+server and `{{mcp_url}}` is its URL: an agent that echoes what it was given (ts-0201-us).
 
 `expect` is a subset match: every key in the expected object must be in the line, with a value that matches, and the
 line may hold more. A list matches a list of the same length, element by element. A line that does not match, or is
@@ -46,6 +64,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
 
 EXIT_STEP_UNKNOWN = 96
 EXIT_MISMATCH = 97
@@ -165,6 +184,114 @@ def git_run(args):
     subprocess.run(["git"] + IDENTITY + args, env=git_env(), capture_output=True, text=True)
 
 
+def below_cwd(path):
+    if os.path.isabs(path) or ".." in path.split("/"):
+        stop(EXIT_STEP_UNKNOWN, "a file below the working folder is wanted, not %s" % path)
+    return path
+
+
+def mcp_server(words):
+    """The server of the `--mcp-config` file in `words`: its `url` and its `headers`."""
+    if "--mcp-config" not in words or words.index("--mcp-config") + 1 >= len(words):
+        stop(EXIT_STEP_UNKNOWN, "there is no --mcp-config in claude's line")
+    with open(words[words.index("--mcp-config") + 1]) as config:
+        servers = json.load(config)["mcpServers"]
+    return next(iter(servers.values()))
+
+
+def substitute(text, words):
+    """`{{mcp_token}}` and `{{mcp_url}}` in `text`, from the `--mcp-config` file."""
+    if "{{mcp_" not in text:
+        return text
+    server = mcp_server(words)
+    token = server.get("headers", {}).get("Authorization", "").replace("Bearer ", "", 1)
+    return text.replace("{{mcp_token}}", token).replace("{{mcp_url}}", server["url"])
+
+
+def assistant_text(text):
+    return {
+        "type": "assistant",
+        "message": {
+            "model": "claude-haiku-5-5", "id": "msg_fake", "type": "message", "role": "assistant",
+            "content": [{"type": "text", "text": text}], "stop_reason": None,
+            "usage": USAGE,
+        },
+        "parent_tool_use_id": None,
+        "session_id": SESSION,
+    }
+
+
+SESSION = "7c1b0e52-9f3a-4d2e-8b61-0a5d3c9e4f17"
+USAGE = {"input_tokens": 4, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 12000, "output_tokens": 40,
+         "service_tier": "standard"}
+
+
+def say_json(value):
+    write_line(sys.stdout, json.dumps(value, separators=(",", ":")))
+
+
+def say_init():
+    say_json({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": SESSION,
+              "tools": ["Read", "Grep", "Glob"], "mcp_servers": [], "model": "claude-haiku-5-5",
+              "permissionMode": "default", "apiKeySource": "none", "claude_code_version": "2.1.323"})
+
+
+def say_result(spec):
+    failed = bool(spec.get("is_error", False))
+    errors = [spec["errors"]] if "errors" in spec else []
+    say_json({"type": "result", "subtype": spec.get("subtype", "success"), "is_error": failed,
+              "api_error_status": spec.get("api_error_status"), "duration_ms": 2100, "duration_api_ms": 1300,
+              "num_turns": 1, "result": spec.get("text"), "stop_reason": None if failed else "end_turn",
+              "session_id": SESSION, "total_cost_usd": spec.get("cost", 0.0041), "usage": USAGE,
+              "permission_denials": [], "terminal_reason": "completed", "errors": errors})
+
+
+def report_env(name):
+    value = os.environ.get(name)
+    if value is None:
+        text = "env %s: absent" % name
+    else:
+        text = "env %s: set, length %d, sum %d" % (name, len(value), sum(value.encode()) % 65521)
+    say_json(assistant_text(text))
+
+
+def tools_call(words, call, number):
+    """Posts the call to the endpoint and writes the call and what came back as a `tool_use` and a `tool_result`."""
+    server = mcp_server(words)
+    use_id = "toolu_mcp_%d" % number
+    name = "mcp__collide__" + call["name"]
+    session = SESSION
+    use = {
+        "type": "assistant",
+        "message": {"model": "claude-haiku-5-5", "id": "msg_call_%d" % number, "type": "message", "role": "assistant",
+                    "content": [{"type": "tool_use", "id": use_id, "name": name, "input": call.get("arguments", {})}],
+                    "stop_reason": None,
+                    "usage": USAGE},
+        "parent_tool_use_id": None, "session_id": session,
+    }
+    write_line(sys.stdout, json.dumps(use, separators=(",", ":")))
+    body = json.dumps({"jsonrpc": "2.0", "id": number, "method": "tools/call",
+                       "params": {"name": call["name"], "arguments": call.get("arguments", {})}}).encode()
+    headers = dict(server.get("headers", {}))
+    headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(server["url"], data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=60) as answer:
+            reply, status = json.load(answer), answer.status
+    except urllib.error.HTTPError as error:
+        reply, status = {"error": {"message": "HTTP %d" % error.code}}, error.code
+    failed = {"content": [{"type": "text", "text": json.dumps(reply.get("error"))}], "isError": True}
+    result = reply.get("result") or failed
+    text = "".join(part.get("text", "") for part in result.get("content", []))
+    done = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "tool_result", "content": text,
+                                                 "is_error": bool(result.get("isError")), "tool_use_id": use_id}]},
+        "parent_tool_use_id": None, "session_id": session,
+    }
+    write_line(sys.stdout, json.dumps(done, separators=(",", ":")))
+
+
 def main():
     words = sys.argv[1:]
     emulate = bool(words) and words[0] == "--emulate-hooks"
@@ -173,9 +300,9 @@ def main():
         emulate_session_start_hooks(words[1:])
     for number, step in steps_of(words[0]):
         if "say" in step:
-            write_line(sys.stdout, json.dumps(step["say"], separators=(",", ":")))
+            write_line(sys.stdout, substitute(json.dumps(step["say"], separators=(",", ":")), words[1:]))
         elif "say_text" in step:
-            write_line(sys.stdout, step["say_text"])
+            write_line(sys.stdout, substitute(step["say_text"], words[1:]))
         elif "stderr" in step:
             write_line(sys.stderr, step["stderr"])
         elif "expect" in step:
@@ -205,6 +332,25 @@ def main():
             git_commit(step["git_commit"])
         elif "git" in step:
             git_run(step["git"])
+        elif "init" in step:
+            say_init()
+        elif "assistant" in step:
+            say_json(assistant_text(substitute(step["assistant"], words[1:])))
+        elif "result" in step:
+            say_result(step["result"])
+        elif "write_pid" in step:
+            with open(below_cwd(step["write_pid"]), "w") as out:
+                out.write(str(os.getpid()))
+        elif "write_stdin" in step:
+            with open(below_cwd(step["write_stdin"]), "w") as out:
+                out.write(sys.stdin.read())
+        elif "dump_launch" in step:
+            with open(below_cwd(step["dump_launch"]), "w") as out:
+                json.dump({"argv": words, "env": dict(os.environ)}, out)
+        elif "report_env" in step:
+            report_env(step["report_env"])
+        elif "tools_call" in step:
+            tools_call(words[1:], step["tools_call"], number)
         elif "exit" in step:
             sys.stdout.flush()
             sys.exit(step["exit"])

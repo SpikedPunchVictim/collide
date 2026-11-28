@@ -122,7 +122,7 @@ use collide_core::owner::{AnswerKind, QueueItem, QueueKind};
 use collide_core::shim::{DaemonMessage, ExitEnd, ExitRecord, ShimMessage};
 use collide_core::state::{PhaseState, RunState};
 use collide_core::transition::{PhaseEnding, TransitionError, phase_ending, phase_transition};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -874,7 +874,19 @@ impl Phases {
     /// `running`. Nothing is made for a name that is bad or taken, or whose socket path is over the limit. A shim that
     /// cannot be started makes the phase `failed`, and the error says why.
     pub fn start_phase(&self, key: &PhaseKey, spec: &PhaseSpec) -> Result<(), PhaseError> {
-        self.start_phase_with(key, spec, None)
+        self.start_phase_with(key, spec, None, &BTreeMap::new())
+    }
+
+    /// [`Phases::start_phase`] for a child that gets `secrets` in its environment, on top of the spec's. The values
+    /// are in no file: `spec.json` names them ([`crate::shim::ENV_FROM_SHIM`]) and the shim takes them from its own
+    /// environment, where this puts them.
+    pub fn start_phase_with_secrets(
+        &self,
+        key: &PhaseKey,
+        spec: &PhaseSpec,
+        secrets: &BTreeMap<String, String>,
+    ) -> Result<(), PhaseError> {
+        self.start_phase_with(key, spec, None, secrets)
     }
 
     /// Starts an agent phase: [`Phases::start_phase`], with the session whose stream the phase's watcher feeds from
@@ -886,7 +898,7 @@ impl Phases {
         spec: &PhaseSpec,
         feed: AgentFeed,
     ) -> Result<(), PhaseError> {
-        self.start_phase_with(key, spec, Some(feed))
+        self.start_phase_with(key, spec, Some(feed), &BTreeMap::new())
     }
 
     fn start_phase_with(
@@ -894,6 +906,7 @@ impl Phases {
         key: &PhaseKey,
         spec: &PhaseSpec,
         feed: Option<AgentFeed>,
+        secrets: &BTreeMap<String, String>,
     ) -> Result<(), PhaseError> {
         let shim_exe = self.shared.shim_exe.clone().ok_or(PhaseError::NoShimExe)?;
         let dir = self.shared.runs_dir.join(&key.run).join(&key.phase);
@@ -913,7 +926,7 @@ impl Phases {
             table.insert(key.clone(), entry.clone());
             entry
         };
-        let made = self.make_dir_and_spec(&entry, spec);
+        let made = self.make_dir_and_spec(&entry, spec, secrets);
         if let Err(error) = made {
             // The name is taken by a directory that was already there, or by one that could not be made.
             self.fail_to_start(&entry, &error);
@@ -926,7 +939,7 @@ impl Phases {
             self.fail_to_start(&entry, &error);
             return Err(error);
         }
-        match self.spawn_shim(&shim_exe, &entry) {
+        match self.spawn_shim(&shim_exe, &entry, secrets) {
             Ok(()) => {}
             Err(error) => {
                 self.fail_to_start(&entry, &error);
@@ -982,7 +995,12 @@ impl Phases {
         Ok(())
     }
 
-    fn make_dir_and_spec(&self, entry: &Arc<Entry>, spec: &PhaseSpec) -> Result<(), PhaseError> {
+    fn make_dir_and_spec(
+        &self,
+        entry: &Arc<Entry>,
+        spec: &PhaseSpec,
+        secrets: &BTreeMap<String, String>,
+    ) -> Result<(), PhaseError> {
         let io_error = |context: String| move |source| PhaseError::Io { context, source };
         let run_dir = self.shared.runs_dir.join(&entry.key.run);
         fs::DirBuilder::new()
@@ -1002,11 +1020,16 @@ impl Phases {
                 });
             }
         }
-        self.write_spec(entry, spec)
+        self.write_spec(entry, spec, secrets)
     }
 
-    /// Writes the phase's `spec.json`, which must not be there yet.
-    fn write_spec(&self, entry: &Arc<Entry>, spec: &PhaseSpec) -> Result<(), PhaseError> {
+    /// Writes the phase's `spec.json`, which must not be there yet. A secret's name is in it and its value is not.
+    fn write_spec(
+        &self,
+        entry: &Arc<Entry>,
+        spec: &PhaseSpec,
+        secrets: &BTreeMap<String, String>,
+    ) -> Result<(), PhaseError> {
         let io_error = |context: String| move |source| PhaseError::Io { context, source };
         let shim_spec = ShimSpec {
             program: spec.program.clone(),
@@ -1024,7 +1047,16 @@ impl Phases {
             .mode(0o600)
             .open(&path)
             .map_err(io_error(format!("making {}", path.display())))?;
-        file.write_all(shim_spec.to_json().to_string().as_bytes())
+        let mut json = shim_spec.to_json();
+        if !secrets.is_empty()
+            && let Some(object) = json.as_object_mut()
+        {
+            object.insert(
+                crate::shim::ENV_FROM_SHIM.to_string(),
+                secrets.keys().cloned().collect::<Vec<_>>().into(),
+            );
+        }
+        file.write_all(json.to_string().as_bytes())
             .and_then(|()| file.sync_all())
             .map_err(io_error(format!("writing {}", path.display())))
     }
@@ -1079,8 +1111,8 @@ impl Phases {
                 context: format!("moving the last attempt of {}", entry.dir.display()),
                 source,
             })
-            .and_then(|()| self.write_spec(&entry, spec))
-            .and_then(|()| self.spawn_shim(&shim_exe, &entry));
+            .and_then(|()| self.write_spec(&entry, spec, &BTreeMap::new()))
+            .and_then(|()| self.spawn_shim(&shim_exe, &entry, &BTreeMap::new()));
         if let Err(error) = started {
             self.fail_to_start(&entry, &error);
             return Err(error);
@@ -1098,7 +1130,12 @@ impl Phases {
     /// Starts `collide shim <dir>` in a session of its own, so that neither a signal to the daemon's group nor a job
     /// that ends with the daemon reaches it, with a cleared environment (the spec's `daemon.env`, if there is one) and
     /// its output in `shim.log`. A reaper thread takes its exit.
-    fn spawn_shim(&self, exe: &Path, entry: &Arc<Entry>) -> Result<(), PhaseError> {
+    fn spawn_shim(
+        &self,
+        exe: &Path,
+        entry: &Arc<Entry>,
+        secrets: &BTreeMap<String, String>,
+    ) -> Result<(), PhaseError> {
         let io_error = |context: String| move |source| PhaseError::Io { context, source };
         let log_path = entry.dir.join(shim_files::SHIM_LOG);
         let log = OpenOptions::new()
@@ -1124,6 +1161,8 @@ impl Phases {
         // A shim is runtime: a stop never sweeps it, because it must outlive the stop to reap its child and write
         // `exit.json`. The marker is in the environment at exec, which is what a scan reads.
         command.env(RUNTIME_MARKER, "1");
+        // The values a spec names but does not hold: the shim passes them to its child.
+        command.envs(secrets);
         // SAFETY: the closure runs between fork and exec and calls only `setsid`, which is async-signal-safe and
         // allocates nothing.
         unsafe {

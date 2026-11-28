@@ -35,7 +35,7 @@ use crate::pack_update::{PackError, UpdateSite, pack_update};
 use crate::secret_store::{Secret, SecretStore, SecretStoreError, pack_item};
 use crate::settings_files::{UserFiles, read_user_files, user_config_dir};
 use crate::user_packs::UserScope;
-use collide_core::agent_layers::{AgentInputs, AgentLayers, agent_layers};
+use collide_core::agent_layers::{AgentInputs, AgentLayers, AgentView, agent_layers};
 use collide_core::owner::{
     ConfigEntry, ConfigGetParams, ConfigGetResult, ConfigLayerFile, ConfigPackAddParams,
     ConfigPackEnableParams, ConfigPackLinkParams, ConfigPackResult, ConfigPackUpdateParams,
@@ -360,6 +360,40 @@ impl ConfigService {
             line,
             problems,
         })
+    }
+
+    /// The agent entry `id` as the layers resolve it, for an ask (ts-0201-us): the user's files, and the repo's line
+    /// when `board` is given. An id no entry has is `NotFound`, naming the ids that exist. A file that cannot be read,
+    /// or a problem with any key of the layers, is `Refused` with its text, as `config.get` refuses it: a config with a
+    /// problem is not resolved.
+    pub fn agent_entry(
+        &self,
+        board: Option<BoardRef>,
+        path: &OsStr,
+        id: &str,
+    ) -> Result<AgentView, GetError> {
+        let gathered = self.gather(board, path).map_err(GetError::Refused)?;
+        if !gathered.problems.is_empty() {
+            return Err(GetError::Refused(gathered.problems.join("\n")));
+        }
+        let resolved = resolve(&gathered.user, gathered.line.as_ref(), None);
+        let known: Vec<String> = resolved
+            .agents
+            .agents
+            .iter()
+            .map(|agent| format!("`{}`", agent.id))
+            .collect();
+        resolved
+            .agents
+            .agents
+            .into_iter()
+            .find(|agent| agent.id == id)
+            .ok_or_else(|| {
+                GetError::NotFound(format!(
+                    "no agent entry has the id `{id}`; the entries are {}",
+                    known.join(", ")
+                ))
+            })
     }
 
     /// The settings of `board` (or the user's alone), with `params.profile` on top, narrowed to `params.key`.

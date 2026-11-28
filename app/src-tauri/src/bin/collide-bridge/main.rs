@@ -31,7 +31,7 @@ mod http;
 use collide_app::endpoint::{EndpointServer, MemoryPortStore, stderr_log};
 use collide_app::shell::{
     ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, RecordingOpener, Shell, ShellHandle,
-    SocketLink, pump_daemon_events,
+    SocketAskConnector, SocketLink, pump_daemon_events,
 };
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::SystemClocks;
@@ -348,6 +348,8 @@ fn main() -> ExitCode {
 
     let shell_access = Arc::clone(&access);
     let shell_hub = Arc::clone(&hub);
+    let asks_hub = Arc::clone(&hub);
+    let asks_access = Arc::clone(&access);
     // The UI-tools endpoint's token is kept in memory, as the keychain is never touched.
     let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::default());
     let opener = RecordingOpener::default();
@@ -367,6 +369,7 @@ fn main() -> ExitCode {
             Box::new(SocketLink::new(shell_access)),
             Box::new(shell_opener),
         )
+        .with_asks(Box::new(SocketAskConnector::new(asks_access)), asks_hub)
     }));
     // The same listener as the app's, on a port the system picks, kept in memory for this run.
     let endpoint = match EndpointServer::start(

@@ -2,6 +2,7 @@ pub mod acp_probe;
 pub mod adapters;
 pub mod agent_checks;
 pub mod agent_feed;
+pub mod ask_runner;
 pub mod atomic_write;
 pub mod auth;
 pub mod base_env;

@@ -16,6 +16,7 @@ mod common;
 mod accept;
 mod agent_setup;
 mod ask;
+mod ask_run;
 mod canary;
 mod capabilities;
 mod contract;

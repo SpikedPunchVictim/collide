@@ -110,6 +110,9 @@
 
 use crate::adapters::claude::auth_status::{LoginProbe, NotChecked};
 use crate::adapters::claude::env_strip;
+use crate::ask_runner::{
+    AskHost, AskPlan, AskRegistry, AskSink, PHASE_NAME as ASK_PHASE, PendingAsk, asks_dir_beside,
+};
 use crate::auth::{
     self, Admitted, Caller, ProcessTree, Session, StdFs, SystemProcessTree, UnixPeer, Verdict,
 };
@@ -166,6 +169,7 @@ use crate::workspace::Git;
 use crate::write_guard::{
     self, Applied, Fate, LivePhases, QueuedWrite, WriteGuard, WriteGuardConfig,
 };
+use collide_core::ask::{AskCancelParams, AskMethod, AskNotice, AskStartDaemonParams};
 use collide_core::change::{Actor, ActorKind};
 use collide_core::corpus::{ListFilter, Page};
 use collide_core::events::Event;
@@ -192,6 +196,7 @@ use collide_core::owner::{
 };
 use collide_core::provider::{ApplyActor, ApplyActorKind, ApplyParams, ApplyResult, GetParams};
 use collide_core::section::{ProposalFeatures, section_uses};
+use collide_core::settings::AgentKind;
 use collide_core::shim::ExitRecord;
 use collide_core::view_eval::view_report;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -700,6 +705,9 @@ pub const CORPUS_RECHECK: Duration = Duration::from_secs(10);
 /// ended (ts-0114-hr).
 pub const WRITE_POLL: Duration = Duration::from_secs(1);
 
+/// How long the daemon waits for its asks to stop when it stops: a cancel stops a phase, which takes its grace.
+const ASK_STOP_WAIT: Duration = Duration::from_secs(30);
+
 /// What every thread of the daemon shares.
 struct Shared {
     paths: DaemonPaths,
@@ -752,6 +760,10 @@ struct Shared {
     guard: WriteGuard,
     /// What each view's members were, for the corpus they were worked out on ([`crate::views`]).
     views: ViewCache,
+    /// The asks that are running (ts-0201-us), by id, each tied to the connection that started it.
+    asks: Arc<AskRegistry>,
+    /// The keychain, which an ask's `secrets` resolve from at launch.
+    secrets: Arc<dyn SecretStore>,
 }
 
 impl Shared {
@@ -970,6 +982,7 @@ impl Daemon {
         if !matches!(claude_published, PublishedChoice::Off) {
             claude.expect_source();
         }
+        let ask_secrets = secret_store.clone();
         // `config.get` reads the repo's layer through the loader. The cache is beside the runs, like the workspaces.
         let config = ConfigService::new(
             home.clone(),
@@ -1183,6 +1196,8 @@ impl Daemon {
             corpora: std::sync::OnceLock::new(),
             guard,
             views: ViewCache::new(view_before_parse),
+            asks: Arc::new(AskRegistry::default()),
+            secrets: ask_secrets,
         });
         let corpora = make_corpora(&shared, workspaces_dir, corpus_recheck);
         let _ = shared.corpora.set(corpora);
@@ -1325,6 +1340,13 @@ impl Drop for Daemon {
         // The same for a `claude --version` in flight, which runs in a group of its own.
         self.shared.claude.end_reads();
         self.join();
+        // An ask belongs to its connection, and the connections are gone, so each ask is cancelled and stopping: wait
+        // for its child to be stopped, not left to run.
+        if !self.shared.asks.wait_idle(ASK_STOP_WAIT) {
+            self.shared
+                .log
+                .line("an ask was still running when the daemon stopped");
+        }
         // The providers of the sources end with the daemon: no child outlives it.
         self.shared.sources.stop();
         // The corpus threads end once the sources do: a call that waited on a provider has returned.
@@ -1855,6 +1877,8 @@ fn serve_connection(shared: &Shared, mut stream: UnixStream) {
     });
     converse(shared, &mut lines, &conn, &session);
     shared.hub.remove(conn.id);
+    // The connection rule (0.2): an ask lives as long as the connection that started it.
+    shared.asks.cancel_connection(conn.id);
 }
 
 /// The first request: it must be `initialize`, with the token and then the version right. Anything else is answered
@@ -1962,6 +1986,16 @@ impl Conn {
         true
     }
 
+    /// Writes one line of an ask's notice. A failed write has left half a line, so the connection is closed.
+    fn send_raw(&self, line: &str) -> bool {
+        let mut stream = self.stream();
+        if stream.write_all(line.as_bytes()).is_err() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            return false;
+        }
+        true
+    }
+
     /// Ends what the daemon writes to the connection, after the notices already written: the client reads those,
     /// then the end of the stream. What the client writes is still read, until it closes.
     fn close(&self, cancelled: &AtomicBool) {
@@ -1998,8 +2032,8 @@ fn converse(shared: &Shared, lines: &mut LineReader, conn: &Arc<Conn>, session: 
             }
             Ok(Line::Closed | Line::Stopping | Line::TimedOut) | Err(_) => return,
         };
-        let (response, pump) = match parse_request(&line) {
-            Err(response) => (response, None),
+        let (response, pump, ask) = match parse_request(&line) {
+            Err(response) => (response, None, None),
             Ok(request) => answer(shared, conn, session, request),
         };
         if conn.send(&response).is_err() {
@@ -2009,32 +2043,203 @@ fn converse(shared: &Shared, lines: &mut LineReader, conn: &Arc<Conn>, session: 
         if let Some(pump) = pump {
             start_pump(shared, conn, pump);
         }
+        // So are an ask's events.
+        if let Some(ask) = ask
+            && let Err(error) = ask.run()
+        {
+            shared
+                .log
+                .line(&format!("an ask's thread was not started: {error}"));
+        }
     }
 }
 
 fn answer(
     shared: &Shared,
-    conn: &Conn,
+    conn: &Arc<Conn>,
     session: &Session,
     request: Request,
-) -> (Response, Option<Pump>) {
+) -> (Response, Option<Pump>, Option<PendingAsk>) {
     let id = request.id.clone();
     let mut pump = None;
-    let result = match route(true, &request) {
-        Err(error) => Err(error),
-        Ok(Routed::Initialize(_)) => unreachable!("route(true, ..) refuses a second initialize"),
-        Ok(Routed::Call(Method::DaemonSubscribe)) => subscribe(shared, conn.id, &request.params)
-            .map(|(value, started)| {
-                pump = Some(started);
+    let mut ask = None;
+    // `ask.start` and `ask.cancel` are not in the owner protocol's method list ([`collide_core::ask`]).
+    let result = match AskMethod::from_name(&request.method) {
+        Some(AskMethod::Start) => {
+            ask_start(shared, conn, session, &request.params).map(|(value, pending)| {
+                ask = Some(pending);
                 value
-            }),
-        Ok(Routed::Call(method)) => call(shared, session, method, &request.params),
+            })
+        }
+        Some(AskMethod::Cancel) => ask_cancel(shared, session, &request.params),
+        Some(AskMethod::Test) | None => route_owner(shared, conn, session, &request, &mut pump),
     };
     let response = match result {
         Ok(value) => Response::success(id, value),
         Err(error) => Response::failure(Some(id), error),
     };
-    (response, pump)
+    (response, pump, ask)
+}
+
+fn route_owner(
+    shared: &Shared,
+    conn: &Conn,
+    session: &Session,
+    request: &Request,
+    pump: &mut Option<Pump>,
+) -> Result<serde_json::Value, RpcError> {
+    match route(true, request) {
+        Err(error) => Err(error),
+        Ok(Routed::Initialize(_)) => unreachable!("route(true, ..) refuses a second initialize"),
+        Ok(Routed::Call(Method::DaemonSubscribe)) => subscribe(shared, conn.id, &request.params)
+            .map(|(value, started)| {
+                *pump = Some(started);
+                value
+            }),
+        Ok(Routed::Call(method)) => call(shared, session, method, &request.params),
+    }
+}
+
+/// An ask's notices, written to the connection that started it, under the same lock as its answers.
+struct ConnSink(Arc<Conn>);
+
+impl AskSink for ConnSink {
+    fn send(&self, notice: &AskNotice) -> bool {
+        self.0.send_raw(&encode_line(&notice.to_notification()))
+    }
+}
+
+/// `ask.start` (ts-0201-us): resolves the entry and refuses what it can before anything is made, takes the id, and
+/// answers; the ask itself starts when the answer is written ([`PendingAsk::run`]). An ask the daemon accepted ends
+/// with an `ask.outcome`, a failure to launch included. What is refused here is an owner error: params that do not
+/// read, an id that cannot name a folder or is in use, an agent id no entry has, and an External entry.
+fn ask_start(
+    shared: &Shared,
+    conn: &Arc<Conn>,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<(serde_json::Value, PendingAsk), RpcError> {
+    let params: AskStartDaemonParams = read_params("ask.start", params)?;
+    refuse_run_agent(session, "start an ask")?;
+    if session.defaults() {
+        return Err(refused_in_defaults("ask.start"));
+    }
+    if shared.stopping() {
+        return Err(RpcError::new(
+            code::UNAVAILABLE,
+            "the daemon is shutting down",
+        ));
+    }
+    let ask = params.ask.as_str();
+    PhaseKey::new(ask, ASK_PHASE).map_err(|error| {
+        RpcError::new(
+            code::INVALID_PARAMS,
+            format!("the ask's id {ask:?} cannot name a folder: {error}"),
+        )
+    })?;
+    let board = last_opened_board(shared)?;
+    let board_ref = board.as_ref().map(|(id, root)| BoardRef {
+        id: id.as_str(),
+        root: root.as_path(),
+    });
+    let agent =
+        match shared
+            .config
+            .agent_entry(board_ref, &tools_path(shared), params.agent.as_str())
+        {
+            Ok(agent) => agent,
+            Err(GetError::NotFound(message)) => {
+                return Err(RpcError::new(code::NOT_FOUND, message));
+            }
+            Err(GetError::Refused(message)) => return Err(RpcError::new(code::CONFLICT, message)),
+        };
+    if agent.entry.kind == Some(AgentKind::External) {
+        return Err(RpcError::new(
+            code::CONFLICT,
+            format!(
+                "`{}` is an external agent: Collide launches nothing for it, so it cannot answer an ask. \
+                 Pick a Claude Code agent",
+                agent.id
+            ),
+        ));
+    }
+    let asks_dir = asks_dir_beside(&shared.paths.runs_dir);
+    let used = shared.phases.has_run(ask) || asks_dir.join(ask).exists();
+    let live = if used {
+        None
+    } else {
+        shared.asks.admit(ask, conn.id)
+    };
+    let Some(live) = live else {
+        return Err(RpcError::new(
+            code::CONFLICT,
+            format!("the ask id {ask:?} is running or has run: an ask id is used once"),
+        ));
+    };
+    let host = AskHost {
+        phases: shared.phases.clone(),
+        secrets: shared.secrets.clone(),
+        base: {
+            let env = shared.env.clone();
+            let wait = shared.capture.timeout + CAPTURE_WAIT_MARGIN;
+            Arc::new(move || wait_for_environment(&env, wait))
+        },
+        asks_dir,
+        log: {
+            let log = shared.log.clone();
+            Arc::new(move |text| log.line(text))
+        },
+    };
+    let plan = AskPlan {
+        ask: ask.to_string(),
+        request: params.request.as_str().to_string(),
+        agent,
+        board_root: board.map(|(_, root)| root),
+        endpoint: params.endpoint.as_str().to_string(),
+        token: params.token.as_str().to_string(),
+    };
+    shared.log.line(&format!(
+        "ask {ask}: accepted for agent {}",
+        params.agent.as_str()
+    ));
+    let pending = PendingAsk::new(
+        host,
+        shared.asks.clone(),
+        live,
+        plan,
+        Arc::new(ConnSink(conn.clone())),
+    );
+    Ok((
+        serde_json::to_value(Ack {}).expect("an Ack is JSON"),
+        pending,
+    ))
+}
+
+/// `ask.cancel`: cancels the ask, from any connection. An ask that is not running is answered all the same, because
+/// the window and the daemon race at the end of every ask.
+fn ask_cancel(
+    shared: &Shared,
+    session: &Session,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, RpcError> {
+    let params: AskCancelParams = read_params("ask.cancel", params)?;
+    refuse_run_agent(session, "cancel an ask")?;
+    if session.defaults() {
+        return Err(refused_in_defaults("ask.cancel"));
+    }
+    shared.asks.cancel(params.ask.as_str());
+    Ok(serde_json::to_value(Ack {}).expect("an Ack is JSON"))
+}
+
+/// The board a window opened or picked last, which is the one `<board root>` stands for in an ask's entry. `None`
+/// when no board was ever picked.
+fn last_opened_board(shared: &Shared) -> Result<Option<(String, std::path::PathBuf)>, RpcError> {
+    let boards = shared.store.boards().map_err(store_failed)?;
+    Ok(boards
+        .into_iter()
+        .filter_map(|board| Some((board.last_opened_ms?, board.id, board.root)))
+        .max_by_key(|(opened, _, _)| *opened)
+        .map(|(_, id, root)| (id, std::path::PathBuf::from(root))))
 }
 
 /// `daemon.subscribe` (ts-0076-cw): registers for the live events first, then reads the head and the events after

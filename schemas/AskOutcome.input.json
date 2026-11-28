@@ -36,7 +36,7 @@
       ]
     },
     "AskEnd": {
-      "description": "How an ask ended (0.11, The ask box). The ask box writes the plain text of each from these: `timed out after N\ns`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`. A refusal before launch is `failed` with its\ntext.",
+      "description": "How an ask ended (0.11, The ask box). The ask box writes the plain text of each from these: `timed out after N\ns`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`, `the ask was lost; ask again`. A refusal\nbefore launch is `failed` with its text.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -119,6 +119,20 @@
           "required": [
             "type",
             "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The ask's shim died with no word of how the child ended, or the daemon restarted under it. The ask box says\n`the ask was lost; ask again` (0.3, The ask agent is a separate role).",
+          "properties": {
+            "type": {
+              "const": "lost",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "type": "object"
         }

@@ -1,0 +1,8 @@
+# Built for the tests: the budget is spent after the first message (ts-0201-us).
+{"wait_eof":true}
+{"write_pid":"fake.pid"}
+{"init":true}
+{"assistant":"ONE"}
+{"result":{"subtype":"error_max_budget_usd","is_error":true,"cost":0.00353,"errors":"Reached maximum budget ($0.0001)"}}
+{"wait_eof":true}
+{"exit":1}

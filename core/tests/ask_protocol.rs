@@ -264,7 +264,7 @@ fn usd(amount: f64) -> Money {
 }
 
 #[test]
-fn each_of_the_five_ends_round_trips() {
+fn each_of_the_six_ends_round_trips() {
     round_trip(AskEnd::Finished {}, json!({ "type": "finished" }));
     round_trip(AskEnd::Cancelled {}, json!({ "type": "cancelled" }));
     round_trip(
@@ -281,12 +281,14 @@ fn each_of_the_five_ends_round_trips() {
         },
         json!({ "type": "failed", "text": "claude was not found on PATH" }),
     );
+    round_trip(AskEnd::Lost {}, json!({ "type": "lost" }));
 }
 
 #[test]
 fn an_end_refuses_an_unknown_key_and_an_unknown_type() {
     assert!(serde_json::from_value::<AskEnd>(json!({ "type": "finished", "x": 1 })).is_err());
-    assert!(serde_json::from_value::<AskEnd>(json!({ "type": "lost" })).is_err());
+    assert!(serde_json::from_value::<AskEnd>(json!({ "type": "lost", "x": 1 })).is_err());
+    assert!(serde_json::from_value::<AskEnd>(json!({ "type": "exploded" })).is_err());
 }
 
 #[test]

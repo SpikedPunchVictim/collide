@@ -1,0 +1,6 @@
+# Built for the tests: an ask that is running and then holds on until it is stopped (ts-0201-us).
+{"wait_eof":true}
+{"write_pid":"fake.pid"}
+{"init":true}
+{"assistant":"Working."}
+{"sleep":120}

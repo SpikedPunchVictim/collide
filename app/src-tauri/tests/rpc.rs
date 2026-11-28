@@ -6,10 +6,13 @@
 mod common;
 
 use collide_app::shell::{
-    ChannelEvent, ChannelWindow, DaemonLink, EventChannel, RecordingOpener, RecordingPicker, Shell,
-    ShellHandle,
+    AskConnector, AskRelay, ChannelEvent, ChannelWindow, DaemonLink, EventChannel, RecordingOpener,
+    RecordingPicker, Shell, ShellHandle,
 };
-use collide_core::owner::{Request, RequestId, Response, RpcError, code};
+use collide_core::agent::{AgentEvent, UsageQuality};
+use collide_core::ask::{AskCost, AskEnd, AskEventNotice, AskNotice, AskOutcome, AskOutcomeNotice};
+use collide_core::non_empty::NonEmpty;
+use collide_core::owner::{Notification, Request, RequestId, Response, RpcError, code};
 use collide_core::ui_tools::ToolManifest;
 use collide_host::clock::{Clock, Clocks, Reading};
 use collide_host::ui_tools::{EndpointTokens, Handled, HttpRequest, TokenFailure, UiToolsEndpoint};
@@ -371,14 +374,349 @@ fn an_ask_cancel_is_forwarded_in_the_window_shape() {
     );
 }
 
-#[test]
-#[should_panic(expected = "shell: ask token")]
-fn a_valid_ask_start_waits_for_the_ask_token_of_stage_6b() {
-    let (mut shell, _, _) = shell();
-    let _ = shell.rpc(
+// ---- the ask's token and its notices ----------------------------------------------------------------------------
+
+/// A connector that keeps what it was asked and the relays it was given, so a test plays the daemon's notices.
+#[derive(Clone, Default)]
+struct FakeConnector {
+    started: Arc<Mutex<Vec<Request>>>,
+    relays: Arc<Mutex<Vec<AskRelay>>>,
+    refusal: Arc<Mutex<Option<RpcError>>>,
+}
+
+impl FakeConnector {
+    fn started(&self) -> Vec<Request> {
+        self.started.lock().unwrap().clone()
+    }
+
+    fn relay(&self, index: usize) -> AskRelay {
+        self.relays.lock().unwrap()[index].clone()
+    }
+
+    fn refusing(&self, error: RpcError) {
+        *self.refusal.lock().unwrap() = Some(error);
+    }
+}
+
+impl AskConnector for FakeConnector {
+    fn start(&mut self, request: &Request, relay: AskRelay) -> Result<(), RpcError> {
+        if let Some(error) = self.refusal.lock().unwrap().clone() {
+            return Err(error);
+        }
+        self.started.lock().unwrap().push(request.clone());
+        self.relays.lock().unwrap().push(relay);
+        Ok(())
+    }
+}
+
+/// A shell whose asks go through a fake connector, with the fake link for everything else.
+fn shell_with_asks() -> (Shell, FakeLink, FakeChannel, FakeConnector) {
+    let (shell, link, channel) = shell();
+    let connector = FakeConnector::default();
+    let shell = shell.with_asks(Box::new(connector.clone()), Arc::new(channel.clone()));
+    (shell, link, channel, connector)
+}
+
+fn ask_start(shell: &mut Shell, ask: &str) -> Result<Value, RpcError> {
+    shell.rpc(
         "ask.start",
-        Some(json!({ "ask": "a1", "agent": "claude", "request": "show the queue" })),
+        Some(json!({ "ask": ask, "agent": "claude", "request": "show the queue" })),
+    )
+}
+
+/// The token the shell put in the `ask.start` the connector got.
+fn token_of(request: &Request) -> String {
+    request.params["token"]
+        .as_str()
+        .expect("a token")
+        .to_string()
+}
+
+fn ask_name(ask: &str) -> NonEmpty {
+    NonEmpty::new(ask).unwrap()
+}
+
+fn event_notice(ask: &str, text: &str) -> Notification {
+    AskNotice::Event(Box::new(AskEventNotice {
+        ask: ask_name(ask),
+        event: AgentEvent::Message { text: text.into() },
+    }))
+    .to_notification()
+}
+
+fn outcome_notice(ask: &str, end: AskEnd) -> Notification {
+    AskNotice::Outcome(Box::new(AskOutcomeNotice {
+        ask: ask_name(ask),
+        outcome: AskOutcome {
+            end,
+            cost: AskCost::NotReported {},
+            quality: UsageQuality::Unreported,
+        },
+    }))
+    .to_notification()
+}
+
+fn tools_call_with(token: &str) -> HttpRequest {
+    let mut request = tools_call();
+    for (name, value) in &mut request.headers {
+        if name == "Authorization" {
+            *value = format!("Bearer {token}");
+        }
+    }
+    request
+}
+
+#[test]
+fn a_valid_ask_start_goes_to_the_daemon_with_the_endpoint_and_a_token_of_its_own() {
+    let (mut shell, link, _, connector) = shell_with_asks();
+    assert_eq!(ask_start(&mut shell, "a1"), Ok(json!({})));
+    let started = connector.started();
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0].method, "ask.start");
+    let params = &started[0].params;
+    assert_eq!(
+        params["endpoint"],
+        json!(format!("http://127.0.0.1:{PORT}/mcp"))
     );
+    assert_eq!(
+        (&params["ask"], &params["agent"], &params["request"]),
+        (&json!("a1"), &json!("claude"), &json!("show the queue"))
+    );
+    let token = token_of(&started[0]);
+    assert_eq!(token.len(), 64);
+    assert!(token.bytes().all(|b| b.is_ascii_hexdigit()), "{token}");
+    assert_ne!(token, ENDPOINT_TOKEN);
+    assert!(
+        link.calls().is_empty(),
+        "the ask has a connection of its own: {:?}",
+        link.calls()
+    );
+}
+
+#[test]
+fn an_ask_start_with_an_empty_request_is_refused_and_registers_nothing() {
+    let (mut shell, link, _, connector) = shell_with_asks();
+    let error = failure(shell.rpc(
+        "ask.start",
+        Some(json!({ "ask": "a1", "agent": "claude", "request": "" })),
+    ));
+    assert_eq!(error.code, code::INVALID_PARAMS);
+    assert!(connector.started().is_empty());
+    assert!(link.calls().is_empty());
+    assert!(shell.endpoint_mut().live_asks().is_empty());
+}
+
+#[test]
+fn each_ask_gets_a_token_of_its_own() {
+    let (mut shell, _, _, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    ask_start(&mut shell, "a2").unwrap();
+    let started = connector.started();
+    assert_ne!(token_of(&started[0]), token_of(&started[1]));
+}
+
+#[test]
+fn the_ask_token_is_registered_with_the_endpoint() {
+    let (mut shell, _, channel, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    assert_eq!(shell.endpoint_mut().live_asks(), vec!["a1".to_string()]);
+    let token = token_of(&connector.started()[0]);
+    let Handled::Pending { .. } = shell.endpoint_mut().handle(&tools_call_with(&token)) else {
+        panic!("a call with the ask's token should reach the window");
+    };
+    assert_eq!(channel.events()[0].params["caller"], json!("a1"));
+}
+
+#[test]
+fn an_ask_start_with_an_id_in_use_is_refused_and_does_not_reach_the_daemon() {
+    let (mut shell, _, _, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    let error = failure(ask_start(&mut shell, "a1"));
+    assert_eq!(error.code, code::CONFLICT);
+    assert_eq!(connector.started().len(), 1);
+}
+
+#[test]
+fn an_ask_start_the_daemon_refuses_comes_back_as_its_error_and_ends_the_token() {
+    let (mut shell, _, _, connector) = shell_with_asks();
+    connector.refusing(RpcError::new(
+        code::NOT_FOUND,
+        "no agent entry has the id `claude`",
+    ));
+    let error = failure(ask_start(&mut shell, "a1"));
+    assert_eq!(error.code, code::NOT_FOUND);
+    assert!(
+        error.message.contains("no agent entry"),
+        "{}",
+        error.message
+    );
+    assert!(shell.endpoint_mut().live_asks().is_empty());
+}
+
+#[test]
+fn an_ask_start_in_a_shell_with_no_connector_is_refused_and_ends_the_token() {
+    let (mut shell, _, _) = shell();
+    let error = failure(ask_start(&mut shell, "a1"));
+    assert_eq!(error.code, code::UNAVAILABLE);
+    assert!(shell.endpoint_mut().live_asks().is_empty());
+}
+
+#[test]
+fn the_asks_notices_are_emitted_to_the_window_as_the_daemon_sent_them() {
+    let (mut shell, _, channel, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    let relay = connector.relay(0);
+    relay.notice(event_notice("a1", "looking"));
+    relay.notice(outcome_notice("a1", AskEnd::Finished {}));
+    let events = channel.events();
+    let methods: Vec<&str> = events.iter().map(|e| e.method.as_str()).collect();
+    assert_eq!(methods, ["ask.event", "ask.outcome"]);
+    assert_eq!(events[0].params, event_notice("a1", "looking").params);
+    assert_eq!(
+        events[1].params["outcome"]["end"],
+        json!({ "type": "finished" })
+    );
+}
+
+#[test]
+fn a_notice_that_is_not_an_asks_is_not_emitted() {
+    let (mut shell, _, channel, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    connector.relay(0).notice(Notification {
+        jsonrpc: Default::default(),
+        method: "daemon.event".into(),
+        params: json!({}),
+    });
+    assert!(channel.events().is_empty(), "{:?}", channel.events());
+}
+
+#[test]
+fn the_ask_token_is_never_sent_to_the_window() {
+    let (mut shell, _, channel, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    let token = token_of(&connector.started()[0]);
+    let relay = connector.relay(0);
+    relay.notice(event_notice("a1", "looking"));
+    relay.notice(outcome_notice("a1", AskEnd::Finished {}));
+    shell.tick();
+    shell.endpoint_mut().handle(&tools_call_with(&token));
+    let seen = serde_json::to_string(&channel.events()).unwrap();
+    assert!(
+        !seen.contains(&token),
+        "the token reached the window: {seen}"
+    );
+    assert!(
+        !seen.contains(ENDPOINT_TOKEN),
+        "the endpoint token reached the window: {seen}"
+    );
+}
+
+#[test]
+fn the_outcome_ends_the_ask_and_its_token_stops_working() {
+    let (mut shell, _, _, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    let token = token_of(&connector.started()[0]);
+    connector
+        .relay(0)
+        .notice(outcome_notice("a1", AskEnd::Finished {}));
+    shell.tick();
+    assert!(shell.endpoint_mut().live_asks().is_empty());
+    match shell.endpoint_mut().handle(&tools_call_with(&token)) {
+        Handled::Response(response) => assert_eq!(response.status, 401),
+        other => panic!("a dead token should be refused, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_ask_event_alone_does_not_end_the_ask() {
+    let (mut shell, _, _, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    connector.relay(0).notice(event_notice("a1", "looking"));
+    shell.tick();
+    assert_eq!(shell.endpoint_mut().live_asks(), vec!["a1".to_string()]);
+}
+
+#[test]
+fn an_id_can_be_used_again_once_its_ask_has_ended() {
+    let (mut shell, _, _, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    connector
+        .relay(0)
+        .notice(outcome_notice("a1", AskEnd::Finished {}));
+    assert_eq!(ask_start(&mut shell, "a1"), Ok(json!({})));
+}
+
+#[test]
+fn a_connection_that_ends_with_no_outcome_tells_the_window_the_ask_was_lost() {
+    let (mut shell, _, channel, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    connector.relay(0).ended();
+    shell.tick();
+    let events = channel.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].method, "ask.outcome");
+    assert_eq!(
+        events[0].params["outcome"]["end"],
+        json!({ "type": "lost" })
+    );
+    assert!(shell.endpoint_mut().live_asks().is_empty());
+}
+
+#[test]
+fn a_connection_that_ends_after_the_outcome_says_nothing_more() {
+    let (mut shell, _, channel, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    let relay = connector.relay(0);
+    relay.notice(outcome_notice("a1", AskEnd::Finished {}));
+    relay.ended();
+    assert_eq!(channel.events().len(), 1);
+}
+
+#[test]
+fn a_window_close_sends_ask_cancel_for_each_live_ask() {
+    let (mut shell, link, _, _) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    ask_start(&mut shell, "a2").unwrap();
+    shell.window_gone();
+    let calls = link.calls();
+    let sent: Vec<(&str, &Value)> = calls
+        .iter()
+        .map(|c| (c.method.as_str(), &c.params))
+        .collect();
+    assert_eq!(
+        sent,
+        [
+            ("ask.cancel", &json!({ "ask": "a1" })),
+            ("ask.cancel", &json!({ "ask": "a2" }))
+        ]
+    );
+}
+
+#[test]
+fn a_window_close_does_not_cancel_an_ask_that_has_ended() {
+    let (mut shell, link, _, connector) = shell_with_asks();
+    ask_start(&mut shell, "a1").unwrap();
+    connector
+        .relay(0)
+        .notice(outcome_notice("a1", AskEnd::Finished {}));
+    shell.window_gone();
+    assert!(link.calls().is_empty(), "{:?}", link.calls());
+}
+
+#[test]
+fn an_ask_test_goes_to_the_daemon_with_a_token_and_the_token_ends_with_the_answer() {
+    let (mut shell, link, _, _) = shell_with_asks();
+    let result = shell.rpc("ask.test", Some(json!({ "ask": "t1", "agent": "claude" })));
+    assert_eq!(result, Ok(json!({ "from": "daemon" })));
+    let calls = link.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].method, "ask.test");
+    assert_eq!(
+        calls[0].params["endpoint"],
+        json!(format!("http://127.0.0.1:{PORT}/mcp"))
+    );
+    assert_eq!(calls[0].params["token"].as_str().map(str::len), Some(64));
+    assert!(shell.endpoint_mut().live_asks().is_empty());
 }
 
 // ---- the event channel -----------------------------------------------------------------------------------------

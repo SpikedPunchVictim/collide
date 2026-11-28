@@ -1,0 +1,4 @@
+# Built for the tests: an agent that exits with a code and no result (ts-0201-us).
+{"wait_eof":true}
+{"init":true}
+{"exit":3}

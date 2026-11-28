@@ -1,0 +1,7 @@
+# Built for the tests: the API fails the turn with status 500 (ts-0201-us).
+{"wait_eof":true}
+{"write_pid":"fake.pid"}
+{"init":true}
+{"result":{"is_error":true,"api_error_status":500,"text":"the API said it failed"}}
+{"wait_eof":true}
+{"exit":1}

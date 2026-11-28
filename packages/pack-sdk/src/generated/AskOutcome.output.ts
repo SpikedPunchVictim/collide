@@ -14,8 +14,8 @@ export type AskCost =
     }
 /**
  * How an ask ended (0.11, The ask box). The ask box writes the plain text of each from these: `timed out after N
- * s`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`. A refusal before launch is `failed` with its
- * text.
+ * s`, `stopped at the $X budget`, `cancelled`, `agent error: <text>`, `the ask was lost; ask again`. A refusal
+ * before launch is `failed` with its text.
  */
 export type AskEnd =
   | {
@@ -35,6 +35,9 @@ export type AskEnd =
   | {
       text: string
       type: 'failed'
+    }
+  | {
+      type: 'lost'
     }
 /**
  * How far the figures of a [`Usage`] event can be trusted. A total built from `partial` figures is shown as "at

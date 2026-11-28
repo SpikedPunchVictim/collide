@@ -18,7 +18,7 @@ use menu::{
 use serde_json::Value;
 use shell::{
     ChannelEvent, ChannelWindow, DaemonAccess, EventChannel, FolderPicker, LaunchStarter, Shell,
-    ShellHandle, SocketLink, UsrBinOpen, pump_daemon_events,
+    ShellHandle, SocketAskConnector, SocketLink, UsrBinOpen, pump_daemon_events,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -169,6 +169,7 @@ fn build_shell(
     secrets: Arc<dyn SecretStore>,
     log: Log,
 ) -> Shell {
+    let asks_channel = Arc::clone(&channel);
     // The manifest is empty until the generator of Stage 6 writes the real one from the tools' TypeScript.
     let endpoint = UiToolsEndpoint::new(
         UNBOUND_PORT,
@@ -181,10 +182,11 @@ fn build_shell(
     // The one place the real opener is made: a link the person confirmed opens in their browser.
     Shell::new(
         endpoint,
-        Box::new(SocketLink::new(access)),
+        Box::new(SocketLink::new(Arc::clone(&access))),
         Box::new(UsrBinOpen),
     )
     .with_picker(picker)
+    .with_asks(Box::new(SocketAskConnector::new(access)), asks_channel)
 }
 
 /// The files of the daemon and the way to start it, from this process's environment (0.2, Starting the daemon).

@@ -20,8 +20,9 @@
 //!    opens a real window. [`SET_DEFAULTS`] tells the link that the window started with defaults (ts-0215-gt), so its
 //!    connection to the daemon is made with the flag on `initialize` ([`set_defaults`]).
 //! 4. `ask.start` and `ask.test` are read in the window's shape ([`collide_core::ask::AskStartParams`]), which has no
-//!    token field, so a window that sends one is refused. The shell then makes the daemon's shape, with the endpoint and
-//!    the ask's token, which is Stage 6b's (`shell: ask token`). `ask.cancel` has one shape and goes on as it is.
+//!    token field, so a window that sends one is refused. The shell then makes the daemon's shape: a token of 32 random
+//!    bytes for the ask, registered with the endpoint, and the endpoint's URL (`with_ask_token`). `ask.cancel`
+//!    has one shape and goes on as it is. See "An ask" below.
 //! 5. Everything else is forwarded, and the daemon says if the method is unknown.
 //!
 //! ## One thread owns the shell
@@ -41,10 +42,23 @@
 //! from the token file. [`SocketLink`] keeps one such connection for the window's calls. [`pump_daemon_events`] has a
 //! connection of its own for `daemon.subscribe`, so a call never waits behind a stream.
 //!
-//! One tag is still a stub: `shell: ask token` ([`Shell`]'s ask forwarding), the ask's token and endpoint added to
-//! `ask.start` and `ask.test` (Stage 6b).
+//! ## An ask
+//!
+//! `ask.start` goes out on a connection of its own, made by an [`AskConnector`] ([`SocketAskConnector`] in the app),
+//! not on the one the window's calls share: the daemon ties an ask to the connection that started it, so closing that
+//! connection is the cancel, and one dropped socket cancels one ask. A thread of the connector reads the connection and
+//! gives each `ask.event` and `ask.outcome` to the ask's [`AskRelay`], which puts it on the event channel. The outcome
+//! also queues the ask's token to end, and the shell's thread ends it ([`Shell::tick`], and before any call, so the
+//! token is dead by the time the window acts on the outcome). A connection that ends with no outcome is told to the
+//! window as a lost ask. When the window closes or reloads, [`Shell::window_gone`] sends `ask.cancel` for each live
+//! ask on the call connection. `ask.test` answers once, on the call connection, and its token ends with the answer.
 
-use collide_core::ask::{AskCancelParams, AskMethod, AskStartParams, AskTestParams};
+use collide_core::agent::UsageQuality;
+use collide_core::ask::{
+    AskCancelParams, AskCost, AskEnd, AskMethod, AskNotice, AskOutcome, AskOutcomeNotice,
+    AskStartParams, AskTestParams,
+};
+use collide_core::non_empty::NonEmpty;
 use collide_core::owner::{
     DaemonSubscribeParams, DaemonSubscribeResult, JsonRpc2, Notification, Request, RequestId,
     Response, RpcError, code,
@@ -57,7 +71,8 @@ use collide_host::daemon::{DaemonPaths, check_home};
 use collide_host::launch;
 use collide_host::owner_client::{ClientError, Incoming, OwnerClient};
 use collide_host::ui_tools::{
-    Completed, Handled, HttpRequest, HttpResponse, Rpc, UiToolsEndpoint, Window,
+    AskRegistration, Completed, ENDPOINT_PATH, Handled, HttpRequest, HttpResponse, Rpc,
+    UiToolsEndpoint, Window, random_token,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -796,6 +811,131 @@ pub fn set_defaults(link: &mut dyn DaemonLink, params: Option<Value>) -> Result<
     Ok(serde_json::json!({}))
 }
 
+/// The notices of one ask, from its connection to the window. The connector hands each notice it reads to
+/// [`AskRelay::notice`], and calls [`AskRelay::ended`] when the connection ends. A relay is made per ask by
+/// [`Shell::rpc`], and it can be used from any thread.
+#[derive(Clone)]
+pub struct AskRelay {
+    ask: String,
+    channel: Arc<dyn EventChannel>,
+    done: mpsc::Sender<String>,
+    outcome_seen: Arc<AtomicBool>,
+}
+
+impl AskRelay {
+    /// Puts one notice of the ask on the event channel. The ask's outcome also tells the shell the ask is over, so its
+    /// token is ended ([`Shell::tick`]). Only `ask.event` and `ask.outcome` pass.
+    pub fn notice(&self, notification: Notification) {
+        let outcome = notification.method == AskNotice::OUTCOME_METHOD;
+        if !outcome && notification.method != AskNotice::EVENT_METHOD {
+            return;
+        }
+        if outcome {
+            self.outcome_seen.store(true, Ordering::SeqCst);
+            // Before the window hears it, so the token is already queued to end when the window acts on the outcome.
+            let _ = self.done.send(self.ask.clone());
+        }
+        self.channel.emit(&ChannelEvent::from(notification));
+    }
+
+    /// The connection ended. An ask that ended with no outcome (the daemon went away) is lost, and the window is told
+    /// so in the shape of an outcome, so its box never waits for one that cannot come.
+    pub fn ended(&self) {
+        if self.outcome_seen.load(Ordering::SeqCst) {
+            return;
+        }
+        let ask = NonEmpty::new(self.ask.as_str()).expect("register_ask refuses an empty id");
+        let lost = AskNotice::Outcome(Box::new(AskOutcomeNotice {
+            ask,
+            outcome: AskOutcome {
+                end: AskEnd::Lost {},
+                cost: AskCost::NotReported {},
+                quality: UsageQuality::Unreported,
+            },
+        }));
+        self.notice(lost.to_notification());
+    }
+}
+
+/// The way an ask's notices come from the daemon: one connection of its own per live ask, so closing it is the cancel
+/// the daemon's rule expects (0.2, The connection rule).
+pub trait AskConnector {
+    /// Opens a connection, sends `request` (an `ask.start`) on it and waits for the daemon's answer. When the daemon
+    /// accepted, the connection is read on a thread of the connector's, which gives each notice to `relay` and calls
+    /// [`AskRelay::ended`] when the connection ends. A refusal is the error, and nothing is left running.
+    fn start(&mut self, request: &Request, relay: AskRelay) -> Result<(), RpcError>;
+}
+
+/// The channel of a shell that was given none: no window is open, and nothing is emitted.
+struct NoChannel;
+
+impl EventChannel for NoChannel {
+    fn is_open(&self) -> bool {
+        false
+    }
+
+    fn emit(&self, _event: &ChannelEvent) {}
+}
+
+/// The connector of a shell that was given none: an ask cannot start.
+struct NoAsks;
+
+impl AskConnector for NoAsks {
+    fn start(&mut self, _request: &Request, _relay: AskRelay) -> Result<(), RpcError> {
+        Err(unavailable(
+            "this shell has no way to the daemon for an ask".to_string(),
+        ))
+    }
+}
+
+/// The real connector: a connection to the daemon per ask ([`DaemonAccess::connect`]).
+pub struct SocketAskConnector {
+    access: Arc<DaemonAccess>,
+}
+
+impl SocketAskConnector {
+    pub fn new(access: Arc<DaemonAccess>) -> Self {
+        SocketAskConnector { access }
+    }
+}
+
+impl AskConnector for SocketAskConnector {
+    fn start(&mut self, request: &Request, relay: AskRelay) -> Result<(), RpcError> {
+        let mut client = self.access.connect()?;
+        match client.call::<Value, Value>(&request.method, &request.params, Some(CALL_WAIT)) {
+            Ok(_) => {}
+            Err(ClientError::Rpc(error)) => return Err(error),
+            Err(error) => return Err(dropped(&request.method, &error, CALL_WAIT)),
+        }
+        client.set_read_wait(Some(ASK_READ_TICK)).map_err(|error| {
+            unavailable(format!("could not read the ask's connection: {error}"))
+        })?;
+        thread::Builder::new()
+            .name("collide-ask-notices".into())
+            .spawn(move || {
+                loop {
+                    match client.next_notice() {
+                        Ok(Incoming::Notice(notification)) => {
+                            let outcome = notification.method == AskNotice::OUTCOME_METHOD;
+                            relay.notice(notification);
+                            if outcome {
+                                break;
+                            }
+                        }
+                        Ok(Incoming::Quiet) => {}
+                        Ok(Incoming::Closed) | Err(_) => break,
+                    }
+                }
+                relay.ended();
+            })
+            .map_err(|error| unavailable(format!("could not start the ask's reader: {error}")))?;
+        Ok(())
+    }
+}
+
+/// How long the reader of an ask's connection waits for a notice before it reads again.
+const ASK_READ_TICK: Duration = Duration::from_millis(500);
+
 /// The shell. See the module doc.
 pub struct Shell {
     endpoint: UiToolsEndpoint,
@@ -806,6 +946,12 @@ pub struct Shell {
     completed: Vec<Completed>,
     /// The HTTP clients whose `tools/call` is waiting on the window, by `requestId`.
     waiting: BTreeMap<String, mpsc::Sender<HttpResponse>>,
+    asks: Box<dyn AskConnector>,
+    /// Where an ask's notices go. The same channel as the endpoint's window, when the app gave it.
+    ask_channel: Arc<dyn EventChannel>,
+    /// The asks whose outcome came, from the readers of their connections, for [`Shell::end_finished_asks`].
+    finished_asks: mpsc::Receiver<String>,
+    finished_sender: mpsc::Sender<String>,
 }
 
 impl Shell {
@@ -814,6 +960,7 @@ impl Shell {
         link: Box<dyn DaemonLink>,
         opener: Box<dyn Opener>,
     ) -> Self {
+        let (finished_sender, finished_asks) = mpsc::channel();
         Shell {
             endpoint,
             link,
@@ -822,7 +969,23 @@ impl Shell {
             next_id: 0,
             completed: Vec::new(),
             waiting: BTreeMap::new(),
+            asks: Box::new(NoAsks),
+            ask_channel: Arc::new(NoChannel),
+            finished_asks,
+            finished_sender,
         }
+    }
+
+    /// The shell with `connector` to start asks, and `channel` for their notices. Without one, `ask.start` says it
+    /// cannot.
+    pub fn with_asks(
+        mut self,
+        connector: Box<dyn AskConnector>,
+        channel: Arc<dyn EventChannel>,
+    ) -> Self {
+        self.asks = connector;
+        self.ask_channel = channel;
+        self
     }
 
     /// The shell with `picker` to ask the person for a folder. Without one, `shell.pick_folder` says there is none.
@@ -851,6 +1014,7 @@ impl Shell {
     /// the window, when the window replies ([`Shell::rpc`]), when its deadline comes ([`Shell::tick`]) or when the
     /// window goes ([`Shell::window_gone`]).
     pub fn http(&mut self, request: &HttpRequest, reply: mpsc::Sender<HttpResponse>) {
+        self.end_finished_asks();
         match self.endpoint.handle(request) {
             Handled::Response(response) => {
                 let _ = reply.send(response);
@@ -863,6 +1027,7 @@ impl Shell {
 
     /// Answers the calls whose deadline has come, and every call that finished since the last look.
     pub fn tick(&mut self) {
+        self.end_finished_asks();
         let expired = self.endpoint.expire();
         self.completed.extend(expired);
         self.deliver();
@@ -871,6 +1036,7 @@ impl Shell {
     /// The window closed or reloaded: the calls waiting on it are answered, and each live ask is cancelled at the
     /// daemon (0.2, Asks are cancelled when the window closes or reloads).
     pub fn window_gone(&mut self) {
+        self.end_finished_asks();
         let gone = self.endpoint.window_gone();
         self.completed.extend(gone.completed);
         for cancel in gone.cancel {
@@ -903,6 +1069,7 @@ impl Shell {
 
     /// One call of the webview's `rpc` command.
     pub fn rpc(&mut self, method: &str, params: Option<Value>) -> Result<Value, RpcError> {
+        self.end_finished_asks();
         if method == "initialize" {
             return Err(RpcError::method_not_found(method).with_data(serde_json::json!({
                 "reason": "the shell makes the handshake; the window does not send `initialize`",
@@ -929,36 +1096,78 @@ impl Shell {
                 self.completed.extend(handled.completed);
                 answer(handled.response)
             }
-            Rpc::Forward => {
-                let request = self.for_the_daemon(request)?;
-                answer(self.link.call(&request))
+            Rpc::Forward => match AskMethod::from_name(&request.method) {
+                None => answer(self.link.call(&request)),
+                Some(AskMethod::Cancel) => {
+                    read::<AskCancelParams>(&request)?;
+                    answer(self.link.call(&request))
+                }
+                Some(AskMethod::Start) => self.ask_start(request),
+                Some(AskMethod::Test) => self.ask_test(request),
+            },
+        }
+    }
+
+    /// `ask.start`: the daemon's shape of the request goes out on a connection of its own, which stays open and is read
+    /// for the ask's notices. A refusal ends the token the ask was given.
+    fn ask_start(&mut self, request: Request) -> Result<Value, RpcError> {
+        let window: AskStartParams = read(&request)?;
+        let ask = window.ask.as_str().to_string();
+        let request = self.with_ask_token(&ask, request)?;
+        let relay = AskRelay {
+            ask: ask.clone(),
+            channel: Arc::clone(&self.ask_channel),
+            done: self.finished_sender.clone(),
+            outcome_seen: Arc::default(),
+        };
+        match self.asks.start(&request, relay) {
+            Ok(()) => Ok(serde_json::json!({})),
+            Err(error) => {
+                self.endpoint.end_ask(&ask);
+                Err(error)
             }
         }
     }
 
-    /// Checks a request that goes on to the daemon, and makes the daemon's shape of an ask's.
-    fn for_the_daemon(&mut self, request: Request) -> Result<Request, RpcError> {
-        match AskMethod::from_name(&request.method) {
-            None => Ok(request),
-            Some(AskMethod::Cancel) => {
-                read::<AskCancelParams>(&request)?;
-                Ok(request)
-            }
-            Some(AskMethod::Start) => {
-                read::<AskStartParams>(&request)?;
-                Ok(self.with_ask_token(request))
-            }
-            Some(AskMethod::Test) => {
-                read::<AskTestParams>(&request)?;
-                Ok(self.with_ask_token(request))
-            }
-        }
+    /// `ask.test`: the daemon answers once, and the test's token ends with the answer.
+    fn ask_test(&mut self, request: Request) -> Result<Value, RpcError> {
+        let window: AskTestParams = read(&request)?;
+        let ask = window.ask.as_str().to_string();
+        let request = self.with_ask_token(&ask, request)?;
+        let response = self.link.call(&request);
+        self.endpoint.end_ask(&ask);
+        answer(response)
     }
 
-    /// Registers the ask with the endpoint, and adds the endpoint's URL and the ask's token to its params.
-    fn with_ask_token(&mut self, request: Request) -> Request {
-        let _ = (&mut self.endpoint, request);
-        todo!("shell: ask token")
+    /// Makes the ask's token, registers it with the endpoint, and adds the endpoint's URL and the token to the params.
+    fn with_ask_token(&mut self, ask: &str, request: Request) -> Result<Request, RpcError> {
+        let token = random_token().map_err(|error| {
+            RpcError::new(
+                code::INTERNAL_ERROR,
+                format!("could not make a token for the ask: {error}"),
+            )
+        })?;
+        self.endpoint.register_ask(ask, &token).map_err(|problem| {
+            let code = match problem {
+                AskRegistration::DuplicateId(_) => code::CONFLICT,
+                _ => code::INVALID_PARAMS,
+            };
+            RpcError::new(code, problem.to_string())
+        })?;
+        let mut params = request.params;
+        params["endpoint"] = Value::String(format!(
+            "http://127.0.0.1:{}{ENDPOINT_PATH}",
+            self.endpoint.port()
+        ));
+        params["token"] = Value::String(token);
+        Ok(Request { params, ..request })
+    }
+
+    /// Ends the token of each ask whose outcome came since the last look.
+    fn end_finished_asks(&mut self) {
+        while let Ok(ask) = self.finished_asks.try_recv() {
+            self.endpoint.end_ask(&ask);
+        }
     }
 }
 

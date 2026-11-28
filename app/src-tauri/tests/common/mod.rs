@@ -91,7 +91,7 @@ pub fn wait_until(what: &str, within: Duration, mut done: impl FnMut() -> bool) 
 /// walk stops at this test process and the process itself is not read for a run marker. What is above it (cargo, a
 /// shell,
 /// a phase of a Collide run with `COLLIDE_RUN` in its environment) is not the test's, and a test cannot change it.
-struct StopsAtThisTest(SystemProcessTree);
+pub struct StopsAtThisTest(pub SystemProcessTree);
 
 impl ProcessTree for StopsAtThisTest {
     fn parent(&self, pid: u32) -> Option<u32> {
@@ -264,6 +264,17 @@ impl DaemonStarter for AlreadyThere {
     fn ensure_running(&self) -> Result<(), String> {
         Ok(())
     }
+}
+
+/// Whether a process with this pid is alive (a zombie is not), read with `ps`, as the crate has no `libc`.
+pub fn pid_alive(pid: u32) -> bool {
+    let out = std::process::Command::new("/bin/ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps runs");
+    let state = String::from_utf8_lossy(&out.stdout);
+    let state = state.trim();
+    !state.is_empty() && !state.starts_with('Z')
 }
 
 // ---- clocks, the access and the channel -------------------------------------------------------------------------

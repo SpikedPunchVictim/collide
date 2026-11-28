@@ -6,6 +6,7 @@ import {
   type WindowMethod,
   createTauriOwner,
 } from '../src/owner/index.ts'
+import type { AskNoticeOutput, AskOutcomeOutput } from '../src/owner/generated.ts'
 
 // These checks run in `pnpm typecheck` (vitest strips types, so the `@ts-expect-error` lines and `expectTypeOf` are
 // the assertions). They show that the per-client token has no way into the webview's API: the shell adds it (0.2).
@@ -48,4 +49,38 @@ async function refused(owner: OwnerClient) {
 test('the refused calls above exist so that the typecheck sees them', () => {
   expectTypeOf(refused).toBeFunction()
   expectTypeOf(FakeOwner).toBeConstructibleWith()
+})
+
+// The ask's notices as the window reads them (ts-0201-us, carried from ts-0034-hh): the generated types, which the
+// shell emits from the daemon's `ask.event` and `ask.outcome`.
+type AskEnd = AskOutcomeOutput['end']
+
+test('an ask ends in one of six ways, and a lost ask is one of them', () => {
+  expectTypeOf<AskEnd['type']>().toEqualTypeOf<
+    'finished' | 'cancelled' | 'timed_out' | 'stopped_at_budget' | 'failed' | 'lost'
+  >()
+  expectTypeOf<{ type: 'lost' }>().toExtend<AskEnd>()
+  expectTypeOf<{ type: 'timed_out'; after_s: number }>().toExtend<AskEnd>()
+  expectTypeOf<{ type: 'stopped_at_budget'; budget: { amount: number; currency: string } }>().toExtend<
+    AskEnd
+  >()
+  expectTypeOf<{ type: 'failed'; text: string }>().toExtend<AskEnd>()
+  // @ts-expect-error a lost ask has no text: the box writes it.
+  const lost: AskEnd = { type: 'lost', text: 'gone' }
+  expectTypeOf(lost).toBeObject()
+})
+
+test('an ask notice is an event or an outcome, each with the ask it belongs to', () => {
+  expectTypeOf<AskNoticeOutput['method']>().toEqualTypeOf<'ask.event' | 'ask.outcome'>()
+  expectTypeOf<Extract<AskNoticeOutput, { method: 'ask.outcome' }>['params']['ask']>().toBeString()
+  type Outcome = Extract<AskNoticeOutput, { method: 'ask.outcome' }>
+  expectTypeOf<Outcome['params']['outcome']>().toEqualTypeOf<AskOutcomeOutput>()
+  expectTypeOf<Extract<AskNoticeOutput, { method: 'ask.event' }>['params']['ask']>().toBeString()
+  expectTypeOf<keyof Extract<AskNoticeOutput, { method: 'ask.event' }>['params']>().toEqualTypeOf<'ask' | 'event'>()
+})
+
+test('an outcome has its end, its cost and the quality of the figures', () => {
+  expectTypeOf<keyof AskOutcomeOutput>().toEqualTypeOf<'end' | 'cost' | 'quality'>()
+  expectTypeOf<AskOutcomeOutput['cost']['type']>().toEqualTypeOf<'reported' | 'not_reported'>()
+  expectTypeOf<AskOutcomeOutput['quality']>().toEqualTypeOf<'exact' | 'partial' | 'unreported'>()
 })
