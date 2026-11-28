@@ -176,12 +176,12 @@ pub fn launch_spec(request: &LaunchRequest) -> Result<LaunchSpec, LaunchError> {
     })
 }
 
-fn invalid<T>(message: String) -> Result<T, LaunchError> {
+pub(super) fn invalid<T>(message: String) -> Result<T, LaunchError> {
     Err(LaunchError::Invalid { message })
 }
 
 /// `value` when it is a safe token (0.5), so it cannot become a flag or climb out of a directory.
-fn safe(what: &str, value: &str) -> Result<String, LaunchError> {
+pub(super) fn safe(what: &str, value: &str) -> Result<String, LaunchError> {
     if is_safe_token(value) {
         Ok(value.to_string())
     } else {

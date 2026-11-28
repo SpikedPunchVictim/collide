@@ -1066,6 +1066,7 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       --mcp-config <ask dir>/mcp.json --strict-mcp-config      # the endpoint and the ask token (0.2)
       --add-dir <extra readable folder>         # one per folder after the first (R5)
       --permission-prompts none                 # a request the line does not allow is denied, never asked
+      --restricted                              # reads stay in the readable folders (measured, `ts-0198-tf`)
       --tools Read,Grep,Glob
       --allowedTools Read,Grep,Glob,mcp__collide__query,mcp__collide__set_view,mcp__collide__show_groups,
                      mcp__collide__highlight,mcp__collide__open
@@ -1075,13 +1076,15 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
     ```
 
     - The request goes on stdin, so it is not in argv. The working directory is the entry's first readable folder, and
-      each further readable folder is passed with `--add-dir`, which is how a second folder becomes readable at all
-      (R5; `--add-dir` is in 2.1.325's `--help`; its effect under `-p` is unmeasured and Stage 6 tests it).
+      each further readable folder is passed with `--add-dir`. With `--restricted` that is how a second folder
+      becomes readable at all; without it every path was readable and `--add-dir` changed nothing (R5; measured
+      under `-p`, `ts-0198-tf`, `claude` 2.1.332).
     - `--permission-prompts none` makes a read the line does not allow a plain denial. Without it the child could
-      wait on a prompt nobody answers until the timeout (read from 2.1.325's `--help`; unmeasured under this line).
-    - **`--restricted`** (R5) is a 2.1.325 flag that may confine reads to the working directory and added
-      directories. Stage 6 measures it under `-p`, and the adapter adopts it if it does confine reads. `--bare` is
-      not adopted (owner, 2026-11-14): it changes how the login is read.
+      wait on a prompt nobody answers until the timeout (read from 2.1.325's `--help`; measured, `ts-0198-tf`: a read
+      `--restricted` refuses is a plain denial, listed in the result's `permission_denials`, with no prompt).
+    - **`--restricted`** (R5) confines the file tools to the working directory and the `--add-dir` folders: a read
+      outside them is refused with no prompt (measured under `-p`, `ts-0198-tf`, 2026-11-27), so the line adopts it.
+      `--bare` is not adopted (owner, 2026-11-14): it changes how the login is read.
     - `--tools` removes Bash, Edit and Write from the child. `--allowedTools` alone would only skip prompts (the S6
       record's reasoning; not tested on its own). With `--tools` cut to three, the scheduling and worktree tools of
       the run line's `--disallowed-tools` are absent already, so the ask line does not list them.
@@ -1089,9 +1092,9 @@ Collide never calls a model API itself. Judgment steps are agent phases, or an a
       measured S9), so this line drops it.
     - The child's environment is the base environment (0.2) minus the adapter's stripped variables. S6 removed every
       `CLAUDE*` and `OTEL_*` variable, and the adapter strips the `CLAUDE*` ones (above).
-    - Whether a Read outside the working directory is refused without a prompt under `-p` is unmeasured. Stage 6 tests
-      it and records the result. Until it does, the Agents page and the ask box say the agent "starts in this folder",
-      and never that it "can read only" it. The contract test (opt-in) plants a file outside every readable folder
+    - A Read outside the readable folders is refused without a prompt under `-p` with `--restricted`, and is not
+      refused without it (measured, `ts-0198-tf`). So for Claude under this line the Agents page and the ask box say
+      the agent "can read only" these folders. The contract test (opt-in) plants a file outside every readable folder
       with a known marker and checks that the marker never reaches the agent's answer, and that the Stage 6 criterion
       on the ask line equals the adapter's pinned line.
   - **ACP profile.** An ACP ask agent gets the engine of Stage 3 and an ask profile in `host`, with no `fs`,
@@ -5069,7 +5072,9 @@ last. It runs after `ts-0178-fw` and before Stage 5. Nothing in it runs a real `
     - whether a read outside the folders is refused without a prompt under `--permission-prompts none`;
     - `lsof` by the child's pid, for an ACP agent's listener, and whether a permission configuration that Collide
       supplies to opencode changes its default of unrestricted.
-    Until each is measured, the page says the agent "starts in this folder".
+    Until each is measured, the page says the agent "starts in this folder". Measured in `ts-0198-tf` (2026-11-27):
+    `--restricted` confines reads and is adopted, and `--add-dir` takes effect only with it; opencode listens on
+    `127.0.0.1:4096` from its start; a permission block that Collide supplies denies only the tools it names.
   - **The launch tests that moved here from 4a:** the secrets test. A `secrets` entry resolves from a fake keychain at
     launch, and the value is searched for, as a seeded string, in every file, argv and log, and is found in none.
   - **A closed window** (0.2): the shell fails `tools/call` with the "open Collide" message, including when the client
@@ -5090,10 +5095,10 @@ last. It runs after `ts-0178-fw` and before Stage 5. Nothing in it runs a real `
     at once; an ask token stops working when its ask ends; the endpoint token appears in no log, no argv and no `ask`
     record;
   - the launch specs, with no process: the Claude `ask` argv equals the adapter's pinned line in 0.3 exactly, holds no
-    token and no request text, passes `--add-dir` once per extra folder and `--permission-prompts none`, and has no
-    `--disable-slash-commands`; `config: user` changes only `--setting-sources`; `--max-budget-usd` appears only when
-    the entry sets a budget; `mcp.json` is mode 0600 and gone after the ask. The fake ACP child shows a read inside
-    the readable folders allowed, a read outside them, a read with no path, an edit and a command each refused, a
+    token and no request text, passes `--add-dir` once per extra folder, `--permission-prompts none` and `--restricted`,
+    and has no `--disable-slash-commands`; `config: user` changes only `--setting-sources`; `--max-budget-usd` appears
+    only when the entry sets a budget; `mcp.json` is mode 0600 and gone after the ask. The fake ACP child shows a read
+    inside the readable folders allowed, a read outside them, a read with no path, an edit and a command each refused, a
     symlink inside a readable folder that points out of it refused after `realpath`, `Cancel` when no `allow_once`
     exists, an agent with no HTTP MCP support refused with the plain text, a timeout that stops the child and says so,
     and Cancel that ends the ask;
@@ -5129,7 +5134,7 @@ last. It runs after `ts-0178-fw` and before Stage 5. Nothing in it runs a real `
     profile that is given `--mdns`, a non-loopback `--hostname` or `--cors` is refused.
   - **Measurements recorded** in the stage's task item: `--add-dir`, `--restricted`, the outside read, opencode's
     listener and its permission configuration. If `--restricted` confines reads, the pinned line adopts it and its
-    criterion above changes with it.
+    criterion above changes with it. It does (`ts-0198-tf`), and both carry it.
   - **The secrets launch test:** a seeded secret reaches the agent's environment and appears in no file, argv or log.
   - **Describe what to show** (note 16): over a fake agent, a request becomes chips and the CEL they write, with the
     count; Keep, Undo and Save as View act as for any ask; and a request a view cannot express shows the agent's
@@ -5145,8 +5150,9 @@ planted outside every readable folder.
 built one at a time in id order after `ts-0222-gx` (part L; revision 33). Four are the owner's, each with its own
 spend cap: the measurements first (`ts-0198-tf`, $0.50), a look at the chip and the lens midway (`ts-0205-qh`, $0.25),
 the opt-in real-agent checks (`ts-0213-as`, $1.00) and the walkthrough (`ts-0214-rz`, $0.50). No builder starts a
-model: the opt-in checks are written and gated in `ts-0212-km`. If `ts-0198-tf` finds that `--restricted` confines
-reads, 0.3's pinned line and the launch-spec criterion add it, and the Agents page says "can read only these folders".
+model: the opt-in checks are written and gated in `ts-0212-km`. `ts-0198-tf` found that `--restricted` confines
+reads, so 0.3's pinned line and the launch-spec criterion add it, and the Agents page says "can read only these
+folders" (2026-11-27).
 Revision 33 adds the owner's dogfood start, `ts-0223-mx`, after `ts-0214-rz`: the keychain check `ts-0197-uj`
 carried, with the real `HOME`, then small Collide items run and reviewed through the app, friction filed as items.
 Its Claude runs are on the owner's account, with a cap the owner sets when it starts (owner, 2026-11-27).
